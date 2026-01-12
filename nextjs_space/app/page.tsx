@@ -82,8 +82,7 @@ function HeroSection() {
             <Link href="/pricing">
               <Button
                 size="lg"
-                variant="outline"
-                className="border-white text-white hover:bg-white/10 px-8"
+                className="bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-500 px-8"
               >
                 View Pricing
               </Button>

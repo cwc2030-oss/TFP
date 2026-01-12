@@ -1,33 +1,12 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import {
-  GoogleMap,
-  useLoadScript,
-  Marker,
-  Polygon,
-  InfoWindow,
-} from "@react-google-maps/api";
-import { Search, MapPin, Layers, X, AlertTriangle, CheckCircle } from "lucide-react";
+import { Search, MapPin, Layers, X, AlertTriangle, CheckCircle, Map as MapIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
 
 const KANSAS_CITY_CENTER = { lat: 39.0997, lng: -94.5786 };
-
-const mapContainerStyle = {
-  width: "100%",
-  height: "100%",
-};
-
-const mapOptions = {
-  mapTypeControl: true,
-  streetViewControl: false,
-  fullscreenControl: true,
-  mapTypeControlOptions: {
-    position: typeof google !== "undefined" ? google.maps.ControlPosition.TOP_RIGHT : 3,
-  },
-};
 
 interface SelectedParcel {
   address: string;
@@ -43,6 +22,15 @@ interface InteractiveMapProps {
   initialLayers?: string[];
 }
 
+// Demo parcels for demonstration mode
+const DEMO_PARCELS = [
+  { address: "1 Kansas City Place, Kansas City, MO 64105", lat: 39.0997, lng: -94.5786, parcelId: "KC-DEMO-001" },
+  { address: "400 Grand Blvd, Kansas City, MO 64106", lat: 39.1018, lng: -94.5844, parcelId: "KC-DEMO-002" },
+  { address: "1020 Main St, Kansas City, MO 64105", lat: 39.1014, lng: -94.5818, parcelId: "KC-DEMO-003" },
+  { address: "6501 Johnson Dr, Mission, KS 66202", lat: 39.0278, lng: -94.6558, parcelId: "KS-DEMO-001" },
+  { address: "11500 Roe Ave, Leawood, KS 66211", lat: 38.9178, lng: -94.6328, parcelId: "KS-DEMO-002" },
+];
+
 export default function InteractiveMap({
   onParcelSelect,
   onLayersChange,
@@ -51,159 +39,67 @@ export default function InteractiveMap({
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   const [selectedLayers, setSelectedLayers] = useState<string[]>(initialLayers);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
-  const [mapType, setMapType] = useState<"roadmap" | "satellite" | "hybrid">("roadmap");
-  const [infoOpen, setInfoOpen] = useState(false);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+  const [filteredParcels, setFilteredParcels] = useState(DEMO_PARCELS);
 
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
-
-  const { isLoaded, loadError } = useLoadScript({
-    googleMapsApiKey: apiKey,
-    libraries: ["places"],
-  });
-
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    mapRef.current = map;
-    geocoderRef.current = new google.maps.Geocoder();
-  }, []);
-
-  const handleMapClick = useCallback(
-    async (e: google.maps.MapMouseEvent) => {
-      if (!e.latLng || !geocoderRef.current) return;
-
-      const lat = e.latLng.lat();
-      const lng = e.latLng.lng();
-
-      try {
-        const response = await geocoderRef.current.geocode({
-          location: { lat, lng },
-        });
-
-        if (response.results?.[0]) {
-          const result = response.results[0];
-          const parcel: SelectedParcel = {
-            address: result.formatted_address,
-            lat,
-            lng,
-            parcelId: `KC-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-          };
-          setSelectedParcel(parcel);
-          setInfoOpen(true);
-          onParcelSelect?.(parcel);
-        }
-      } catch (error) {
-        console.error("Geocoding error:", error);
-      }
-    },
-    [onParcelSelect]
-  );
-
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim() || !geocoderRef.current || !mapRef.current) return;
-
-    setIsSearching(true);
-    try {
-      const response = await geocoderRef.current.geocode({
-        address: searchQuery + ", Kansas City",
-      });
-
-      if (response.results?.[0]) {
-        const result = response.results[0];
-        const location = result.geometry.location;
-        const lat = location.lat();
-        const lng = location.lng();
-
-        mapRef.current.panTo({ lat, lng });
-        mapRef.current.setZoom(17);
-
-        const parcel: SelectedParcel = {
-          address: result.formatted_address,
-          lat,
-          lng,
-          parcelId: `KC-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-        };
-        setSelectedParcel(parcel);
-        setInfoOpen(true);
-        onParcelSelect?.(parcel);
-      }
-    } catch (error) {
-      console.error("Search error:", error);
-    } finally {
-      setIsSearching(false);
+  const handleSearch = () => {
+    if (!searchQuery.trim()) {
+      setFilteredParcels(DEMO_PARCELS);
+      return;
     }
-  }, [searchQuery, onParcelSelect]);
+    const filtered = DEMO_PARCELS.filter(
+      (p) =>
+        p.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.parcelId.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredParcels(filtered.length > 0 ? filtered : DEMO_PARCELS);
+  };
 
-  const toggleLayer = useCallback(
-    (layerId: string) => {
-      setSelectedLayers((prev) => {
-        const newLayers = prev.includes(layerId)
-          ? prev.filter((id) => id !== layerId)
-          : [...prev, layerId];
-        onLayersChange?.(newLayers);
-        return newLayers;
-      });
-    },
-    [onLayersChange]
-  );
+  const selectParcel = (parcel: SelectedParcel) => {
+    setSelectedParcel(parcel);
+    onParcelSelect?.(parcel);
+  };
 
-  const clearSelection = useCallback(() => {
+  const toggleLayer = (layerId: string) => {
+    setSelectedLayers((prev) => {
+      const newLayers = prev.includes(layerId)
+        ? prev.filter((id) => id !== layerId)
+        : [...prev, layerId];
+      onLayersChange?.(newLayers);
+      return newLayers;
+    });
+  };
+
+  const clearSelection = () => {
     setSelectedParcel(null);
-    setInfoOpen(false);
     onParcelSelect?.(null);
-  }, [onParcelSelect]);
-
-  if (loadError) {
-    return (
-      <div className="flex items-center justify-center h-full bg-stone-100 rounded-lg">
-        <div className="text-center p-8">
-          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-stone-800 mb-2">
-            Map Loading Error
-          </h3>
-          <p className="text-stone-600">
-            {apiKey
-              ? "Unable to load Google Maps. Please check your API key configuration."
-              : "Google Maps API key not configured. Please add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to your environment."}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isLoaded) {
-    return (
-      <div className="flex items-center justify-center h-full bg-stone-100 rounded-lg">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-700 mx-auto mb-4"></div>
-          <p className="text-stone-600">Loading map...</p>
-        </div>
-      </div>
-    );
-  }
+  };
 
   return (
-    <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg">
+    <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-gradient-to-br from-emerald-50 to-stone-100">
+      {/* Demo Mode Banner */}
+      <div className="absolute top-0 left-0 right-0 z-20 bg-amber-500 text-white text-center py-2 text-sm font-medium">
+        <AlertTriangle className="w-4 h-4 inline mr-2" />
+        Demo Mode - Select a sample parcel below. Configure Google Maps API for full interactive functionality.
+      </div>
+
       {/* Search Bar */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex gap-2 max-w-xl">
+      <div className="absolute top-14 left-4 right-4 z-10 flex gap-2 max-w-xl">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            placeholder="Search by address or parcel ID..."
+            placeholder="Search demo parcels..."
             className="pl-10 bg-white/95 backdrop-blur-sm shadow-md border-stone-200"
           />
         </div>
         <Button
           onClick={handleSearch}
-          disabled={isSearching}
           className="bg-emerald-700 hover:bg-emerald-800 text-white shadow-md"
         >
-          {isSearching ? "Searching..." : "Search"}
+          Search
         </Button>
         <Button
           onClick={() => setShowLayerPanel(!showLayerPanel)}
@@ -216,7 +112,7 @@ export default function InteractiveMap({
 
       {/* Layer Panel */}
       {showLayerPanel && (
-        <div className="absolute top-20 right-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[60vh] overflow-y-auto">
+        <div className="absolute top-28 right-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[50vh] overflow-y-auto">
           <div className="p-4 border-b border-stone-200 flex items-center justify-between">
             <h3 className="font-semibold text-stone-800">Map Layers</h3>
             <button
@@ -244,24 +140,82 @@ export default function InteractiveMap({
         </div>
       )}
 
+      {/* Demo Map Visual - Static Map Background */}
+      <div className="absolute inset-0 pt-10">
+        <div 
+          className="w-full h-full bg-stone-200"
+          style={{
+            backgroundImage: `url('https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Tiled_web_map_numbering.png/320px-Tiled_web_map_numbering.png linear-gradient(to bottom right, #e7f5ee, #f5f5f4)`,
+            backgroundSize: "256px 256px, cover",
+            backgroundRepeat: "repeat, no-repeat",
+            backgroundPosition: "center",
+          }}
+        >
+          {/* Map grid overlay for visual effect */}
+          <div 
+            className="absolute inset-0"
+            style={{
+              backgroundImage: `
+                linear-gradient(rgba(16, 185, 129, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(16, 185, 129, 0.1) 1px, transparent 1px)
+              `,
+              backgroundSize: "50px 50px",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Demo Parcel List */}
+      <div className="absolute top-28 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[50vh] overflow-y-auto">
+        <div className="p-4 border-b border-stone-200">
+          <h3 className="font-semibold text-stone-800 flex items-center gap-2">
+            <MapIcon className="w-5 h-5 text-emerald-700" />
+            Sample Parcels (Kansas City Metro)
+          </h3>
+          <p className="text-xs text-stone-500 mt-1">Click to select a parcel for your report</p>
+        </div>
+        <div className="p-2 space-y-2">
+          {filteredParcels.map((parcel, idx) => (
+            <button
+              key={idx}
+              onClick={() => selectParcel(parcel)}
+              className={`w-full text-left p-3 rounded-lg transition-all ${
+                selectedParcel?.parcelId === parcel.parcelId
+                  ? "bg-emerald-100 border-2 border-emerald-500"
+                  : "bg-stone-50 hover:bg-stone-100 border-2 border-transparent"
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-stone-800">{parcel.address}</p>
+                  <p className="text-xs text-stone-500">{parcel.parcelId}</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Selected Parcel Info */}
       {selectedParcel && (
-        <div className="absolute bottom-4 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200">
+        <div className="absolute bottom-4 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-emerald-300">
           <div className="p-4">
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3">
-                <MapPin className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
+                <CheckCircle className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="font-medium text-stone-800 text-sm">
+                    Selected Parcel
+                  </p>
+                  <p className="text-xs text-stone-600 mt-1">
                     {selectedParcel.address}
                   </p>
-                  {selectedParcel.parcelId && (
-                    <p className="text-xs text-stone-500 mt-1">
-                      Parcel ID: {selectedParcel.parcelId}
-                    </p>
-                  )}
                   <p className="text-xs text-stone-500">
-                    {selectedParcel.lat.toFixed(6)}, {selectedParcel.lng.toFixed(6)}
+                    ID: {selectedParcel.parcelId}
+                  </p>
+                  <p className="text-xs text-stone-400">
+                    {selectedParcel.lat.toFixed(4)}, {selectedParcel.lng.toFixed(4)}
                   </p>
                 </div>
               </div>
@@ -275,43 +229,6 @@ export default function InteractiveMap({
           </div>
         </div>
       )}
-
-      {/* Map Type Toggle */}
-      <div className="absolute bottom-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg shadow-md overflow-hidden">
-        <div className="flex text-sm">
-          {(["roadmap", "satellite", "hybrid"] as const).map((type) => (
-            <button
-              key={type}
-              onClick={() => setMapType(type)}
-              className={`px-3 py-2 capitalize transition-colors ${
-                mapType === type
-                  ? "bg-emerald-700 text-white"
-                  : "bg-white text-stone-700 hover:bg-stone-100"
-              }`}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Google Map */}
-      <GoogleMap
-        mapContainerStyle={mapContainerStyle}
-        center={KANSAS_CITY_CENTER}
-        zoom={11}
-        onLoad={onMapLoad}
-        onClick={handleMapClick}
-        mapTypeId={mapType}
-        options={mapOptions}
-      >
-        {selectedParcel && (
-          <Marker
-            position={{ lat: selectedParcel.lat, lng: selectedParcel.lng }}
-            animation={google.maps.Animation.DROP}
-          />
-        )}
-      </GoogleMap>
     </div>
   );
 }
@@ -349,10 +266,9 @@ function LayerToggle({
             </span>
           )}
         </div>
-        <p className="text-xs text-stone-500 mt-0.5 line-clamp-2">
-          {layer.description}
+        <p className="text-xs text-stone-500 mt-0.5 truncate">
+          {layer.dataSource}
         </p>
-        <p className="text-xs text-stone-400 mt-1">Source: {layer.dataSource}</p>
       </div>
       <div className="flex-shrink-0">
         {isSelected ? (
