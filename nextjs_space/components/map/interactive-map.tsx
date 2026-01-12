@@ -153,26 +153,32 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Demo Map Visual - Static Map Background */}
+      {/* Demo Map Visual - Static USA Map Background */}
       <div className="absolute inset-0 pt-10">
-        <div 
-          className="w-full h-full bg-stone-200"
-          style={{
-            backgroundImage: `url('https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Tiled_web_map_numbering.png/320px-Tiled_web_map_numbering.png linear-gradient(to bottom right, #e7f5ee, #f5f5f4)`,
-            backgroundSize: "256px 256px, cover",
-            backgroundRepeat: "repeat, no-repeat",
-            backgroundPosition: "center",
-          }}
-        >
+        <div className="relative w-full h-full overflow-hidden">
+          {/* USA Map Image */}
+          <img
+            src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Map_of_USA_with_state_names.svg/1280px-Map_of_USA_with_state_names.svg.png"
+            alt="USA Map"
+            className="absolute inset-0 w-full h-full object-contain opacity-30"
+            style={{ objectPosition: "center 60%" }}
+          />
+          {/* Gradient overlay */}
+          <div 
+            className="absolute inset-0"
+            style={{
+              background: "linear-gradient(to bottom right, rgba(236, 253, 245, 0.9), rgba(245, 245, 244, 0.85))",
+            }}
+          />
           {/* Map grid overlay for visual effect */}
           <div 
             className="absolute inset-0"
             style={{
               backgroundImage: `
-                linear-gradient(rgba(16, 185, 129, 0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(16, 185, 129, 0.1) 1px, transparent 1px)
+                linear-gradient(rgba(16, 185, 129, 0.15) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(16, 185, 129, 0.15) 1px, transparent 1px)
               `,
-              backgroundSize: "50px 50px",
+              backgroundSize: "40px 40px",
             }}
           />
         </div>
