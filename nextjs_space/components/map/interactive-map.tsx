@@ -22,13 +22,26 @@ interface InteractiveMapProps {
   initialLayers?: string[];
 }
 
-// Demo parcels for demonstration mode
+// Demo parcels for demonstration mode - Nationwide coverage examples
 const DEMO_PARCELS = [
-  { address: "1 Kansas City Place, Kansas City, MO 64105", lat: 39.0997, lng: -94.5786, parcelId: "KC-DEMO-001" },
-  { address: "400 Grand Blvd, Kansas City, MO 64106", lat: 39.1018, lng: -94.5844, parcelId: "KC-DEMO-002" },
-  { address: "1020 Main St, Kansas City, MO 64105", lat: 39.1014, lng: -94.5818, parcelId: "KC-DEMO-003" },
-  { address: "6501 Johnson Dr, Mission, KS 66202", lat: 39.0278, lng: -94.6558, parcelId: "KS-DEMO-001" },
-  { address: "11500 Roe Ave, Leawood, KS 66211", lat: 38.9178, lng: -94.6328, parcelId: "KS-DEMO-002" },
+  // Missouri & Kansas (Home Base)
+  { address: "1 Kansas City Place, Kansas City, MO 64105", lat: 39.0997, lng: -94.5786, parcelId: "MO-KC-001", state: "Missouri" },
+  { address: "6501 Johnson Dr, Mission, KS 66202", lat: 39.0278, lng: -94.6558, parcelId: "KS-MSN-001", state: "Kansas" },
+  // Texas
+  { address: "1000 Main St, Houston, TX 77002", lat: 29.7604, lng: -95.3698, parcelId: "TX-HOU-001", state: "Texas" },
+  { address: "500 Commerce St, Dallas, TX 75202", lat: 32.7767, lng: -96.7970, parcelId: "TX-DAL-001", state: "Texas" },
+  // Florida
+  { address: "100 S Biscayne Blvd, Miami, FL 33131", lat: 25.7617, lng: -80.1918, parcelId: "FL-MIA-001", state: "Florida" },
+  // California
+  { address: "350 S Grand Ave, Los Angeles, CA 90071", lat: 34.0522, lng: -118.2437, parcelId: "CA-LA-001", state: "California" },
+  // Arizona
+  { address: "2 N Central Ave, Phoenix, AZ 85004", lat: 33.4484, lng: -112.0740, parcelId: "AZ-PHX-001", state: "Arizona" },
+  // Colorado
+  { address: "1144 15th St, Denver, CO 80202", lat: 39.7392, lng: -104.9903, parcelId: "CO-DEN-001", state: "Colorado" },
+  // Georgia
+  { address: "265 Peachtree St, Atlanta, GA 30303", lat: 33.7490, lng: -84.3880, parcelId: "GA-ATL-001", state: "Georgia" },
+  // New York
+  { address: "350 5th Ave, New York, NY 10118", lat: 40.7484, lng: -73.9857, parcelId: "NY-NYC-001", state: "New York" },
 ];
 
 export default function InteractiveMap({
@@ -78,9 +91,9 @@ export default function InteractiveMap({
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-gradient-to-br from-emerald-50 to-stone-100">
       {/* Demo Mode Banner */}
-      <div className="absolute top-0 left-0 right-0 z-20 bg-amber-500 text-white text-center py-2 text-sm font-medium">
-        <AlertTriangle className="w-4 h-4 inline mr-2" />
-        Demo Mode - Select a sample parcel below. Configure Google Maps API for full interactive functionality.
+      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white text-center py-2 text-sm font-medium">
+        <MapIcon className="w-4 h-4 inline mr-2" />
+        🇺🇸 Nationwide Coverage - Sample parcels from 10 states below. Add Google Maps API for full address search.
       </div>
 
       {/* Search Bar */}
@@ -166,13 +179,13 @@ export default function InteractiveMap({
       </div>
 
       {/* Demo Parcel List */}
-      <div className="absolute top-28 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[50vh] overflow-y-auto">
-        <div className="p-4 border-b border-stone-200">
+      <div className="absolute top-28 left-4 z-10 w-96 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[55vh] overflow-y-auto">
+        <div className="p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
           <h3 className="font-semibold text-stone-800 flex items-center gap-2">
             <MapIcon className="w-5 h-5 text-emerald-700" />
-            Sample Parcels (Kansas City Metro)
+            Sample Parcels Across the USA
           </h3>
-          <p className="text-xs text-stone-500 mt-1">Click to select a parcel for your report</p>
+          <p className="text-xs text-stone-500 mt-1">Select any parcel to generate a $350 report with your chosen layers</p>
         </div>
         <div className="p-2 space-y-2">
           {filteredParcels.map((parcel, idx) => (
@@ -187,8 +200,13 @@ export default function InteractiveMap({
             >
               <div className="flex items-start gap-2">
                 <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-stone-800">{parcel.address}</p>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-stone-800">{parcel.address}</p>
+                    <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full ml-2">
+                      {(parcel as any).state}
+                    </span>
+                  </div>
                   <p className="text-xs text-stone-500">{parcel.parcelId}</p>
                 </div>
               </div>

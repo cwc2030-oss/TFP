@@ -65,7 +65,7 @@ function HeroSection() {
             <span className="text-emerald-400"> Analysis</span>
           </h1>
           <p className="text-xl text-emerald-100 max-w-3xl mx-auto mb-8">
-            Comprehensive mapping reports for Kansas City metro area properties.
+            Comprehensive mapping reports for properties across the entire United States.
             Flood zones, topography, zoning, and more - all in one detailed PDF report.
           </p>
 
@@ -89,7 +89,11 @@ function HeroSection() {
             </Link>
           </div>
 
-          <div className="mt-12 flex items-center justify-center gap-8 text-emerald-200">
+          <div className="mt-12 flex flex-wrap items-center justify-center gap-6 text-emerald-200">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              <span>🇺🇸 All 50 States</span>
+            </div>
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
               <span>FEMA Flood Data</span>

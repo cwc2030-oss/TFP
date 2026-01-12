@@ -17,6 +17,7 @@ import { MAP_LAYERS } from "@/lib/map-layers";
 
 export default function PricingPage() {
   const includedFeatures = [
+    "🇺🇸 Nationwide coverage (all 50 states)",
     "Interactive parcel selection",
     "Address or map click search",
     "All available map layers",
