@@ -130,10 +130,12 @@ export default function InteractiveMap({
     
     let markers = "";
     if (selectedParcel) {
-      markers = `&markers=color:red%7C${selectedParcel.lat},${selectedParcel.lng}`;
+      markers = `&markers=color:red%7Clabel:P%7C${selectedParcel.lat},${selectedParcel.lng}`;
     }
     
-    return `https://i.ytimg.com/vi/FjhpOT2bdNg/maxresdefault.jpg`;
+    // Return Google Static Maps URL with satellite/hybrid view
+    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
+    return `${baseUrl}?center=${mapCenter.lat},${mapCenter.lng}&zoom=${mapZoom}&size=1280x720&maptype=hybrid${markers}&key=${apiKey}`;
   };
 
   return (
