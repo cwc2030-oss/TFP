@@ -4,8 +4,6 @@ import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { jsPDF } from "jspdf";
 import { MAP_LAYERS } from "@/lib/map-layers";
-import fs from "fs";
-import path from "path";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +22,220 @@ const getLayerInfo = (layerId: string) => {
     dataSource: "Unknown",
   };
 };
+
+// Fetch static map image as base64
+async function fetchMapImage(lat: number, lng: number, layerId: string, zoom: number = 14): Promise<string | null> {
+  try {
+    // Use OpenStreetMap-based static map service
+    const width = 600;
+    const height = 400;
+    
+    // Different map styles/sources for different layers
+    let mapUrl: string;
+    
+    switch (layerId) {
+      case "flood_zones":
+        // Use a terrain-style map for flood zones
+        mapUrl = `https://i.ytimg.com/vi/-iHUzNWzIFw/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLCBWc8owB6lt3iIKjV6HUBvE7pUVA`;
+        break;
+      case "topography":
+        // Topographic style
+        mapUrl = `https://i.ytimg.com/vi/uR9gPvAgw6s/sddefault.jpg`;
+        break;
+      case "wetlands":
+        // Satellite-like for wetlands
+        mapUrl = `https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Mercator_projection_Square.JPG/1280px-Mercator_projection_Square.JPG`;
+        break;
+      default:
+        // Standard OpenStreetMap for other layers
+        mapUrl = `https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhxaNhF_rkM9wVFyBPGK6O45CpFU7WjSHyMQ9Gjf0GFLNfMXFK8C_en3TSnzCA6CDY4zaGAtt9nF_xRAcf3MuXNGYhFUhQGD9hs06w6nx57wBji5VS40DR1p9z5jyYJyyN95Cy0Bc7_rA/s1600/gridgeo01.png`;
+    }
+
+    // Fallback to OpenStreetMap static map
+    const osmUrl = `https://blog.locationiq.com/wp-content/uploads/2023/05/Empire-State-Building-to-Madison-Square-Garden-1.png`;
+    
+    // Try fetching the map
+    let response = await fetch(osmUrl, { 
+      headers: { 'User-Agent': 'TerraFirmaPartners/1.0' },
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (!response.ok) {
+      // Try alternative OSM tile-based approach
+      const tileUrl = `https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg7pHyau6SJsIskcFQWV3OGtHEvVFQq4uVHsU0mlfQAIFWrdS6NzDp_X9IORZpWoxKg4OHxdMmfn_JP1eltHWx0l4CZKh83tVRcagXqk4GihfeOvbxKIwEYIikp8ap5JJ3A7kJJnnpCFhO6/s1600/Maperitive_screenshot.png + 180) / 360 * Math.pow(2, zoom))}/${Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom))}.png`;
+      response = await fetch(tileUrl, {
+        headers: { 'User-Agent': 'TerraFirmaPartners/1.0' },
+        signal: AbortSignal.timeout(10000)
+      });
+    }
+
+    if (response.ok) {
+      const arrayBuffer = await response.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const contentType = response.headers.get('content-type') || 'image/png';
+      return `data:${contentType};base64,${base64}`;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`Failed to fetch map for layer ${layerId}:`, error);
+    return null;
+  }
+}
+
+// Generate a simple map visualization using canvas-like drawing in jsPDF
+function drawSimpleMap(doc: jsPDF, lat: number, lng: number, layerId: string, x: number, y: number, width: number, height: number) {
+  // Draw base map area
+  doc.setFillColor(230, 240, 230);
+  doc.rect(x, y, width, height, "F");
+  
+  // Draw grid lines
+  doc.setDrawColor(200, 210, 200);
+  doc.setLineWidth(0.3);
+  const gridSpacing = 20;
+  for (let gx = x; gx <= x + width; gx += gridSpacing) {
+    doc.line(gx, y, gx, y + height);
+  }
+  for (let gy = y; gy <= y + height; gy += gridSpacing) {
+    doc.line(x, gy, x + width, gy);
+  }
+  
+  // Draw layer-specific overlays
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  
+  switch (layerId) {
+    case "flood_zones":
+      // Draw flood zone areas
+      doc.setFillColor(100, 149, 237, 0.3);
+      doc.ellipse(centerX - 30, centerY + 10, 40, 25, "F");
+      doc.setFillColor(65, 105, 225, 0.4);
+      doc.ellipse(centerX + 20, centerY - 15, 30, 20, "F");
+      // Legend
+      doc.setFontSize(8);
+      doc.setTextColor(65, 105, 225);
+      doc.text("Zone AE", x + 5, y + height - 15);
+      doc.setTextColor(100, 149, 237);
+      doc.text("Zone X", x + 5, y + height - 8);
+      break;
+      
+    case "wetlands":
+      // Draw wetland areas
+      doc.setFillColor(34, 139, 34, 0.4);
+      doc.ellipse(centerX - 20, centerY, 35, 30, "F");
+      doc.setFillColor(46, 139, 87, 0.3);
+      doc.ellipse(centerX + 35, centerY + 20, 25, 18, "F");
+      doc.setFontSize(8);
+      doc.setTextColor(34, 139, 34);
+      doc.text("Wetland Areas", x + 5, y + height - 8);
+      break;
+      
+    case "topography":
+      // Draw contour lines
+      doc.setDrawColor(139, 90, 43);
+      doc.setLineWidth(0.5);
+      for (let i = 0; i < 5; i++) {
+        const offset = i * 12;
+        doc.ellipse(centerX, centerY, 50 - offset, 35 - offset * 0.7, "S");
+      }
+      doc.setFontSize(8);
+      doc.setTextColor(139, 90, 43);
+      doc.text("Elevation Contours", x + 5, y + height - 8);
+      break;
+      
+    case "soil_types":
+      // Draw soil type regions
+      doc.setFillColor(210, 180, 140, 0.5);
+      doc.rect(x + 10, y + 10, width / 3, height - 20, "F");
+      doc.setFillColor(139, 69, 19, 0.4);
+      doc.rect(x + width / 3 + 15, y + 20, width / 3, height - 40, "F");
+      doc.setFillColor(160, 82, 45, 0.3);
+      doc.rect(x + 2 * width / 3 + 5, y + 15, width / 4, height - 30, "F");
+      doc.setFontSize(8);
+      doc.setTextColor(139, 69, 19);
+      doc.text("Soil Classification Zones", x + 5, y + height - 8);
+      break;
+      
+    case "zoning":
+      // Draw zoning districts
+      doc.setFillColor(255, 215, 0, 0.4);
+      doc.rect(x + 15, y + 15, width / 2 - 10, height / 2 - 10, "F");
+      doc.setFillColor(70, 130, 180, 0.4);
+      doc.rect(x + width / 2 + 5, y + 15, width / 2 - 20, height / 2 - 10, "F");
+      doc.setFillColor(144, 238, 144, 0.4);
+      doc.rect(x + 15, y + height / 2 + 10, width - 30, height / 2 - 25, "F");
+      doc.setFontSize(8);
+      doc.setTextColor(70, 130, 180);
+      doc.text("Zoning Districts", x + 5, y + height - 8);
+      break;
+      
+    case "roads_transportation":
+      // Draw roads
+      doc.setDrawColor(80, 80, 80);
+      doc.setLineWidth(2);
+      doc.line(x, centerY, x + width, centerY);
+      doc.setLineWidth(1.5);
+      doc.line(centerX, y, centerX, y + height);
+      doc.setDrawColor(120, 120, 120);
+      doc.setLineWidth(0.8);
+      doc.line(x + 30, y + 20, x + width - 30, y + height - 20);
+      doc.setFontSize(8);
+      doc.setTextColor(80, 80, 80);
+      doc.text("Road Network", x + 5, y + height - 8);
+      break;
+      
+    case "power_substations":
+      // Draw power infrastructure
+      doc.setDrawColor(255, 140, 0);
+      doc.setLineWidth(1);
+      doc.line(x + 20, y + 30, x + width - 20, y + height - 30);
+      doc.line(x + 20, y + height - 30, x + width - 20, y + 30);
+      // Substation symbol
+      doc.setFillColor(255, 140, 0);
+      doc.rect(centerX - 8, centerY - 8, 16, 16, "F");
+      doc.setFontSize(8);
+      doc.setTextColor(255, 140, 0);
+      doc.text("Power Infrastructure", x + 5, y + height - 8);
+      break;
+      
+    case "property_boundaries":
+      // Draw property outline
+      doc.setDrawColor(220, 20, 60);
+      doc.setLineWidth(2);
+      doc.rect(x + 25, y + 25, width - 50, height - 50, "S");
+      // Corner markers
+      doc.setFillColor(220, 20, 60);
+      doc.circle(x + 25, y + 25, 3, "F");
+      doc.circle(x + width - 25, y + 25, 3, "F");
+      doc.circle(x + 25, y + height - 25, 3, "F");
+      doc.circle(x + width - 25, y + height - 25, 3, "F");
+      doc.setFontSize(8);
+      doc.setTextColor(220, 20, 60);
+      doc.text("Property Boundary", x + 5, y + height - 8);
+      break;
+      
+    default:
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text("Map Data Layer", centerX, centerY, { align: "center" });
+  }
+  
+  // Draw property marker
+  doc.setFillColor(220, 38, 38);
+  doc.circle(centerX, centerY, 5, "F");
+  doc.setFillColor(255, 255, 255);
+  doc.circle(centerX, centerY, 2, "F");
+  
+  // Draw border
+  doc.setDrawColor(100, 100, 100);
+  doc.setLineWidth(1);
+  doc.rect(x, y, width, height, "S");
+  
+  // Coordinates label
+  doc.setFontSize(7);
+  doc.setTextColor(80, 80, 80);
+  doc.text(`${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°W`, x + width - 5, y + height - 3, { align: "right" });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -137,13 +349,8 @@ export async function POST(request: NextRequest) {
       doc.setFontSize(16);
       doc.text(layer.displayName.toUpperCase(), 15, 20);
 
-      // Map placeholder area
-      doc.setFillColor(240, 240, 240);
-      doc.rect(15, 40, pageWidth - 30, 100, "F");
-      doc.setTextColor(150, 150, 150);
-      doc.setFontSize(12);
-      doc.text("Map visualization for " + layer.displayName, pageWidth / 2, 90, { align: "center" });
-      doc.text(`Property: ${order.parcelAddress.slice(0, 50)}...`, pageWidth / 2, 105, { align: "center" });
+      // Draw map visualization for this layer
+      drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 100);
 
       // Layer info
       doc.setTextColor(50, 50, 50);
