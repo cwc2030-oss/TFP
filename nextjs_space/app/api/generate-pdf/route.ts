@@ -78,9 +78,16 @@ async function fetchGoogleMapImage(
     });
 
     if (response.ok) {
-      const arrayBuffer = await response.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
-      return `data:image/png;base64,${base64}`;
+      const contentType = response.headers.get('content-type') || '';
+      // Make sure it's actually an image, not an error page
+      if (contentType.includes('image')) {
+        const arrayBuffer = await response.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        return `data:image/png;base64,${base64}`;
+      } else {
+        console.error(`Google Maps returned non-image content: ${contentType}`);
+        return null;
+      }
     }
     
     console.error(`Google Maps API error: ${response.status}`);
@@ -93,14 +100,14 @@ async function fetchGoogleMapImage(
 
 // Generate a simple map visualization using canvas-like drawing in jsPDF
 function drawSimpleMap(doc: jsPDF, lat: number, lng: number, layerId: string, x: number, y: number, width: number, height: number) {
-  // Draw base map area
-  doc.setFillColor(230, 240, 230);
+  // Draw base map area with light green background
+  doc.setFillColor(235, 245, 235);
   doc.rect(x, y, width, height, "F");
   
   // Draw grid lines
-  doc.setDrawColor(200, 210, 200);
+  doc.setDrawColor(200, 215, 200);
   doc.setLineWidth(0.3);
-  const gridSpacing = 20;
+  const gridSpacing = 15;
   for (let gx = x; gx <= x + width; gx += gridSpacing) {
     doc.line(gx, y, gx, y + height);
   }
@@ -114,112 +121,114 @@ function drawSimpleMap(doc: jsPDF, lat: number, lng: number, layerId: string, x:
   
   switch (layerId) {
     case "flood_zones":
-      // Draw flood zone areas
-      doc.setFillColor(100, 149, 237, 0.3);
-      doc.ellipse(centerX - 30, centerY + 10, 40, 25, "F");
-      doc.setFillColor(65, 105, 225, 0.4);
-      doc.ellipse(centerX + 20, centerY - 15, 30, 20, "F");
+      // Draw flood zone areas using rectangles
+      doc.setFillColor(173, 216, 230); // Light blue
+      doc.rect(x + 20, y + 15, width * 0.4, height * 0.5, "F");
+      doc.setFillColor(100, 149, 237); // Cornflower blue
+      doc.rect(x + width * 0.5, y + height * 0.4, width * 0.35, height * 0.4, "F");
       // Legend
       doc.setFontSize(8);
       doc.setTextColor(65, 105, 225);
-      doc.text("Zone AE", x + 5, y + height - 15);
+      doc.text("Zone AE (High Risk)", x + 5, y + height - 12);
       doc.setTextColor(100, 149, 237);
-      doc.text("Zone X", x + 5, y + height - 8);
+      doc.text("Zone X (Moderate Risk)", x + 5, y + height - 5);
       break;
       
     case "wetlands":
       // Draw wetland areas
-      doc.setFillColor(34, 139, 34, 0.4);
-      doc.ellipse(centerX - 20, centerY, 35, 30, "F");
-      doc.setFillColor(46, 139, 87, 0.3);
-      doc.ellipse(centerX + 35, centerY + 20, 25, 18, "F");
+      doc.setFillColor(144, 238, 144); // Light green
+      doc.rect(x + 25, y + 20, width * 0.35, height * 0.6, "F");
+      doc.setFillColor(34, 139, 34); // Forest green
+      doc.rect(x + width * 0.55, y + 25, width * 0.3, height * 0.45, "F");
       doc.setFontSize(8);
       doc.setTextColor(34, 139, 34);
-      doc.text("Wetland Areas", x + 5, y + height - 8);
+      doc.text("Wetland Areas Identified", x + 5, y + height - 5);
       break;
       
     case "topography":
-      // Draw contour lines
+      // Draw contour lines using concentric rectangles
       doc.setDrawColor(139, 90, 43);
-      doc.setLineWidth(0.5);
+      doc.setLineWidth(0.8);
       for (let i = 0; i < 5; i++) {
-        const offset = i * 12;
-        doc.ellipse(centerX, centerY, 50 - offset, 35 - offset * 0.7, "S");
+        const offset = i * 8;
+        doc.rect(x + 15 + offset, y + 10 + offset, width - 30 - offset * 2, height - 20 - offset * 2, "S");
       }
       doc.setFontSize(8);
       doc.setTextColor(139, 90, 43);
-      doc.text("Elevation Contours", x + 5, y + height - 8);
+      doc.text("Elevation Contours (ft above sea level)", x + 5, y + height - 5);
       break;
       
     case "soil_types":
       // Draw soil type regions
-      doc.setFillColor(210, 180, 140, 0.5);
-      doc.rect(x + 10, y + 10, width / 3, height - 20, "F");
-      doc.setFillColor(139, 69, 19, 0.4);
-      doc.rect(x + width / 3 + 15, y + 20, width / 3, height - 40, "F");
-      doc.setFillColor(160, 82, 45, 0.3);
-      doc.rect(x + 2 * width / 3 + 5, y + 15, width / 4, height - 30, "F");
+      doc.setFillColor(210, 180, 140); // Tan
+      doc.rect(x + 10, y + 10, width / 3 - 5, height - 20, "F");
+      doc.setFillColor(139, 69, 19); // Saddle brown
+      doc.rect(x + width / 3 + 10, y + 15, width / 3 - 10, height - 30, "F");
+      doc.setFillColor(160, 82, 45); // Sienna
+      doc.rect(x + 2 * width / 3 + 5, y + 12, width / 3 - 15, height - 24, "F");
       doc.setFontSize(8);
       doc.setTextColor(139, 69, 19);
-      doc.text("Soil Classification Zones", x + 5, y + height - 8);
+      doc.text("Soil Classification Zones", x + 5, y + height - 5);
       break;
       
     case "zoning":
       // Draw zoning districts
-      doc.setFillColor(255, 215, 0, 0.4);
-      doc.rect(x + 15, y + 15, width / 2 - 10, height / 2 - 10, "F");
-      doc.setFillColor(70, 130, 180, 0.4);
-      doc.rect(x + width / 2 + 5, y + 15, width / 2 - 20, height / 2 - 10, "F");
-      doc.setFillColor(144, 238, 144, 0.4);
-      doc.rect(x + 15, y + height / 2 + 10, width - 30, height / 2 - 25, "F");
-      doc.setFontSize(8);
+      doc.setFillColor(255, 223, 128); // Light gold - Residential
+      doc.rect(x + 10, y + 10, width / 2 - 15, height / 2 - 10, "F");
+      doc.setFillColor(135, 206, 235); // Sky blue - Commercial
+      doc.rect(x + width / 2, y + 10, width / 2 - 10, height / 2 - 10, "F");
+      doc.setFillColor(144, 238, 144); // Light green - Agricultural
+      doc.rect(x + 10, y + height / 2 + 5, width - 20, height / 2 - 15, "F");
+      doc.setFontSize(7);
       doc.setTextColor(70, 130, 180);
-      doc.text("Zoning Districts", x + 5, y + height - 8);
+      doc.text("R-1 Residential | C-1 Commercial | A-1 Agricultural", x + 5, y + height - 5);
       break;
       
     case "roads_transportation":
       // Draw roads
       doc.setDrawColor(80, 80, 80);
+      doc.setLineWidth(3);
+      doc.line(x + 10, centerY, x + width - 10, centerY); // Main road
       doc.setLineWidth(2);
-      doc.line(x, centerY, x + width, centerY);
-      doc.setLineWidth(1.5);
-      doc.line(centerX, y, centerX, y + height);
+      doc.line(centerX, y + 10, centerX, y + height - 10); // Cross road
       doc.setDrawColor(120, 120, 120);
-      doc.setLineWidth(0.8);
-      doc.line(x + 30, y + 20, x + width - 30, y + height - 20);
+      doc.setLineWidth(1);
+      doc.line(x + 30, y + 15, x + width - 30, y + height - 15); // Secondary
       doc.setFontSize(8);
       doc.setTextColor(80, 80, 80);
-      doc.text("Road Network", x + 5, y + height - 8);
+      doc.text("Road Network & Access Points", x + 5, y + height - 5);
       break;
       
     case "power_substations":
       // Draw power infrastructure
       doc.setDrawColor(255, 140, 0);
-      doc.setLineWidth(1);
-      doc.line(x + 20, y + 30, x + width - 20, y + height - 30);
-      doc.line(x + 20, y + height - 30, x + width - 20, y + 30);
+      doc.setLineWidth(1.5);
+      doc.line(x + 15, centerY - 15, x + width - 15, centerY - 15); // Power line
+      doc.line(x + 15, centerY + 15, x + width - 15, centerY + 15); // Power line
       // Substation symbol
       doc.setFillColor(255, 140, 0);
-      doc.rect(centerX - 8, centerY - 8, 16, 16, "F");
+      doc.rect(centerX - 10, centerY - 10, 20, 20, "F");
+      doc.setFillColor(255, 255, 255);
+      doc.rect(centerX - 5, centerY - 5, 10, 10, "F");
       doc.setFontSize(8);
       doc.setTextColor(255, 140, 0);
-      doc.text("Power Infrastructure", x + 5, y + height - 8);
+      doc.text("Power Infrastructure & Substations", x + 5, y + height - 5);
       break;
       
     case "property_boundaries":
       // Draw property outline
       doc.setDrawColor(220, 20, 60);
-      doc.setLineWidth(2);
-      doc.rect(x + 25, y + 25, width - 50, height - 50, "S");
+      doc.setLineWidth(2.5);
+      doc.rect(x + 20, y + 15, width - 40, height - 30, "S");
       // Corner markers
       doc.setFillColor(220, 20, 60);
-      doc.circle(x + 25, y + 25, 3, "F");
-      doc.circle(x + width - 25, y + 25, 3, "F");
-      doc.circle(x + 25, y + height - 25, 3, "F");
-      doc.circle(x + width - 25, y + height - 25, 3, "F");
+      doc.rect(x + 17, y + 12, 6, 6, "F");
+      doc.rect(x + width - 23, y + 12, 6, 6, "F");
+      doc.rect(x + 17, y + height - 18, 6, 6, "F");
+      doc.rect(x + width - 23, y + height - 18, 6, 6, "F");
       doc.setFontSize(8);
       doc.setTextColor(220, 20, 60);
-      doc.text("Property Boundary", x + 5, y + height - 8);
+      doc.text("Property Boundary Markers", x + 5, y + height - 5);
       break;
       
     default:
@@ -228,11 +237,11 @@ function drawSimpleMap(doc: jsPDF, lat: number, lng: number, layerId: string, x:
       doc.text("Map Data Layer", centerX, centerY, { align: "center" });
   }
   
-  // Draw property marker
+  // Draw property marker (red pin)
   doc.setFillColor(220, 38, 38);
-  doc.circle(centerX, centerY, 5, "F");
+  doc.rect(centerX - 4, centerY - 4, 8, 8, "F");
   doc.setFillColor(255, 255, 255);
-  doc.circle(centerX, centerY, 2, "F");
+  doc.rect(centerX - 2, centerY - 2, 4, 4, "F");
   
   // Draw border
   doc.setDrawColor(100, 100, 100);
