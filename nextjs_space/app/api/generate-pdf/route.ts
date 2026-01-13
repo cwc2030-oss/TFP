@@ -23,62 +23,70 @@ const getLayerInfo = (layerId: string) => {
   };
 };
 
-// Fetch static map image as base64
-async function fetchMapImage(lat: number, lng: number, layerId: string, zoom: number = 14): Promise<string | null> {
+// Fetch Google Maps Static API image as base64
+async function fetchGoogleMapImage(
+  lat: number, 
+  lng: number, 
+  layerId: string, 
+  zoom: number = 15
+): Promise<string | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.error("Google Maps API key not configured");
+    return null;
+  }
+
   try {
-    // Use OpenStreetMap-based static map service
-    const width = 600;
+    const width = 640;
     const height = 400;
     
-    // Different map styles/sources for different layers
-    let mapUrl: string;
+    // Different map types for different layers
+    let mapType = "roadmap";
+    let style = "";
     
     switch (layerId) {
       case "flood_zones":
-        // Use a terrain-style map for flood zones
-        mapUrl = `https://i.ytimg.com/vi/-iHUzNWzIFw/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLCBWc8owB6lt3iIKjV6HUBvE7pUVA`;
+      case "wetlands":
+        mapType = "terrain";
         break;
       case "topography":
-        // Topographic style
-        mapUrl = `https://i.ytimg.com/vi/uR9gPvAgw6s/sddefault.jpg`;
+        mapType = "terrain";
+        style = "&style=feature:all|element:labels|visibility:on";
         break;
-      case "wetlands":
-        // Satellite-like for wetlands
-        mapUrl = `https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Mercator_projection_Square.JPG/1280px-Mercator_projection_Square.JPG`;
+      case "soil_types":
+        mapType = "satellite";
+        break;
+      case "roads_transportation":
+        mapType = "roadmap";
+        style = "&style=feature:road|element:geometry|color:0x000000|weight:2";
+        break;
+      case "property_boundaries":
+      case "zoning":
+        mapType = "hybrid";
+        break;
+      case "power_substations":
+        mapType = "roadmap";
         break;
       default:
-        // Standard OpenStreetMap for other layers
-        mapUrl = `https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhxaNhF_rkM9wVFyBPGK6O45CpFU7WjSHyMQ9Gjf0GFLNfMXFK8C_en3TSnzCA6CDY4zaGAtt9nF_xRAcf3MuXNGYhFUhQGD9hs06w6nx57wBji5VS40DR1p9z5jyYJyyN95Cy0Bc7_rA/s1600/gridgeo01.png`;
+        mapType = "roadmap";
     }
 
-    // Fallback to OpenStreetMap static map
-    const osmUrl = `https://blog.locationiq.com/wp-content/uploads/2023/05/Empire-State-Building-to-Madison-Square-Garden-1.png`;
-    
-    // Try fetching the map
-    let response = await fetch(osmUrl, { 
-      headers: { 'User-Agent': 'TerraFirmaPartners/1.0' },
-      signal: AbortSignal.timeout(10000)
+    const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&maptype=${mapType}&markers=color:red%7C${lat},${lng}${style}&key=${apiKey}`;
+
+    const response = await fetch(mapUrl, {
+      signal: AbortSignal.timeout(15000)
     });
-    
-    if (!response.ok) {
-      // Try alternative OSM tile-based approach
-      const tileUrl = `https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg7pHyau6SJsIskcFQWV3OGtHEvVFQq4uVHsU0mlfQAIFWrdS6NzDp_X9IORZpWoxKg4OHxdMmfn_JP1eltHWx0l4CZKh83tVRcagXqk4GihfeOvbxKIwEYIikp8ap5JJ3A7kJJnnpCFhO6/s1600/Maperitive_screenshot.png + 180) / 360 * Math.pow(2, zoom))}/${Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom))}.png`;
-      response = await fetch(tileUrl, {
-        headers: { 'User-Agent': 'TerraFirmaPartners/1.0' },
-        signal: AbortSignal.timeout(10000)
-      });
-    }
 
     if (response.ok) {
       const arrayBuffer = await response.arrayBuffer();
       const base64 = Buffer.from(arrayBuffer).toString('base64');
-      const contentType = response.headers.get('content-type') || 'image/png';
-      return `data:${contentType};base64,${base64}`;
+      return `data:image/png;base64,${base64}`;
     }
     
+    console.error(`Google Maps API error: ${response.status}`);
     return null;
   } catch (error) {
-    console.error(`Failed to fetch map for layer ${layerId}:`, error);
+    console.error(`Failed to fetch Google map for layer ${layerId}:`, error);
     return null;
   }
 }
@@ -334,8 +342,16 @@ export async function POST(request: NextRequest) {
       yPos += 18;
     });
 
+    // Pre-fetch all Google Maps images for layers
+    const mapImages: Record<string, string | null> = {};
+    for (const layerId of selectedLayers) {
+      const mapImage = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, layerId);
+      mapImages[layerId] = mapImage;
+    }
+
     // Layer Detail Pages
-    selectedLayers.forEach((layerId: string, index: number) => {
+    for (let index = 0; index < selectedLayers.length; index++) {
+      const layerId = selectedLayers[index];
       const layer = getLayerInfo(layerId);
 
       doc.addPage();
@@ -349,8 +365,23 @@ export async function POST(request: NextRequest) {
       doc.setFontSize(16);
       doc.text(layer.displayName.toUpperCase(), 15, 20);
 
-      // Draw map visualization for this layer
-      drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 100);
+      // Add Google Map image or fallback to simple map
+      const mapImage = mapImages[layerId];
+      if (mapImage) {
+        try {
+          doc.addImage(mapImage, "PNG", 15, 40, pageWidth - 30, 80);
+          // Add coordinates label below map
+          doc.setFontSize(8);
+          doc.setTextColor(100, 100, 100);
+          doc.text(`Location: ${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W`, pageWidth - 15, 125, { align: "right" });
+        } catch (imgError) {
+          console.error("Failed to add map image:", imgError);
+          drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 80);
+        }
+      } else {
+        // Fallback to simple drawn map
+        drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 80);
+      }
 
       // Layer info
       doc.setTextColor(50, 50, 50);
@@ -386,7 +417,7 @@ export async function POST(request: NextRequest) {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(9);
       doc.text(`Terra Firma Partners LLC | Page ${index + 3}`, pageWidth / 2, pageHeight - 5, { align: "center" });
-    });
+    }
 
     // Disclaimer Page
     doc.addPage();
