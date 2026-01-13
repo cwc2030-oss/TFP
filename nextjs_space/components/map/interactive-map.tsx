@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
+
+declare global {
+  interface Window {
+    google: typeof google;
+    initMap: () => void;
+  }
+}
 
 interface SelectedParcel {
   address: string;
@@ -32,6 +39,10 @@ export default function InteractiveMap({
   onLayersChange,
   initialLayers = [],
 }: InteractiveMapProps) {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const googleMapRef = useRef<google.maps.Map | null>(null);
+  const markerRef = useRef<google.maps.Marker | null>(null);
+  
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   const [selectedLayers, setSelectedLayers] = useState<string[]>(initialLayers);
   const [searchQuery, setSearchQuery] = useState("");
@@ -39,11 +50,106 @@ export default function InteractiveMap({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [mapCenter, setMapCenter] = useState({ lat: 39.8283, lng: -98.5795 }); // Center of US
-  const [mapZoom, setMapZoom] = useState(4);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapType, setMapType] = useState<"satellite" | "terrain" | "hybrid" | "roadmap">("hybrid");
+  const [is3DMode, setIs3DMode] = useState(true);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
+  // Initialize Google Maps
+  const initializeMap = useCallback(() => {
+    if (!mapRef.current || !window.google || googleMapRef.current) return;
+
+    const map = new google.maps.Map(mapRef.current, {
+      center: { lat: 39.8283, lng: -98.5795 }, // Center of US
+      zoom: 4,
+      mapTypeId: "hybrid",
+      tilt: 45,
+      heading: 0,
+      mapTypeControl: false,
+      streetViewControl: true,
+      fullscreenControl: false,
+      zoomControl: true,
+      zoomControlOptions: {
+        position: google.maps.ControlPosition.RIGHT_BOTTOM,
+      },
+      gestureHandling: "greedy",
+      rotateControl: true,
+    });
+
+    googleMapRef.current = map;
+    setMapLoaded(true);
+  }, []);
+
+  // Load Google Maps Script
+  useEffect(() => {
+    if (!apiKey) return;
+    
+    // Check if already loaded
+    if (window.google && window.google.maps) {
+      initializeMap();
+      return;
+    }
+
+    // Define callback
+    window.initMap = initializeMap;
+
+    // Check if script already exists
+    const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', initializeMap);
+      return;
+    }
+
+    // Load script
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap&v=weekly`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+
+    return () => {
+      // Cleanup not needed as we want the script to persist
+    };
+  }, [apiKey, initializeMap]);
+
+  // Update map type
+  useEffect(() => {
+    if (googleMapRef.current) {
+      googleMapRef.current.setMapTypeId(mapType);
+    }
+  }, [mapType]);
+
+  // Handle 3D mode toggle
+  const toggle3DMode = () => {
+    if (!googleMapRef.current) return;
+    
+    if (is3DMode) {
+      googleMapRef.current.setTilt(0);
+      googleMapRef.current.setHeading(0);
+    } else {
+      googleMapRef.current.setTilt(45);
+    }
+    setIs3DMode(!is3DMode);
+  };
+
+  // Rotate map
+  const rotateMap = (degrees: number) => {
+    if (!googleMapRef.current) return;
+    const currentHeading = googleMapRef.current.getHeading() || 0;
+    googleMapRef.current.setHeading(currentHeading + degrees);
+  };
+
+  // Reset view
+  const resetView = () => {
+    if (!googleMapRef.current) return;
+    googleMapRef.current.setTilt(45);
+    googleMapRef.current.setHeading(0);
+    googleMapRef.current.setZoom(selectedParcel ? 18 : 4);
+    setIs3DMode(true);
+  };
+
+  // Handle search
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -60,7 +166,6 @@ export default function InteractiveMap({
     setHasSearched(true);
 
     try {
-      // Use Google Geocoding API
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
           searchQuery + ", USA"
@@ -78,10 +183,11 @@ export default function InteractiveMap({
         }));
         setSearchResults(results);
         
-        // Center map on first result
-        if (results.length > 0) {
-          setMapCenter({ lat: results[0].lat, lng: results[0].lng });
-          setMapZoom(14);
+        // Pan to first result
+        if (results.length > 0 && googleMapRef.current) {
+          googleMapRef.current.panTo({ lat: results[0].lat, lng: results[0].lng });
+          googleMapRef.current.setZoom(16);
+          googleMapRef.current.setTilt(45);
         }
       } else {
         setSearchResults([]);
@@ -94,6 +200,7 @@ export default function InteractiveMap({
     }
   };
 
+  // Select a parcel
   const selectParcel = (result: SearchResult) => {
     const parcel: SelectedParcel = {
       address: result.address,
@@ -102,9 +209,36 @@ export default function InteractiveMap({
       parcelId: `PARCEL-${result.placeId.slice(0, 8).toUpperCase()}`,
     };
     setSelectedParcel(parcel);
-    setMapCenter({ lat: result.lat, lng: result.lng });
-    setMapZoom(17);
     onParcelSelect?.(parcel);
+
+    // Update map
+    if (googleMapRef.current) {
+      // Remove existing marker
+      if (markerRef.current) {
+        markerRef.current.setMap(null);
+      }
+
+      // Pan to location with animation
+      googleMapRef.current.panTo({ lat: result.lat, lng: result.lng });
+      googleMapRef.current.setZoom(18);
+      googleMapRef.current.setTilt(60);
+
+      // Add marker
+      markerRef.current = new google.maps.Marker({
+        position: { lat: result.lat, lng: result.lng },
+        map: googleMapRef.current,
+        title: result.address,
+        animation: google.maps.Animation.DROP,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 12,
+          fillColor: "#059669",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 3,
+        },
+      });
+    }
   };
 
   const toggleLayer = (layerId: string) => {
@@ -119,31 +253,28 @@ export default function InteractiveMap({
 
   const clearSelection = () => {
     setSelectedParcel(null);
-    setMapZoom(4);
-    setMapCenter({ lat: 39.8283, lng: -98.5795 });
     onParcelSelect?.(null);
-  };
-
-  // Generate Google Static Map URL
-  const getMapUrl = () => {
-    if (!apiKey) return null;
     
-    let markers = "";
-    if (selectedParcel) {
-      markers = `&markers=color:red%7Clabel:P%7C${selectedParcel.lat},${selectedParcel.lng}`;
+    // Remove marker
+    if (markerRef.current) {
+      markerRef.current.setMap(null);
+      markerRef.current = null;
     }
-    
-    // Return Google Static Maps URL with satellite/hybrid view
-    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
-    return `${baseUrl}?center=${mapCenter.lat},${mapCenter.lng}&zoom=${mapZoom}&size=1280x720&maptype=hybrid${markers}&key=${apiKey}`;
+
+    // Reset map view
+    if (googleMapRef.current) {
+      googleMapRef.current.panTo({ lat: 39.8283, lng: -98.5795 });
+      googleMapRef.current.setZoom(4);
+      googleMapRef.current.setTilt(0);
+    }
   };
 
   return (
-    <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-gradient-to-br from-emerald-50 to-stone-100">
+    <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-stone-900">
       {/* Header Banner */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white text-center py-2 text-sm font-medium">
         <MapIcon className="w-4 h-4 inline mr-2" />
-        🇺🇸 Nationwide Coverage - Search any address in the United States
+        🇺🇸 Interactive 3D Map - Pan, Zoom, Tilt & Rotate
       </div>
 
       {/* Search Bar */}
@@ -174,11 +305,65 @@ export default function InteractiveMap({
         </Button>
       </div>
 
+      {/* 3D Controls */}
+      <div className="absolute top-28 left-4 z-10 flex flex-col gap-2">
+        <div className="bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 p-2 space-y-2">
+          <p className="text-xs font-semibold text-stone-600 px-2">View Controls</p>
+          
+          <Button
+            onClick={toggle3DMode}
+            variant="outline"
+            size="sm"
+            className={`w-full justify-start gap-2 ${is3DMode ? 'bg-emerald-50 border-emerald-300' : ''}`}
+          >
+            <Mountain className="w-4 h-4" />
+            {is3DMode ? "3D On" : "3D Off"}
+          </Button>
+          
+          <Button
+            onClick={() => rotateMap(45)}
+            variant="outline"
+            size="sm"
+            className="w-full justify-start gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Rotate 45°
+          </Button>
+          
+          <Button
+            onClick={resetView}
+            variant="outline"
+            size="sm"
+            className="w-full justify-start gap-2"
+          >
+            <Maximize2 className="w-4 h-4" />
+            Reset View
+          </Button>
+          
+          <div className="border-t border-stone-200 pt-2 mt-2">
+            <p className="text-xs font-semibold text-stone-600 px-2 mb-2">Map Style</p>
+            <div className="grid grid-cols-2 gap-1">
+              {(["hybrid", "satellite", "terrain", "roadmap"] as const).map((type) => (
+                <Button
+                  key={type}
+                  onClick={() => setMapType(type)}
+                  variant="outline"
+                  size="sm"
+                  className={`text-xs capitalize ${mapType === type ? 'bg-emerald-50 border-emerald-300' : ''}`}
+                >
+                  {type}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Layer Panel */}
       {showLayerPanel && (
         <div className="absolute top-28 right-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[50vh] overflow-y-auto">
           <div className="p-4 border-b border-stone-200 flex items-center justify-between">
-            <h3 className="font-semibold text-stone-800">Map Layers</h3>
+            <h3 className="font-semibold text-stone-800">Report Layers</h3>
             <button
               onClick={() => setShowLayerPanel(false)}
               className="text-stone-400 hover:text-stone-600"
@@ -204,93 +389,67 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Map Display */}
+      {/* Google Map Container */}
       <div className="absolute inset-0 pt-10">
-        {apiKey && getMapUrl() ? (
-          <img
-            src={getMapUrl()!}
-            alt="Map"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              // Fallback if map fails to load
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-          />
-        ) : (
-          <div className="relative w-full h-full overflow-hidden">
-            <img
-              src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Map_of_USA_with_state_names.svg/1280px-Map_of_USA_with_state_names.svg.png"
-              alt="USA Map"
-              className="absolute inset-0 w-full h-full object-contain opacity-40"
-              style={{ objectPosition: "center 60%" }}
-            />
-            <div 
-              className="absolute inset-0"
-              style={{
-                background: "linear-gradient(to bottom right, rgba(236, 253, 245, 0.85), rgba(245, 245, 244, 0.8))",
-              }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-stone-500 text-lg">Enter an address above to search</p>
+        {!mapLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center bg-stone-100">
+            <div className="text-center">
+              <Loader2 className="w-12 h-12 animate-spin text-emerald-600 mx-auto mb-4" />
+              <p className="text-stone-600">Loading Interactive 3D Map...</p>
             </div>
           </div>
         )}
+        <div ref={mapRef} className="w-full h-full" />
       </div>
 
       {/* Search Results Panel */}
-      <div className="absolute top-28 left-4 z-10 w-96 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[55vh] overflow-y-auto">
-        <div className="p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
-          <h3 className="font-semibold text-stone-800 flex items-center gap-2">
-            <MapIcon className="w-5 h-5 text-emerald-700" />
-            {hasSearched ? "Search Results" : "Search for a Property"}
-          </h3>
-          <p className="text-xs text-stone-500 mt-1">
-            {hasSearched 
-              ? `${searchResults.length} result${searchResults.length !== 1 ? "s" : ""} found` 
-              : "Enter an address, city, or ZIP code to find properties"}
-          </p>
-        </div>
-        <div className="p-2 space-y-2">
-          {isSearching ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-            </div>
-          ) : searchResults.length > 0 ? (
-            searchResults.map((result, idx) => (
-              <button
-                key={idx}
-                onClick={() => selectParcel(result)}
-                className={`w-full text-left p-3 rounded-lg transition-all ${
-                  selectedParcel?.address === result.address
-                    ? "bg-emerald-100 border-2 border-emerald-500"
-                    : "bg-stone-50 hover:bg-stone-100 border-2 border-transparent"
-                }`}
-              >
-                <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-stone-800">{result.address}</p>
-                    <p className="text-xs text-stone-500 mt-1">
-                      {result.lat.toFixed(4)}°N, {Math.abs(result.lng).toFixed(4)}°W
-                    </p>
+      {(hasSearched || searchResults.length > 0) && (
+        <div className="absolute top-72 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[40vh] overflow-y-auto">
+          <div className="p-3 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
+            <h3 className="font-semibold text-stone-800 text-sm flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-emerald-700" />
+              Search Results
+            </h3>
+            <p className="text-xs text-stone-500">
+              {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} found
+            </p>
+          </div>
+          <div className="p-2 space-y-2">
+            {isSearching ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+              </div>
+            ) : searchResults.length > 0 ? (
+              searchResults.map((result, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => selectParcel(result)}
+                  className={`w-full text-left p-3 rounded-lg transition-all ${
+                    selectedParcel?.address === result.address
+                      ? "bg-emerald-100 border-2 border-emerald-500"
+                      : "bg-stone-50 hover:bg-stone-100 border-2 border-transparent"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-stone-800">{result.address}</p>
+                      <p className="text-xs text-stone-500 mt-1">
+                        {result.lat.toFixed(4)}°N, {Math.abs(result.lng).toFixed(4)}°W
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </button>
-            ))
-          ) : hasSearched ? (
-            <div className="text-center py-8 text-stone-500">
-              <p>No results found</p>
-              <p className="text-xs mt-1">Try a different address or ZIP code</p>
-            </div>
-          ) : (
-            <div className="text-center py-8 text-stone-400">
-              <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">Search for any US address</p>
-              <p className="text-xs mt-1">Example: "123 Main St, Kansas City, MO"</p>
-            </div>
-          )}
+                </button>
+              ))
+            ) : (
+              <div className="text-center py-6 text-stone-500">
+                <p className="text-sm">No results found</p>
+                <p className="text-xs mt-1">Try a different address</p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Selected Parcel Info */}
       {selectedParcel && (
@@ -300,28 +459,35 @@ export default function InteractiveMap({
               <div className="flex items-start gap-3">
                 <CheckCircle className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-medium text-stone-800 text-sm">
-                    Selected Parcel
-                  </p>
-                  <p className="text-xs text-stone-600 mt-1">
-                    {selectedParcel.address}
-                  </p>
-                  <p className="text-xs text-stone-500">
-                    ID: {selectedParcel.parcelId}
-                  </p>
+                  <p className="font-medium text-stone-800 text-sm">Selected Parcel</p>
+                  <p className="text-xs text-stone-600 mt-1">{selectedParcel.address}</p>
+                  <p className="text-xs text-stone-500">ID: {selectedParcel.parcelId}</p>
                   <p className="text-xs text-stone-400">
                     {selectedParcel.lat.toFixed(4)}, {selectedParcel.lng.toFixed(4)}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={clearSelection}
-                className="text-stone-400 hover:text-stone-600"
-              >
+              <button onClick={clearSelection} className="text-stone-400 hover:text-stone-600">
                 <X className="w-4 h-4" />
               </button>
             </div>
+            <div className="mt-3 pt-3 border-t border-stone-200">
+              <p className="text-xs text-emerald-700 flex items-center gap-1">
+                <Eye className="w-3 h-3" />
+                Use mouse to drag, scroll to zoom, Ctrl+drag to rotate
+              </p>
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* Instructions overlay when no parcel selected */}
+      {!selectedParcel && !hasSearched && mapLoaded && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white px-6 py-3 rounded-full text-sm">
+          <span className="flex items-center gap-2">
+            <Search className="w-4 h-4" />
+            Search for an address to explore in 3D
+          </span>
         </div>
       )}
     </div>
@@ -361,9 +527,7 @@ function LayerToggle({
             </span>
           )}
         </div>
-        <p className="text-xs text-stone-500 mt-0.5 truncate">
-          {layer.dataSource}
-        </p>
+        <p className="text-xs text-stone-500 mt-0.5 truncate">{layer.dataSource}</p>
       </div>
       <div className="flex-shrink-0">
         {isSelected ? (
