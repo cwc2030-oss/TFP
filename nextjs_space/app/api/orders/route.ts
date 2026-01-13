@@ -61,7 +61,6 @@ export async function POST(request: NextRequest) {
         parcelId: parcelId || null,
         parcelLat,
         parcelLng,
-        parcelBounds: parcelBounds ? JSON.stringify(parcelBounds) : null,
         selectedLayers: JSON.stringify(selectedLayers),
         price: 350,
         status: "pending",

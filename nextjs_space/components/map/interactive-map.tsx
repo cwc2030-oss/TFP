@@ -1,12 +1,10 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Search, MapPin, Layers, X, AlertTriangle, CheckCircle, Map as MapIcon } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
-
-const KANSAS_CITY_CENTER = { lat: 39.0997, lng: -94.5786 };
 
 interface SelectedParcel {
   address: string;
@@ -22,27 +20,12 @@ interface InteractiveMapProps {
   initialLayers?: string[];
 }
 
-// Demo parcels for demonstration mode - Nationwide coverage examples
-const DEMO_PARCELS = [
-  // Missouri & Kansas (Home Base)
-  { address: "1 Kansas City Place, Kansas City, MO 64105", lat: 39.0997, lng: -94.5786, parcelId: "MO-KC-001", state: "Missouri" },
-  { address: "6501 Johnson Dr, Mission, KS 66202", lat: 39.0278, lng: -94.6558, parcelId: "KS-MSN-001", state: "Kansas" },
-  // Texas
-  { address: "1000 Main St, Houston, TX 77002", lat: 29.7604, lng: -95.3698, parcelId: "TX-HOU-001", state: "Texas" },
-  { address: "500 Commerce St, Dallas, TX 75202", lat: 32.7767, lng: -96.7970, parcelId: "TX-DAL-001", state: "Texas" },
-  // Florida
-  { address: "100 S Biscayne Blvd, Miami, FL 33131", lat: 25.7617, lng: -80.1918, parcelId: "FL-MIA-001", state: "Florida" },
-  // California
-  { address: "350 S Grand Ave, Los Angeles, CA 90071", lat: 34.0522, lng: -118.2437, parcelId: "CA-LA-001", state: "California" },
-  // Arizona
-  { address: "2 N Central Ave, Phoenix, AZ 85004", lat: 33.4484, lng: -112.0740, parcelId: "AZ-PHX-001", state: "Arizona" },
-  // Colorado
-  { address: "1144 15th St, Denver, CO 80202", lat: 39.7392, lng: -104.9903, parcelId: "CO-DEN-001", state: "Colorado" },
-  // Georgia
-  { address: "265 Peachtree St, Atlanta, GA 30303", lat: 33.7490, lng: -84.3880, parcelId: "GA-ATL-001", state: "Georgia" },
-  // New York
-  { address: "350 5th Ave, New York, NY 10118", lat: 40.7484, lng: -73.9857, parcelId: "NY-NYC-001", state: "New York" },
-];
+interface SearchResult {
+  address: string;
+  lat: number;
+  lng: number;
+  placeId: string;
+}
 
 export default function InteractiveMap({
   onParcelSelect,
@@ -53,23 +36,74 @@ export default function InteractiveMap({
   const [selectedLayers, setSelectedLayers] = useState<string[]>(initialLayers);
   const [searchQuery, setSearchQuery] = useState("");
   const [showLayerPanel, setShowLayerPanel] = useState(true);
-  const [filteredParcels, setFilteredParcels] = useState(DEMO_PARCELS);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [mapCenter, setMapCenter] = useState({ lat: 39.8283, lng: -98.5795 }); // Center of US
+  const [mapZoom, setMapZoom] = useState(4);
 
-  const handleSearch = () => {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+  const handleSearch = async () => {
     if (!searchQuery.trim()) {
-      setFilteredParcels(DEMO_PARCELS);
+      setSearchResults([]);
+      setHasSearched(false);
       return;
     }
-    const filtered = DEMO_PARCELS.filter(
-      (p) =>
-        p.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.parcelId.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    setFilteredParcels(filtered.length > 0 ? filtered : DEMO_PARCELS);
+
+    if (!apiKey) {
+      console.error("Google Maps API key not configured");
+      return;
+    }
+
+    setIsSearching(true);
+    setHasSearched(true);
+
+    try {
+      // Use Google Geocoding API
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+          searchQuery + ", USA"
+        )}&key=${apiKey}`
+      );
+
+      const data = await response.json();
+
+      if (data.status === "OK" && data.results) {
+        const results: SearchResult[] = data.results.slice(0, 5).map((result: any) => ({
+          address: result.formatted_address,
+          lat: result.geometry.location.lat,
+          lng: result.geometry.location.lng,
+          placeId: result.place_id,
+        }));
+        setSearchResults(results);
+        
+        // Center map on first result
+        if (results.length > 0) {
+          setMapCenter({ lat: results[0].lat, lng: results[0].lng });
+          setMapZoom(14);
+        }
+      } else {
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error("Search error:", error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
-  const selectParcel = (parcel: SelectedParcel) => {
+  const selectParcel = (result: SearchResult) => {
+    const parcel: SelectedParcel = {
+      address: result.address,
+      lat: result.lat,
+      lng: result.lng,
+      parcelId: `PARCEL-${result.placeId.slice(0, 8).toUpperCase()}`,
+    };
     setSelectedParcel(parcel);
+    setMapCenter({ lat: result.lat, lng: result.lng });
+    setMapZoom(17);
     onParcelSelect?.(parcel);
   };
 
@@ -85,15 +119,29 @@ export default function InteractiveMap({
 
   const clearSelection = () => {
     setSelectedParcel(null);
+    setMapZoom(4);
+    setMapCenter({ lat: 39.8283, lng: -98.5795 });
     onParcelSelect?.(null);
+  };
+
+  // Generate Google Static Map URL
+  const getMapUrl = () => {
+    if (!apiKey) return null;
+    
+    let markers = "";
+    if (selectedParcel) {
+      markers = `&markers=color:red%7C${selectedParcel.lat},${selectedParcel.lng}`;
+    }
+    
+    return `https://i.ytimg.com/vi/FjhpOT2bdNg/maxresdefault.jpg`;
   };
 
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-gradient-to-br from-emerald-50 to-stone-100">
-      {/* Demo Mode Banner */}
+      {/* Header Banner */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white text-center py-2 text-sm font-medium">
         <MapIcon className="w-4 h-4 inline mr-2" />
-        🇺🇸 Nationwide Coverage - Sample parcels from 10 states below. Add Google Maps API for full address search.
+        🇺🇸 Nationwide Coverage - Search any address in the United States
       </div>
 
       {/* Search Bar */}
@@ -104,15 +152,16 @@ export default function InteractiveMap({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            placeholder="Search demo parcels..."
+            placeholder="Enter any US address, city, or ZIP code..."
             className="pl-10 bg-white/95 backdrop-blur-sm shadow-md border-stone-200"
           />
         </div>
         <Button
           onClick={handleSearch}
+          disabled={isSearching}
           className="bg-emerald-700 hover:bg-emerald-800 text-white shadow-md"
         >
-          Search
+          {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : "Search"}
         </Button>
         <Button
           onClick={() => setShowLayerPanel(!showLayerPanel)}
@@ -153,71 +202,91 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Demo Map Visual - Static USA Map Background */}
+      {/* Map Display */}
       <div className="absolute inset-0 pt-10">
-        <div className="relative w-full h-full overflow-hidden">
-          {/* USA Map Image */}
+        {apiKey && getMapUrl() ? (
           <img
-            src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Map_of_USA_with_state_names.svg/1280px-Map_of_USA_with_state_names.svg.png"
-            alt="USA Map"
-            className="absolute inset-0 w-full h-full object-contain opacity-30"
-            style={{ objectPosition: "center 60%" }}
-          />
-          {/* Gradient overlay */}
-          <div 
-            className="absolute inset-0"
-            style={{
-              background: "linear-gradient(to bottom right, rgba(236, 253, 245, 0.9), rgba(245, 245, 244, 0.85))",
+            src={getMapUrl()!}
+            alt="Map"
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              // Fallback if map fails to load
+              (e.target as HTMLImageElement).style.display = 'none';
             }}
           />
-          {/* Map grid overlay for visual effect */}
-          <div 
-            className="absolute inset-0"
-            style={{
-              backgroundImage: `
-                linear-gradient(rgba(16, 185, 129, 0.15) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(16, 185, 129, 0.15) 1px, transparent 1px)
-              `,
-              backgroundSize: "40px 40px",
-            }}
-          />
-        </div>
+        ) : (
+          <div className="relative w-full h-full overflow-hidden">
+            <img
+              src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Map_of_USA_with_state_names.svg/1280px-Map_of_USA_with_state_names.svg.png"
+              alt="USA Map"
+              className="absolute inset-0 w-full h-full object-contain opacity-40"
+              style={{ objectPosition: "center 60%" }}
+            />
+            <div 
+              className="absolute inset-0"
+              style={{
+                background: "linear-gradient(to bottom right, rgba(236, 253, 245, 0.85), rgba(245, 245, 244, 0.8))",
+              }}
+            />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-stone-500 text-lg">Enter an address above to search</p>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Demo Parcel List */}
+      {/* Search Results Panel */}
       <div className="absolute top-28 left-4 z-10 w-96 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[55vh] overflow-y-auto">
         <div className="p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
           <h3 className="font-semibold text-stone-800 flex items-center gap-2">
             <MapIcon className="w-5 h-5 text-emerald-700" />
-            Sample Parcels Across the USA
+            {hasSearched ? "Search Results" : "Search for a Property"}
           </h3>
-          <p className="text-xs text-stone-500 mt-1">Select any parcel to generate a $350 report with your chosen layers</p>
+          <p className="text-xs text-stone-500 mt-1">
+            {hasSearched 
+              ? `${searchResults.length} result${searchResults.length !== 1 ? "s" : ""} found` 
+              : "Enter an address, city, or ZIP code to find properties"}
+          </p>
         </div>
         <div className="p-2 space-y-2">
-          {filteredParcels.map((parcel, idx) => (
-            <button
-              key={idx}
-              onClick={() => selectParcel(parcel)}
-              className={`w-full text-left p-3 rounded-lg transition-all ${
-                selectedParcel?.parcelId === parcel.parcelId
-                  ? "bg-emerald-100 border-2 border-emerald-500"
-                  : "bg-stone-50 hover:bg-stone-100 border-2 border-transparent"
-              }`}
-            >
-              <div className="flex items-start gap-2">
-                <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-stone-800">{parcel.address}</p>
-                    <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full ml-2">
-                      {(parcel as any).state}
-                    </span>
+          {isSearching ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+            </div>
+          ) : searchResults.length > 0 ? (
+            searchResults.map((result, idx) => (
+              <button
+                key={idx}
+                onClick={() => selectParcel(result)}
+                className={`w-full text-left p-3 rounded-lg transition-all ${
+                  selectedParcel?.address === result.address
+                    ? "bg-emerald-100 border-2 border-emerald-500"
+                    : "bg-stone-50 hover:bg-stone-100 border-2 border-transparent"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-stone-800">{result.address}</p>
+                    <p className="text-xs text-stone-500 mt-1">
+                      {result.lat.toFixed(4)}°N, {Math.abs(result.lng).toFixed(4)}°W
+                    </p>
                   </div>
-                  <p className="text-xs text-stone-500">{parcel.parcelId}</p>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))
+          ) : hasSearched ? (
+            <div className="text-center py-8 text-stone-500">
+              <p>No results found</p>
+              <p className="text-xs mt-1">Try a different address or ZIP code</p>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-stone-400">
+              <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">Search for any US address</p>
+              <p className="text-xs mt-1">Example: "123 Main St, Kansas City, MO"</p>
+            </div>
+          )}
         </div>
       </div>
 

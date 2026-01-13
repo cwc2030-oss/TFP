@@ -10,45 +10,45 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  passwordHash  String
-  name          String
-  company       String?
-  role          String    @default("user")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  orders        Order[]
+    id           String   @id @default(cuid())
+    email        String   @unique
+    passwordHash String
+    name         String?
+    company      String?
+    role         String   @default("user")
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+    orders       Order[]
 }
 
 model MapLayer {
-  id            String    @id @default(cuid())
-  name          String    @unique
-  displayName   String
-  description   String
-  category      String
-  dataSource    String
-  isAvailable   Boolean   @default(true)
-  isPremium     Boolean   @default(false)
-  sortOrder     Int       @default(0)
-  createdAt     DateTime  @default(now())
+    id           String   @id @default(cuid())
+    name         String   @unique
+    description  String?
+    source       String?
+    category     String?
+    isAvailable  Boolean  @default(true)
+    isPremium    Boolean  @default(false)
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
 }
 
 model Order {
-  id              String    @id @default(cuid())
-  userId          String?
-  user            User?     @relation(fields: [userId], references: [id])
-  guestEmail      String?
-  parcelAddress   String
-  parcelId        String?
-  parcelLat       Float
-  parcelLng       Float
-  parcelBounds    String?   @db.Text
-  selectedLayers  String    @db.Text
-  price           Float     @default(350)
-  status          String    @default("pending")
-  paymentIntentId String?
-  pdfPath         String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+    id              String   @id @default(cuid())
+    userId          String?
+    user            User?    @relation(fields: [userId], references: [id])
+    parcelAddress   String
+    parcelLat       Float
+    parcelLng       Float
+    parcelId        String?
+    selectedLayers  String   @default("[]")
+    guestEmail      String?
+    status          String   @default("pending")
+    paymentStatus   String   @default("pending")
+    paymentIntentId String?
+    stripeSessionId String?
+    pdfPath         String?
+    price           Float    @default(350)
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
 }
