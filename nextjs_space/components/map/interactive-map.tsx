@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye } from "lucide-react";
+import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
@@ -34,6 +34,22 @@ interface SearchResult {
   placeId: string;
 }
 
+interface ParcelData {
+  parcelId: string;
+  owner: string;
+  mailingAddress: string;
+  siteAddress: string;
+  acreage: number;
+  sqft: number;
+  zoning: string;
+  useDescription: string;
+  coordinates: number[][][] | number[][][][];
+  geometryType: string;
+  lat: number;
+  lng: number;
+  regridPath: string;
+}
+
 export default function InteractiveMap({
   onParcelSelect,
   onLayersChange,
@@ -42,26 +58,200 @@ export default function InteractiveMap({
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<google.maps.Map | null>(null);
   const markerRef = useRef<google.maps.Marker | null>(null);
+  const parcelPolygonsRef = useRef<google.maps.Polygon[]>([]);
+  const selectedPolygonRef = useRef<google.maps.Polygon | null>(null);
   
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
+  const [parcelData, setParcelData] = useState<ParcelData | null>(null);
+  const [neighboringParcels, setNeighboringParcels] = useState<ParcelData[]>([]);
   const [selectedLayers, setSelectedLayers] = useState<string[]>(initialLayers);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showLayerPanel, setShowLayerPanel] = useState(true);
+  const [showLayerPanel, setShowLayerPanel] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapType, setMapType] = useState<"satellite" | "terrain" | "hybrid" | "roadmap">("hybrid");
   const [is3DMode, setIs3DMode] = useState(true);
+  const [isLoadingParcel, setIsLoadingParcel] = useState(false);
+  const [showNeighbors, setShowNeighbors] = useState(true);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+  // Clear all parcel polygons from map
+  const clearParcelPolygons = useCallback(() => {
+    parcelPolygonsRef.current.forEach(polygon => polygon.setMap(null));
+    parcelPolygonsRef.current = [];
+    if (selectedPolygonRef.current) {
+      selectedPolygonRef.current.setMap(null);
+      selectedPolygonRef.current = null;
+    }
+  }, []);
+
+  // Draw a parcel polygon on the map
+  const drawParcelPolygon = useCallback((parcel: ParcelData, isSelected: boolean = false) => {
+    if (!googleMapRef.current || !parcel.coordinates || parcel.coordinates.length === 0) return null;
+
+    let paths: google.maps.LatLngLiteral[][] = [];
+    
+    try {
+      if (parcel.geometryType === "MultiPolygon") {
+        // MultiPolygon: coordinates is number[][][][]
+        const multiCoords = parcel.coordinates as number[][][][];
+        multiCoords.forEach(polygon => {
+          if (polygon[0]) {
+            const ring = polygon[0].map(coord => ({
+              lat: coord[1],
+              lng: coord[0]
+            }));
+            paths.push(ring);
+          }
+        });
+      } else {
+        // Polygon: coordinates is number[][][]
+        const polyCoords = parcel.coordinates as number[][][];
+        if (polyCoords[0]) {
+          const ring = polyCoords[0].map(coord => ({
+            lat: coord[1],
+            lng: coord[0]
+          }));
+          paths.push(ring);
+        }
+      }
+    } catch (e) {
+      console.error("Error parsing parcel coordinates:", e);
+      return null;
+    }
+
+    if (paths.length === 0) return null;
+
+    const polygon = new google.maps.Polygon({
+      paths: paths,
+      strokeColor: isSelected ? "#059669" : "#6366f1",
+      strokeOpacity: isSelected ? 1 : 0.7,
+      strokeWeight: isSelected ? 3 : 2,
+      fillColor: isSelected ? "#059669" : "#6366f1",
+      fillOpacity: isSelected ? 0.25 : 0.1,
+      map: googleMapRef.current,
+      clickable: !isSelected,
+    });
+
+    if (!isSelected) {
+      polygon.addListener("click", () => {
+        // When clicking a neighboring parcel, make it selected
+        setParcelData(parcel);
+        setSelectedParcel({
+          address: parcel.siteAddress,
+          lat: parcel.lat,
+          lng: parcel.lng,
+          parcelId: parcel.parcelId,
+        });
+        onParcelSelect?.({
+          address: parcel.siteAddress,
+          lat: parcel.lat,
+          lng: parcel.lng,
+          parcelId: parcel.parcelId,
+        });
+        
+        // Update visual
+        if (selectedPolygonRef.current) {
+          selectedPolygonRef.current.setOptions({
+            strokeColor: "#6366f1",
+            strokeOpacity: 0.7,
+            strokeWeight: 2,
+            fillColor: "#6366f1",
+            fillOpacity: 0.1,
+          });
+        }
+        polygon.setOptions({
+          strokeColor: "#059669",
+          strokeOpacity: 1,
+          strokeWeight: 3,
+          fillColor: "#059669",
+          fillOpacity: 0.25,
+        });
+        selectedPolygonRef.current = polygon;
+      });
+
+      polygon.addListener("mouseover", () => {
+        if (selectedPolygonRef.current !== polygon) {
+          polygon.setOptions({ fillOpacity: 0.3 });
+        }
+      });
+
+      polygon.addListener("mouseout", () => {
+        if (selectedPolygonRef.current !== polygon) {
+          polygon.setOptions({ fillOpacity: 0.1 });
+        }
+      });
+    }
+
+    return polygon;
+  }, [onParcelSelect]);
+
+  // Fetch parcel data from Regrid API
+  const fetchParcelData = useCallback(async (lat: number, lng: number) => {
+    setIsLoadingParcel(true);
+    clearParcelPolygons();
+    
+    try {
+      // Fetch the main parcel at this location
+      const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
+      const data = await response.json();
+      
+      if (data.parcels && data.parcels.length > 0) {
+        const mainParcel = data.parcels[0];
+        setParcelData(mainParcel);
+        
+        // Draw the main parcel polygon
+        const mainPolygon = drawParcelPolygon(mainParcel, true);
+        if (mainPolygon) {
+          selectedPolygonRef.current = mainPolygon;
+        }
+        
+        // Fetch neighboring parcels
+        if (showNeighbors) {
+          const neighborsResponse = await fetch("/api/parcels", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat, lng, radius: 0.002 }),
+          });
+          const neighborsData = await neighborsResponse.json();
+          
+          if (neighborsData.parcels) {
+            // Filter out the main parcel
+            const neighbors = neighborsData.parcels.filter(
+              (p: ParcelData) => p.parcelId !== mainParcel.parcelId
+            );
+            setNeighboringParcels(neighbors);
+            
+            // Draw neighboring parcels
+            neighbors.forEach((neighbor: ParcelData) => {
+              const polygon = drawParcelPolygon(neighbor, false);
+              if (polygon) {
+                parcelPolygonsRef.current.push(polygon);
+              }
+            });
+          }
+        }
+      } else {
+        setParcelData(null);
+        setNeighboringParcels([]);
+      }
+    } catch (error) {
+      console.error("Error fetching parcel data:", error);
+      setParcelData(null);
+    } finally {
+      setIsLoadingParcel(false);
+    }
+  }, [clearParcelPolygons, drawParcelPolygon, showNeighbors]);
 
   // Initialize Google Maps
   const initializeMap = useCallback(() => {
     if (!mapRef.current || !window.google || googleMapRef.current) return;
 
     const map = new google.maps.Map(mapRef.current, {
-      center: { lat: 39.8283, lng: -98.5795 }, // Center of US
+      center: { lat: 39.8283, lng: -98.5795 },
       zoom: 4,
       mapTypeId: "hybrid",
       tilt: 45,
@@ -85,32 +275,24 @@ export default function InteractiveMap({
   useEffect(() => {
     if (!apiKey) return;
     
-    // Check if already loaded
     if (window.google && window.google.maps) {
       initializeMap();
       return;
     }
 
-    // Define callback
     window.initMap = initializeMap;
 
-    // Check if script already exists
     const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
     if (existingScript) {
       existingScript.addEventListener('load', initializeMap);
       return;
     }
 
-    // Load script
     const script = document.createElement("script");
     script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap&v=weekly`;
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
-
-    return () => {
-      // Cleanup not needed as we want the script to persist
-    };
   }, [apiKey, initializeMap]);
 
   // Update map type
@@ -120,7 +302,6 @@ export default function InteractiveMap({
     }
   }, [mapType]);
 
-  // Handle 3D mode toggle
   const toggle3DMode = () => {
     if (!googleMapRef.current) return;
     
@@ -133,14 +314,12 @@ export default function InteractiveMap({
     setIs3DMode(!is3DMode);
   };
 
-  // Rotate map
   const rotateMap = (degrees: number) => {
     if (!googleMapRef.current) return;
     const currentHeading = googleMapRef.current.getHeading() || 0;
     googleMapRef.current.setHeading(currentHeading + degrees);
   };
 
-  // Reset view
   const resetView = () => {
     if (!googleMapRef.current) return;
     googleMapRef.current.setTilt(45);
@@ -149,7 +328,6 @@ export default function InteractiveMap({
     setIs3DMode(true);
   };
 
-  // Handle search
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -183,7 +361,6 @@ export default function InteractiveMap({
         }));
         setSearchResults(results);
         
-        // Pan to first result
         if (results.length > 0 && googleMapRef.current) {
           googleMapRef.current.panTo({ lat: results[0].lat, lng: results[0].lng });
           googleMapRef.current.setZoom(16);
@@ -200,8 +377,7 @@ export default function InteractiveMap({
     }
   };
 
-  // Select a parcel
-  const selectParcel = (result: SearchResult) => {
+  const selectParcel = async (result: SearchResult) => {
     const parcel: SelectedParcel = {
       address: result.address,
       lat: result.lat,
@@ -211,19 +387,15 @@ export default function InteractiveMap({
     setSelectedParcel(parcel);
     onParcelSelect?.(parcel);
 
-    // Update map
     if (googleMapRef.current) {
-      // Remove existing marker
       if (markerRef.current) {
         markerRef.current.setMap(null);
       }
 
-      // Pan to location with animation
       googleMapRef.current.panTo({ lat: result.lat, lng: result.lng });
       googleMapRef.current.setZoom(18);
-      googleMapRef.current.setTilt(60);
+      googleMapRef.current.setTilt(45);
 
-      // Add marker
       markerRef.current = new google.maps.Marker({
         position: { lat: result.lat, lng: result.lng },
         map: googleMapRef.current,
@@ -231,13 +403,16 @@ export default function InteractiveMap({
         animation: google.maps.Animation.DROP,
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 12,
-          fillColor: "#059669",
+          scale: 10,
+          fillColor: "#dc2626",
           fillOpacity: 1,
           strokeColor: "#ffffff",
-          strokeWeight: 3,
+          strokeWeight: 2,
         },
       });
+
+      // Fetch real parcel data from Regrid
+      await fetchParcelData(result.lat, result.lng);
     }
   };
 
@@ -253,15 +428,16 @@ export default function InteractiveMap({
 
   const clearSelection = () => {
     setSelectedParcel(null);
+    setParcelData(null);
+    setNeighboringParcels([]);
     onParcelSelect?.(null);
+    clearParcelPolygons();
     
-    // Remove marker
     if (markerRef.current) {
       markerRef.current.setMap(null);
       markerRef.current = null;
     }
 
-    // Reset map view
     if (googleMapRef.current) {
       googleMapRef.current.panTo({ lat: 39.8283, lng: -98.5795 });
       googleMapRef.current.setZoom(4);
@@ -269,12 +445,17 @@ export default function InteractiveMap({
     }
   };
 
+  const formatAcreage = (acres: number) => {
+    if (acres >= 1) return `${acres.toFixed(2)} acres`;
+    return `${(acres * 43560).toFixed(0)} sq ft`;
+  };
+
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-stone-900">
       {/* Header Banner */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white text-center py-2 text-sm font-medium">
         <MapIcon className="w-4 h-4 inline mr-2" />
-        🇺🇸 Interactive 3D Map - Pan, Zoom, Tilt & Rotate
+        🇺🇸 Interactive 3D Map with Parcel Boundaries & Owner Data
       </div>
 
       {/* Search Bar */}
@@ -285,7 +466,7 @@ export default function InteractiveMap({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            placeholder="Enter any US address, city, or ZIP code..."
+            placeholder="Enter any US address to view parcel data..."
             className="pl-10 bg-white/95 backdrop-blur-sm shadow-md border-stone-200"
           />
         </div>
@@ -339,6 +520,16 @@ export default function InteractiveMap({
             <Maximize2 className="w-4 h-4" />
             Reset View
           </Button>
+
+          <Button
+            onClick={() => setShowNeighbors(!showNeighbors)}
+            variant="outline"
+            size="sm"
+            className={`w-full justify-start gap-2 ${showNeighbors ? 'bg-indigo-50 border-indigo-300' : ''}`}
+          >
+            <MapPinned className="w-4 h-4" />
+            {showNeighbors ? "Neighbors On" : "Neighbors Off"}
+          </Button>
           
           <div className="border-t border-stone-200 pt-2 mt-2">
             <p className="text-xs font-semibold text-stone-600 px-2 mb-2">Map Style</p>
@@ -364,10 +555,7 @@ export default function InteractiveMap({
         <div className="absolute top-28 right-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[50vh] overflow-y-auto">
           <div className="p-4 border-b border-stone-200 flex items-center justify-between">
             <h3 className="font-semibold text-stone-800">Report Layers</h3>
-            <button
-              onClick={() => setShowLayerPanel(false)}
-              className="text-stone-400 hover:text-stone-600"
-            >
+            <button onClick={() => setShowLayerPanel(false)} className="text-stone-400 hover:text-stone-600">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -403,7 +591,7 @@ export default function InteractiveMap({
       </div>
 
       {/* Search Results Panel */}
-      {(hasSearched || searchResults.length > 0) && (
+      {(hasSearched || searchResults.length > 0) && !parcelData && (
         <div className="absolute top-72 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[40vh] overflow-y-auto">
           <div className="p-3 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
             <h3 className="font-semibold text-stone-800 text-sm flex items-center gap-2">
@@ -451,33 +639,110 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Selected Parcel Info */}
-      {selectedParcel && (
-        <div className="absolute bottom-4 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-emerald-300">
-          <div className="p-4">
+      {/* Parcel Data Panel */}
+      {parcelData && (
+        <div className="absolute bottom-4 left-4 z-10 w-96 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-emerald-300 max-h-[60vh] overflow-y-auto">
+          <div className="p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3">
                 <CheckCircle className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-medium text-stone-800 text-sm">Selected Parcel</p>
-                  <p className="text-xs text-stone-600 mt-1">{selectedParcel.address}</p>
-                  <p className="text-xs text-stone-500">ID: {selectedParcel.parcelId}</p>
-                  <p className="text-xs text-stone-400">
-                    {selectedParcel.lat.toFixed(4)}, {selectedParcel.lng.toFixed(4)}
-                  </p>
+                  <p className="font-semibold text-stone-800">Parcel Information</p>
+                  <p className="text-xs text-stone-500">Powered by Regrid</p>
                 </div>
               </div>
               <button onClick={clearSelection} className="text-stone-400 hover:text-stone-600">
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="mt-3 pt-3 border-t border-stone-200">
-              <p className="text-xs text-emerald-700 flex items-center gap-1">
-                <Eye className="w-3 h-3" />
-                Use mouse to drag, scroll to zoom, Ctrl+drag to rotate
-              </p>
-            </div>
           </div>
+          
+          {isLoadingParcel ? (
+            <div className="p-8 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+            </div>
+          ) : (
+            <div className="p-4 space-y-4">
+              {/* Parcel ID */}
+              <div className="flex items-start gap-3">
+                <MapPin className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">Parcel ID (APN)</p>
+                  <p className="font-mono text-sm text-stone-800">{parcelData.parcelId}</p>
+                </div>
+              </div>
+
+              {/* Owner */}
+              <div className="flex items-start gap-3">
+                <User className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">Owner</p>
+                  <p className="text-sm text-stone-800 font-medium">{parcelData.owner}</p>
+                </div>
+              </div>
+
+              {/* Mailing Address */}
+              <div className="flex items-start gap-3">
+                <Home className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">Mailing Address</p>
+                  <p className="text-sm text-stone-800">{parcelData.mailingAddress}</p>
+                </div>
+              </div>
+
+              {/* Site Address */}
+              <div className="flex items-start gap-3">
+                <MapPinned className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">Site Address</p>
+                  <p className="text-sm text-stone-800">{parcelData.siteAddress}</p>
+                </div>
+              </div>
+
+              {/* Acreage */}
+              <div className="flex items-start gap-3">
+                <Ruler className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">Lot Size</p>
+                  <p className="text-sm text-stone-800">
+                    {formatAcreage(parcelData.acreage)}
+                    {parcelData.sqft > 0 && (
+                      <span className="text-stone-500 ml-2">({parcelData.sqft.toLocaleString()} sq ft)</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Zoning */}
+              <div className="flex items-start gap-3">
+                <Building2 className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">Zoning / Use</p>
+                  <p className="text-sm text-stone-800">
+                    {parcelData.zoning !== "N/A" ? parcelData.zoning : parcelData.useDescription}
+                  </p>
+                </div>
+              </div>
+
+              {/* Neighboring parcels count */}
+              {neighboringParcels.length > 0 && (
+                <div className="pt-3 mt-3 border-t border-stone-200">
+                  <p className="text-xs text-indigo-600 flex items-center gap-1">
+                    <MapPinned className="w-3 h-3" />
+                    {neighboringParcels.length} neighboring parcel{neighboringParcels.length !== 1 ? "s" : ""} shown in purple • Click to select
+                  </p>
+                </div>
+              )}
+
+              {/* Controls hint */}
+              <div className="pt-3 border-t border-stone-200">
+                <p className="text-xs text-stone-500 flex items-center gap-1">
+                  <Eye className="w-3 h-3" />
+                  Drag to pan • Scroll to zoom • Ctrl+drag to rotate
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -486,8 +751,27 @@ export default function InteractiveMap({
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white px-6 py-3 rounded-full text-sm">
           <span className="flex items-center gap-2">
             <Search className="w-4 h-4" />
-            Search for an address to explore in 3D
+            Search an address to view parcel boundaries & owner data
           </span>
+        </div>
+      )}
+
+      {/* Legend */}
+      {parcelData && (
+        <div className="absolute bottom-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 p-3">
+          <p className="text-xs font-semibold text-stone-600 mb-2">Legend</p>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-3 bg-emerald-500/30 border-2 border-emerald-600 rounded-sm" />
+              <span className="text-xs text-stone-600">Selected Parcel</span>
+            </div>
+            {showNeighbors && neighboringParcels.length > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-3 bg-indigo-500/20 border-2 border-indigo-500 rounded-sm" />
+                <span className="text-xs text-stone-600">Neighboring Parcels</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
