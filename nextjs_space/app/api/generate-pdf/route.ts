@@ -34,8 +34,8 @@ const getLayerInfo = (layerId: string) => {
   };
 };
 
-// Fetch parcel data from Regrid API
-async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelData | null> {
+// Fetch parcel data from Regrid API using typeahead + path approach
+async function fetchRegridParcelData(lat: number, lng: number, address: string): Promise<ParcelData | null> {
   const apiKey = process.env.REGRID_API_KEY;
   if (!apiKey) {
     console.error("Regrid API key not configured");
@@ -43,29 +43,51 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
   }
 
   try {
-    const url = `https://app.regrid.com/api/v2/parcels/point?lat=${lat}&lon=${lng}&token=${apiKey}`;
-    const response = await fetch(url, {
+    // Step 1: Use typeahead to find parcel path from address
+    const typeaheadUrl = `https://app.regrid.com/api/v1/typeahead.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
+    const typeaheadResponse = await fetch(typeaheadUrl, {
       headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
     });
 
-    if (!response.ok) {
-      console.error("Regrid API error:", response.status);
+    if (!typeaheadResponse.ok) {
+      console.error("Regrid typeahead error:", typeaheadResponse.status);
       return null;
     }
 
-    const data = await response.json();
+    const typeaheadResults = await typeaheadResponse.json();
     
-    if (!data.results || data.results.length === 0) {
+    if (!Array.isArray(typeaheadResults) || typeaheadResults.length === 0) {
+      console.log("No typeahead results for address:", address);
       return null;
     }
 
-    const feature = data.results[0];
-    const fields = feature.properties?.fields || {};
+    // Get the path from the first result
+    const parcelPath = typeaheadResults[0].path;
+    if (!parcelPath) {
+      console.log("No path in typeahead result");
+      return null;
+    }
+
+    // Step 2: Fetch full parcel data using path
+    const parcelUrl = `https://app.regrid.com/api/v1/parcel.json?path=${parcelPath}&token=${apiKey}`;
+    const parcelResponse = await fetch(parcelUrl, {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!parcelResponse.ok) {
+      console.error("Regrid parcel error:", parcelResponse.status);
+      return null;
+    }
+
+    const parcelData = await parcelResponse.json();
+    const fields = parcelData.properties?.fields || {};
     
     // Build addresses
     const mailParts = [
-      fields.mail_address,
+      fields.mailadd || fields.mail_address,
+      fields.mail_unit,
       fields.mail_city,
       fields.mail_state2,
       fields.mail_zip
@@ -73,18 +95,18 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
     
     const siteParts = [
       fields.address,
-      fields.city,
-      fields.state2,
-      fields.szip
+      fields.city || fields.situs_city,
+      fields.state2 || fields.situs_state2,
+      fields.szip || fields.situs_zip
     ].filter(Boolean);
 
     return {
       parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "Not Available",
       owner: fields.owner || "Not Available",
       mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
-      siteAddress: siteParts.length > 0 ? siteParts.join(", ") : "Not Available",
+      siteAddress: siteParts.length > 0 ? siteParts.join(", ") : parcelData.properties?.headline || "Not Available",
       acreage: fields.ll_gisacre || fields.acres || 0,
-      sqft: fields.ll_gissqft || fields.sqft || 0,
+      sqft: fields.ll_gissqft || fields.ll_bldg_footprint_sqft || fields.sqft || 0,
       zoning: fields.zoning || "N/A",
       useDescription: fields.usedesc || fields.zoning_description || "N/A",
     };
@@ -356,8 +378,8 @@ export async function POST(request: NextRequest) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
 
-    // Fetch real parcel data from Regrid
-    const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng);
+    // Fetch real parcel data from Regrid using address
+    const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
 
     // Cover Page
     doc.setFillColor(34, 83, 60); // Forest green

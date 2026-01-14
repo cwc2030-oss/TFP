@@ -67,85 +67,101 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  try {
-    let url: string;
-    
-    if (lat && lng) {
-      // Search by coordinates
-      url = `https://app.regrid.com/api/v2/parcels/point?lat=${lat}&lon=${lng}&token=${apiKey}`;
-    } else if (address) {
-      // Search by address
-      url = `https://app.regrid.com/api/v2/parcels/address?query=${encodeURIComponent(address)}&token=${apiKey}`;
-    } else {
-      return NextResponse.json(
-        { error: "Either lat/lng or address is required" },
-        { status: 400 }
-      );
-    }
+  if (!address && !lat && !lng) {
+    return NextResponse.json(
+      { error: "Either lat/lng or address is required" },
+      { status: 400 }
+    );
+  }
 
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-      },
-      signal: AbortSignal.timeout(15000),
+  try {
+    // Step 1: Use typeahead to find parcel path
+    const searchQuery = address || `${lat}, ${lng}`;
+    const typeaheadUrl = `https://app.regrid.com/api/v1/typeahead.json?query=${encodeURIComponent(searchQuery)}&token=${apiKey}`;
+    
+    const typeaheadResponse = await fetch(typeaheadUrl, {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(10000),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Regrid API error:", response.status, errorText);
+    if (!typeaheadResponse.ok) {
+      console.error("Regrid typeahead error:", typeaheadResponse.status);
       return NextResponse.json(
-        { error: `Regrid API error: ${response.status}` },
-        { status: response.status }
+        { parcels: [], message: "Search failed" },
+        { status: 200 }
       );
     }
 
-    const data = await response.json();
+    const typeaheadResults = await typeaheadResponse.json();
     
-    if (!data.results || data.results.length === 0) {
+    if (!Array.isArray(typeaheadResults) || typeaheadResults.length === 0) {
       return NextResponse.json(
         { parcels: [], message: "No parcels found at this location" },
         { status: 200 }
       );
     }
 
-    // Transform Regrid response to our format
-    const parcels: ParcelResponse[] = data.results.map((feature: RegridParcel) => {
-      const fields = feature.properties?.fields || {};
-      
-      // Build mailing address
-      const mailParts = [
-        fields.mail_address,
-        fields.mail_city,
-        fields.mail_state2,
-        fields.mail_zip
-      ].filter(Boolean);
-      
-      // Build site address
-      const siteParts = [
-        fields.address,
-        fields.city,
-        fields.state2,
-        fields.szip
-      ].filter(Boolean);
+    // Get the first result's path
+    const firstResult = typeaheadResults[0];
+    if (!firstResult.path) {
+      return NextResponse.json(
+        { parcels: [], message: "No parcel path found" },
+        { status: 200 }
+      );
+    }
 
-      return {
-        parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "Unknown",
-        owner: fields.owner || "Unknown Owner",
-        mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
-        siteAddress: siteParts.length > 0 ? siteParts.join(", ") : "Not Available",
-        acreage: fields.ll_gisacre || fields.acres || 0,
-        sqft: fields.ll_gissqft || fields.sqft || 0,
-        zoning: fields.zoning || "N/A",
-        useDescription: fields.usedesc || fields.zoning_description || "N/A",
-        coordinates: feature.geometry?.coordinates || [],
-        geometryType: feature.geometry?.type || "Polygon",
-        lat: fields.lat || 0,
-        lng: fields.lon || 0,
-        regridPath: fields.path || "",
-      };
+    // Step 2: Fetch full parcel data using path
+    const parcelUrl = `https://app.regrid.com/api/v1/parcel.json?path=${firstResult.path}&token=${apiKey}`;
+    const parcelResponse = await fetch(parcelUrl, {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(10000),
     });
 
-    return NextResponse.json({ parcels });
+    if (!parcelResponse.ok) {
+      console.error("Regrid parcel error:", parcelResponse.status);
+      return NextResponse.json(
+        { parcels: [], message: "Failed to fetch parcel details" },
+        { status: 200 }
+      );
+    }
+
+    const feature = await parcelResponse.json();
+    const fields = feature.properties?.fields || {};
+    
+    // Build mailing address
+    const mailParts = [
+      fields.mailadd || fields.mail_address,
+      fields.mail_unit,
+      fields.mail_city,
+      fields.mail_state2,
+      fields.mail_zip
+    ].filter(Boolean);
+    
+    // Build site address
+    const siteParts = [
+      fields.address,
+      fields.city || fields.situs_city,
+      fields.state2 || fields.situs_state2,
+      fields.szip || fields.situs_zip
+    ].filter(Boolean);
+
+    const parcel: ParcelResponse = {
+      parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "Unknown",
+      owner: fields.owner || "Unknown Owner",
+      mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
+      siteAddress: siteParts.length > 0 ? siteParts.join(", ") : feature.properties?.headline || "Not Available",
+      acreage: fields.ll_gisacre || fields.acres || 0,
+      sqft: fields.ll_gissqft || fields.ll_bldg_footprint_sqft || fields.sqft || 0,
+      zoning: fields.zoning || "N/A",
+      useDescription: fields.usedesc || fields.zoning_description || "N/A",
+      coordinates: feature.geometry?.coordinates || [],
+      geometryType: feature.geometry?.type || "Polygon",
+      lat: firstResult.centroid?.[1] || fields.lat || 0,
+      lng: firstResult.centroid?.[0] || fields.lon || 0,
+      regridPath: firstResult.path || "",
+    };
+
+    return NextResponse.json({ parcels: [parcel] });
 
   } catch (error) {
     console.error("Error fetching parcel data:", error);
