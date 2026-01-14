@@ -757,8 +757,56 @@ export default function InteractiveMap({
                 </div>
               )}
 
+              {/* Report Layers Toggle Section */}
+              <div className="pt-4 mt-4 border-t-2 border-emerald-200">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-emerald-700" />
+                    <p className="text-sm font-semibold text-stone-800">Report Layers</p>
+                  </div>
+                  <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+                    {selectedLayers.length} selected
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500 mb-3">
+                  Toggle which layers to include in your report:
+                </p>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {MAP_LAYERS.map((layer) => (
+                    <CompactLayerToggle
+                      key={layer.id}
+                      layer={layer}
+                      isSelected={selectedLayers.includes(layer.id)}
+                      onToggle={() => toggleLayer(layer.id)}
+                    />
+                  ))}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => {
+                      const allLayerIds = MAP_LAYERS.map(l => l.id);
+                      setSelectedLayers(allLayerIds);
+                      onLayersChange?.(allLayerIds);
+                    }}
+                    className="text-xs text-emerald-700 hover:text-emerald-800 font-medium"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-xs text-stone-300">|</span>
+                  <button
+                    onClick={() => {
+                      setSelectedLayers([]);
+                      onLayersChange?.([]);
+                    }}
+                    className="text-xs text-stone-500 hover:text-stone-700 font-medium"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
               {/* Controls hint */}
-              <div className="pt-3 border-t border-stone-200">
+              <div className="pt-3 mt-3 border-t border-stone-200">
                 <p className="text-xs text-stone-500 flex items-center gap-1">
                   <Eye className="w-3 h-3" />
                   Drag to pan • Scroll to zoom • Ctrl+drag to rotate
@@ -843,6 +891,58 @@ function LayerToggle({
           <div className="w-5 h-5 rounded-full border-2 border-stone-300" />
         )}
       </div>
+    </button>
+  );
+}
+
+function CompactLayerToggle({
+  layer,
+  isSelected,
+  onToggle,
+}: {
+  layer: MapLayerConfig;
+  isSelected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`w-full flex items-center gap-2 p-2 rounded-lg transition-all text-left ${
+        isSelected
+          ? "bg-emerald-50 border border-emerald-400"
+          : "bg-stone-50 border border-transparent hover:bg-stone-100 hover:border-stone-200"
+      }`}
+    >
+      {/* Toggle Switch */}
+      <div
+        className={`w-8 h-4 rounded-full relative transition-colors flex-shrink-0 ${
+          isSelected ? "bg-emerald-500" : "bg-stone-300"
+        }`}
+      >
+        <div
+          className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${
+            isSelected ? "translate-x-4" : "translate-x-0.5"
+          }`}
+        />
+      </div>
+      
+      {/* Layer Color Indicator */}
+      <div
+        className="w-3 h-3 rounded-full flex-shrink-0"
+        style={{ backgroundColor: layer.color }}
+      />
+      
+      {/* Layer Name */}
+      <span className={`text-sm flex-1 truncate ${isSelected ? "text-stone-800 font-medium" : "text-stone-600"}`}>
+        {layer.displayName}
+      </span>
+      
+      {/* Premium Badge */}
+      {layer.isPremium && (
+        <span className="text-[10px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded flex-shrink-0">
+          Pro
+        </span>
+      )}
     </button>
   );
 }
