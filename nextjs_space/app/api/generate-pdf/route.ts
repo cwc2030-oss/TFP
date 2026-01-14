@@ -136,7 +136,7 @@ const formatAcreage = (acres: number, sqft: number): string => {
   return "Not Available";
 };
 
-// Build parcel boundary path for Google Maps Static API
+// Build parcel boundary path for Google Maps Static API with prominent border
 function buildParcelPath(coordinates: number[][][] | null): string {
   if (!coordinates || coordinates.length === 0 || !coordinates[0]) {
     return "";
@@ -150,13 +150,14 @@ function buildParcelPath(coordinates: number[][][] | null): string {
   const maxPoints = 50;
   const step = ring.length > maxPoints ? Math.ceil(ring.length / maxPoints) : 1;
   
-  // Build path string: color:0x00FF00FF (green with full opacity)|weight:3|fillcolor:0x00FF0040|lat,lng|lat,lng...
+  // Build path string with PROMINENT GREEN BORDER like the interface
+  // Using brighter green (#22C55E) with thick weight (5) and semi-transparent fill
   const pathPoints = ring
     .filter((_, i) => i % step === 0 || i === ring.length - 1)
     .map(coord => `${coord[1]},${coord[0]}`) // GeoJSON is [lng, lat], Google wants lat,lng
     .join("|");
   
-  return `&path=color:0x22543DFF|weight:3|fillcolor:0x22543D40|${pathPoints}`;
+  return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
 }
 
 // Fetch Google Maps Static API image as base64
@@ -177,35 +178,34 @@ async function fetchGoogleMapImage(
     const width = 640;
     const height = 400;
     
-    // Different map types for different layers
-    let mapType = "roadmap";
+    // Use satellite imagery for aerial property view to match the interface
+    let mapType = "satellite";
     let style = "";
     
     switch (layerId) {
       case "flood_zones":
       case "wetlands":
-        mapType = "terrain";
+        mapType = "satellite"; // Aerial view shows environmental features better
         break;
       case "topography":
         mapType = "terrain";
         style = "&style=feature:all|element:labels|visibility:on";
         break;
       case "soil_types":
-        mapType = "satellite";
+      case "property_boundaries":
+        mapType = "satellite"; // Pure satellite for clear property boundaries
         break;
       case "roads_transportation":
-        mapType = "roadmap";
-        style = "&style=feature:road|element:geometry|color:0x000000|weight:2";
+        mapType = "hybrid"; // Satellite with road labels
         break;
-      case "property_boundaries":
       case "zoning":
-        mapType = "hybrid";
+        mapType = "hybrid"; // Satellite with zoning context
         break;
       case "power_substations":
-        mapType = "roadmap";
+        mapType = "hybrid"; // Satellite with infrastructure labels
         break;
       default:
-        mapType = "roadmap";
+        mapType = "satellite"; // Default to satellite for best aerial view
     }
 
     // Build parcel boundary path
@@ -608,12 +608,12 @@ export async function POST(request: NextRequest) {
     yPos = 80;
     const mapHeight = 70;
     
-    // Fetch satellite map image with parcel boundaries
+    // Fetch satellite map image with prominent parcel boundaries
     const mapImage = await fetchGoogleMapImage(
       order.parcelLat, 
       order.parcelLng, 
-      "soil_types", // Use satellite view for better visual detail
-      17,
+      "property_boundaries", // Satellite view with clear property borders
+      17, // High zoom for detailed aerial view
       parcelData?.coordinates || null
     );
 
