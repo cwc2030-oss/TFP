@@ -191,13 +191,16 @@ export default function InteractiveMap({
   }, [onParcelSelect]);
 
   // Fetch parcel data from Regrid API
-  const fetchParcelData = useCallback(async (lat: number, lng: number) => {
+  const fetchParcelData = useCallback(async (lat: number, lng: number, address?: string) => {
     setIsLoadingParcel(true);
     clearParcelPolygons();
     
     try {
-      // Fetch the main parcel at this location
-      const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
+      // Fetch the main parcel at this location - use address if available for better accuracy
+      const params = address 
+        ? `address=${encodeURIComponent(address)}`
+        : `lat=${lat}&lng=${lng}`;
+      const response = await fetch(`/api/parcels?${params}`);
       const data = await response.json();
       
       if (data.parcels && data.parcels.length > 0) {
@@ -413,7 +416,7 @@ export default function InteractiveMap({
       });
 
       // Fetch real parcel data from Regrid
-      await fetchParcelData(result.lat, result.lng);
+      await fetchParcelData(result.lat, result.lng, result.address);
     }
   };
 

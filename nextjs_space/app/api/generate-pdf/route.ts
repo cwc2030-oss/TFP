@@ -16,6 +16,7 @@ interface ParcelData {
   sqft: number;
   zoning: string;
   useDescription: string;
+  coordinates: number[][][] | null;
 }
 
 const formatDate = (date: Date) => {
@@ -100,6 +101,15 @@ async function fetchRegridParcelData(lat: number, lng: number, address: string):
       fields.szip || fields.situs_zip
     ].filter(Boolean);
 
+    // Extract polygon coordinates
+    let coordinates: number[][][] | null = null;
+    if (parcelData.geometry?.type === "Polygon" && parcelData.geometry.coordinates) {
+      coordinates = parcelData.geometry.coordinates as number[][][];
+    } else if (parcelData.geometry?.type === "MultiPolygon" && parcelData.geometry.coordinates) {
+      // Take the first polygon from MultiPolygon
+      coordinates = (parcelData.geometry.coordinates as number[][][][])[0] || null;
+    }
+
     return {
       parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "Not Available",
       owner: fields.owner || "Not Available",
@@ -109,6 +119,7 @@ async function fetchRegridParcelData(lat: number, lng: number, address: string):
       sqft: fields.ll_gissqft || fields.ll_bldg_footprint_sqft || fields.sqft || 0,
       zoning: fields.zoning || "N/A",
       useDescription: fields.usedesc || fields.zoning_description || "N/A",
+      coordinates,
     };
   } catch (error) {
     console.error("Failed to fetch Regrid parcel data:", error);
@@ -125,12 +136,36 @@ const formatAcreage = (acres: number, sqft: number): string => {
   return "Not Available";
 };
 
+// Build parcel boundary path for Google Maps Static API
+function buildParcelPath(coordinates: number[][][] | null): string {
+  if (!coordinates || coordinates.length === 0 || !coordinates[0]) {
+    return "";
+  }
+  
+  // Get the outer ring (first array)
+  const ring = coordinates[0];
+  if (ring.length < 3) return "";
+  
+  // Limit points to avoid URL length issues (max ~50 points)
+  const maxPoints = 50;
+  const step = ring.length > maxPoints ? Math.ceil(ring.length / maxPoints) : 1;
+  
+  // Build path string: color:0x00FF00FF (green with full opacity)|weight:3|fillcolor:0x00FF0040|lat,lng|lat,lng...
+  const pathPoints = ring
+    .filter((_, i) => i % step === 0 || i === ring.length - 1)
+    .map(coord => `${coord[1]},${coord[0]}`) // GeoJSON is [lng, lat], Google wants lat,lng
+    .join("|");
+  
+  return `&path=color:0x22543DFF|weight:3|fillcolor:0x22543D40|${pathPoints}`;
+}
+
 // Fetch Google Maps Static API image as base64
 async function fetchGoogleMapImage(
   lat: number, 
   lng: number, 
   layerId: string, 
-  zoom: number = 15
+  zoom: number = 15,
+  parcelCoordinates: number[][][] | null = null
 ): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
@@ -173,7 +208,10 @@ async function fetchGoogleMapImage(
         mapType = "roadmap";
     }
 
-    const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&maptype=${mapType}&markers=color:red%7C${lat},${lng}${style}&key=${apiKey}`;
+    // Build parcel boundary path
+    const parcelPath = buildParcelPath(parcelCoordinates);
+
+        const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&maptype=${mapType}&markers=color:red%7C${lat},${lng}${style}${parcelPath}&key=${apiKey}`;
 
     const response = await fetch(mapUrl, {
       signal: AbortSignal.timeout(15000)
@@ -201,7 +239,17 @@ async function fetchGoogleMapImage(
 }
 
 // Generate a simple map visualization using canvas-like drawing in jsPDF
-function drawSimpleMap(doc: jsPDF, lat: number, lng: number, layerId: string, x: number, y: number, width: number, height: number) {
+function drawSimpleMap(
+  doc: jsPDF, 
+  lat: number, 
+  lng: number, 
+  layerId: string, 
+  x: number, 
+  y: number, 
+  width: number, 
+  height: number,
+  parcelCoordinates: number[][][] | null = null
+) {
   // Draw base map area with light green background
   doc.setFillColor(235, 245, 235);
   doc.rect(x, y, width, height, "F");
@@ -215,6 +263,50 @@ function drawSimpleMap(doc: jsPDF, lat: number, lng: number, layerId: string, x:
   }
   for (let gy = y; gy <= y + height; gy += gridSpacing) {
     doc.line(x, gy, x + width, gy);
+  }
+
+  // Draw parcel boundary if coordinates available
+  if (parcelCoordinates && parcelCoordinates[0] && parcelCoordinates[0].length > 2) {
+    const ring = parcelCoordinates[0];
+    
+    // Find bounds of the parcel
+    let minLng = Infinity, maxLng = -Infinity;
+    let minLat = Infinity, maxLat = -Infinity;
+    for (const coord of ring) {
+      minLng = Math.min(minLng, coord[0]);
+      maxLng = Math.max(maxLng, coord[0]);
+      minLat = Math.min(minLat, coord[1]);
+      maxLat = Math.max(maxLat, coord[1]);
+    }
+    
+    // Scale coordinates to fit in the map area with padding
+    const padding = 10;
+    const mapWidth = width - padding * 2;
+    const mapHeight = height - padding * 2;
+    const lngRange = maxLng - minLng || 0.001;
+    const latRange = maxLat - minLat || 0.001;
+    
+    // Convert geo coordinates to PDF coordinates
+    const toX = (lng: number) => x + padding + ((lng - minLng) / lngRange) * mapWidth;
+    const toY = (lat: number) => y + padding + mapHeight - ((lat - minLat) / latRange) * mapHeight;
+    
+    // Draw filled polygon
+    doc.setFillColor(34, 83, 60, 0.2); // Semi-transparent forest green
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(2);
+    
+    // Start path
+    const points: number[][] = ring.map(coord => [toX(coord[0]), toY(coord[1])]);
+    
+    // Draw the polygon outline
+    if (points.length > 0) {
+      doc.moveTo(points[0][0], points[0][1]);
+      for (let i = 1; i < points.length; i++) {
+        doc.lineTo(points[i][0], points[i][1]);
+      }
+      doc.lineTo(points[0][0], points[0][1]); // Close path
+      doc.stroke();
+    }
   }
   
   // Draw layer-specific overlays
@@ -560,10 +652,16 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(9);
     doc.text("Terra Firma Partners LLC | Page 3", pageWidth / 2, pageHeight - 5, { align: "center" });
 
-    // Pre-fetch all Google Maps images for layers
+    // Pre-fetch all Google Maps images for layers (with parcel boundary)
     const mapImages: Record<string, string | null> = {};
     for (const layerId of selectedLayers) {
-      const mapImage = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, layerId);
+      const mapImage = await fetchGoogleMapImage(
+        order.parcelLat, 
+        order.parcelLng, 
+        layerId, 
+        17, // Higher zoom for better parcel visibility
+        parcelData?.coordinates || null
+      );
       mapImages[layerId] = mapImage;
     }
 
@@ -594,11 +692,11 @@ export async function POST(request: NextRequest) {
           doc.text(`Location: ${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W`, pageWidth - 15, 125, { align: "right" });
         } catch (imgError) {
           console.error("Failed to add map image:", imgError);
-          drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 80);
+          drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 80, parcelData?.coordinates || null);
         }
       } else {
         // Fallback to simple drawn map
-        drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 80);
+        drawSimpleMap(doc, order.parcelLat, order.parcelLng, layerId, 15, 40, pageWidth - 30, 80, parcelData?.coordinates || null);
       }
 
       // Layer info
