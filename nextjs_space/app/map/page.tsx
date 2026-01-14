@@ -55,10 +55,6 @@ export default function MapPage() {
   const handleParcelSelect = useCallback((parcel: SelectedParcel | null) => {
     setSelectedParcel(parcel);
     setError("");
-    // Automatically open checkout when a parcel is selected
-    if (parcel) {
-      setShowCheckout(true);
-    }
   }, []);
 
   const handleLayersChange = useCallback((layers: string[]) => {
