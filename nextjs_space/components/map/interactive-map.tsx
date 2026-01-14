@@ -198,10 +198,8 @@ export default function InteractiveMap({
     clearParcelPolygons();
     
     try {
-      // Fetch the main parcel at this location - use address if available for better accuracy
-      const params = address 
-        ? `address=${encodeURIComponent(address)}`
-        : `lat=${lat}&lng=${lng}`;
+      // Always use coordinates for parcel lookup - more accurate than address matching
+      const params = `lat=${lat}&lng=${lng}`;
       const response = await fetch(`/api/parcels?${params}`);
       const data = await response.json();
       
