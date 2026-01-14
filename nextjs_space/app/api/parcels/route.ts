@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Version 2.0 - Regrid Pro API with nationwide coverage
 export const dynamic = "force-dynamic";
 
 interface RegridParcel {
@@ -75,57 +76,57 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Step 1: Use typeahead to find parcel path
-    const searchQuery = address || `${lat}, ${lng}`;
-    const typeaheadUrl = `https://app.regrid.com/api/v1/typeahead.json?query=${encodeURIComponent(searchQuery)}&token=${apiKey}`;
+    // Use the search endpoint (more reliable than typeahead)
+    let searchUrl: string;
     
-    const typeaheadResponse = await fetch(typeaheadUrl, {
+    if (address) {
+      // Search by address
+      searchUrl = `https://app.regrid.com/api/v1/search.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
+    } else if (lat && lng) {
+      // Search by coordinates
+      searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
+    } else {
+      return NextResponse.json(
+        { parcels: [], message: "Address or coordinates required" },
+        { status: 200 }
+      );
+    }
+    
+    const searchResponse = await fetch(searchUrl, {
       headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
 
-    if (!typeaheadResponse.ok) {
-      console.error("Regrid typeahead error:", typeaheadResponse.status);
+    if (!searchResponse.ok) {
+      console.error("Regrid search error:", searchResponse.status);
       return NextResponse.json(
         { parcels: [], message: "Search failed" },
         { status: 200 }
       );
     }
 
-    const typeaheadResults = await typeaheadResponse.json();
+    const searchData = await searchResponse.json();
     
-    if (!Array.isArray(typeaheadResults) || typeaheadResults.length === 0) {
+    // Handle error responses from Regrid
+    if (searchData.status === "error") {
+      console.error("Regrid API error:", searchData.message);
+      return NextResponse.json(
+        { parcels: [], message: searchData.message || "Search failed" },
+        { status: 200 }
+      );
+    }
+    
+    const results = searchData.results || [];
+    
+    if (results.length === 0) {
       return NextResponse.json(
         { parcels: [], message: "No parcels found at this location" },
         { status: 200 }
       );
     }
 
-    // Get the first result's path
-    const firstResult = typeaheadResults[0];
-    if (!firstResult.path) {
-      return NextResponse.json(
-        { parcels: [], message: "No parcel path found" },
-        { status: 200 }
-      );
-    }
-
-    // Step 2: Fetch full parcel data using path
-    const parcelUrl = `https://app.regrid.com/api/v1/parcel.json?path=${firstResult.path}&token=${apiKey}`;
-    const parcelResponse = await fetch(parcelUrl, {
-      headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!parcelResponse.ok) {
-      console.error("Regrid parcel error:", parcelResponse.status);
-      return NextResponse.json(
-        { parcels: [], message: "Failed to fetch parcel details" },
-        { status: 200 }
-      );
-    }
-
-    const feature = await parcelResponse.json();
+    // Get the first (best matching) result
+    const feature = results[0];
     const fields = feature.properties?.fields || {};
     
     // Build mailing address
@@ -150,15 +151,15 @@ export async function GET(request: NextRequest) {
       owner: fields.owner || "Unknown Owner",
       mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
       siteAddress: siteParts.length > 0 ? siteParts.join(", ") : feature.properties?.headline || "Not Available",
-      acreage: fields.ll_gisacre || fields.acres || 0,
-      sqft: fields.ll_gissqft || fields.ll_bldg_footprint_sqft || fields.sqft || 0,
+      acreage: fields.ll_gisacre || fields.gisacre || fields.acres || 0,
+      sqft: fields.ll_gissqft || fields.sqft || 0,
       zoning: fields.zoning || "N/A",
       useDescription: fields.usedesc || fields.zoning_description || "N/A",
       coordinates: feature.geometry?.coordinates || [],
       geometryType: feature.geometry?.type || "Polygon",
-      lat: firstResult.centroid?.[1] || fields.lat || 0,
-      lng: firstResult.centroid?.[0] || fields.lon || 0,
-      regridPath: firstResult.path || "",
+      lat: parseFloat(fields.lat) || 0,
+      lng: parseFloat(fields.lon) || 0,
+      regridPath: fields.path || feature.properties?.path || "",
     };
 
     return NextResponse.json({ parcels: [parcel] });
