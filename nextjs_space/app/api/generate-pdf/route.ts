@@ -7,6 +7,17 @@ import { MAP_LAYERS } from "@/lib/map-layers";
 
 export const dynamic = "force-dynamic";
 
+interface ParcelData {
+  parcelId: string;
+  owner: string;
+  mailingAddress: string;
+  siteAddress: string;
+  acreage: number;
+  sqft: number;
+  zoning: string;
+  useDescription: string;
+}
+
 const formatDate = (date: Date) => {
   return date.toLocaleDateString("en-US", {
     year: "numeric",
@@ -21,6 +32,75 @@ const getLayerInfo = (layerId: string) => {
     description: "Layer data",
     dataSource: "Unknown",
   };
+};
+
+// Fetch parcel data from Regrid API
+async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelData | null> {
+  const apiKey = process.env.REGRID_API_KEY;
+  if (!apiKey) {
+    console.error("Regrid API key not configured");
+    return null;
+  }
+
+  try {
+    const url = `https://app.regrid.com/api/v2/parcels/point?lat=${lat}&lon=${lng}&token=${apiKey}`;
+    const response = await fetch(url, {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      console.error("Regrid API error:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (!data.results || data.results.length === 0) {
+      return null;
+    }
+
+    const feature = data.results[0];
+    const fields = feature.properties?.fields || {};
+    
+    // Build addresses
+    const mailParts = [
+      fields.mail_address,
+      fields.mail_city,
+      fields.mail_state2,
+      fields.mail_zip
+    ].filter(Boolean);
+    
+    const siteParts = [
+      fields.address,
+      fields.city,
+      fields.state2,
+      fields.szip
+    ].filter(Boolean);
+
+    return {
+      parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "Not Available",
+      owner: fields.owner || "Not Available",
+      mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
+      siteAddress: siteParts.length > 0 ? siteParts.join(", ") : "Not Available",
+      acreage: fields.ll_gisacre || fields.acres || 0,
+      sqft: fields.ll_gissqft || fields.sqft || 0,
+      zoning: fields.zoning || "N/A",
+      useDescription: fields.usedesc || fields.zoning_description || "N/A",
+    };
+  } catch (error) {
+    console.error("Failed to fetch Regrid parcel data:", error);
+    return null;
+  }
+}
+
+const formatAcreage = (acres: number, sqft: number): string => {
+  if (acres >= 1) {
+    return `${acres.toFixed(2)} acres (${sqft.toLocaleString()} sq ft)`;
+  } else if (sqft > 0) {
+    return `${sqft.toLocaleString()} sq ft (${acres.toFixed(3)} acres)`;
+  }
+  return "Not Available";
 };
 
 // Fetch Google Maps Static API image as base64
@@ -276,35 +356,133 @@ export async function POST(request: NextRequest) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
 
+    // Fetch real parcel data from Regrid
+    const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng);
+
     // Cover Page
     doc.setFillColor(34, 83, 60); // Forest green
     doc.rect(0, 0, pageWidth, pageHeight, "F");
 
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(32);
-    doc.text("TERRA FIRMA", pageWidth / 2, 60, { align: "center" });
+    doc.text("TERRA FIRMA", pageWidth / 2, 50, { align: "center" });
     doc.setFontSize(18);
-    doc.text("PARTNERS LLC", pageWidth / 2, 72, { align: "center" });
+    doc.text("PARTNERS LLC", pageWidth / 2, 62, { align: "center" });
 
     doc.setFontSize(14);
-    doc.text("Land Parcel Analysis Report", pageWidth / 2, 100, { align: "center" });
+    doc.text("Land Parcel Analysis Report", pageWidth / 2, 85, { align: "center" });
 
     doc.setDrawColor(255, 255, 255);
-    doc.line(40, 115, pageWidth - 40, 115);
+    doc.line(40, 95, pageWidth - 40, 95);
 
     doc.setFontSize(12);
-    doc.text("Property Address:", pageWidth / 2, 135, { align: "center" });
-    doc.setFontSize(14);
+    doc.text("Property Address:", pageWidth / 2, 110, { align: "center" });
+    doc.setFontSize(13);
     const addressLines = doc.splitTextToSize(order.parcelAddress, 140);
-    doc.text(addressLines, pageWidth / 2, 147, { align: "center" });
+    doc.text(addressLines, pageWidth / 2, 120, { align: "center" });
+
+    // Add parcel info on cover if available
+    if (parcelData) {
+      let coverY = 140;
+      doc.setFontSize(10);
+      doc.text(`Parcel ID (APN): ${parcelData.parcelId}`, pageWidth / 2, coverY, { align: "center" });
+      coverY += 10;
+      doc.text(`Owner: ${parcelData.owner}`, pageWidth / 2, coverY, { align: "center" });
+      coverY += 10;
+      doc.text(`Lot Size: ${formatAcreage(parcelData.acreage, parcelData.sqft)}`, pageWidth / 2, coverY, { align: "center" });
+    }
 
     doc.setFontSize(11);
-    doc.text(`Report Generated: ${formatDate(new Date())}`, pageWidth / 2, 180, { align: "center" });
-    doc.text(`Order ID: ${order.id.slice(0, 8)}...`, pageWidth / 2, 190, { align: "center" });
+    doc.text(`Report Generated: ${formatDate(new Date())}`, pageWidth / 2, 185, { align: "center" });
+    doc.text(`Order ID: ${order.id.slice(0, 8)}...`, pageWidth / 2, 195, { align: "center" });
 
     doc.setFontSize(10);
-    doc.text("Coordinates:", pageWidth / 2, 210, { align: "center" });
-    doc.text(`Lat: ${order.parcelLat.toFixed(6)}, Lng: ${order.parcelLng.toFixed(6)}`, pageWidth / 2, 220, { align: "center" });
+    doc.text("Coordinates:", pageWidth / 2, 215, { align: "center" });
+    doc.text(`Lat: ${order.parcelLat.toFixed(6)}, Lng: ${order.parcelLng.toFixed(6)}`, pageWidth / 2, 225, { align: "center" });
+
+    // Property Details Page (NEW)
+    doc.addPage();
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, pageWidth, pageHeight, "F");
+
+    // Header
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, 0, pageWidth, 30, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text("PROPERTY DETAILS", 15, 20);
+
+    doc.setTextColor(50, 50, 50);
+    doc.setFontSize(12);
+    let detailY = 45;
+
+    // Property Identification Section
+    doc.setFillColor(240, 253, 244); // Light green background
+    doc.rect(10, detailY - 5, pageWidth - 20, 45, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Property Identification", 15, detailY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    detailY += 10;
+    doc.text(`Parcel ID (APN): ${parcelData?.parcelId || order.parcelId || "Not Available"}`, 20, detailY);
+    detailY += 8;
+    doc.text(`Site Address: ${parcelData?.siteAddress || order.parcelAddress}`, 20, detailY);
+    detailY += 8;
+    doc.text(`Coordinates: ${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W`, 20, detailY);
+
+    detailY += 20;
+
+    // Owner Information Section
+    doc.setFillColor(239, 246, 255); // Light blue background
+    doc.rect(10, detailY - 5, pageWidth - 20, 35, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Owner Information", 15, detailY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    detailY += 10;
+    doc.text(`Owner Name: ${parcelData?.owner || "Not Available"}`, 20, detailY);
+    detailY += 8;
+    const mailAddrLines = doc.splitTextToSize(`Mailing Address: ${parcelData?.mailingAddress || "Not Available"}`, pageWidth - 40);
+    doc.text(mailAddrLines, 20, detailY);
+
+    detailY += 25;
+
+    // Lot Information Section
+    doc.setFillColor(254, 249, 195); // Light yellow background
+    doc.rect(10, detailY - 5, pageWidth - 20, 35, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Lot Information", 15, detailY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    detailY += 10;
+    if (parcelData) {
+      doc.text(`Lot Size: ${formatAcreage(parcelData.acreage, parcelData.sqft)}`, 20, detailY);
+    } else {
+      doc.text("Lot Size: Not Available", 20, detailY);
+    }
+    detailY += 8;
+    doc.text(`Zoning: ${parcelData?.zoning || "N/A"}`, 20, detailY);
+    detailY += 8;
+    doc.text(`Land Use: ${parcelData?.useDescription || "N/A"}`, 20, detailY);
+
+    detailY += 25;
+
+    // Data Source Attribution
+    doc.setFillColor(243, 244, 246); // Light gray background
+    doc.rect(10, detailY - 5, pageWidth - 20, 20, "F");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Data Source: Regrid Parcel Database - County Assessor Records", 15, detailY + 5);
+
+    // Footer
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, pageHeight - 15, pageWidth, 15, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.text("Terra Firma Partners LLC | Page 2", pageWidth / 2, pageHeight - 5, { align: "center" });
 
     // Summary Page
     doc.addPage();
@@ -323,15 +501,17 @@ export async function POST(request: NextRequest) {
     let yPos = 50;
 
     doc.setFont("helvetica", "bold");
-    doc.text("Property Information", 15, yPos);
+    doc.text("Property Overview", 15, yPos);
     doc.setFont("helvetica", "normal");
     yPos += 10;
     doc.text(`Address: ${order.parcelAddress}`, 15, yPos);
     yPos += 8;
-    if (order.parcelId) {
-      doc.text(`Parcel ID: ${order.parcelId}`, 15, yPos);
-      yPos += 8;
-    }
+    doc.text(`Parcel ID: ${parcelData?.parcelId || order.parcelId || "N/A"}`, 15, yPos);
+    yPos += 8;
+    doc.text(`Owner: ${parcelData?.owner || "N/A"}`, 15, yPos);
+    yPos += 8;
+    doc.text(`Lot Size: ${parcelData ? formatAcreage(parcelData.acreage, parcelData.sqft) : "N/A"}`, 15, yPos);
+    yPos += 8;
     doc.text(`Location: ${order.parcelLat.toFixed(6)}, ${order.parcelLng.toFixed(6)}`, 15, yPos);
 
     yPos += 20;
@@ -350,6 +530,13 @@ export async function POST(request: NextRequest) {
       doc.setTextColor(50, 50, 50);
       yPos += 18;
     });
+
+    // Footer for summary page
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, pageHeight - 15, pageWidth, 15, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.text("Terra Firma Partners LLC | Page 3", pageWidth / 2, pageHeight - 5, { align: "center" });
 
     // Pre-fetch all Google Maps images for layers
     const mapImages: Record<string, string | null> = {};
@@ -425,7 +612,7 @@ export async function POST(request: NextRequest) {
       doc.rect(0, pageHeight - 15, pageWidth, 15, "F");
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(9);
-      doc.text(`Terra Firma Partners LLC | Page ${index + 3}`, pageWidth / 2, pageHeight - 5, { align: "center" });
+      doc.text(`Terra Firma Partners LLC | Page ${index + 4}`, pageWidth / 2, pageHeight - 5, { align: "center" });
     }
 
     // Disclaimer Page
