@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
@@ -24,6 +24,7 @@ interface SelectedParcel {
 interface InteractiveMapProps {
   onParcelSelect?: (parcel: SelectedParcel | null) => void;
   onLayersChange?: (layers: string[]) => void;
+  onCheckout?: () => void;
   initialLayers?: string[];
 }
 
@@ -53,6 +54,7 @@ interface ParcelData {
 export default function InteractiveMap({
   onParcelSelect,
   onLayersChange,
+  onCheckout,
   initialLayers = [],
 }: InteractiveMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -803,6 +805,24 @@ export default function InteractiveMap({
                     Clear All
                   </button>
                 </div>
+              </div>
+
+              {/* Checkout Button */}
+              <div className="pt-4 mt-4 border-t border-stone-200">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm text-stone-600">Report Price</span>
+                  <span className="text-xl font-bold text-emerald-700">$350</span>
+                </div>
+                <button
+                  onClick={onCheckout}
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
+                >
+                  <FileText className="w-4 h-4" />
+                  Order Property Report
+                </button>
+                <p className="text-xs text-stone-500 text-center mt-2">
+                  {selectedLayers.length} layer{selectedLayers.length !== 1 ? 's' : ''} selected
+                </p>
               </div>
 
               {/* Controls hint */}

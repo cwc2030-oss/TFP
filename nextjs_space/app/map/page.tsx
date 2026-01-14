@@ -134,85 +134,11 @@ export default function MapPage() {
           <InteractiveMap
             onParcelSelect={handleParcelSelect}
             onLayersChange={handleLayersChange}
+            onCheckout={handleProceedToCheckout}
             initialLayers={selectedLayers}
           />
 
-          {/* Order Summary Floating Card */}
-          {selectedParcel && !showCheckout && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="absolute top-20 right-96 z-20 w-72"
-            >
-              <Card className="shadow-xl bg-white/95 backdrop-blur-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <ShoppingCart className="w-5 h-5 text-emerald-700" />
-                    Order Summary
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-sm text-stone-500">Selected Property</p>
-                      <p className="text-sm font-medium text-stone-800 line-clamp-2">
-                        {selectedParcel.address}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-stone-500">Selected Layers</p>
-                      <p className="text-sm font-medium text-stone-800">
-                        {selectedLayers.length} layer(s)
-                      </p>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {selectedLayers.slice(0, 3).map((layerId) => {
-                          const layer = MAP_LAYERS.find((l) => l.id === layerId);
-                          return (
-                            <span
-                              key={layerId}
-                              className="text-xs bg-stone-100 text-stone-600 px-2 py-0.5 rounded"
-                            >
-                              {layer?.displayName || layerId}
-                            </span>
-                          );
-                        })}
-                        {selectedLayers.length > 3 && (
-                          <span className="text-xs text-stone-500">
-                            +{selectedLayers.length - 3} more
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="border-t border-stone-200 pt-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="text-stone-600">Total</span>
-                        <span className="text-2xl font-bold text-emerald-700">
-                          $350
-                        </span>
-                      </div>
-
-                      {error && (
-                        <div className="flex items-center gap-2 p-2 bg-red-50 text-red-700 rounded text-xs mb-3">
-                          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                          {error}
-                        </div>
-                      )}
-
-                      <Button
-                        onClick={handleProceedToCheckout}
-                        className="w-full bg-emerald-700 hover:bg-emerald-800 text-white"
-                      >
-                        <FileText className="w-4 h-4 mr-2" />
-                        Proceed to Checkout
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
+{/* Order Summary card removed - checkout button now in parcel panel */}
         </div>
       </div>
 
