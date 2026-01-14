@@ -448,20 +448,56 @@ function drawSimpleMap(
   doc.text(`${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°W`, x + width - 5, y + height - 3, { align: "right" });
 }
 
-// Helper function to get layer score/rating
-function getLayerScore(layerId: string): { score: string; rating: string; color: [number, number, number] } {
-  const scores: Record<string, { score: string; rating: string; color: [number, number, number] }> = {
-    flood_zones: { score: "Low Risk", rating: "Zone X", color: [34, 197, 94] }, // green
-    wetlands: { score: "Minimal", rating: "<5% Coverage", color: [34, 197, 94] },
-    topography: { score: "Gentle", rating: "1-5° Slope", color: [34, 197, 94] },
-    soil_types: { score: "Type B/C", rating: "Good Drainage", color: [234, 179, 8] }, // yellow
-    zoning: { score: "Agricultural", rating: "A-1 District", color: [34, 197, 94] },
-    property_boundaries: { score: "Verified", rating: "County Records", color: [34, 197, 94] },
-    power_substations: { score: "Nearby", rating: "<1 Mile", color: [34, 197, 94] },
-    roads_transportation: { score: "Good Access", rating: "Paved Road", color: [34, 197, 94] },
+// Helper function to get layer score/rating with risk level
+function getLayerScore(layerId: string): { score: string; rating: string; color: [number, number, number]; riskLevel: number } {
+  const scores: Record<string, { score: string; rating: string; color: [number, number, number]; riskLevel: number }> = {
+    flood_zones: { score: "Low Risk", rating: "Zone X", color: [34, 197, 94], riskLevel: 1 }, // green - low risk
+    wetlands: { score: "Minimal", rating: "<5% Coverage", color: [34, 197, 94], riskLevel: 1 },
+    topography: { score: "Gentle", rating: "1-5° Slope", color: [34, 197, 94], riskLevel: 1 },
+    soil_types: { score: "Type B/C", rating: "Good Drainage", color: [234, 179, 8], riskLevel: 2 }, // yellow - moderate
+    zoning: { score: "Agricultural", rating: "A-1 District", color: [34, 197, 94], riskLevel: 1 },
+    property_boundaries: { score: "Verified", rating: "County Records", color: [34, 197, 94], riskLevel: 1 },
+    power_substations: { score: "Nearby", rating: "<1 Mile", color: [34, 197, 94], riskLevel: 1 },
+    roads_transportation: { score: "Good Access", rating: "Paved Road", color: [34, 197, 94], riskLevel: 1 },
   };
 
-  return scores[layerId] || { score: "Available", rating: "Data Present", color: [156, 163, 175] };
+  return scores[layerId] || { score: "Available", rating: "Data Present", color: [156, 163, 175], riskLevel: 1 };
+}
+
+// Calculate overall risk score from selected layers
+function calculateOverallRisk(selectedLayers: string[]): { score: number; label: string; color: [number, number, number] } {
+  if (selectedLayers.length === 0) {
+    return { score: 0, label: "No Data", color: [156, 163, 175] };
+  }
+
+  const totalRisk = selectedLayers.reduce((sum, layerId) => {
+    return sum + getLayerScore(layerId).riskLevel;
+  }, 0);
+
+  const avgRisk = totalRisk / selectedLayers.length;
+
+  if (avgRisk <= 1.2) {
+    return { score: avgRisk, label: "Low Risk", color: [34, 197, 94] }; // green
+  } else if (avgRisk <= 1.8) {
+    return { score: avgRisk, label: "Moderate Risk", color: [234, 179, 8] }; // yellow
+  } else {
+    return { score: avgRisk, label: "Higher Risk", color: [239, 68, 68] }; // red
+  }
+}
+
+// Load and convert logo to base64
+async function loadLogoImage(): Promise<string | null> {
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const logoPath = path.join(process.cwd(), 'public', 'logo-landscape.png');
+    const logoBuffer = await fs.readFile(logoPath);
+    const base64 = logoBuffer.toString('base64');
+    return `data:image/png;base64,${base64}`;
+  } catch (error) {
+    console.error("Failed to load logo:", error);
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -489,11 +525,23 @@ export async function POST(request: NextRequest) {
     // Fetch real parcel data from Regrid using address
     const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
 
+    // Load logo
+    const logoImage = await loadLogoImage();
+
     // ONE PAGE REPORT DESIGN
     
     // Header Section (Forest Green)
     doc.setFillColor(34, 83, 60);
     doc.rect(0, 0, pageWidth, 35, "F");
+    
+    // Add logo to header if available
+    if (logoImage) {
+      try {
+        doc.addImage(logoImage, "PNG", 15, 5, 50, 25);
+      } catch (logoError) {
+        console.error("Failed to add logo to PDF:", logoError);
+      }
+    }
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
@@ -560,11 +608,11 @@ export async function POST(request: NextRequest) {
     yPos = 80;
     const mapHeight = 70;
     
-    // Fetch ONE comprehensive map image with parcel boundaries
+    // Fetch satellite map image with parcel boundaries
     const mapImage = await fetchGoogleMapImage(
       order.parcelLat, 
       order.parcelLng, 
-      "property_boundaries", // Use hybrid view to show property clearly
+      "soil_types", // Use satellite view for better visual detail
       17,
       parcelData?.coordinates || null
     );
@@ -585,6 +633,41 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(7);
     doc.setTextColor(100, 100, 100);
     doc.text(`${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W`, pageWidth / 2, yPos, { align: "center" });
+
+    // Overall Risk Assessment Section
+    yPos += 8;
+    const overallRisk = calculateOverallRisk(selectedLayers);
+    
+    // Risk assessment box
+    doc.setFillColor(250, 250, 250);
+    doc.rect(15, yPos - 3, pageWidth - 30, 15, "F");
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text("OVERALL PROPERTY ASSESSMENT:", 20, yPos + 3);
+    
+    // Risk indicator bar
+    const barStartX = 110;
+    const barWidth = 60;
+    const barHeight = 6;
+    
+    // Background bar (gray)
+    doc.setFillColor(230, 230, 230);
+    doc.roundedRect(barStartX, yPos, barWidth, barHeight, 2, 2, "F");
+    
+    // Risk level bar (colored based on risk)
+    const fillWidth = (overallRisk.score / 3) * barWidth; // scale 0-3 to bar width
+    doc.setFillColor(...overallRisk.color);
+    doc.roundedRect(barStartX, yPos, Math.min(fillWidth, barWidth), barHeight, 2, 2, "F");
+    
+    // Risk label
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...overallRisk.color);
+    doc.text(overallRisk.label, barStartX + barWidth + 5, yPos + 4.5);
+    
+    yPos += 10;
 
     // Layer Analysis Section
     yPos += 10;
