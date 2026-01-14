@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned } from "lucide-react";
+import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
@@ -75,6 +75,7 @@ export default function InteractiveMap({
   const [is3DMode, setIs3DMode] = useState(true);
   const [isLoadingParcel, setIsLoadingParcel] = useState(false);
   const [showNeighbors, setShowNeighbors] = useState(true);
+  const [showViewControls, setShowViewControls] = useState(false);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -486,69 +487,88 @@ export default function InteractiveMap({
         </Button>
       </div>
 
-      {/* 3D Controls */}
-      <div className="absolute top-28 left-4 z-10 flex flex-col gap-2">
-        <div className="bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 p-2 space-y-2">
-          <p className="text-xs font-semibold text-stone-600 px-2">View Controls</p>
-          
-          <Button
-            onClick={toggle3DMode}
-            variant="outline"
-            size="sm"
-            className={`w-full justify-start gap-2 ${is3DMode ? 'bg-emerald-50 border-emerald-300' : ''}`}
-          >
-            <Mountain className="w-4 h-4" />
-            {is3DMode ? "3D On" : "3D Off"}
-          </Button>
-          
-          <Button
-            onClick={() => rotateMap(45)}
-            variant="outline"
-            size="sm"
-            className="w-full justify-start gap-2"
-          >
-            <RotateCcw className="w-4 h-4" />
-            Rotate 45°
-          </Button>
-          
-          <Button
-            onClick={resetView}
-            variant="outline"
-            size="sm"
-            className="w-full justify-start gap-2"
-          >
-            <Maximize2 className="w-4 h-4" />
-            Reset View
-          </Button>
+      {/* 3D Controls Toggle Button */}
+      <div className="absolute top-28 left-4 z-10">
+        <Button
+          onClick={() => setShowViewControls(!showViewControls)}
+          variant="outline"
+          className="bg-white/95 backdrop-blur-sm shadow-md"
+        >
+          <Settings className="w-5 h-5" />
+          {showViewControls ? <ChevronLeft className="w-4 h-4 ml-1" /> : <ChevronRight className="w-4 h-4 ml-1" />}
+        </Button>
+      </div>
 
-          <Button
-            onClick={() => setShowNeighbors(!showNeighbors)}
-            variant="outline"
-            size="sm"
-            className={`w-full justify-start gap-2 ${showNeighbors ? 'bg-indigo-50 border-indigo-300' : ''}`}
-          >
-            <MapPinned className="w-4 h-4" />
-            {showNeighbors ? "Neighbors On" : "Neighbors Off"}
-          </Button>
-          
-          <div className="border-t border-stone-200 pt-2 mt-2">
-            <p className="text-xs font-semibold text-stone-600 px-2 mb-2">Map Style</p>
-            <div className="grid grid-cols-2 gap-1">
-              {(["hybrid", "satellite", "terrain", "roadmap"] as const).map((type) => (
-                <Button
-                  key={type}
-                  onClick={() => setMapType(type)}
-                  variant="outline"
-                  size="sm"
-                  className={`text-xs capitalize ${mapType === type ? 'bg-emerald-50 border-emerald-300' : ''}`}
-                >
-                  {type}
-                </Button>
-              ))}
+      {/* 3D Controls Panel */}
+      {showViewControls && (
+        <div className="absolute top-40 left-4 z-10 flex flex-col gap-2">
+          <div className="bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 p-2 space-y-2">
+            <div className="flex items-center justify-between px-2">
+              <p className="text-xs font-semibold text-stone-600">View Controls</p>
+              <button onClick={() => setShowViewControls(false)} className="text-stone-400 hover:text-stone-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <Button
+              onClick={toggle3DMode}
+              variant="outline"
+              size="sm"
+              className={`w-full justify-start gap-2 ${is3DMode ? 'bg-emerald-50 border-emerald-300' : ''}`}
+            >
+              <Mountain className="w-4 h-4" />
+              {is3DMode ? "3D On" : "3D Off"}
+            </Button>
+            
+            <Button
+              onClick={() => rotateMap(45)}
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Rotate 45°
+            </Button>
+            
+            <Button
+              onClick={resetView}
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2"
+            >
+              <Maximize2 className="w-4 h-4" />
+              Reset View
+            </Button>
+
+            <Button
+              onClick={() => setShowNeighbors(!showNeighbors)}
+              variant="outline"
+              size="sm"
+              className={`w-full justify-start gap-2 ${showNeighbors ? 'bg-indigo-50 border-indigo-300' : ''}`}
+            >
+              <MapPinned className="w-4 h-4" />
+              {showNeighbors ? "Neighbors On" : "Neighbors Off"}
+            </Button>
+            
+            <div className="border-t border-stone-200 pt-2 mt-2">
+              <p className="text-xs font-semibold text-stone-600 px-2 mb-2">Map Style</p>
+              <div className="grid grid-cols-2 gap-1">
+                {(["hybrid", "satellite", "terrain", "roadmap"] as const).map((type) => (
+                  <Button
+                    key={type}
+                    onClick={() => setMapType(type)}
+                    variant="outline"
+                    size="sm"
+                    className={`text-xs capitalize ${mapType === type ? 'bg-emerald-50 border-emerald-300' : ''}`}
+                  >
+                    {type}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Layer Panel */}
       {showLayerPanel && (
