@@ -73,6 +73,8 @@ export default function InteractiveMap({
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const [mapType, setMapType] = useState<"satellite" | "terrain" | "hybrid" | "roadmap">("hybrid");
   const [is3DMode, setIs3DMode] = useState(true);
   const [isLoadingParcel, setIsLoadingParcel] = useState(false);
@@ -320,7 +322,7 @@ export default function InteractiveMap({
     }
 
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap&libraries=places&v=weekly`;
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
@@ -332,6 +334,39 @@ export default function InteractiveMap({
       googleMapRef.current.setMapTypeId(mapType);
     }
   }, [mapType]);
+
+  // Initialize Google Places Autocomplete
+  useEffect(() => {
+    if (!mapLoaded || !searchInputRef.current || !window.google?.maps?.places || autocompleteRef.current) return;
+
+    const autocomplete = new google.maps.places.Autocomplete(searchInputRef.current, {
+      types: ["address"],
+      componentRestrictions: { country: "us" },
+      fields: ["formatted_address", "geometry", "place_id"],
+    });
+
+    autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      if (place.geometry?.location && place.formatted_address) {
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        
+        setSearchQuery(place.formatted_address);
+        setSearchResults([]);
+        setHasSearched(true);
+        
+        // Directly select this location
+        selectParcel({
+          address: place.formatted_address,
+          lat,
+          lng,
+          placeId: place.place_id || "",
+        });
+      }
+    });
+
+    autocompleteRef.current = autocomplete;
+  }, [mapLoaded]);
 
   const toggle3DMode = () => {
     if (!googleMapRef.current) return;
@@ -492,8 +527,9 @@ export default function InteractiveMap({
       {/* Search Bar */}
       <div className="absolute top-14 left-4 right-4 z-10 flex gap-2 max-w-xl">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400 pointer-events-none" />
           <Input
+            ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
