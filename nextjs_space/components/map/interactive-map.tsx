@@ -211,6 +211,33 @@ export default function InteractiveMap({
         const mainPolygon = drawParcelPolygon(mainParcel, true);
         if (mainPolygon) {
           selectedPolygonRef.current = mainPolygon;
+          
+          // Fit map to parcel bounds for proper framing
+          if (googleMapRef.current && mainParcel.coordinates) {
+            const bounds = new google.maps.LatLngBounds();
+            try {
+              let coords: number[][] = [];
+              if (mainParcel.geometryType === "MultiPolygon") {
+                const multiCoords = mainParcel.coordinates as number[][][][];
+                multiCoords.forEach(polygon => {
+                  if (polygon[0]) coords = coords.concat(polygon[0]);
+                });
+              } else {
+                const polyCoords = mainParcel.coordinates as number[][][];
+                if (polyCoords[0]) coords = polyCoords[0];
+              }
+              coords.forEach(coord => {
+                bounds.extend({ lat: coord[1], lng: coord[0] });
+              });
+              googleMapRef.current.fitBounds(bounds, { top: 80, bottom: 20, left: 20, right: 350 });
+              // Add slight tilt for 3D effect after fitting
+              setTimeout(() => {
+                if (googleMapRef.current) googleMapRef.current.setTilt(45);
+              }, 300);
+            } catch (e) {
+              console.error("Error fitting bounds:", e);
+            }
+          }
         }
         
         // Fetch neighboring parcels
@@ -396,9 +423,9 @@ export default function InteractiveMap({
         markerRef.current.setMap(null);
       }
 
+      // Pan to location first, fitBounds will adjust zoom after parcel data loads
       googleMapRef.current.panTo({ lat: result.lat, lng: result.lng });
-      googleMapRef.current.setZoom(18);
-      googleMapRef.current.setTilt(45);
+      googleMapRef.current.setZoom(16); // Initial zoom, will be adjusted by fitBounds
 
       markerRef.current = new google.maps.Marker({
         position: { lat: result.lat, lng: result.lng },
@@ -808,8 +835,8 @@ export default function InteractiveMap({
               {/* Checkout Button */}
               <div className="pt-4 mt-4 border-t border-stone-200">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-stone-600">Report Price</span>
-                  <span className="text-xl font-bold text-emerald-700">$350</span>
+                  <span className="text-sm text-stone-600">Basic Land Report</span>
+                  <span className="text-xl font-bold text-emerald-700">$99</span>
                 </div>
                 <button
                   onClick={onCheckout}

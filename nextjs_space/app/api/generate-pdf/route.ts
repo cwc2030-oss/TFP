@@ -547,130 +547,110 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(24);
     doc.text("TERRA FIRMA PARTNERS LLC", pageWidth / 2, 15, { align: "center" });
     doc.setFontSize(11);
-    doc.text("Land Parcel Analysis Report", pageWidth / 2, 25, { align: "center" });
+    doc.text("Land Analysis Report", pageWidth / 2, 25, { align: "center" });
 
-    // Property Information Section
-    let yPos = 45;
-    
-    // Two-column layout for property details
-    const colLeft = 15;
-    const colRight = 110;
-    
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("PROPERTY INFORMATION", colLeft, yPos);
-    
-    yPos += 8;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(60, 60, 60);
-    
-    // Left column
-    doc.setFont("helvetica", "bold");
-    doc.text("Address:", colLeft, yPos);
-    doc.setFont("helvetica", "normal");
-    const addrLines = doc.splitTextToSize(order.parcelAddress, 85);
-    doc.text(addrLines, colLeft + 20, yPos);
-    
-    yPos += addrLines.length * 5 + 3;
-    doc.setFont("helvetica", "bold");
-    doc.text("Parcel ID:", colLeft, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(parcelData?.parcelId || "Not Available", colLeft + 20, yPos);
-    
-    yPos += 5;
-    doc.setFont("helvetica", "bold");
-    doc.text("Owner:", colLeft, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(parcelData?.owner || "Not Available", colLeft + 20, yPos);
-    
-    // Right column
-    yPos = 53;
-    doc.setFont("helvetica", "bold");
-    doc.text("Lot Size:", colRight, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(parcelData ? formatAcreage(parcelData.acreage, parcelData.sqft) : "N/A", colRight + 20, yPos);
-    
-    yPos += 5;
-    doc.setFont("helvetica", "bold");
-    doc.text("Zoning:", colRight, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(parcelData?.zoning || "N/A", colRight + 20, yPos);
-    
-    yPos += 5;
-    doc.setFont("helvetica", "bold");
-    doc.text("Land Use:", colRight, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(parcelData?.useDescription || "N/A", colRight + 20, yPos);
-
-    // Map Section
-    yPos = 80;
-    const mapHeight = 70;
+    // ============================================
+    // HERO AERIAL VIEW - Primary Focus
+    // ============================================
+    let yPos = 35;
+    const heroMapHeight = 100; // Large hero image
     
     // Fetch satellite map image with prominent parcel boundaries
     const mapImage = await fetchGoogleMapImage(
       order.parcelLat, 
       order.parcelLng, 
-      "property_boundaries", // Satellite view with clear property borders
-      17, // High zoom for detailed aerial view
+      "property_boundaries",
+      16, // Balanced zoom for property context
       parcelData?.coordinates || null
     );
 
+    // Draw bordered frame for the aerial image
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(1.5);
+    doc.rect(10, yPos - 2, pageWidth - 20, heroMapHeight + 4);
+
     if (mapImage) {
       try {
-        doc.addImage(mapImage, "PNG", 15, yPos, pageWidth - 30, mapHeight);
+        doc.addImage(mapImage, "PNG", 12, yPos, pageWidth - 24, heroMapHeight);
       } catch (imgError) {
         console.error("Failed to add map image:", imgError);
-        drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 15, yPos, pageWidth - 30, mapHeight, parcelData?.coordinates || null);
+        drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 12, yPos, pageWidth - 24, heroMapHeight, parcelData?.coordinates || null);
       }
     } else {
-      drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 15, yPos, pageWidth - 30, mapHeight, parcelData?.coordinates || null);
+      drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 12, yPos, pageWidth - 24, heroMapHeight, parcelData?.coordinates || null);
     }
 
-    // Coordinates label below map
-    yPos += mapHeight + 3;
-    doc.setFontSize(7);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W`, pageWidth / 2, yPos, { align: "center" });
+    // Coordinates overlay on bottom of map
+    yPos += heroMapHeight - 5;
+    doc.setFillColor(40, 40, 40);
+    doc.rect(12, yPos - 2, pageWidth - 24, 8, "F");
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${order.parcelLat.toFixed(6)}N, ${Math.abs(order.parcelLng).toFixed(6)}W`, pageWidth / 2, yPos + 3, { align: "center" });
 
-    // Overall Risk Assessment Section
-    yPos += 8;
-    const overallRisk = calculateOverallRisk(selectedLayers);
+    // ============================================
+    // PROPERTY INFO - Compact horizontal strip
+    // ============================================
+    yPos += 15;
     
-    // Risk assessment box
-    doc.setFillColor(250, 250, 250);
-    doc.rect(15, yPos - 3, pageWidth - 30, 15, "F");
+    // Property info background
+    doc.setFillColor(248, 250, 252);
+    doc.rect(10, yPos - 3, pageWidth - 20, 20, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.rect(10, yPos - 3, pageWidth - 20, 20);
     
+    // Property details in a single row layout
+    doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
+    
+    const lotSize = parcelData ? formatAcreage(parcelData.acreage, parcelData.sqft) : "N/A";
+    const owner = parcelData?.owner || "Not Available";
+    const parcelId = parcelData?.parcelId || "N/A";
+    
+    // Row 1
+    doc.text("OWNER", 15, yPos + 2);
+    doc.setFont("helvetica", "normal");
     doc.setTextColor(60, 60, 60);
-    doc.text("OVERALL PROPERTY ASSESSMENT:", 20, yPos + 3);
+    const truncOwner = owner.length > 25 ? owner.substring(0, 22) + "..." : owner;
+    doc.text(truncOwner, 15, yPos + 7);
     
-    // Risk indicator bar
-    const barStartX = 110;
-    const barWidth = 60;
-    const barHeight = 6;
-    
-    // Background bar (gray)
-    doc.setFillColor(230, 230, 230);
-    doc.roundedRect(barStartX, yPos, barWidth, barHeight, 2, 2, "F");
-    
-    // Risk level bar (colored based on risk)
-    const fillWidth = (overallRisk.score / 3) * barWidth; // scale 0-3 to bar width
-    doc.setFillColor(...overallRisk.color);
-    doc.roundedRect(barStartX, yPos, Math.min(fillWidth, barWidth), barHeight, 2, 2, "F");
-    
-    // Risk label
+    doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(...overallRisk.color);
-    doc.text(overallRisk.label, barStartX + barWidth + 5, yPos + 4.5);
+    doc.text("LOT SIZE", 75, yPos + 2);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    doc.text(lotSize, 75, yPos + 7);
     
-    yPos += 10;
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.text("PARCEL ID", 130, yPos + 2);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    doc.text(parcelId, 130, yPos + 7);
+    
+    // Row 2 - Zoning
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.text("ZONING", 15, yPos + 12);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    doc.text(parcelData?.zoning || "N/A", 35, yPos + 12);
 
-    // Layer Analysis Section
-    yPos += 10;
+    // Overall Risk Assessment inline
+    const overallRisk = calculateOverallRisk(selectedLayers);
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.text("ASSESSMENT", 75, yPos + 12);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...overallRisk.color);
+    doc.text(overallRisk.label, 105, yPos + 12);
+
+    // ============================================
+    // LAYER SCORES - Clean table
+    // ============================================
+    yPos += 25;
     
     doc.setFillColor(34, 83, 60);
     doc.rect(15, yPos - 3, pageWidth - 30, 8, "F");

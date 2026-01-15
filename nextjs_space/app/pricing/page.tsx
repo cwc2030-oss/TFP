@@ -18,13 +18,12 @@ import { MAP_LAYERS } from "@/lib/map-layers";
 export default function PricingPage() {
   const includedFeatures = [
     "🇺🇸 Nationwide coverage (all 50 states)",
-    "Interactive parcel selection",
-    "Address or map click search",
-    "All available map layers",
-    "Professional PDF report",
-    "High-quality map images",
-    "Layer-specific analysis",
-    "Data source citations",
+    "Gorgeous bordered aerial property view",
+    "High-resolution satellite imagery",
+    "Parcel boundaries clearly outlined",
+    "Basic layer analysis included",
+    "Owner & parcel information",
+    "Professional one-page PDF report",
     "Instant download",
   ];
 
@@ -42,8 +41,8 @@ export default function PricingPage() {
               Simple, Transparent Pricing
             </h1>
             <p className="text-emerald-200 text-lg max-w-2xl mx-auto">
-              One price for comprehensive land analysis reports. No hidden fees,
-              no subscriptions.
+              Get a beautiful aerial view of any property with basic land analysis.
+              No hidden fees, no subscriptions.
             </p>
           </motion.div>
         </div>
@@ -60,10 +59,10 @@ export default function PricingPage() {
             <Card className="shadow-2xl overflow-hidden">
               <div className="bg-emerald-700 p-8 text-center">
                 <h2 className="text-2xl font-semibold text-white mb-2">
-                  Land Analysis Report
+                  Basic Land Report
                 </h2>
                 <div className="flex items-baseline justify-center gap-2">
-                  <span className="text-5xl font-bold text-white">$350</span>
+                  <span className="text-5xl font-bold text-white">$99</span>
                   <span className="text-emerald-200">per report</span>
                 </div>
               </div>

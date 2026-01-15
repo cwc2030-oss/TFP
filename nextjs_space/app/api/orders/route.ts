@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
         parcelLat,
         parcelLng,
         selectedLayers: JSON.stringify(selectedLayers),
-        price: 350,
+        price: 99,
         status: "pending",
       },
     });
