@@ -1931,6 +1931,120 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Send confirmation email to customer
+    if (order.user?.email) {
+      try {
+        const appUrl = process.env.NEXTAUTH_URL || 'https://terrafirmapartners.abacusai.app';
+        const dashboardUrl = `${appUrl}/dashboard`;
+        
+        const emailHtml = `
+          <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8faf8;">
+            <div style="background: linear-gradient(135deg, #22543d 0%, #276749 100%); padding: 30px 20px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600;">Terra Firma Partners</h1>
+              <p style="color: #9ae6b4; margin: 5px 0 0 0; font-size: 14px;">Professional Land Analysis Services</p>
+            </div>
+            
+            <div style="padding: 30px 25px;">
+              <div style="background: #ffffff; border-radius: 12px; padding: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+                <div style="text-align: center; margin-bottom: 25px;">
+                  <div style="display: inline-block; background: #c6f6d5; border-radius: 50%; padding: 15px;">
+                    <span style="font-size: 32px;">✓</span>
+                  </div>
+                  <h2 style="color: #22543d; margin: 15px 0 5px 0; font-size: 20px;">Your Report is Ready!</h2>
+                  <p style="color: #718096; margin: 0; font-size: 14px;">Thank you for your purchase</p>
+                </div>
+                
+                <div style="background: #f0fff4; border-left: 4px solid #38a169; padding: 15px; border-radius: 0 8px 8px 0; margin: 20px 0;">
+                  <p style="margin: 0 0 8px 0; font-size: 12px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px;">Property Address</p>
+                  <p style="margin: 0; font-size: 16px; color: #2d3748; font-weight: 600;">${order.parcelAddress}</p>
+                </div>
+                
+                <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                  <tr>
+                    <td style="padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
+                      <span style="color: #718096; font-size: 13px;">Report ID</span>
+                    </td>
+                    <td style="padding: 10px 0; border-bottom: 1px solid #e2e8f0; text-align: right;">
+                      <span style="color: #2d3748; font-weight: 500;">${reportNumber}</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
+                      <span style="color: #718096; font-size: 13px;">Property Size</span>
+                    </td>
+                    <td style="padding: 10px 0; border-bottom: 1px solid #e2e8f0; text-align: right;">
+                      <span style="color: #2d3748; font-weight: 500;">${parcelData?.acreage?.toFixed(2) || 'N/A'} acres</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
+                      <span style="color: #718096; font-size: 13px;">Report Pages</span>
+                    </td>
+                    <td style="padding: 10px 0; border-bottom: 1px solid #e2e8f0; text-align: right;">
+                      <span style="color: #2d3748; font-weight: 500;">${totalPages} pages</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 10px 0;">
+                      <span style="color: #718096; font-size: 13px;">Generated</span>
+                    </td>
+                    <td style="padding: 10px 0; text-align: right;">
+                      <span style="color: #2d3748; font-weight: 500;">${formatDate(new Date())}</span>
+                    </td>
+                  </tr>
+                </table>
+                
+                <div style="text-align: center; margin-top: 25px;">
+                  <a href="${dashboardUrl}" style="display: inline-block; background: linear-gradient(135deg, #38a169 0%, #2f855a 100%); color: #ffffff; text-decoration: none; padding: 14px 35px; border-radius: 8px; font-weight: 600; font-size: 15px;">
+                    Download Your Report
+                  </a>
+                  <p style="color: #a0aec0; font-size: 12px; margin-top: 12px;">Access your report anytime from your dashboard</p>
+                </div>
+              </div>
+              
+              <div style="margin-top: 25px; padding: 20px; background: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+                <h3 style="color: #22543d; margin: 0 0 15px 0; font-size: 15px;">What's Included in Your Report:</h3>
+                <ul style="margin: 0; padding: 0 0 0 20px; color: #4a5568; font-size: 13px; line-height: 1.8;">
+                  <li>Property boundaries & satellite imagery</li>
+                  <li>Ownership & valuation data</li>
+                  <li>Road access & utility availability</li>
+                  <li>Flood zone & terrain analysis</li>
+                  <li>Soil ratings & land use suitability</li>
+                  <li>Actionable landowner tips</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div style="background: #22543d; padding: 25px 20px; text-align: center;">
+              <p style="color: #9ae6b4; margin: 0 0 10px 0; font-size: 13px;">Questions about your report?</p>
+              <a href="mailto:info@terrafirmapartners.com" style="color: #ffffff; text-decoration: none; font-size: 14px;">info@terrafirmapartners.com</a>
+              <p style="color: #68d391; margin: 15px 0 0 0; font-size: 12px;">© ${new Date().getFullYear()} Terra Firma Partners LLC</p>
+            </div>
+          </div>
+        `;
+
+        await fetch('https://apps.abacus.ai/api/sendNotificationEmail', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deployment_token: process.env.ABACUSAI_API_KEY,
+            app_id: process.env.WEB_APP_ID,
+            notification_id: process.env.NOTIF_ID_LAND_REPORT_ORDER_CONFIRMATION,
+            subject: `Your Terra Firma Land Report is Ready - ${order.parcelAddress}`,
+            body: emailHtml,
+            is_html: true,
+            recipient_email: order.user.email,
+            sender_email: `reports@terrafirmapartners.abacusai.app`,
+            sender_alias: 'Terra Firma Partners',
+          }),
+        });
+        console.log('Confirmation email sent to:', order.user.email);
+      } catch (emailError) {
+        console.error('Failed to send confirmation email:', emailError);
+        // Don't fail the whole request if email fails
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: "PDF generated successfully",
