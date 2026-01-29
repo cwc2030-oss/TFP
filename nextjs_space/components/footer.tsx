@@ -7,7 +7,7 @@ export default function Footer() {
   return (
     <footer className="bg-stone-900 text-stone-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid md:grid-cols-3 gap-8">
+        <div className="grid md:grid-cols-4 gap-8">
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
@@ -15,12 +15,12 @@ export default function Footer() {
                 <Map className="w-6 h-6 text-white" />
               </div>
               <div>
-                <span className="font-bold text-lg text-white">Terra Firma</span>
+                <span className="font-bold text-lg text-white">Terra Firma™</span>
                 <span className="text-sm text-stone-400 block -mt-1">Partners LLC</span>
               </div>
             </div>
             <p className="text-sm text-stone-400 max-w-xs">
-              Professional land parcel analysis and mapping services for the Kansas City metro area.
+              Professional land parcel analysis and mapping services across the United States.
             </p>
           </div>
 
@@ -46,6 +46,23 @@ export default function Footer() {
             </ul>
           </div>
 
+          {/* Legal */}
+          <div>
+            <h4 className="font-semibold text-white mb-4">Legal</h4>
+            <ul className="space-y-2">
+              <li>
+                <Link href="/terms" className="text-sm hover:text-emerald-400 transition-colors">
+                  Terms of Service
+                </Link>
+              </li>
+              <li>
+                <Link href="/privacy" className="text-sm hover:text-emerald-400 transition-colors">
+                  Privacy Policy
+                </Link>
+              </li>
+            </ul>
+          </div>
+
           {/* Contact */}
           <div>
             <h4 className="font-semibold text-white mb-4">Contact</h4>
@@ -63,7 +80,7 @@ export default function Footer() {
         </div>
 
         <div className="border-t border-stone-800 mt-8 pt-8 text-center text-sm text-stone-500">
-          <p>© {new Date().getFullYear()} Terra Firma Partners LLC. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Terra Firma Partners™ LLC. All rights reserved.</p>
         </div>
       </div>
     </footer>

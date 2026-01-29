@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MapPin, Layers, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { Search, MapPin, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText, Mail, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MAP_LAYERS, MapLayerConfig } from "@/lib/map-layers";
+
 
 declare global {
   interface Window {
@@ -66,9 +66,9 @@ export default function InteractiveMap({
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   const [parcelData, setParcelData] = useState<ParcelData | null>(null);
   const [neighboringParcels, setNeighboringParcels] = useState<ParcelData[]>([]);
-  const [selectedLayers, setSelectedLayers] = useState<string[]>(initialLayers);
+  // Basic Report layers - pre-selected for $99 report, no user configuration
+  const selectedLayers = ["flood_zones", "topography", "soil_types", "property_boundaries", "roads_transportation"];
   const [searchQuery, setSearchQuery] = useState("");
-  const [showLayerPanel, setShowLayerPanel] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -80,8 +80,88 @@ export default function InteractiveMap({
   const [isLoadingParcel, setIsLoadingParcel] = useState(false);
   const [showNeighbors, setShowNeighbors] = useState(true);
   const [showViewControls, setShowViewControls] = useState(false);
+  const [showFullPanel, setShowFullPanel] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(4);
+  const [clickModeEnabled, setClickModeEnabled] = useState(true);
+  const [showZoomHint, setShowZoomHint] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+  
+  // Detect mobile/tablet
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  
+  // Get responsive padding for fitBounds - smaller on mobile for better parcel visibility
+  const getFitBoundsPadding = useCallback(() => {
+    const mobile = window.innerWidth < 768;
+    return mobile 
+      ? { top: 70, bottom: 150, left: 20, right: 20 }
+      : { top: 80, bottom: 20, left: 20, right: 350 };
+  }, []);
+  
+  // Send parcel details via email
+  const handleSendEmail = async () => {
+    if (!emailInput || !parcelData) return;
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailInput)) {
+      setEmailError("Please enter a valid email address");
+      return;
+    }
+    
+    setIsSendingEmail(true);
+    setEmailError("");
+    
+    try {
+      const response = await fetch("/api/email-parcel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: emailInput,
+          parcel: parcelData,
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setEmailSent(true);
+        setTimeout(() => {
+          setShowEmailModal(false);
+          setEmailSent(false);
+          setEmailInput("");
+        }, 2000);
+      } else {
+        setEmailError(result.message || "Failed to send email");
+      }
+    } catch (error) {
+      setEmailError("Something went wrong. Please try again.");
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+  
+  // Minimum zoom level required for click-to-select (roughly county level)
+  const MIN_CLICK_ZOOM = 14;
+  
+  // Show zoom hint briefly when user clicks while too zoomed out
+  const flashZoomHint = useCallback(() => {
+    setShowZoomHint(true);
+    setTimeout(() => setShowZoomHint(false), 3000);
+  }, []);
 
   // Clear all parcel polygons from map
   const clearParcelPolygons = useCallback(() => {
@@ -231,10 +311,10 @@ export default function InteractiveMap({
               coords.forEach(coord => {
                 bounds.extend({ lat: coord[1], lng: coord[0] });
               });
-              googleMapRef.current.fitBounds(bounds, { top: 80, bottom: 20, left: 20, right: 350 });
-              // Add slight tilt for 3D effect after fitting
+              googleMapRef.current.fitBounds(bounds, getFitBoundsPadding());
+              // Add slight tilt for 3D effect after fitting (skip on mobile for smoother experience)
               setTimeout(() => {
-                if (googleMapRef.current) googleMapRef.current.setTilt(45);
+                if (googleMapRef.current && window.innerWidth >= 768) googleMapRef.current.setTilt(45);
               }, 300);
             } catch (e) {
               console.error("Error fitting bounds:", e);
@@ -277,7 +357,7 @@ export default function InteractiveMap({
     } finally {
       setIsLoadingParcel(false);
     }
-  }, [clearParcelPolygons, drawParcelPolygon, showNeighbors]);
+  }, [clearParcelPolygons, drawParcelPolygon, showNeighbors, getFitBoundsPadding]);
 
   // Initialize Google Maps
   const initializeMap = useCallback(() => {
@@ -302,7 +382,139 @@ export default function InteractiveMap({
 
     googleMapRef.current = map;
     setMapLoaded(true);
-  }, []);
+    
+    // Track zoom level for click-to-select feature
+    map.addListener("zoom_changed", () => {
+      const zoom = map.getZoom();
+      if (zoom !== undefined) {
+        setCurrentZoom(zoom);
+      }
+    });
+    
+    // Click-to-select parcels on the map
+    map.addListener("click", async (event: google.maps.MapMouseEvent) => {
+      if (!event.latLng) return;
+      
+      const zoom = map.getZoom() || 4;
+      if (zoom < 14) {
+        // Too zoomed out - prompt user to zoom in
+        flashZoomHint();
+        return;
+      }
+      
+      const lat = event.latLng.lat();
+      const lng = event.latLng.lng();
+      
+      // Create a temporary marker at click location
+      if (markerRef.current) {
+        markerRef.current.setMap(null);
+      }
+      
+      markerRef.current = new google.maps.Marker({
+        position: { lat, lng },
+        map: map,
+        title: "Selected Location",
+        animation: google.maps.Animation.DROP,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: "#dc2626",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
+      });
+      
+      // Fetch parcel data at clicked location
+      setIsLoadingParcel(true);
+      clearParcelPolygons();
+      
+      try {
+        const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
+        const data = await response.json();
+        
+        if (data.parcels && data.parcels.length > 0) {
+          const mainParcel = data.parcels[0];
+          setParcelData(mainParcel);
+          setSearchQuery(mainParcel.siteAddress || "");
+          setHasSearched(true);
+          
+          const parcel: SelectedParcel = {
+            address: mainParcel.siteAddress || `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            lat: mainParcel.lat,
+            lng: mainParcel.lng,
+            parcelId: mainParcel.parcelId,
+          };
+          setSelectedParcel(parcel);
+          onParcelSelect?.(parcel);
+          
+          // Draw the main parcel polygon
+          const mainPolygon = drawParcelPolygon(mainParcel, true);
+          if (mainPolygon) {
+            selectedPolygonRef.current = mainPolygon;
+            
+            // Fit map to parcel bounds
+            if (mainParcel.coordinates) {
+              const bounds = new google.maps.LatLngBounds();
+              try {
+                let coords: number[][] = [];
+                if (mainParcel.geometryType === "MultiPolygon") {
+                  const multiCoords = mainParcel.coordinates as number[][][][];
+                  multiCoords.forEach((polygon: number[][][]) => {
+                    if (polygon[0]) coords = coords.concat(polygon[0]);
+                  });
+                } else {
+                  const polyCoords = mainParcel.coordinates as number[][][];
+                  if (polyCoords[0]) coords = polyCoords[0];
+                }
+                coords.forEach((coord: number[]) => {
+                  bounds.extend({ lat: coord[1], lng: coord[0] });
+                });
+                map.fitBounds(bounds, getFitBoundsPadding());
+                setTimeout(() => {
+                  if (window.innerWidth >= 768) map.setTilt(45);
+                }, 300);
+              } catch (e) {
+                console.error("Error fitting bounds:", e);
+              }
+            }
+          }
+          
+          // Fetch neighboring parcels
+          if (showNeighbors) {
+            const neighborsResponse = await fetch("/api/parcels", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ lat: mainParcel.lat, lng: mainParcel.lng, radius: 0.002 }),
+            });
+            const neighborsData = await neighborsResponse.json();
+            
+            if (neighborsData.parcels) {
+              const neighbors = neighborsData.parcels.filter(
+                (p: ParcelData) => p.parcelId !== mainParcel.parcelId
+              );
+              setNeighboringParcels(neighbors);
+              
+              neighbors.forEach((neighbor: ParcelData) => {
+                const polygon = drawParcelPolygon(neighbor, false);
+                if (polygon) {
+                  parcelPolygonsRef.current.push(polygon);
+                }
+              });
+            }
+          }
+        } else {
+          // No parcel found at location - let user know
+          setParcelData(null);
+          setNeighboringParcels([]);
+        }
+      } catch (error) {
+        console.error("Error fetching parcel at click location:", error);
+      } finally {
+        setIsLoadingParcel(false);
+      }
+    });
+  }, [clearParcelPolygons, drawParcelPolygon, onParcelSelect, showNeighbors, flashZoomHint, getFitBoundsPadding]);
 
   // Load Google Maps Script
   useEffect(() => {
@@ -482,20 +694,12 @@ export default function InteractiveMap({
     }
   };
 
-  const toggleLayer = (layerId: string) => {
-    setSelectedLayers((prev) => {
-      const newLayers = prev.includes(layerId)
-        ? prev.filter((id) => id !== layerId)
-        : [...prev, layerId];
-      onLayersChange?.(newLayers);
-      return newLayers;
-    });
-  };
 
   const clearSelection = () => {
     setSelectedParcel(null);
     setParcelData(null);
     setNeighboringParcels([]);
+    setShowFullPanel(false);
     onParcelSelect?.(null);
     clearParcelPolygons();
     
@@ -525,7 +729,7 @@ export default function InteractiveMap({
       </div>
 
       {/* Search Bar */}
-      <div className="absolute top-14 left-4 right-4 z-10 flex gap-2 max-w-xl">
+      <div className={`absolute top-14 z-10 flex gap-2 ${isMobile ? 'left-2 right-2' : 'left-4 right-4 max-w-xl'}`}>
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400 pointer-events-none" />
           <Input
@@ -544,24 +748,18 @@ export default function InteractiveMap({
         >
           {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : "Search"}
         </Button>
-        <Button
-          onClick={() => setShowLayerPanel(!showLayerPanel)}
-          variant="outline"
-          className="bg-white/95 backdrop-blur-sm shadow-md"
-        >
-          <Layers className="w-5 h-5" />
-        </Button>
       </div>
 
-      {/* 3D Controls Toggle Button */}
-      <div className="absolute top-28 left-4 z-10">
+      {/* 3D Controls Toggle Button - Hidden on very small mobile */}
+      <div className={`absolute top-28 z-10 ${isMobile ? 'left-2' : 'left-4'}`}>
         <Button
           onClick={() => setShowViewControls(!showViewControls)}
           variant="outline"
+          size={isMobile ? "sm" : "default"}
           className="bg-white/95 backdrop-blur-sm shadow-md"
         >
-          <Settings className="w-5 h-5" />
-          {showViewControls ? <ChevronLeft className="w-4 h-4 ml-1" /> : <ChevronRight className="w-4 h-4 ml-1" />}
+          <Settings className="w-4 h-4" />
+          {!isMobile && (showViewControls ? <ChevronLeft className="w-4 h-4 ml-1" /> : <ChevronRight className="w-4 h-4 ml-1" />)}
         </Button>
       </div>
 
@@ -637,31 +835,6 @@ export default function InteractiveMap({
       )}
 
       {/* Layer Panel */}
-      {showLayerPanel && (
-        <div className="absolute top-28 right-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[50vh] overflow-y-auto">
-          <div className="p-4 border-b border-stone-200 flex items-center justify-between">
-            <h3 className="font-semibold text-stone-800">Report Layers</h3>
-            <button onClick={() => setShowLayerPanel(false)} className="text-stone-400 hover:text-stone-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="p-4 space-y-3">
-            {MAP_LAYERS.map((layer) => (
-              <LayerToggle
-                key={layer.id}
-                layer={layer}
-                isSelected={selectedLayers.includes(layer.id)}
-                onToggle={() => toggleLayer(layer.id)}
-              />
-            ))}
-          </div>
-          <div className="p-4 bg-stone-50 border-t border-stone-200">
-            <p className="text-xs text-stone-500">
-              {selectedLayers.length} layer{selectedLayers.length !== 1 ? "s" : ""} selected for report
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Google Map Container */}
       <div className="absolute inset-0 pt-10">
@@ -673,12 +846,17 @@ export default function InteractiveMap({
             </div>
           </div>
         )}
-        <div ref={mapRef} className="w-full h-full" />
+        <div 
+          ref={mapRef} 
+          className="w-full h-full" 
+          style={{ cursor: currentZoom >= MIN_CLICK_ZOOM && !selectedParcel ? 'crosshair' : 'grab' }}
+        />
       </div>
 
       {/* Search Results Panel */}
       {(hasSearched || searchResults.length > 0) && !parcelData && (
-        <div className="absolute top-72 left-4 z-10 w-80 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[40vh] overflow-y-auto">
+        <div className={`absolute z-10 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-stone-200 max-h-[40vh] overflow-y-auto
+          ${isMobile ? 'top-28 left-2 right-2' : 'top-72 left-4 w-80'}`}>
           <div className="p-3 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
             <h3 className="font-semibold text-stone-800 text-sm flex items-center gap-2">
               <MapPin className="w-4 h-4 text-emerald-700" />
@@ -725,10 +903,57 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Parcel Data Panel */}
-      {parcelData && (
-        <div className="absolute bottom-4 left-4 z-10 w-96 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-emerald-300 max-h-[60vh] overflow-y-auto">
-          <div className="p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white">
+      {/* Floating Order Button - Shows when parcel selected but panel not expanded */}
+      {parcelData && !showFullPanel && !isLoadingParcel && (
+        <div className={`absolute left-1/2 -translate-x-1/2 z-10 ${isMobile ? 'bottom-4' : 'bottom-6'}`}>
+          <button
+            onClick={() => setShowFullPanel(true)}
+            className={`bg-emerald-700 hover:bg-emerald-800 text-white rounded-full font-semibold shadow-2xl flex items-center gap-2 transition-all hover:scale-105 animate-pulse hover:animate-none
+              ${isMobile ? 'py-3 px-6 text-base' : 'py-4 px-8 text-lg gap-3'}`}
+          >
+            <FileText className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
+            Order Land Analysis – $99
+          </button>
+          <p className={`text-white text-center mt-2 drop-shadow-lg bg-black/50 rounded-full px-4 py-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+            {isMobile ? 'Tap for parcel details' : 'Click to see parcel details & order report'}
+          </p>
+        </div>
+      )}
+
+      {/* Loading indicator when fetching parcel */}
+      {isLoadingParcel && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur-sm rounded-full shadow-lg px-6 py-3">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+            <span className="text-stone-700 font-medium">Loading parcel data...</span>
+          </div>
+        </div>
+      )}
+      
+      {/* Zoom hint toast */}
+      {showZoomHint && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 bg-amber-500 text-white px-6 py-3 rounded-lg shadow-lg animate-bounce">
+          <div className="flex items-center gap-3">
+            <Maximize2 className="w-5 h-5" />
+            <span className="font-medium">Zoom in closer to click-select parcels</span>
+          </div>
+        </div>
+      )}
+
+      {/* Full Parcel Data Panel - Shows when expanded */}
+      {parcelData && showFullPanel && (
+        <div className={`absolute z-10 bg-white/95 backdrop-blur-sm shadow-lg border border-emerald-300 overflow-y-auto
+          ${isMobile 
+            ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[70vh] border-b-0' 
+            : 'bottom-4 left-4 w-96 rounded-lg max-h-[60vh]'
+          }`}>
+          {/* Mobile drag indicator */}
+          {isMobile && (
+            <div className="flex justify-center py-2 bg-gradient-to-r from-emerald-50 to-white">
+              <div className="w-12 h-1.5 bg-stone-300 rounded-full" />
+            </div>
+          )}
+          <div className={`p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white ${isMobile ? 'pt-1' : ''}`}>
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3">
                 <CheckCircle className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
@@ -737,174 +962,184 @@ export default function InteractiveMap({
                   <p className="text-xs text-stone-500">Powered by Regrid</p>
                 </div>
               </div>
-              <button onClick={clearSelection} className="text-stone-400 hover:text-stone-600">
+              <button onClick={() => setShowFullPanel(false)} className="text-stone-400 hover:text-stone-600 p-1" title="Minimize">
                 <X className="w-5 h-5" />
               </button>
             </div>
           </div>
           
-          {isLoadingParcel ? (
-            <div className="p-8 flex items-center justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          <div className="p-4 space-y-4">
+            {/* Parcel ID */}
+            <div className="flex items-start gap-3">
+              <MapPin className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-stone-500 uppercase tracking-wide">Parcel ID (APN)</p>
+                <p className="font-mono text-sm text-stone-800">{parcelData.parcelId}</p>
+              </div>
             </div>
-          ) : (
-            <div className="p-4 space-y-4">
-              {/* Parcel ID */}
-              <div className="flex items-start gap-3">
-                <MapPin className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Parcel ID (APN)</p>
-                  <p className="font-mono text-sm text-stone-800">{parcelData.parcelId}</p>
-                </div>
+
+            {/* Owner */}
+            <div className="flex items-start gap-3">
+              <User className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-stone-500 uppercase tracking-wide">Owner</p>
+                <p className="text-sm text-stone-800 font-medium">{parcelData.owner}</p>
               </div>
+            </div>
 
-              {/* Owner */}
-              <div className="flex items-start gap-3">
-                <User className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Owner</p>
-                  <p className="text-sm text-stone-800 font-medium">{parcelData.owner}</p>
-                </div>
+            {/* Mailing Address */}
+            <div className="flex items-start gap-3">
+              <Home className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-stone-500 uppercase tracking-wide">Mailing Address</p>
+                <p className="text-sm text-stone-800">{parcelData.mailingAddress}</p>
               </div>
+            </div>
 
-              {/* Mailing Address */}
-              <div className="flex items-start gap-3">
-                <Home className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Mailing Address</p>
-                  <p className="text-sm text-stone-800">{parcelData.mailingAddress}</p>
-                </div>
+            {/* Site Address */}
+            <div className="flex items-start gap-3">
+              <MapPinned className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-stone-500 uppercase tracking-wide">Site Address</p>
+                <p className="text-sm text-stone-800">{parcelData.siteAddress}</p>
               </div>
+            </div>
 
-              {/* Site Address */}
-              <div className="flex items-start gap-3">
-                <MapPinned className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Site Address</p>
-                  <p className="text-sm text-stone-800">{parcelData.siteAddress}</p>
-                </div>
-              </div>
-
-              {/* Acreage */}
-              <div className="flex items-start gap-3">
-                <Ruler className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Lot Size</p>
-                  <p className="text-sm text-stone-800">
-                    {formatAcreage(parcelData.acreage)}
-                    {parcelData.sqft > 0 && (
-                      <span className="text-stone-500 ml-2">({parcelData.sqft.toLocaleString()} sq ft)</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              {/* Zoning */}
-              <div className="flex items-start gap-3">
-                <Building2 className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-stone-500 uppercase tracking-wide">Zoning / Use</p>
-                  <p className="text-sm text-stone-800">
-                    {parcelData.zoning !== "N/A" ? parcelData.zoning : parcelData.useDescription}
-                  </p>
-                </div>
-              </div>
-
-              {/* Neighboring parcels count */}
-              {neighboringParcels.length > 0 && (
-                <div className="pt-3 mt-3 border-t border-stone-200">
-                  <p className="text-xs text-indigo-600 flex items-center gap-1">
-                    <MapPinned className="w-3 h-3" />
-                    {neighboringParcels.length} neighboring parcel{neighboringParcels.length !== 1 ? "s" : ""} shown in purple • Click to select
-                  </p>
-                </div>
-              )}
-
-              {/* Report Layers Toggle Section */}
-              <div className="pt-4 mt-4 border-t-2 border-emerald-200">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-emerald-700" />
-                    <p className="text-sm font-semibold text-stone-800">Report Layers</p>
-                  </div>
-                  <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
-                    {selectedLayers.length} selected
-                  </span>
-                </div>
-                <p className="text-xs text-stone-500 mb-3">
-                  Toggle which layers to include in your report:
-                </p>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                  {MAP_LAYERS.map((layer) => (
-                    <CompactLayerToggle
-                      key={layer.id}
-                      layer={layer}
-                      isSelected={selectedLayers.includes(layer.id)}
-                      onToggle={() => toggleLayer(layer.id)}
-                    />
-                  ))}
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => {
-                      const allLayerIds = MAP_LAYERS.map(l => l.id);
-                      setSelectedLayers(allLayerIds);
-                      onLayersChange?.(allLayerIds);
-                    }}
-                    className="text-xs text-emerald-700 hover:text-emerald-800 font-medium"
-                  >
-                    Select All
-                  </button>
-                  <span className="text-xs text-stone-300">|</span>
-                  <button
-                    onClick={() => {
-                      setSelectedLayers([]);
-                      onLayersChange?.([]);
-                    }}
-                    className="text-xs text-stone-500 hover:text-stone-700 font-medium"
-                  >
-                    Clear All
-                  </button>
-                </div>
-              </div>
-
-              {/* Checkout Button */}
-              <div className="pt-4 mt-4 border-t border-stone-200">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-stone-600">Basic Land Report</span>
-                  <span className="text-xl font-bold text-emerald-700">$99</span>
-                </div>
-                <button
-                  onClick={onCheckout}
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
-                >
-                  <FileText className="w-4 h-4" />
-                  Order Property Report
-                </button>
-                <p className="text-xs text-stone-500 text-center mt-2">
-                  {selectedLayers.length} layer{selectedLayers.length !== 1 ? 's' : ''} selected
+            {/* Acreage */}
+            <div className="flex items-start gap-3">
+              <Ruler className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-stone-500 uppercase tracking-wide">Lot Size</p>
+                <p className="text-sm text-stone-800">
+                  {formatAcreage(parcelData.acreage)}
+                  {parcelData.sqft > 0 && (
+                    <span className="text-stone-500 ml-2">({parcelData.sqft.toLocaleString()} sq ft)</span>
+                  )}
                 </p>
               </div>
+            </div>
 
-              {/* Controls hint */}
+            {/* Zoning */}
+            <div className="flex items-start gap-3">
+              <Building2 className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-stone-500 uppercase tracking-wide">Zoning / Use</p>
+                <p className="text-sm text-stone-800">
+                  {parcelData.zoning !== "N/A" ? parcelData.zoning : parcelData.useDescription}
+                </p>
+              </div>
+            </div>
+
+            {/* Neighboring parcels count */}
+            {neighboringParcels.length > 0 && (
               <div className="pt-3 mt-3 border-t border-stone-200">
-                <p className="text-xs text-stone-500 flex items-center gap-1">
-                  <Eye className="w-3 h-3" />
-                  Drag to pan • Scroll to zoom • Ctrl+drag to rotate
+                <p className="text-xs text-indigo-600 flex items-center gap-1">
+                  <MapPinned className="w-3 h-3" />
+                  {neighboringParcels.length} neighboring parcel{neighboringParcels.length !== 1 ? "s" : ""} shown in purple • Click to select
                 </p>
               </div>
+            )}
+
+            {/* Basic Report Includes */}
+            <div className="pt-4 mt-4 border-t-2 border-emerald-200">
+              <p className="text-sm font-semibold text-stone-800 mb-2">Basic Report Includes:</p>
+              <ul className="text-xs text-stone-600 space-y-1">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  FEMA Flood Zones
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  Topography & Elevation
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  Soil Types
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  Property Boundaries
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  Roads & Transportation
+                </li>
+              </ul>
             </div>
-          )}
+
+            {/* Checkout Button */}
+            <div className="pt-4 mt-4 border-t border-stone-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm text-stone-600">Basic Land Report</span>
+                <span className="text-xl font-bold text-emerald-700">$99</span>
+              </div>
+              <button
+                onClick={onCheckout}
+                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
+              >
+                <FileText className="w-4 h-4" />
+                Order Property Report
+              </button>
+              <a
+                href="/api/sample-report?v=20260122"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full mt-2 border border-emerald-700 text-emerald-700 hover:bg-emerald-50 py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
+              >
+                <Eye className="w-4 h-4" />
+                Preview Sample Report
+              </a>
+              <button
+                onClick={() => setShowEmailModal(true)}
+                className="w-full mt-2 border border-stone-300 text-stone-600 hover:bg-stone-50 py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
+              >
+                <Mail className="w-4 h-4" />
+                Email Me This Parcel
+              </button>
+              <p className="text-xs text-stone-400 text-center mt-2">
+                Save parcel details to your inbox
+              </p>
+            </div>
+
+            {/* Controls hint */}
+            <div className="pt-3 mt-3 border-t border-stone-200">
+              <p className="text-xs text-stone-500 flex items-center gap-1">
+                <Eye className="w-3 h-3" />
+                {isMobile 
+                  ? 'Pinch to zoom • Drag to pan • Two fingers to rotate'
+                  : 'Drag to pan • Scroll to zoom • Ctrl+drag to rotate'
+                }
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Instructions overlay when no parcel selected */}
-      {!selectedParcel && !hasSearched && mapLoaded && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white px-6 py-3 rounded-full text-sm">
-          <span className="flex items-center gap-2">
-            <Search className="w-4 h-4" />
-            Search an address to view parcel boundaries & owner data
-          </span>
+      {!selectedParcel && mapLoaded && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-3">
+          <a
+            href="/api/sample-report?v=20260122"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2.5 rounded-full text-sm font-medium flex items-center gap-2 shadow-lg transition-colors"
+          >
+            <Eye className="w-4 h-4" />
+            View Sample Report
+          </a>
+          <div className="bg-black/70 text-white px-6 py-3 rounded-full text-sm">
+            {currentZoom >= MIN_CLICK_ZOOM ? (
+              <span className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-emerald-400" />
+                Click anywhere on the map to select a parcel
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Search className="w-4 h-4" />
+                Search an address or zoom in to click-select parcels
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -926,104 +1161,95 @@ export default function InteractiveMap({
           </div>
         </div>
       )}
+
+      {/* Email Parcel Modal */}
+      {showEmailModal && parcelData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Mail className="w-6 h-6 text-white" />
+                  <h3 className="text-lg font-semibold text-white">Email Me This Parcel</h3>
+                </div>
+                <button 
+                  onClick={() => { setShowEmailModal(false); setEmailError(""); }}
+                  className="text-white/80 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            
+            {/* Modal Body */}
+            <div className="p-6">
+              {emailSent ? (
+                <div className="text-center py-6">
+                  <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+                  <h4 className="text-xl font-semibold text-stone-800 mb-2">Sent!</h4>
+                  <p className="text-stone-600">Check your inbox for parcel details.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Parcel Preview */}
+                  <div className="bg-stone-50 rounded-lg p-4 mb-4">
+                    <p className="text-sm font-medium text-stone-800">{parcelData.siteAddress}</p>
+                    <p className="text-xs text-stone-500 mt-1">
+                      {parcelData.acreage >= 1 
+                        ? `${parcelData.acreage.toFixed(2)} acres` 
+                        : `${(parcelData.acreage * 43560).toFixed(0)} sq ft`
+                      } • {parcelData.owner}
+                    </p>
+                  </div>
+                  
+                  {/* Email Input */}
+                  <div className="space-y-3">
+                    <label className="block text-sm font-medium text-stone-700">
+                      Your email address
+                    </label>
+                    <Input
+                      type="email"
+                      placeholder="you@example.com"
+                      value={emailInput}
+                      onChange={(e) => { setEmailInput(e.target.value); setEmailError(""); }}
+                      onKeyDown={(e) => e.key === "Enter" && handleSendEmail()}
+                      className="w-full"
+                      autoFocus
+                    />
+                    {emailError && (
+                      <p className="text-sm text-red-500">{emailError}</p>
+                    )}
+                    <p className="text-xs text-stone-500">
+                      We&apos;ll send you a summary with a link to return to this parcel. No spam, ever.
+                    </p>
+                  </div>
+                  
+                  {/* Send Button */}
+                  <button
+                    onClick={handleSendEmail}
+                    disabled={isSendingEmail || !emailInput}
+                    className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-stone-300 text-white py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
+                  >
+                    {isSendingEmail ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        Send Parcel Details
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function LayerToggle({
-  layer,
-  isSelected,
-  onToggle,
-}: {
-  layer: MapLayerConfig;
-  isSelected: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      className={`w-full flex items-start gap-3 p-3 rounded-lg transition-all text-left ${
-        isSelected
-          ? "bg-emerald-50 border-2 border-emerald-500"
-          : "bg-stone-50 border-2 border-transparent hover:bg-stone-100"
-      }`}
-    >
-      <div
-        className="w-4 h-4 rounded-full mt-0.5 flex-shrink-0"
-        style={{ backgroundColor: layer.color }}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-stone-800">
-            {layer.displayName}
-          </span>
-          {layer.isPremium && (
-            <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
-              Premium
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-stone-500 mt-0.5 truncate">{layer.dataSource}</p>
-      </div>
-      <div className="flex-shrink-0">
-        {isSelected ? (
-          <CheckCircle className="w-5 h-5 text-emerald-600" />
-        ) : (
-          <div className="w-5 h-5 rounded-full border-2 border-stone-300" />
-        )}
-      </div>
-    </button>
-  );
-}
-
-function CompactLayerToggle({
-  layer,
-  isSelected,
-  onToggle,
-}: {
-  layer: MapLayerConfig;
-  isSelected: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      className={`w-full flex items-center gap-2 p-2 rounded-lg transition-all text-left ${
-        isSelected
-          ? "bg-emerald-50 border border-emerald-400"
-          : "bg-stone-50 border border-transparent hover:bg-stone-100 hover:border-stone-200"
-      }`}
-    >
-      {/* Toggle Switch */}
-      <div
-        className={`w-8 h-4 rounded-full relative transition-colors flex-shrink-0 ${
-          isSelected ? "bg-emerald-500" : "bg-stone-300"
-        }`}
-      >
-        <div
-          className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${
-            isSelected ? "translate-x-4" : "translate-x-0.5"
-          }`}
-        />
-      </div>
-      
-      {/* Layer Color Indicator */}
-      <div
-        className="w-3 h-3 rounded-full flex-shrink-0"
-        style={{ backgroundColor: layer.color }}
-      />
-      
-      {/* Layer Name */}
-      <span className={`text-sm flex-1 truncate ${isSelected ? "text-stone-800 font-medium" : "text-stone-600"}`}>
-        {layer.displayName}
-      </span>
-      
-      {/* Premium Badge */}
-      {layer.isPremium && (
-        <span className="text-[10px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded flex-shrink-0">
-          Pro
-        </span>
-      )}
-    </button>
-  );
-}

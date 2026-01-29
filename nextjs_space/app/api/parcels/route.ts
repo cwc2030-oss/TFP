@@ -51,6 +51,32 @@ interface ParcelResponse {
   lat: number;
   lng: number;
   regridPath: string;
+  // Valuation & Tax
+  marketValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  taxYear: string | null;
+  // Sales History
+  saleDate: string | null;
+  salePrice: number | null;
+  lastOwnershipTransfer: string | null;
+  // Building Details
+  yearBuilt: number | null;
+  numStories: number | null;
+  numBedrooms: number | null;
+  numBathrooms: number | null;
+  buildingSqft: number | null;
+  // Legal
+  legalDescription: string | null;
+  subdivision: string | null;
+  plssTownship: string | null;
+  plssRange: string | null;
+  plssSection: string | null;
+  // Census
+  censusTract: string | null;
+  censusBlock: string | null;
+  // County info
+  county: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -160,6 +186,32 @@ export async function GET(request: NextRequest) {
       lat: parseFloat(fields.lat) || 0,
       lng: parseFloat(fields.lon) || 0,
       regridPath: fields.path || feature.properties?.path || "",
+      // Valuation & Tax
+      marketValue: fields.parval || fields.market_value || null,
+      landValue: fields.landval || fields.land_value || null,
+      improvementValue: fields.improvval || fields.improvement_value || null,
+      taxYear: fields.taxyear || null,
+      // Sales History
+      saleDate: fields.saledate || fields.sale_date || null,
+      salePrice: fields.saleprice || fields.sale_price || null,
+      lastOwnershipTransfer: fields.last_ownership_transfer_date || null,
+      // Building Details
+      yearBuilt: fields.yearbuilt || fields.year_built || null,
+      numStories: fields.numstories || fields.stories || null,
+      numBedrooms: fields.num_bedrooms || fields.bedrooms || null,
+      numBathrooms: fields.num_bath || fields.bathrooms || null,
+      buildingSqft: fields.area_building || fields.building_sqft || null,
+      // Legal
+      legalDescription: fields.legaldesc || fields.legal_description || null,
+      subdivision: fields.subdivision || null,
+      plssTownship: fields.plss_township || null,
+      plssRange: fields.plss_range || null,
+      plssSection: fields.plss_section || null,
+      // Census
+      censusTract: fields.census_tract || null,
+      censusBlock: fields.census_block || null,
+      // County
+      county: fields.county || null,
     };
 
     return NextResponse.json({ parcels: [parcel] });
@@ -173,7 +225,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Also support getting neighboring parcels
+// Also support getting neighboring parcels using radius search
 export async function POST(request: NextRequest) {
   const apiKey = process.env.REGRID_API_KEY;
   
@@ -186,7 +238,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { lat, lng, radius = 0.001 } = body; // radius in degrees (~100m)
+    const { lat, lng, radius = 0.002 } = body;
     
     if (!lat || !lng) {
       return NextResponse.json(
@@ -195,75 +247,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create a bounding box around the point
-    const bbox = [
-      lng - radius, // west
-      lat - radius, // south
-      lng + radius, // east
-      lat + radius, // north
-    ].join(",");
+    // Use the v1 search endpoint with multiple offset points to find neighbors
+    // This is more reliable than the v2 bbox query which can be problematic
+    const offsets = [
+      { latOff: radius, lngOff: 0 },      // North
+      { latOff: -radius, lngOff: 0 },     // South
+      { latOff: 0, lngOff: radius },      // East
+      { latOff: 0, lngOff: -radius },     // West
+      { latOff: radius, lngOff: radius }, // NE
+      { latOff: radius, lngOff: -radius },// NW
+      { latOff: -radius, lngOff: radius },// SE
+      { latOff: -radius, lngOff: -radius },// SW
+    ];
 
-    const url = `https://app.regrid.com/api/v2/parcels/query?bbox=${bbox}&limit=20&token=${apiKey}`;
-
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Regrid API error:", response.status, errorText);
-      return NextResponse.json(
-        { error: `Regrid API error: ${response.status}` },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
+    const uniqueParcels = new Map<string, any>();
     
-    const parcels = (data.results || []).map((feature: RegridParcel) => {
-      const fields = feature.properties?.fields || {};
+    // Fetch parcels at each offset point
+    const fetchPromises = offsets.map(async ({ latOff, lngOff }) => {
+      const searchLat = lat + latOff;
+      const searchLng = lng + lngOff;
       
-      const mailParts = [
-        fields.mail_address,
-        fields.mail_city,
-        fields.mail_state2,
-        fields.mail_zip
-      ].filter(Boolean);
-      
-      const siteParts = [
-        fields.address,
-        fields.city,
-        fields.state2,
-        fields.szip
-      ].filter(Boolean);
+      try {
+        const url = `https://app.regrid.com/api/v1/search.json?lat=${searchLat}&lon=${searchLng}&token=${apiKey}`;
+        const response = await fetch(url, {
+          headers: { "Accept": "application/json" },
+          signal: AbortSignal.timeout(10000),
+        });
 
-      return {
-        parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "Unknown",
-        owner: fields.owner || "Unknown Owner",
-        mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
-        siteAddress: siteParts.length > 0 ? siteParts.join(", ") : "Not Available",
-        acreage: fields.ll_gisacre || fields.acres || 0,
-        sqft: fields.ll_gissqft || fields.sqft || 0,
-        zoning: fields.zoning || "N/A",
-        useDescription: fields.usedesc || fields.zoning_description || "N/A",
-        coordinates: feature.geometry?.coordinates || [],
-        geometryType: feature.geometry?.type || "Polygon",
-        lat: fields.lat || 0,
-        lng: fields.lon || 0,
-        regridPath: fields.path || "",
-      };
+        if (!response.ok) return [];
+        
+        const data = await response.json();
+        return data.results || [];
+      } catch {
+        return [];
+      }
     });
 
+    const allResults = await Promise.all(fetchPromises);
+    
+    // Combine and dedupe by parcel ID
+    allResults.flat().forEach((feature: any) => {
+      const fields = feature.properties?.fields || {};
+      const parcelId = fields.parcelnumb || fields.parcelnumb_no_formatting;
+      
+      if (parcelId && !uniqueParcels.has(parcelId)) {
+        const mailParts = [
+          fields.mailadd || fields.mail_address,
+          fields.mail_city,
+          fields.mail_state2,
+          fields.mail_zip
+        ].filter(Boolean);
+        
+        const siteParts = [
+          fields.address,
+          fields.city || fields.situs_city,
+          fields.state2 || fields.situs_state2,
+          fields.szip || fields.situs_zip
+        ].filter(Boolean);
+
+        uniqueParcels.set(parcelId, {
+          parcelId,
+          owner: fields.owner || "Unknown Owner",
+          mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
+          siteAddress: siteParts.length > 0 ? siteParts.join(", ") : feature.properties?.headline || "Not Available",
+          acreage: fields.ll_gisacre || fields.gisacre || fields.acres || 0,
+          sqft: fields.ll_gissqft || fields.sqft || 0,
+          zoning: fields.zoning || "N/A",
+          useDescription: fields.usedesc || fields.zoning_description || "N/A",
+          coordinates: feature.geometry?.coordinates || [],
+          geometryType: feature.geometry?.type || "Polygon",
+          lat: parseFloat(fields.lat) || 0,
+          lng: parseFloat(fields.lon) || 0,
+          regridPath: fields.path || feature.properties?.path || "",
+        });
+      }
+    });
+
+    const parcels = Array.from(uniqueParcels.values());
+    
     return NextResponse.json({ parcels });
 
   } catch (error) {
     console.error("Error fetching neighboring parcels:", error);
     return NextResponse.json(
-      { error: "Failed to fetch neighboring parcels" },
-      { status: 500 }
+      { parcels: [], error: "Failed to fetch neighboring parcels" },
+      { status: 200 } // Return 200 with empty array to avoid breaking the UI
     );
   }
 }

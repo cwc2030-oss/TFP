@@ -17,6 +17,30 @@ interface ParcelData {
   zoning: string;
   useDescription: string;
   coordinates: number[][][] | null;
+  // Valuation & Tax
+  marketValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  taxYear: string | null;
+  // Sales History
+  saleDate: string | null;
+  salePrice: number | null;
+  lastOwnershipTransfer: string | null;
+  // Building Details
+  yearBuilt: number | null;
+  numStories: number | null;
+  numBedrooms: number | null;
+  numBathrooms: number | null;
+  buildingSqft: number | null;
+  // Legal
+  legalDescription: string | null;
+  subdivision: string | null;
+  plssTownship: string | null;
+  plssRange: string | null;
+  plssSection: string | null;
+  // Census & Location
+  censusTract: string | null;
+  county: string | null;
 }
 
 const formatDate = (date: Date) => {
@@ -27,15 +51,17 @@ const formatDate = (date: Date) => {
   });
 };
 
-const getLayerInfo = (layerId: string) => {
-  return MAP_LAYERS.find((l) => l.id === layerId) || {
-    displayName: layerId,
-    description: "Layer data",
-    dataSource: "Unknown",
-  };
-};
+// Generate unique report number
+function generateReportNumber(): string {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `TFP-${year}${month}${day}-${random}`;
+}
 
-// Fetch parcel data from Regrid API using typeahead + path approach
+// Fetch parcel data from Regrid API using coordinate-based search
 async function fetchRegridParcelData(lat: number, lng: number, address: string): Promise<ParcelData | null> {
   const apiKey = process.env.REGRID_API_KEY;
   if (!apiKey) {
@@ -44,48 +70,34 @@ async function fetchRegridParcelData(lat: number, lng: number, address: string):
   }
 
   try {
-    // Step 1: Use typeahead to find parcel path from address
-    const typeaheadUrl = `https://app.regrid.com/api/v1/typeahead.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
-    const typeaheadResponse = await fetch(typeaheadUrl, {
+    const searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
+    const searchResponse = await fetch(searchUrl, {
       headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
 
-    if (!typeaheadResponse.ok) {
-      console.error("Regrid typeahead error:", typeaheadResponse.status);
+    if (!searchResponse.ok) {
+      console.error("Regrid search error:", searchResponse.status);
       return null;
     }
 
-    const typeaheadResults = await typeaheadResponse.json();
+    const searchData = await searchResponse.json();
     
-    if (!Array.isArray(typeaheadResults) || typeaheadResults.length === 0) {
-      console.log("No typeahead results for address:", address);
+    if (searchData.status === "error") {
+      console.error("Regrid API error:", searchData.message);
+      return null;
+    }
+    
+    const results = searchData.results || [];
+    
+    if (results.length === 0) {
+      console.log("No parcels found at coordinates:", lat, lng);
       return null;
     }
 
-    // Get the path from the first result
-    const parcelPath = typeaheadResults[0].path;
-    if (!parcelPath) {
-      console.log("No path in typeahead result");
-      return null;
-    }
-
-    // Step 2: Fetch full parcel data using path
-    const parcelUrl = `https://app.regrid.com/api/v1/parcel.json?path=${parcelPath}&token=${apiKey}`;
-    const parcelResponse = await fetch(parcelUrl, {
-      headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!parcelResponse.ok) {
-      console.error("Regrid parcel error:", parcelResponse.status);
-      return null;
-    }
-
-    const parcelData = await parcelResponse.json();
+    const parcelData = results[0];
     const fields = parcelData.properties?.fields || {};
     
-    // Build addresses
     const mailParts = [
       fields.mailadd || fields.mail_address,
       fields.mail_unit,
@@ -101,12 +113,10 @@ async function fetchRegridParcelData(lat: number, lng: number, address: string):
       fields.szip || fields.situs_zip
     ].filter(Boolean);
 
-    // Extract polygon coordinates
     let coordinates: number[][][] | null = null;
     if (parcelData.geometry?.type === "Polygon" && parcelData.geometry.coordinates) {
       coordinates = parcelData.geometry.coordinates as number[][][];
     } else if (parcelData.geometry?.type === "MultiPolygon" && parcelData.geometry.coordinates) {
-      // Take the first polygon from MultiPolygon
       coordinates = (parcelData.geometry.coordinates as number[][][][])[0] || null;
     }
 
@@ -120,6 +130,25 @@ async function fetchRegridParcelData(lat: number, lng: number, address: string):
       zoning: fields.zoning || "N/A",
       useDescription: fields.usedesc || fields.zoning_description || "N/A",
       coordinates,
+      marketValue: fields.parval || fields.market_value || null,
+      landValue: fields.landval || fields.land_value || null,
+      improvementValue: fields.improvval || fields.improvement_value || null,
+      taxYear: fields.taxyear || null,
+      saleDate: fields.saledate || fields.sale_date || null,
+      salePrice: fields.saleprice || fields.sale_price || null,
+      lastOwnershipTransfer: fields.last_ownership_transfer_date || null,
+      yearBuilt: fields.yearbuilt || fields.year_built || null,
+      numStories: fields.numstories || fields.stories || null,
+      numBedrooms: fields.num_bedrooms || fields.bedrooms || null,
+      numBathrooms: fields.num_bath || fields.bathrooms || null,
+      buildingSqft: fields.area_building || fields.building_sqft || null,
+      legalDescription: fields.legaldesc || fields.legal_description || null,
+      subdivision: fields.subdivision || null,
+      plssTownship: fields.plss_township || null,
+      plssRange: fields.plss_range || null,
+      plssSection: fields.plss_section || null,
+      censusTract: fields.census_tract || null,
+      county: fields.county || null,
     };
   } catch (error) {
     console.error("Failed to fetch Regrid parcel data:", error);
@@ -136,25 +165,21 @@ const formatAcreage = (acres: number, sqft: number): string => {
   return "Not Available";
 };
 
-// Build parcel boundary path for Google Maps Static API with prominent border
+// Build parcel boundary path for Google Maps Static API
 function buildParcelPath(coordinates: number[][][] | null): string {
   if (!coordinates || coordinates.length === 0 || !coordinates[0]) {
     return "";
   }
   
-  // Get the outer ring (first array)
   const ring = coordinates[0];
   if (ring.length < 3) return "";
   
-  // Limit points to avoid URL length issues (max ~50 points)
   const maxPoints = 50;
   const step = ring.length > maxPoints ? Math.ceil(ring.length / maxPoints) : 1;
   
-  // Build path string with PROMINENT GREEN BORDER like the interface
-  // Using brighter green (#22C55E) with thick weight (5) and semi-transparent fill
   const pathPoints = ring
     .filter((_, i) => i % step === 0 || i === ring.length - 1)
-    .map(coord => `${coord[1]},${coord[0]}`) // GeoJSON is [lng, lat], Google wants lat,lng
+    .map(coord => `${coord[1]},${coord[0]}`)
     .join("|");
   
   return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
@@ -178,40 +203,27 @@ async function fetchGoogleMapImage(
     const width = 640;
     const height = 400;
     
-    // Use satellite imagery for aerial property view to match the interface
     let mapType = "satellite";
     let style = "";
     
     switch (layerId) {
-      case "flood_zones":
-      case "wetlands":
-        mapType = "satellite"; // Aerial view shows environmental features better
-        break;
       case "topography":
         mapType = "terrain";
         style = "&style=feature:all|element:labels|visibility:on";
         break;
-      case "soil_types":
-      case "property_boundaries":
-        mapType = "satellite"; // Pure satellite for clear property boundaries
-        break;
       case "roads_transportation":
-        mapType = "hybrid"; // Satellite with road labels
-        break;
       case "zoning":
-        mapType = "hybrid"; // Satellite with zoning context
-        break;
       case "power_substations":
-        mapType = "hybrid"; // Satellite with infrastructure labels
+        mapType = "hybrid";
         break;
       default:
-        mapType = "satellite"; // Default to satellite for best aerial view
+        mapType = "satellite";
     }
 
-    // Build parcel boundary path
     const parcelPath = buildParcelPath(parcelCoordinates);
-
-        const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&maptype=${mapType}&markers=color:red%7C${lat},${lng}${style}${parcelPath}&key=${apiKey}`;
+    const mapsApiHost = "maps.googleapis.com";
+    const mapsApiPath = "/maps/api/staticmap";
+    const mapUrl = `https://${mapsApiHost}${mapsApiPath}?center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&maptype=${mapType}${style}${parcelPath}&key=${apiKey}`;
 
     const response = await fetch(mapUrl, {
       signal: AbortSignal.timeout(15000)
@@ -219,18 +231,13 @@ async function fetchGoogleMapImage(
 
     if (response.ok) {
       const contentType = response.headers.get('content-type') || '';
-      // Make sure it's actually an image, not an error page
       if (contentType.includes('image')) {
         const arrayBuffer = await response.arrayBuffer();
         const base64 = Buffer.from(arrayBuffer).toString('base64');
         return `data:image/png;base64,${base64}`;
-      } else {
-        console.error(`Google Maps returned non-image content: ${contentType}`);
-        return null;
       }
     }
     
-    console.error(`Google Maps API error: ${response.status}`);
     return null;
   } catch (error) {
     console.error(`Failed to fetch Google map for layer ${layerId}:`, error);
@@ -238,7 +245,7 @@ async function fetchGoogleMapImage(
   }
 }
 
-// Generate a simple map visualization using canvas-like drawing in jsPDF
+// Draw simple fallback map
 function drawSimpleMap(
   doc: jsPDF, 
   lat: number, 
@@ -250,11 +257,9 @@ function drawSimpleMap(
   height: number,
   parcelCoordinates: number[][][] | null = null
 ) {
-  // Draw base map area with light green background
   doc.setFillColor(235, 245, 235);
   doc.rect(x, y, width, height, "F");
   
-  // Draw grid lines
   doc.setDrawColor(200, 215, 200);
   doc.setLineWidth(0.3);
   const gridSpacing = 15;
@@ -265,11 +270,9 @@ function drawSimpleMap(
     doc.line(x, gy, x + width, gy);
   }
 
-  // Draw parcel boundary if coordinates available
   if (parcelCoordinates && parcelCoordinates[0] && parcelCoordinates[0].length > 2) {
     const ring = parcelCoordinates[0];
     
-    // Find bounds of the parcel
     let minLng = Infinity, maxLng = -Infinity;
     let minLat = Infinity, maxLat = -Infinity;
     for (const coord of ring) {
@@ -279,213 +282,339 @@ function drawSimpleMap(
       maxLat = Math.max(maxLat, coord[1]);
     }
     
-    // Scale coordinates to fit in the map area with padding
     const padding = 10;
     const mapWidth = width - padding * 2;
     const mapHeight = height - padding * 2;
     const lngRange = maxLng - minLng || 0.001;
     const latRange = maxLat - minLat || 0.001;
     
-    // Convert geo coordinates to PDF coordinates
     const toX = (lng: number) => x + padding + ((lng - minLng) / lngRange) * mapWidth;
     const toY = (lat: number) => y + padding + mapHeight - ((lat - minLat) / latRange) * mapHeight;
     
-    // Draw filled polygon
-    doc.setFillColor(34, 83, 60, 0.2); // Semi-transparent forest green
     doc.setDrawColor(34, 83, 60);
     doc.setLineWidth(2);
     
-    // Start path
     const points: number[][] = ring.map(coord => [toX(coord[0]), toY(coord[1])]);
     
-    // Draw the polygon outline
     if (points.length > 0) {
       doc.moveTo(points[0][0], points[0][1]);
       for (let i = 1; i < points.length; i++) {
         doc.lineTo(points[i][0], points[i][1]);
       }
-      doc.lineTo(points[0][0], points[0][1]); // Close path
+      doc.lineTo(points[0][0], points[0][1]);
       doc.stroke();
     }
   }
   
-  // Draw layer-specific overlays
   const centerX = x + width / 2;
   const centerY = y + height / 2;
   
-  switch (layerId) {
-    case "flood_zones":
-      // Draw flood zone areas using rectangles
-      doc.setFillColor(173, 216, 230); // Light blue
-      doc.rect(x + 20, y + 15, width * 0.4, height * 0.5, "F");
-      doc.setFillColor(100, 149, 237); // Cornflower blue
-      doc.rect(x + width * 0.5, y + height * 0.4, width * 0.35, height * 0.4, "F");
-      // Legend
-      doc.setFontSize(8);
-      doc.setTextColor(65, 105, 225);
-      doc.text("Zone AE (High Risk)", x + 5, y + height - 12);
-      doc.setTextColor(100, 149, 237);
-      doc.text("Zone X (Moderate Risk)", x + 5, y + height - 5);
-      break;
-      
-    case "wetlands":
-      // Draw wetland areas
-      doc.setFillColor(144, 238, 144); // Light green
-      doc.rect(x + 25, y + 20, width * 0.35, height * 0.6, "F");
-      doc.setFillColor(34, 139, 34); // Forest green
-      doc.rect(x + width * 0.55, y + 25, width * 0.3, height * 0.45, "F");
-      doc.setFontSize(8);
-      doc.setTextColor(34, 139, 34);
-      doc.text("Wetland Areas Identified", x + 5, y + height - 5);
-      break;
-      
-    case "topography":
-      // Draw contour lines using concentric rectangles
-      doc.setDrawColor(139, 90, 43);
-      doc.setLineWidth(0.8);
-      for (let i = 0; i < 5; i++) {
-        const offset = i * 8;
-        doc.rect(x + 15 + offset, y + 10 + offset, width - 30 - offset * 2, height - 20 - offset * 2, "S");
-      }
-      doc.setFontSize(8);
-      doc.setTextColor(139, 90, 43);
-      doc.text("Elevation Contours (ft above sea level)", x + 5, y + height - 5);
-      break;
-      
-    case "soil_types":
-      // Draw soil type regions
-      doc.setFillColor(210, 180, 140); // Tan
-      doc.rect(x + 10, y + 10, width / 3 - 5, height - 20, "F");
-      doc.setFillColor(139, 69, 19); // Saddle brown
-      doc.rect(x + width / 3 + 10, y + 15, width / 3 - 10, height - 30, "F");
-      doc.setFillColor(160, 82, 45); // Sienna
-      doc.rect(x + 2 * width / 3 + 5, y + 12, width / 3 - 15, height - 24, "F");
-      doc.setFontSize(8);
-      doc.setTextColor(139, 69, 19);
-      doc.text("Soil Classification Zones", x + 5, y + height - 5);
-      break;
-      
-    case "zoning":
-      // Draw zoning districts
-      doc.setFillColor(255, 223, 128); // Light gold - Residential
-      doc.rect(x + 10, y + 10, width / 2 - 15, height / 2 - 10, "F");
-      doc.setFillColor(135, 206, 235); // Sky blue - Commercial
-      doc.rect(x + width / 2, y + 10, width / 2 - 10, height / 2 - 10, "F");
-      doc.setFillColor(144, 238, 144); // Light green - Agricultural
-      doc.rect(x + 10, y + height / 2 + 5, width - 20, height / 2 - 15, "F");
-      doc.setFontSize(7);
-      doc.setTextColor(70, 130, 180);
-      doc.text("R-1 Residential | C-1 Commercial | A-1 Agricultural", x + 5, y + height - 5);
-      break;
-      
-    case "roads_transportation":
-      // Draw roads
-      doc.setDrawColor(80, 80, 80);
-      doc.setLineWidth(3);
-      doc.line(x + 10, centerY, x + width - 10, centerY); // Main road
-      doc.setLineWidth(2);
-      doc.line(centerX, y + 10, centerX, y + height - 10); // Cross road
-      doc.setDrawColor(120, 120, 120);
-      doc.setLineWidth(1);
-      doc.line(x + 30, y + 15, x + width - 30, y + height - 15); // Secondary
-      doc.setFontSize(8);
-      doc.setTextColor(80, 80, 80);
-      doc.text("Road Network & Access Points", x + 5, y + height - 5);
-      break;
-      
-    case "power_substations":
-      // Draw power infrastructure
-      doc.setDrawColor(255, 140, 0);
-      doc.setLineWidth(1.5);
-      doc.line(x + 15, centerY - 15, x + width - 15, centerY - 15); // Power line
-      doc.line(x + 15, centerY + 15, x + width - 15, centerY + 15); // Power line
-      // Substation symbol
-      doc.setFillColor(255, 140, 0);
-      doc.rect(centerX - 10, centerY - 10, 20, 20, "F");
-      doc.setFillColor(255, 255, 255);
-      doc.rect(centerX - 5, centerY - 5, 10, 10, "F");
-      doc.setFontSize(8);
-      doc.setTextColor(255, 140, 0);
-      doc.text("Power Infrastructure & Substations", x + 5, y + height - 5);
-      break;
-      
-    case "property_boundaries":
-      // Draw property outline
-      doc.setDrawColor(220, 20, 60);
-      doc.setLineWidth(2.5);
-      doc.rect(x + 20, y + 15, width - 40, height - 30, "S");
-      // Corner markers
-      doc.setFillColor(220, 20, 60);
-      doc.rect(x + 17, y + 12, 6, 6, "F");
-      doc.rect(x + width - 23, y + 12, 6, 6, "F");
-      doc.rect(x + 17, y + height - 18, 6, 6, "F");
-      doc.rect(x + width - 23, y + height - 18, 6, 6, "F");
-      doc.setFontSize(8);
-      doc.setTextColor(220, 20, 60);
-      doc.text("Property Boundary Markers", x + 5, y + height - 5);
-      break;
-      
-    default:
-      doc.setFontSize(10);
-      doc.setTextColor(100, 100, 100);
-      doc.text("Map Data Layer", centerX, centerY, { align: "center" });
-  }
-  
-  // Draw property marker (red pin)
   doc.setFillColor(220, 38, 38);
   doc.rect(centerX - 4, centerY - 4, 8, 8, "F");
   doc.setFillColor(255, 255, 255);
   doc.rect(centerX - 2, centerY - 2, 4, 4, "F");
   
-  // Draw border
   doc.setDrawColor(100, 100, 100);
   doc.setLineWidth(1);
   doc.rect(x, y, width, height, "S");
   
-  // Coordinates label
   doc.setFontSize(7);
   doc.setTextColor(80, 80, 80);
   doc.text(`${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°W`, x + width - 5, y + height - 3, { align: "right" });
 }
 
-// Helper function to get layer score/rating with risk level
-function getLayerScore(layerId: string): { score: string; rating: string; color: [number, number, number]; riskLevel: number } {
-  const scores: Record<string, { score: string; rating: string; color: [number, number, number]; riskLevel: number }> = {
-    flood_zones: { score: "Low Risk", rating: "Zone X", color: [34, 197, 94], riskLevel: 1 }, // green - low risk
-    wetlands: { score: "Minimal", rating: "<5% Coverage", color: [34, 197, 94], riskLevel: 1 },
-    topography: { score: "Gentle", rating: "1-5° Slope", color: [34, 197, 94], riskLevel: 1 },
-    soil_types: { score: "Type B/C", rating: "Good Drainage", color: [234, 179, 8], riskLevel: 2 }, // yellow - moderate
-    zoning: { score: "Agricultural", rating: "A-1 District", color: [34, 197, 94], riskLevel: 1 },
-    property_boundaries: { score: "Verified", rating: "County Records", color: [34, 197, 94], riskLevel: 1 },
-    power_substations: { score: "Nearby", rating: "<1 Mile", color: [34, 197, 94], riskLevel: 1 },
-    roads_transportation: { score: "Good Access", rating: "Paved Road", color: [34, 197, 94], riskLevel: 1 },
-  };
-
-  return scores[layerId] || { score: "Available", rating: "Data Present", color: [156, 163, 175], riskLevel: 1 };
+// Draw decorative certificate border
+function drawCertificateBorder(doc: jsPDF, pageWidth: number, pageHeight: number) {
+  // Outer border
+  doc.setDrawColor(34, 83, 60);
+  doc.setLineWidth(3);
+  doc.rect(8, 8, pageWidth - 16, pageHeight - 16);
+  
+  // Inner decorative border
+  doc.setLineWidth(0.5);
+  doc.rect(12, 12, pageWidth - 24, pageHeight - 24);
+  
+  // Corner ornaments (simple L shapes)
+  doc.setLineWidth(2);
+  const cornerSize = 15;
+  
+  // Top-left
+  doc.line(15, 25, 15, 15);
+  doc.line(15, 15, 25, 15);
+  
+  // Top-right
+  doc.line(pageWidth - 25, 15, pageWidth - 15, 15);
+  doc.line(pageWidth - 15, 15, pageWidth - 15, 25);
+  
+  // Bottom-left
+  doc.line(15, pageHeight - 25, 15, pageHeight - 15);
+  doc.line(15, pageHeight - 15, 25, pageHeight - 15);
+  
+  // Bottom-right
+  doc.line(pageWidth - 25, pageHeight - 15, pageWidth - 15, pageHeight - 15);
+  doc.line(pageWidth - 15, pageHeight - 25, pageWidth - 15, pageHeight - 15);
 }
 
-// Calculate overall risk score from selected layers
-function calculateOverallRisk(selectedLayers: string[]): { score: number; label: string; color: [number, number, number] } {
-  if (selectedLayers.length === 0) {
-    return { score: 0, label: "No Data", color: [156, 163, 175] };
-  }
+// Draw consistent page footer
+function drawPageFooter(doc: jsPDF, pageWidth: number, pageHeight: number, currentPage: number, totalPages: number, reportNumber: string) {
+  const footerY = pageHeight - 25;
+  
+  doc.setFontSize(6);
+  doc.setTextColor(120, 120, 120);
+  doc.text("This report is for informational purposes only. Data accuracy depends on county records. Not a substitute for professional surveys, appraisals, or legal advice.", pageWidth / 2, footerY, { align: "center" });
+  doc.text("Property conditions may change. Verify all information before making decisions.", pageWidth / 2, footerY + 4, { align: "center" });
+  
+  // Bottom bar
+  doc.setFillColor(34, 83, 60);
+  doc.rect(0, pageHeight - 15, pageWidth, 15, "F");
+  
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(7);
+  doc.text(`Report #${reportNumber}`, 15, pageHeight - 6);
+  doc.text(`Page ${currentPage} of ${totalPages}`, pageWidth / 2, pageHeight - 6, { align: "center" });
+  doc.text("© 2026 Terra Firma Partners LLC", pageWidth - 15, pageHeight - 6, { align: "right" });
+}
 
-  const totalRisk = selectedLayers.reduce((sum, layerId) => {
-    return sum + getLayerScore(layerId).riskLevel;
-  }, 0);
+// Draw page header
+function drawPageHeader(doc: jsPDF, pageWidth: number, title: string, accentColor: [number, number, number] = [34, 197, 94]) {
+  doc.setFillColor(34, 83, 60);
+  doc.rect(0, 0, pageWidth, 22, "F");
+  doc.setFillColor(...accentColor);
+  doc.rect(0, 22, pageWidth, 3, "F");
+  
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(title, pageWidth / 2, 14, { align: "center" });
+}
 
-  const avgRisk = totalRisk / selectedLayers.length;
+// USDA Hardiness Zone calculator
+interface HardinessData {
+  zone: string;
+  minTemp: string;
+  avgFirstFrost: string;
+  avgLastFrost: string;
+  growingSeason: string;
+  idealCrops: string[];
+  soilTempInfo: string;
+}
 
-  if (avgRisk <= 1.2) {
-    return { score: avgRisk, label: "Low Risk", color: [34, 197, 94] }; // green
-  } else if (avgRisk <= 1.8) {
-    return { score: avgRisk, label: "Moderate Risk", color: [234, 179, 8] }; // yellow
+function getHardinessZone(lat: number): HardinessData {
+  const absLat = Math.abs(lat);
+  
+  if (absLat >= 47) {
+    return {
+      zone: "3-4",
+      minTemp: "-40°F to -20°F",
+      avgFirstFrost: "Early September",
+      avgLastFrost: "Late May",
+      growingSeason: "90-120 days",
+      idealCrops: ["Hardy vegetables", "Cold-tolerant fruits", "Root crops", "Brassicas", "Short-season corn"],
+      soilTempInfo: "Soil remains frozen 4-6 months. Plant after soil reaches 50°F."
+    };
+  } else if (absLat >= 44) {
+    return {
+      zone: "4-5",
+      minTemp: "-30°F to -10°F",
+      avgFirstFrost: "Mid-September",
+      avgLastFrost: "Early May",
+      growingSeason: "120-150 days",
+      idealCrops: ["Apples", "Potatoes", "Wheat", "Oats", "Hardy berries", "Cool-season vegetables"],
+      soilTempInfo: "Soil frozen 3-5 months. Spring planting typically begins late April."
+    };
+  } else if (absLat >= 40) {
+    return {
+      zone: "5-6",
+      minTemp: "-20°F to 0°F",
+      avgFirstFrost: "Late September to Mid-October",
+      avgLastFrost: "Mid to Late April",
+      growingSeason: "150-180 days",
+      idealCrops: ["Corn", "Soybeans", "Wheat", "Tomatoes", "Peppers", "Squash", "Stone fruits"],
+      soilTempInfo: "Soil frozen 2-4 months. Good for most temperate crops."
+    };
+  } else if (absLat >= 36) {
+    return {
+      zone: "6-7",
+      minTemp: "-10°F to 10°F",
+      avgFirstFrost: "Mid to Late October",
+      avgLastFrost: "Early to Mid-April",
+      growingSeason: "180-210 days",
+      idealCrops: ["Cotton", "Peanuts", "Sweet potatoes", "Peaches", "Pecans", "Warm-season vegetables"],
+      soilTempInfo: "Brief soil freezing. Extended growing season supports diverse crops."
+    };
+  } else if (absLat >= 32) {
+    return {
+      zone: "7-8",
+      minTemp: "0°F to 20°F",
+      avgFirstFrost: "Late October to November",
+      avgLastFrost: "Late March",
+      growingSeason: "210-240 days",
+      idealCrops: ["Citrus (protected)", "Figs", "Muscadine grapes", "Okra", "Southern peas", "Winter vegetables"],
+      soilTempInfo: "Minimal soil freezing. Year-round growing possible with planning."
+    };
+  } else if (absLat >= 28) {
+    return {
+      zone: "8-9",
+      minTemp: "10°F to 30°F",
+      avgFirstFrost: "November to December",
+      avgLastFrost: "Late February to Early March",
+      growingSeason: "240-300 days",
+      idealCrops: ["Citrus", "Avocados", "Tropical fruits", "Rice", "Sugarcane", "Year-round vegetables"],
+      soilTempInfo: "Rare soil freezing. Nearly year-round production possible."
+    };
   } else {
-    return { score: avgRisk, label: "Higher Risk", color: [239, 68, 68] }; // red
+    return {
+      zone: "9-10+",
+      minTemp: "20°F to 40°F+",
+      avgFirstFrost: "Rare or none",
+      avgLastFrost: "Rare or none",
+      growingSeason: "300-365 days",
+      idealCrops: ["Tropical fruits", "Citrus", "Bananas", "Mangoes", "Papayas", "Continuous vegetables"],
+      soilTempInfo: "No soil freezing. True year-round tropical/subtropical production."
+    };
   }
 }
 
-// Load and convert logo to base64
+// Category data interface
+interface CategoryData {
+  title: string;
+  color: [number, number, number];
+  icon: string;
+  fields: { label: string; value: string }[];
+  summary: string;
+  dataSource: string;
+  tips: string[];
+  funFact: string;
+}
+
+// Generate fun facts based on property data
+function generateFunFacts(acres: number, county: string, state: string) {
+  const footballFields = Math.round(acres / 1.32);
+  const countyName = county ? county.charAt(0).toUpperCase() + county.slice(1).toLowerCase() : "This";
+  
+  return {
+    physical: `At ${acres.toFixed(0)} acres, this property is roughly the size of ${footballFields} football fields. ${countyName} County's diverse terrain supports both agricultural and recreational land uses.`,
+    water: `The Missouri River watershed, which influences this region, drains approximately 529,350 square miles across 10 states—the largest river system in North America.`,
+    vegetation: `${countyName} County sits in the Central Hardwood Forest region, home to over 150 native tree species including prized black walnut, valued at up to $20,000 per tree for premium veneer logs.`,
+    infrastructure: `Rural Missouri land values have increased an average of 7.2% annually over the past decade, outpacing inflation and making land one of the region's most stable investments.`
+  };
+}
+
+// Generate category reports with tips and fun facts
+function generateCategoryReports(parcelData: any, acreage: string, zoning: string, address: string): CategoryData[] {
+  const acres = parseFloat(acreage) || 0;
+  const isAg = zoning?.toLowerCase().includes('ag') || zoning?.toLowerCase().includes('farm');
+  const county = parcelData?.county || "";
+  const funFacts = generateFunFacts(acres, county, "MO");
+  
+  return [
+    {
+      title: "Physical Characteristics",
+      color: [139, 92, 246],
+      icon: "🏔️",
+      fields: [
+        { label: "Topography", value: acres > 10 ? "Flat to gently rolling (0–8% slopes)" : "Generally level terrain" },
+        { label: "Soils", value: "Predominantly well-drained loams with moderate productivity" },
+        { label: "Drainage", value: "Natural surface drainage with defined low areas" },
+        { label: "Floodplain", value: "None indicated / Verify with FEMA maps" },
+      ],
+      summary: "The property's terrain and soils support a wide range of uses with minimal physical constraints. Gentle topography is ideal for development or agricultural use.",
+      dataSource: "USGS National Elevation Dataset, USDA Soil Survey",
+      tips: [
+        "Request a soil test before significant agricultural investment",
+        "Walk the property after rain to observe drainage patterns",
+        "Note any areas of erosion or standing water"
+      ],
+      funFact: funFacts.physical
+    },
+    {
+      title: "Water & Hydrology",
+      color: [59, 130, 246],
+      icon: "💧",
+      fields: [
+        { label: "Surface Water", value: "Verify on-site: Creek / Pond / None visible" },
+        { label: "Seasonal Wetness", value: "Low to Moderate" },
+        { label: "Water Retention", value: "Moderate potential" },
+        { label: "Wetlands", value: "None mapped / Field verify" },
+      ],
+      summary: "Natural drainage patterns support land health. Surface water features enhance wildlife value and may provide irrigation potential.",
+      dataSource: "USFWS National Wetlands Inventory, FEMA NFHL",
+      tips: [
+        "Verify water rights - they may be separate from land ownership",
+        "Check for existing well permits in county records",
+        "Consider pond potential for livestock or irrigation"
+      ],
+      funFact: funFacts.water
+    },
+    {
+      title: "Vegetation & Habitat",
+      color: [16, 185, 129],
+      icon: "🌲",
+      fields: [
+        { label: "Dominant Cover", value: acres > 15 ? "Mixed timber and open areas" : "Open / Managed vegetation" },
+        { label: "Edge Habitat", value: acres > 10 ? "Strong – natural transitions present" : "Moderate" },
+        { label: "Wildlife Potential", value: "Deer, turkey, small game, songbirds" },
+        { label: "Timber Value", value: acres > 20 ? "Potential merchantable timber" : "Limited / Aesthetic" },
+      ],
+      summary: "Vegetation structure provides habitat value and aesthetic appeal. Edge habitat between cover types supports diverse wildlife populations.",
+      dataSource: "Aerial imagery analysis, Regional habitat data",
+      tips: [
+        "Consult a forester for timber inventory and management plan",
+        "Consider food plots to enhance wildlife habitat",
+        "Identify invasive species for removal"
+      ],
+      funFact: funFacts.vegetation
+    },
+    {
+      title: "Infrastructure & Access",
+      color: [107, 114, 128],
+      icon: "🛤️",
+      fields: [
+        { label: "Road Access", value: "County road / Public access indicated" },
+        { label: "Internal Trails", value: "Verify on-site" },
+        { label: "Utilities", value: "Electric service area / Verify availability" },
+        { label: "Build Sites", value: acres > 5 ? "Multiple potential locations" : "Limited / Identified" },
+      ],
+      summary: "Road access and utility proximity reduce development barriers. Internal access points may require improvement for full property utilization.",
+      dataSource: "County GIS, OpenStreetMap, Utility records",
+      tips: [
+        "Verify deeded road access - don't assume",
+        "Contact utility companies for connection costs",
+        "Consider septic feasibility for building sites"
+      ],
+      funFact: funFacts.infrastructure
+    }
+  ];
+}
+
+// Generate use-case suitability scores
+function generateUseCaseScores(acreage: string, zoning: string): { use: string; stars: number; description: string }[] {
+  const acres = parseFloat(acreage) || 0;
+  const isAg = zoning?.toLowerCase().includes('ag') || zoning?.toLowerCase().includes('farm');
+  
+  return [
+    { use: "Recreation / Hunting", stars: acres > 20 ? 5 : acres > 10 ? 4 : 3, description: "Space for trails, blinds, and wildlife management" },
+    { use: "Wildlife Habitat", stars: acres > 15 ? 5 : acres > 5 ? 4 : 3, description: "Natural areas supporting native species" },
+    { use: "Small-Scale Agriculture", stars: isAg ? 5 : acres > 10 ? 4 : 3, description: "Gardens, orchards, livestock grazing" },
+    { use: "Timber Investment", stars: acres > 30 ? 5 : acres > 15 ? 4 : acres > 5 ? 3 : 2, description: "Long-term timber growth and harvest" },
+    { use: "Residential / Cabin", stars: acres < 20 ? 4 : 3, description: "Homesite or weekend retreat" },
+    { use: "Conservation Easement", stars: acres > 20 ? 5 : acres > 10 ? 4 : 3, description: "Tax benefits through permanent protection" },
+  ];
+}
+
+// Draw star rating
+function drawStars(doc: jsPDF, stars: number, x: number, y: number) {
+  for (let i = 0; i < 5; i++) {
+    if (i < stars) {
+      doc.setFillColor(234, 179, 8);
+    } else {
+      doc.setFillColor(229, 231, 235);
+    }
+    doc.circle(x + (i * 5), y, 2, "F");
+  }
+}
+
+// Load logo
 async function loadLogoImage(): Promise<string | null> {
   try {
     const fs = await import('fs/promises');
@@ -521,243 +650,1291 @@ export async function POST(request: NextRequest) {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
+    const reportNumber = generateReportNumber();
+    const totalPages = 14;
 
-    // Fetch real parcel data from Regrid using address
+    // Fetch real parcel data from Regrid
     const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
-
-    // Load logo
     const logoImage = await loadLogoImage();
+    
+    // Parse address components
+    const addressParts = order.parcelAddress.split(',').map((p: string) => p.trim());
+    const county = parcelData?.county || addressParts[addressParts.length - 2] || 'N/A';
+    const state = addressParts.length >= 2 ? addressParts[addressParts.length - 1] : 'N/A';
+    const lotSize = parcelData ? formatAcreage(parcelData.acreage, parcelData.sqft) : "N/A";
+    const acres = parcelData?.acreage || 0;
+    const zoningStr = parcelData?.zoning || "N/A";
 
-    // ONE PAGE REPORT DESIGN
+    // ============================================
+    // PAGE 1: COVER PAGE (Frame-worthy)
+    // ============================================
     
-    // Header Section (Forest Green)
+    // Draw certificate border
+    drawCertificateBorder(doc, pageWidth, pageHeight);
+    
+    // Header with logo area
     doc.setFillColor(34, 83, 60);
-    doc.rect(0, 0, pageWidth, 35, "F");
+    doc.rect(20, 20, pageWidth - 40, 35, "F");
     
-    // Add logo to header if available
     if (logoImage) {
       try {
-        doc.addImage(logoImage, "PNG", 15, 5, 50, 25);
-      } catch (logoError) {
-        console.error("Failed to add logo to PDF:", logoError);
+        doc.addImage(logoImage, "PNG", 25, 23, 40, 20);
+      } catch (e) {
+        console.error("Logo error:", e);
       }
     }
     
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(24);
-    doc.text("TERRA FIRMA PARTNERS LLC", pageWidth / 2, 15, { align: "center" });
-    doc.setFontSize(11);
-    doc.text("Land Analysis Report", pageWidth / 2, 25, { align: "center" });
-
-    // ============================================
-    // HERO AERIAL VIEW - Primary Focus
-    // ============================================
-    let yPos = 35;
-    const heroMapHeight = 100; // Large hero image
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text("TERRA FIRMA PARTNERS LLC", pageWidth / 2 + 10, 32, { align: "center" });
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Professional Land Analysis Services", pageWidth / 2 + 10, 42, { align: "center" });
     
-    // Fetch satellite map image with prominent parcel boundaries
+    // Report Title Block
+    doc.setFillColor(248, 250, 252);
+    doc.rect(20, 60, pageWidth - 40, 20, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(1);
+    doc.rect(20, 60, pageWidth - 40, 20);
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("COMPREHENSIVE LAND ANALYSIS REPORT", pageWidth / 2, 73, { align: "center" });
+    
+    // Hero aerial map with property boundary
+    const heroMapHeight = 85;
+    const mapY = 88;
+    
+    // Calculate optimal zoom based on acreage
+    const acreage = parcelData?.acreage || 1;
+    let optimalZoom = 16;
+    if (acreage > 200) optimalZoom = 13;
+    else if (acreage > 80) optimalZoom = 14;
+    else if (acreage > 20) optimalZoom = 15;
+    else optimalZoom = 16;
+    
     const mapImage = await fetchGoogleMapImage(
       order.parcelLat, 
       order.parcelLng, 
       "property_boundaries",
-      16, // Balanced zoom for property context
+      optimalZoom,
       parcelData?.coordinates || null
     );
 
-    // Draw bordered frame for the aerial image
     doc.setDrawColor(34, 83, 60);
-    doc.setLineWidth(1.5);
-    doc.rect(10, yPos - 2, pageWidth - 20, heroMapHeight + 4);
+    doc.setLineWidth(2);
+    doc.rect(25, mapY, pageWidth - 50, heroMapHeight);
 
     if (mapImage) {
       try {
-        doc.addImage(mapImage, "PNG", 12, yPos, pageWidth - 24, heroMapHeight);
+        doc.addImage(mapImage, "PNG", 27, mapY + 2, pageWidth - 54, heroMapHeight - 4);
       } catch (imgError) {
-        console.error("Failed to add map image:", imgError);
-        drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 12, yPos, pageWidth - 24, heroMapHeight, parcelData?.coordinates || null);
+        drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 27, mapY + 2, pageWidth - 54, heroMapHeight - 4, parcelData?.coordinates || null);
       }
     } else {
-      drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 12, yPos, pageWidth - 24, heroMapHeight, parcelData?.coordinates || null);
+      drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", 27, mapY + 2, pageWidth - 54, heroMapHeight - 4, parcelData?.coordinates || null);
     }
 
-    // Coordinates overlay on bottom of map
-    yPos += heroMapHeight - 5;
-    doc.setFillColor(40, 40, 40);
-    doc.rect(12, yPos - 2, pageWidth - 24, 8, "F");
-    doc.setFontSize(8);
-    doc.setTextColor(255, 255, 255);
-    doc.text(`${order.parcelLat.toFixed(6)}N, ${Math.abs(order.parcelLng).toFixed(6)}W`, pageWidth / 2, yPos + 3, { align: "center" });
-
-    // ============================================
-    // PROPERTY INFO - Compact horizontal strip
-    // ============================================
-    yPos += 15;
-    
-    // Property info background
-    doc.setFillColor(248, 250, 252);
-    doc.rect(10, yPos - 3, pageWidth - 20, 20, "F");
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.5);
-    doc.rect(10, yPos - 3, pageWidth - 20, 20);
-    
-    // Property details in a single row layout
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    
-    const lotSize = parcelData ? formatAcreage(parcelData.acreage, parcelData.sqft) : "N/A";
-    const owner = parcelData?.owner || "Not Available";
-    const parcelId = parcelData?.parcelId || "N/A";
-    
-    // Row 1
-    doc.text("OWNER", 15, yPos + 2);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-    const truncOwner = owner.length > 25 ? owner.substring(0, 22) + "..." : owner;
-    doc.text(truncOwner, 15, yPos + 7);
-    
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.text("LOT SIZE", 75, yPos + 2);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-    doc.text(lotSize, 75, yPos + 7);
-    
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.text("PARCEL ID", 130, yPos + 2);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-    doc.text(parcelId, 130, yPos + 7);
-    
-    // Row 2 - Zoning
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.text("ZONING", 15, yPos + 12);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-    doc.text(parcelData?.zoning || "N/A", 35, yPos + 12);
-
-    // Overall Risk Assessment inline
-    const overallRisk = calculateOverallRisk(selectedLayers);
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.text("ASSESSMENT", 75, yPos + 12);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...overallRisk.color);
-    doc.text(overallRisk.label, 105, yPos + 12);
-
-    // ============================================
-    // LAYER SCORES - Clean table
-    // ============================================
-    yPos += 25;
+    // Property Address Block
+    let infoY = mapY + heroMapHeight + 8;
     
     doc.setFillColor(34, 83, 60);
-    doc.rect(15, yPos - 3, pageWidth - 30, 8, "F");
+    doc.roundedRect(25, infoY, pageWidth - 50, 28, 3, 3, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("PROPERTY LOCATION", pageWidth / 2, infoY + 8, { align: "center" });
+    
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "normal");
+    const displayAddress = order.parcelAddress.length > 60 ? order.parcelAddress.substring(0, 57) + "..." : order.parcelAddress;
+    doc.text(displayAddress, pageWidth / 2, infoY + 18, { align: "center" });
+    
+    doc.setFontSize(9);
+    doc.text(`${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W`, pageWidth / 2, infoY + 25, { align: "center" });
+    
+    // Key Stats Grid
+    infoY += 35;
+    const statBoxWidth = (pageWidth - 60) / 4;
+    const stats = [
+      { label: "TOTAL AREA", value: `${acres.toFixed(2)} AC` },
+      { label: "PARCEL ID", value: parcelData?.parcelId?.substring(0, 12) || "N/A" },
+      { label: "ZONING", value: zoningStr.substring(0, 10) },
+      { label: "COUNTY", value: county.substring(0, 12) },
+    ];
+    
+    stats.forEach((stat, idx) => {
+      const boxX = 27 + (idx * statBoxWidth) + (idx * 2);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(boxX, infoY, statBoxWidth, 22, 2, 2, "F");
+      doc.setDrawColor(34, 197, 94);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(boxX, infoY, statBoxWidth, 22, 2, 2);
+      
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text(stat.label, boxX + statBoxWidth / 2, infoY + 7, { align: "center" });
+      
+      doc.setTextColor(34, 83, 60);
+      doc.setFontSize(10);
+      doc.text(stat.value, boxX + statBoxWidth / 2, infoY + 16, { align: "center" });
+    });
+    
+    // Report Details
+    infoY += 30;
+    doc.setFillColor(255, 251, 235);
+    doc.roundedRect(25, infoY, pageWidth - 50, 18, 2, 2, "F");
+    
+    doc.setTextColor(100, 100, 100);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Report Number: ${reportNumber}`, 35, infoY + 7);
+    doc.text(`Generated: ${formatDate(new Date())}`, 35, infoY + 13);
+    doc.text(`Data Sources: Regrid, USGS, USDA, County Records`, pageWidth - 35, infoY + 7, { align: "right" });
+    doc.text(`Total Pages: ${totalPages}`, pageWidth - 35, infoY + 13, { align: "right" });
+    
+    // Certification statement
+    infoY += 25;
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.text("This report was prepared using publicly available data sources. It is intended for informational", pageWidth / 2, infoY, { align: "center" });
+    doc.text("purposes only and should not be used as a substitute for professional surveys, appraisals, or legal advice.", pageWidth / 2, infoY + 5, { align: "center" });
+    
+    // Footer with website
+    doc.setFillColor(34, 83, 60);
+    doc.rect(20, pageHeight - 28, pageWidth - 40, 12, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("www.terrafirmapartners.com", pageWidth / 2, pageHeight - 20, { align: "center" });
+
+    // ============================================
+    // PAGE 2: TABLE OF CONTENTS & AT-A-GLANCE
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "REPORT OVERVIEW", [34, 197, 94]);
+    
+    let tocY = 35;
+    
+    // Table of Contents
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(15, tocY, pageWidth - 30, 70, 3, 3, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, tocY, pageWidth - 30, 70, 3, 3);
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("TABLE OF CONTENTS", 20, tocY + 10);
+    
+    const tocItems = [
+      { page: 1, title: "Cover Page & Property Summary" },
+      { page: 2, title: "Report Overview & At-a-Glance" },
+      { page: 3, title: "Ownership & Valuation" },
+      { page: 4, title: "Property & Structure Details" },
+      { page: 5, title: "Physical Characteristics" },
+      { page: 6, title: "Water & Hydrology" },
+      { page: 7, title: "Vegetation & Habitat" },
+      { page: 8, title: "Infrastructure & Access" },
+      { page: 9, title: "Growing Potential" },
+      { page: 10, title: "Use-Case Suitability" },
+      { page: 11, title: "Understanding Your Land Rights" },
+      { page: 12, title: "Land Stewardship Guide" },
+      { page: 13, title: "Next Steps & Due Diligence" },
+      { page: 14, title: "Glossary & Notes" },
+    ];
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const col1Items = tocItems.slice(0, 7);
+    const col2Items = tocItems.slice(7);
+    
+    col1Items.forEach((item, idx) => {
+      doc.setTextColor(60, 60, 60);
+      doc.text(`${item.title}`, 25, tocY + 20 + (idx * 7));
+      doc.setTextColor(34, 83, 60);
+      doc.text(`${item.page}`, 95, tocY + 20 + (idx * 7), { align: "right" });
+    });
+    
+    col2Items.forEach((item, idx) => {
+      doc.setTextColor(60, 60, 60);
+      doc.text(`${item.title}`, pageWidth / 2 + 10, tocY + 20 + (idx * 7));
+      doc.setTextColor(34, 83, 60);
+      doc.text(`${item.page}`, pageWidth - 25, tocY + 20 + (idx * 7), { align: "right" });
+    });
+    
+    // At-a-Glance Summary
+    tocY += 80;
+    
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(15, tocY, pageWidth - 30, 95, 3, 3, "F");
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, tocY, pageWidth - 30, 95, 3, 3);
+    
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(15, tocY, 100, 12, 3, 3, "F");
+    doc.rect(15, tocY + 6, 100, 6, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("LAYER ANALYSIS", pageWidth / 2, yPos + 2, { align: "center" });
-
-    yPos += 12;
-
-    // Draw table header
-    const tableStartY = yPos;
-    const col1X = 20;
-    const col2X = 95;
-    const col3X = 145;
-    const rowHeight = 8;
-
-    doc.setFillColor(240, 240, 240);
-    doc.rect(15, yPos - 2, pageWidth - 30, rowHeight, "F");
+    doc.text("PROPERTY AT-A-GLANCE", 65, tocY + 8, { align: "center" });
     
-    doc.setTextColor(50, 50, 50);
+    // Two-column summary
+    const summaryCol1X = 25;
+    const summaryCol2X = pageWidth / 2 + 5;
+    let summaryY = tocY + 22;
+    
+    const summaryFields = [
+      { label: "Property Address", value: displayAddress },
+      { label: "Total Acreage", value: `${acres.toFixed(2)} acres` },
+      { label: "Parcel ID (APN)", value: parcelData?.parcelId || "N/A" },
+      { label: "Zoning Designation", value: zoningStr },
+      { label: "Current Owner", value: parcelData?.owner?.substring(0, 30) || "N/A" },
+      { label: "County", value: county },
+      { label: "Market Value", value: parcelData?.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A" },
+      { label: "Coordinates", value: `${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W` },
+    ];
+    
+    summaryFields.forEach((field, idx) => {
+      const colX = idx % 2 === 0 ? summaryCol1X : summaryCol2X;
+      const rowY = summaryY + Math.floor(idx / 2) * 14;
+      
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text(field.label + ":", colX, rowY);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(40, 40, 40);
+      doc.setFontSize(9);
+      const maxWidth = (pageWidth - 60) / 2 - 5;
+      const valueLines = doc.splitTextToSize(field.value, maxWidth);
+      doc.text(valueLines[0] || "N/A", colX, rowY + 6);
+    });
+    
+    // Quick assessment
+    summaryY += 65;
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(0.5);
+    doc.line(25, summaryY, pageWidth - 25, summaryY);
+    
+    summaryY += 8;
+    doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text("Data Layer", col1X, yPos + 3);
-    doc.text("Score", col2X, yPos + 3);
-    doc.text("Rating/Details", col3X, yPos + 3);
-
-    yPos += rowHeight;
-
-    // Draw table rows for each layer
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.text("QUICK ASSESSMENT:", 25, summaryY);
     
-    selectedLayers.forEach((layerId: string, index: number) => {
-      const layer = getLayerInfo(layerId);
-      const scoreData = getLayerScore(layerId);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    const assessmentText = acres > 20 
+      ? "Large acreage suitable for agriculture, recreation, or conservation. Multiple potential uses."
+      : acres > 5
+      ? "Mid-size property with flexibility for residential, small farming, or recreational use."
+      : "Compact parcel ideal for residential development or intensive small-scale agriculture.";
+    doc.text(assessmentText, 75, summaryY);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 2, totalPages, reportNumber);
+
+    // ============================================
+    // PAGE 3: OWNERSHIP & VALUATION
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "OWNERSHIP & VALUATION", [16, 185, 129]);
+    
+    let ownerY = 35;
+    
+    // Owner Information Box
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(15, ownerY, pageWidth - 30, 55, 3, 3, "F");
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, ownerY, pageWidth - 30, 55, 3, 3);
+    
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(15, ownerY, 85, 12, 3, 3, "F");
+    doc.rect(15, ownerY + 6, 85, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("CURRENT OWNER OF RECORD", 57, ownerY + 8, { align: "center" });
+    
+    doc.setTextColor(40, 40, 40);
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(parcelData?.owner || "Not Available", 25, ownerY + 28);
+    
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    doc.text("Mailing Address:", 25, ownerY + 40);
+    doc.setTextColor(40, 40, 40);
+    doc.text(parcelData?.mailingAddress || "Not Available", 65, ownerY + 40);
+    
+    if (parcelData?.lastOwnershipTransfer) {
+      doc.setTextColor(80, 80, 80);
+      doc.text("Ownership Since:", 25, ownerY + 48);
+      doc.setTextColor(40, 40, 40);
+      doc.text(parcelData.lastOwnershipTransfer, 65, ownerY + 48);
+    }
+    
+    ownerY += 65;
+    
+    // Valuation Section
+    doc.setFillColor(255, 251, 235);
+    doc.roundedRect(15, ownerY, pageWidth - 30, 70, 3, 3, "F");
+    doc.setDrawColor(234, 179, 8);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, ownerY, pageWidth - 30, 70, 3, 3);
+    
+    doc.setFillColor(234, 179, 8);
+    doc.roundedRect(15, ownerY, 105, 12, 3, 3, "F");
+    doc.rect(15, ownerY + 6, 105, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("ASSESSED VALUATION", 67, ownerY + 8, { align: "center" });
+    
+    const colW = (pageWidth - 50) / 3;
+    const valStartX = 20;
+    const valY = ownerY + 24;
+    
+    // Total Market Value
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("TOTAL MARKET VALUE", valStartX, valY);
+    doc.setTextColor(34, 83, 60);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    const marketVal = parcelData?.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A";
+    doc.text(marketVal, valStartX, valY + 12);
+    
+    // Land Value
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("LAND VALUE", valStartX + colW, valY);
+    doc.setTextColor(139, 92, 246);
+    doc.setFontSize(14);
+    const landVal = parcelData?.landValue ? `$${parcelData.landValue.toLocaleString()}` : "N/A";
+    doc.text(landVal, valStartX + colW, valY + 12);
+    
+    // Improvement Value
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("IMPROVEMENT VALUE", valStartX + colW * 2, valY);
+    doc.setTextColor(59, 130, 246);
+    doc.setFontSize(14);
+    const impVal = parcelData?.improvementValue ? `$${parcelData.improvementValue.toLocaleString()}` : "N/A";
+    doc.text(impVal, valStartX + colW * 2, valY + 12);
+    
+    // Explanation
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "italic");
+    doc.text("Note: Assessed values are determined by the county for tax purposes and may not reflect current market conditions.", 25, ownerY + 55);
+    doc.text(`Tax Year: ${parcelData?.taxYear || 'N/A'}`, 25, ownerY + 62);
+    
+    ownerY += 80;
+    
+    // Sales History
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(15, ownerY, pageWidth - 30, 50, 3, 3, "F");
+    doc.setDrawColor(107, 114, 128);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, ownerY, pageWidth - 30, 50, 3, 3);
+    
+    doc.setFillColor(107, 114, 128);
+    doc.roundedRect(15, ownerY, 80, 12, 3, 3, "F");
+    doc.rect(15, ownerY + 6, 80, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("SALES HISTORY", 55, ownerY + 8, { align: "center" });
+    
+    const salesY = ownerY + 24;
+    doc.setTextColor(80, 80, 80);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Last Sale Date:", 25, salesY);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(40, 40, 40);
+    doc.text(parcelData?.saleDate || "Not Available", 70, salesY);
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "bold");
+    doc.text("Sale Price:", 25, salesY + 10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(40, 40, 40);
+    const salePrice = parcelData?.salePrice && parcelData.salePrice > 0 ? `$${parcelData.salePrice.toLocaleString()}` : "Not Disclosed";
+    doc.text(salePrice, 70, salesY + 10);
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "bold");
+    doc.text("Transfer Date:", 25, salesY + 20);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(40, 40, 40);
+    doc.text(parcelData?.lastOwnershipTransfer || "Not Available", 70, salesY + 20);
+    
+    ownerY += 60;
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Data Source: County Assessor Records via Regrid", 15, ownerY);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 3, totalPages, reportNumber);
+    
+    // ============================================
+    // PAGE 4: PROPERTY & STRUCTURE DETAILS
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "PROPERTY & STRUCTURE DETAILS", [139, 92, 246]);
+    
+    let propY = 35;
+    
+    const hasBuilding = parcelData?.yearBuilt || parcelData?.buildingSqft || parcelData?.numBedrooms;
+    
+    if (hasBuilding) {
+      doc.setFillColor(240, 249, 255);
+      doc.roundedRect(15, propY, pageWidth - 30, 65, 3, 3, "F");
+      doc.setDrawColor(59, 130, 246);
+      doc.setLineWidth(1);
+      doc.roundedRect(15, propY, pageWidth - 30, 65, 3, 3);
       
-      // Alternating row colors
-      if (index % 2 === 0) {
-        doc.setFillColor(250, 250, 250);
-        doc.rect(15, yPos - 2, pageWidth - 30, rowHeight, "F");
+      doc.setFillColor(59, 130, 246);
+      doc.roundedRect(15, propY, 100, 12, 3, 3, "F");
+      doc.rect(15, propY + 6, 100, 6, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("BUILDING INFORMATION", 65, propY + 8, { align: "center" });
+      
+      const bldgY = propY + 22;
+      const bldgFields = [
+        { label: "Year Built:", value: parcelData?.yearBuilt?.toString() || "N/A" },
+        { label: "Building Area:", value: parcelData?.buildingSqft ? `${parcelData.buildingSqft.toLocaleString()} sq ft` : "N/A" },
+        { label: "Stories:", value: parcelData?.numStories?.toString() || "N/A" },
+        { label: "Bedrooms:", value: parcelData?.numBedrooms?.toString() || "N/A" },
+        { label: "Bathrooms:", value: parcelData?.numBathrooms?.toString() || "N/A" },
+        { label: "Property Use:", value: parcelData?.useDescription || "N/A" },
+      ];
+      
+      bldgFields.forEach((field, idx) => {
+        const colOffset = idx % 2 === 0 ? 0 : 85;
+        const rowOffset = Math.floor(idx / 2) * 12;
+        doc.setTextColor(80, 80, 80);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(field.label, 25 + colOffset, bldgY + rowOffset);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(40, 40, 40);
+        doc.text(field.value, 60 + colOffset, bldgY + rowOffset);
+      });
+      
+      propY += 75;
+    } else {
+      doc.setFillColor(255, 251, 235);
+      doc.roundedRect(15, propY, pageWidth - 30, 35, 3, 3, "F");
+      doc.setDrawColor(234, 179, 8);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(15, propY, pageWidth - 30, 35, 3, 3);
+      
+      doc.setTextColor(146, 64, 14);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("VACANT LAND / NO STRUCTURES", pageWidth / 2, propY + 12, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("No building or improvement records found for this parcel. This may indicate", pageWidth / 2, propY + 22, { align: "center" });
+      doc.text("undeveloped land or structures not yet recorded with the county.", pageWidth / 2, propY + 29, { align: "center" });
+      
+      propY += 45;
+    }
+    
+    // Legal Description
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(15, propY, pageWidth - 30, 60, 3, 3, "F");
+    doc.setDrawColor(107, 114, 128);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, propY, pageWidth - 30, 60, 3, 3);
+    
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(15, propY, 90, 12, 3, 3, "F");
+    doc.rect(15, propY + 6, 90, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("LEGAL DESCRIPTION", 60, propY + 8, { align: "center" });
+    
+    const legalY = propY + 22;
+    doc.setTextColor(40, 40, 40);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    
+    const legalDesc = parcelData?.legalDescription || "Legal description not available in county records";
+    const legalLines = doc.splitTextToSize(legalDesc, pageWidth - 50);
+    doc.text(legalLines.slice(0, 3), 25, legalY);
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "bold");
+    doc.text("Subdivision:", 25, legalY + 25);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(40, 40, 40);
+    doc.text(parcelData?.subdivision || "N/A", 60, legalY + 25);
+    
+    if (parcelData?.plssTownship || parcelData?.plssRange || parcelData?.plssSection) {
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.text("PLSS:", 25, legalY + 33);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(40, 40, 40);
+      const plss = [parcelData.plssTownship, parcelData.plssRange, parcelData.plssSection].filter(Boolean).join(" / ");
+      doc.text(plss || "N/A", 60, legalY + 33);
+    }
+    
+    propY += 70;
+    
+    // Location Data
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(15, propY, pageWidth - 30, 45, 3, 3, "F");
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, propY, pageWidth - 30, 45, 3, 3);
+    
+    doc.setFillColor(34, 197, 94);
+    doc.roundedRect(15, propY, 90, 12, 3, 3, "F");
+    doc.rect(15, propY + 6, 90, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("LOCATION DATA", 60, propY + 8, { align: "center" });
+    
+    const locY = propY + 22;
+    const locFields = [
+      { label: "County:", value: parcelData?.county ? parcelData.county.charAt(0).toUpperCase() + parcelData.county.slice(1) : "N/A" },
+      { label: "Census Tract:", value: parcelData?.censusTract || "N/A" },
+      { label: "Coordinates:", value: `${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W` },
+    ];
+    
+    locFields.forEach((field, idx) => {
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(field.label, 25, locY + idx * 9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(40, 40, 40);
+      doc.text(field.value, 70, locY + idx * 9);
+    });
+    
+    propY += 55;
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Data Source: County Records, US Census Bureau via Regrid", 15, propY);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 4, totalPages, reportNumber);
+
+    // ============================================
+    // PAGES 5-8: CATEGORY ANALYSIS PAGES
+    // ============================================
+    const categories = generateCategoryReports(parcelData, acres.toString(), zoningStr, order.parcelAddress);
+    
+    for (let i = 0; i < categories.length; i++) {
+      const category = categories[i];
+      
+      doc.addPage();
+      drawPageHeader(doc, pageWidth, category.title.toUpperCase(), category.color);
+      
+      let pageY = 35;
+      
+      // Subject Property Aerial Image (reusing mapImage from page 1)
+      const aerialMapWidth = 75;
+      const aerialMapHeight = 50;
+      const aerialMapX = pageWidth - aerialMapWidth - 15;
+      
+      doc.setFillColor(34, 83, 60);
+      doc.roundedRect(aerialMapX, pageY - 4, aerialMapWidth, 10, 2, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text("SUBJECT PROPERTY", aerialMapX + aerialMapWidth / 2, pageY + 2, { align: "center" });
+      
+      doc.setDrawColor(34, 83, 60);
+      doc.setLineWidth(1.5);
+      doc.rect(aerialMapX, pageY + 8, aerialMapWidth, aerialMapHeight);
+      
+      if (mapImage) {
+        try {
+          doc.addImage(mapImage, "PNG", aerialMapX + 1, pageY + 9, aerialMapWidth - 2, aerialMapHeight - 2);
+        } catch {
+          drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", aerialMapX + 1, pageY + 9, aerialMapWidth - 2, aerialMapHeight - 2, parcelData?.coordinates || null);
+        }
+      } else {
+        drawSimpleMap(doc, order.parcelLat, order.parcelLng, "property_boundaries", aerialMapX + 1, pageY + 9, aerialMapWidth - 2, aerialMapHeight - 2, parcelData?.coordinates || null);
       }
       
-      // Layer name
-      doc.setTextColor(60, 60, 60);
-      doc.text(layer.displayName, col1X, yPos + 3);
+      // Fields
+      const fieldsWidth = pageWidth - aerialMapWidth - 35;
+      let fieldY = pageY;
       
-      // Score with colored indicator
-      doc.setFillColor(...scoreData.color);
-      doc.circle(col2X + 2, yPos + 1.5, 2, "F");
-      doc.setTextColor(60, 60, 60);
-      doc.text(scoreData.score, col2X + 7, yPos + 3);
+      category.fields.forEach((field, idx) => {
+        if (idx % 2 === 0) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(15, fieldY - 3, fieldsWidth, 13, "F");
+        }
+        
+        doc.setFillColor(...category.color);
+        doc.rect(15, fieldY - 3, 2, 13, "F");
+        
+        doc.setTextColor(80, 80, 80);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(field.label + ":", 20, fieldY + 4);
+        
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(40, 40, 40);
+        const valueLines = doc.splitTextToSize(field.value, fieldsWidth - 45);
+        doc.text(valueLines, 55, fieldY + 4);
+        
+        fieldY += 14;
+      });
       
-      // Rating/Details
-      doc.setTextColor(100, 100, 100);
-      doc.text(scoreData.rating, col3X, yPos + 3);
+      pageY = Math.max(pageY + aerialMapHeight + 20, fieldY + 8);
       
-      yPos += rowHeight;
-    });
+      // Summary
+      doc.setFillColor(240, 253, 244);
+      doc.roundedRect(15, pageY, pageWidth - 30, 35, 3, 3, "F");
+      doc.setDrawColor(34, 83, 60);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(15, pageY, pageWidth - 30, 35, 3, 3);
+      
+      doc.setFillColor(34, 83, 60);
+      doc.roundedRect(15, pageY, 60, 10, 3, 3, "F");
+      doc.rect(15, pageY + 5, 60, 5, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("SUMMARY", 45, pageY + 7, { align: "center" });
+      
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const summaryLines = doc.splitTextToSize(category.summary, pageWidth - 45);
+      doc.text(summaryLines, 20, pageY + 18);
+      
+      pageY += 42;
+      
+      // Did You Know? Fun Fact Section
+      doc.setFillColor(255, 251, 235);
+      doc.roundedRect(15, pageY, pageWidth - 30, 30, 3, 3, "F");
+      doc.setDrawColor(184, 134, 11);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(15, pageY, pageWidth - 30, 30, 3, 3);
+      
+      doc.setFillColor(184, 134, 11);
+      doc.roundedRect(15, pageY, 75, 10, 3, 3, "F");
+      doc.rect(15, pageY + 5, 75, 5, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("DID YOU KNOW?", 52.5, pageY + 7, { align: "center" });
+      
+      doc.setTextColor(146, 64, 14);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      const funFactLines = doc.splitTextToSize(category.funFact, pageWidth - 45);
+      doc.text(funFactLines, 20, pageY + 17);
+      
+      pageY += 36;
+      
+      // Tips Section
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(15, pageY, pageWidth - 30, 38, 3, 3, "F");
+      doc.setDrawColor(107, 114, 128);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(15, pageY, pageWidth - 30, 38, 3, 3);
+      
+      doc.setFillColor(107, 114, 128);
+      doc.roundedRect(15, pageY, 70, 10, 3, 3, "F");
+      doc.rect(15, pageY + 5, 70, 5, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("LANDOWNER TIPS", 50, pageY + 7, { align: "center" });
+      
+      let tipY = pageY + 17;
+      category.tips.forEach((tip, idx) => {
+        doc.setTextColor(107, 114, 128);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.text(`${idx + 1}.`, 20, tipY);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(60, 60, 60);
+        doc.text(tip, 27, tipY);
+        tipY += 8;
+      });
+      
+      pageY += 44;
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      doc.text(`Data Source: ${category.dataSource}`, 15, pageY);
+      
+      drawPageFooter(doc, pageWidth, pageHeight, i + 5, totalPages, reportNumber);
+    }
 
-    // Draw table border
+    // ============================================
+    // PAGE 9: GROWING POTENTIAL
+    // ============================================
+    const hardiness = getHardinessZone(order.parcelLat);
+    
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "GROWING POTENTIAL", [34, 197, 94]);
+    
+    let growingY = 35;
+    
+    const colWidth = (pageWidth - 40) / 2;
+    
+    // Left: Climate & Zone
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(15, growingY, colWidth, 90, 3, 3, "F");
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, growingY, colWidth, 90, 3, 3);
+    
+    doc.setFillColor(34, 197, 94);
+    doc.roundedRect(15, growingY, colWidth, 12, 3, 3, "F");
+    doc.rect(15, growingY + 6, colWidth, 6, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("USDA HARDINESS ZONE", 15 + colWidth / 2, growingY + 8, { align: "center" });
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFontSize(32);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Zone ${hardiness.zone}`, 15 + colWidth / 2, growingY + 35, { align: "center" });
+    
+    let climateY = growingY + 45;
+    const climateFields = [
+      { label: "Min Winter Temp:", value: hardiness.minTemp },
+      { label: "Growing Season:", value: hardiness.growingSeason },
+      { label: "Last Spring Frost:", value: hardiness.avgLastFrost },
+      { label: "First Fall Frost:", value: hardiness.avgFirstFrost },
+    ];
+    
+    climateFields.forEach((field) => {
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text(field.label, 20, climateY);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(40, 40, 40);
+      doc.text(field.value, 55, climateY);
+      climateY += 10;
+    });
+    
+    // Right: Ideal Crops
+    const rightColX = 20 + colWidth;
+    doc.setFillColor(255, 251, 235);
+    doc.roundedRect(rightColX, growingY, colWidth, 90, 3, 3, "F");
+    doc.setDrawColor(234, 179, 8);
+    doc.setLineWidth(1);
+    doc.roundedRect(rightColX, growingY, colWidth, 90, 3, 3);
+    
+    doc.setFillColor(234, 179, 8);
+    doc.roundedRect(rightColX, growingY, colWidth, 12, 3, 3, "F");
+    doc.rect(rightColX, growingY + 6, colWidth, 6, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("IDEAL CROPS FOR THIS ZONE", rightColX + colWidth / 2, growingY + 8, { align: "center" });
+    
+    let cropY = growingY + 22;
+    hardiness.idealCrops.forEach((crop, idx) => {
+      doc.setFillColor(34, 197, 94);
+      doc.circle(rightColX + 8, cropY - 1, 2, "F");
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(crop, rightColX + 14, cropY);
+      cropY += 11;
+    });
+    
+    growingY += 100;
+    
+    // Soil info
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(15, growingY, pageWidth - 30, 30, 3, 3, "F");
+    doc.setDrawColor(107, 114, 128);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, growingY, pageWidth - 30, 30, 3, 3);
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("SOIL TEMPERATURE GUIDANCE:", 20, growingY + 10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    const soilLines = doc.splitTextToSize(hardiness.soilTempInfo, pageWidth - 50);
+    doc.text(soilLines, 20, growingY + 20);
+    
+    growingY += 40;
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Data Source: USDA Plant Hardiness Zone Map, NOAA Climate Data", 15, growingY);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 9, totalPages, reportNumber);
+
+    // ============================================
+    // PAGE 10: USE-CASE SUITABILITY
+    // ============================================
+    const useCaseScores = generateUseCaseScores(acres.toString(), zoningStr);
+    
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "USE-CASE SUITABILITY", [234, 179, 8]);
+    
+    let useY = 35;
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.text("Based on property size, zoning, and regional characteristics, this property is rated for the following uses:", pageWidth / 2, useY, { align: "center" });
+    
+    useY += 15;
+    
+    useCaseScores.forEach((score, idx) => {
+      const rowY = useY + (idx * 22);
+      
+      if (idx % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+      } else {
+        doc.setFillColor(255, 255, 255);
+      }
+      doc.rect(15, rowY - 5, pageWidth - 30, 20, "F");
+      
+      doc.setFillColor(34, 83, 60);
+      doc.rect(15, rowY - 5, 3, 20, "F");
+      
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(score.use, 25, rowY + 3);
+      
+      drawStars(doc, score.stars, 90, rowY + 2);
+      
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text(score.description, 120, rowY + 3);
+    });
+    
+    useY += useCaseScores.length * 22 + 10;
+    
+    // Rating legend
+    doc.setFillColor(255, 251, 235);
+    doc.roundedRect(15, useY, pageWidth - 30, 25, 3, 3, "F");
+    doc.setDrawColor(234, 179, 8);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, useY, pageWidth - 30, 25, 3, 3);
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("RATING SCALE:", 20, useY + 8);
+    doc.setFont("helvetica", "normal");
+    doc.text("★★★★★ Excellent  |  ★★★★☆ Very Good  |  ★★★☆☆ Good  |  ★★☆☆☆ Fair  |  ★☆☆☆☆ Limited", 20, useY + 17);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 10, totalPages, reportNumber);
+
+    // ============================================
+    // PAGE 11: UNDERSTANDING YOUR LAND RIGHTS
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "UNDERSTANDING YOUR LAND RIGHTS", [139, 92, 246]);
+    
+    let rightsY = 35;
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.text("Land ownership in the United States involves a \"bundle of rights\" that can be separated, sold, or retained.", pageWidth / 2, rightsY, { align: "center" });
+    
+    rightsY += 12;
+    
+    const rightsData = [
+      {
+        title: "SURFACE RIGHTS",
+        color: [34, 197, 94] as [number, number, number],
+        description: "The right to use the surface of the land for farming, building, recreation, or other purposes. This is typically what is transferred in a standard real estate transaction.",
+        tip: "Always verify what improvements or restrictions apply to surface use."
+      },
+      {
+        title: "MINERAL RIGHTS",
+        color: [139, 92, 246] as [number, number, number],
+        description: "The right to extract minerals beneath the surface, including oil, gas, coal, and precious metals. These rights can be severed from surface rights and sold separately.",
+        tip: "Check deed history to confirm mineral rights conveyance. In many areas, mineral rights were severed decades ago."
+      },
+      {
+        title: "WATER RIGHTS",
+        color: [59, 130, 246] as [number, number, number],
+        description: "Rights to use water on or adjacent to the property. Water law varies significantly by state (riparian vs. prior appropriation systems).",
+        tip: "Contact your state water resources agency to understand applicable water rights doctrine."
+      },
+      {
+        title: "AIR RIGHTS",
+        color: [107, 114, 128] as [number, number, number],
+        description: "The right to control the space above the land surface, subject to aviation regulations. Can affect building height and development potential.",
+        tip: "Air rights are increasingly valuable in urban areas for development."
+      },
+    ];
+    
+    rightsData.forEach((right, idx) => {
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(15, rightsY, pageWidth - 30, 35, 2, 2, "F");
+      doc.setFillColor(...right.color);
+      doc.rect(15, rightsY, 3, 35, "F");
+      
+      doc.setTextColor(...right.color);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(right.title, 22, rightsY + 8);
+      
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      const descLines = doc.splitTextToSize(right.description, pageWidth - 50);
+      doc.text(descLines, 22, rightsY + 16);
+      
+      doc.setTextColor(146, 64, 14);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(7);
+      doc.text(`TIP: ${right.tip}`, 22, rightsY + 30);
+      
+      rightsY += 40;
+    });
+    
+    // Easements section
+    rightsY += 5;
+    doc.setFillColor(255, 251, 235);
+    doc.roundedRect(15, rightsY, pageWidth - 30, 35, 3, 3, "F");
+    doc.setDrawColor(234, 179, 8);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, rightsY, pageWidth - 30, 35, 3, 3);
+    
+    doc.setTextColor(146, 64, 14);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("EASEMENTS & ENCUMBRANCES", 20, rightsY + 10);
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text("Easements grant others limited rights to use your property (e.g., utility access, road access). Review your title", 20, rightsY + 20);
+    doc.text("commitment or deed for recorded easements. Common types include utility easements, access easements, and drainage easements.", 20, rightsY + 27);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 11, totalPages, reportNumber);
+
+    // ============================================
+    // PAGE 12: LAND STEWARDSHIP GUIDE
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "LAND STEWARDSHIP GUIDE", [16, 185, 129]);
+    
+    let stewY = 35;
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.text("Good land stewardship protects your investment, supports wildlife, and may qualify you for tax incentives.", pageWidth / 2, stewY, { align: "center" });
+    
+    stewY += 12;
+    
+    const stewardshipTopics = [
+      {
+        title: "CONSERVATION PROGRAMS",
+        items: [
+          "Conservation Reserve Program (CRP) - Annual rental payments for taking marginal cropland out of production",
+          "Environmental Quality Incentives Program (EQIP) - Cost-share for conservation practices",
+          "Conservation Easements - Permanent protection with significant tax benefits",
+          "Contact your local USDA Service Center for eligibility and enrollment"
+        ]
+      },
+      {
+        title: "WILDLIFE MANAGEMENT",
+        items: [
+          "Create edge habitat where different cover types meet for maximum species diversity",
+          "Establish food plots with native plants to support game and non-game wildlife",
+          "Maintain water sources - even small ponds dramatically increase wildlife value",
+          "Leave standing dead trees (snags) for cavity-nesting birds when safe to do so"
+        ]
+      },
+      {
+        title: "TIMBER MANAGEMENT",
+        items: [
+          "Consult a professional forester before any harvest - free assistance often available through state forestry agencies",
+          "Timber Stand Improvement (TSI) removes low-value trees to benefit crop trees",
+          "Consider certification (FSC, SFI) for access to premium markets",
+          "Timber sales can provide income while improving long-term stand quality"
+        ]
+      },
+      {
+        title: "SOIL HEALTH",
+        items: [
+          "Minimize soil disturbance and maintain ground cover to prevent erosion",
+          "Rotate grazing areas to prevent overgrazing and compaction",
+          "Conduct soil tests every 2-3 years for productive agricultural land",
+          "Consider cover crops to build organic matter and suppress weeds"
+        ]
+      }
+    ];
+    
+    stewardshipTopics.forEach((topic, idx) => {
+      doc.setFillColor(240, 253, 244);
+      doc.roundedRect(15, stewY, pageWidth - 30, 35, 2, 2, "F");
+      doc.setFillColor(16, 185, 129);
+      doc.rect(15, stewY, 3, 35, "F");
+      
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(topic.title, 22, stewY + 8);
+      
+      let itemY = stewY + 15;
+      topic.items.forEach((item, itemIdx) => {
+        doc.setTextColor(60, 60, 60);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.text(`• ${item}`, 25, itemY);
+        itemY += 5;
+      });
+      
+      stewY += 40;
+    });
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 12, totalPages, reportNumber);
+
+    // ============================================
+    // PAGE 13: NEXT STEPS & DUE DILIGENCE
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "NEXT STEPS & DUE DILIGENCE", [59, 130, 246]);
+    
+    let nextY = 35;
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.text("Before finalizing any land purchase or development decision, complete these essential steps:", pageWidth / 2, nextY, { align: "center" });
+    
+    nextY += 12;
+    
+    // Due Diligence Checklist
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(15, nextY, pageWidth - 30, 95, 3, 3, "F");
+    doc.setDrawColor(59, 130, 246);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, nextY, pageWidth - 30, 95, 3, 3);
+    
+    doc.setFillColor(59, 130, 246);
+    doc.roundedRect(15, nextY, 110, 12, 3, 3, "F");
+    doc.rect(15, nextY + 6, 110, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("DUE DILIGENCE CHECKLIST", 70, nextY + 8, { align: "center" });
+    
+    const checklist = [
+      "□  Order title search and review for liens, easements, and encumbrances",
+      "□  Commission a boundary survey from a licensed surveyor",
+      "□  Verify road access is deeded (not just assumed)",
+      "□  Contact utility companies for service availability and connection costs",
+      "□  Check county zoning and any restrictive covenants",
+      "□  Review FEMA flood maps for flood zone designation",
+      "□  Conduct soil/perc test if septic system will be needed",
+      "□  Verify water rights (especially in Western states)",
+      "□  Check for environmental issues (Phase I if commercial use planned)",
+      "□  Walk the property - preferably after rain to observe drainage",
+    ];
+    
+    let checkY = nextY + 20;
+    checklist.forEach((item) => {
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text(item, 22, checkY);
+      checkY += 7.5;
+    });
+    
+    nextY += 105;
+    
+    // Professionals to Consult
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(15, nextY, pageWidth - 30, 55, 3, 3, "F");
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, nextY, pageWidth - 30, 55, 3, 3);
+    
+    doc.setFillColor(34, 197, 94);
+    doc.roundedRect(15, nextY, 110, 12, 3, 3, "F");
+    doc.rect(15, nextY + 6, 110, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("PROFESSIONALS TO CONSULT", 70, nextY + 8, { align: "center" });
+    
+    const professionals = [
+      { role: "Real Estate Attorney", purpose: "Title review, contract negotiation, closing" },
+      { role: "Licensed Surveyor", purpose: "Boundary survey, easement location" },
+      { role: "Appraiser", purpose: "Fair market value determination" },
+      { role: "Forester", purpose: "Timber inventory and management plan" },
+      { role: "Soil Scientist/Engineer", purpose: "Septic feasibility, soil quality" },
+    ];
+    
+    let profY = nextY + 20;
+    professionals.forEach((prof, idx) => {
+      const colX = idx % 2 === 0 ? 22 : pageWidth / 2 + 5;
+      const rowOffset = Math.floor(idx / 2) * 12;
+      
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text(prof.role + ":", colX, profY + rowOffset);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(prof.purpose, colX + 38, profY + rowOffset);
+    });
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 13, totalPages, reportNumber);
+
+    // ============================================
+    // PAGE 14: GLOSSARY & NOTES
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "GLOSSARY & NOTES", [107, 114, 128]);
+    
+    let glossY = 35;
+    
+    // Glossary
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(15, glossY, pageWidth - 30, 110, 3, 3, "F");
+    doc.setDrawColor(107, 114, 128);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(15, glossY, pageWidth - 30, 110, 3, 3);
+    
+    doc.setFillColor(107, 114, 128);
+    doc.roundedRect(15, glossY, 60, 12, 3, 3, "F");
+    doc.rect(15, glossY + 6, 60, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("GLOSSARY", 45, glossY + 8, { align: "center" });
+    
+    const glossaryTerms = [
+      { term: "APN (Assessor's Parcel Number)", def: "Unique identifier assigned by the county assessor" },
+      { term: "Easement", def: "A right to use another's property for a specific purpose" },
+      { term: "Encumbrance", def: "Any claim or restriction on the property" },
+      { term: "FEMA", def: "Federal Emergency Management Agency (administers flood maps)" },
+      { term: "Legal Description", def: "Precise written identification of property location" },
+      { term: "PLSS", def: "Public Land Survey System (Township, Range, Section)" },
+      { term: "Plat", def: "Recorded map showing lot boundaries within a subdivision" },
+      { term: "Right-of-Way", def: "Legal right to pass through property owned by another" },
+      { term: "Riparian Rights", def: "Water rights based on owning land adjacent to water" },
+      { term: "Setback", def: "Required distance between structures and property lines" },
+      { term: "Title Insurance", def: "Protection against defects in property ownership" },
+      { term: "Zoning", def: "Government regulation of land use and development" },
+    ];
+    
+    let termY = glossY + 20;
+    const termCol1 = glossaryTerms.slice(0, 6);
+    const termCol2 = glossaryTerms.slice(6);
+    
+    termCol1.forEach((item) => {
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text(item.term, 20, termY);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(item.def, 20, termY + 5);
+      termY += 14;
+    });
+    
+    termY = glossY + 20;
+    termCol2.forEach((item) => {
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.text(item.term, pageWidth / 2 + 5, termY);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(item.def, pageWidth / 2 + 5, termY + 5);
+      termY += 14;
+    });
+    
+    glossY += 120;
+    
+    // Notes Section
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(15, glossY, pageWidth - 30, 55, 3, 3, "F");
     doc.setDrawColor(200, 200, 200);
     doc.setLineWidth(0.5);
-    doc.rect(15, tableStartY - 2, pageWidth - 30, (selectedLayers.length + 1) * rowHeight);
-
-    // Footer Section
-    yPos = pageHeight - 35;
+    doc.roundedRect(15, glossY, pageWidth - 30, 55, 3, 3);
     
-    // Data source note
-    doc.setFontSize(7);
-    doc.setTextColor(100, 100, 100);
-    const dataSources = "Data sources: Regrid (Parcel Data), FEMA (Flood Zones), USGS (Topography), USDA (Soils), Local Government (Zoning)";
-    doc.text(dataSources, pageWidth / 2, yPos, { align: "center" });
+    doc.setTextColor(150, 150, 150);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("YOUR NOTES:", 20, glossY + 10);
     
-    yPos += 5;
-    doc.text(`Report Generated: ${formatDate(new Date())} | Order ID: ${order.id.slice(0, 12)}`, pageWidth / 2, yPos, { align: "center" });
+    // Lined paper effect
+    doc.setDrawColor(230, 230, 230);
+    doc.setLineWidth(0.3);
+    for (let lineY = glossY + 18; lineY < glossY + 52; lineY += 8) {
+      doc.line(20, lineY, pageWidth - 20, lineY);
+    }
     
-    // Disclaimer
-    yPos += 7;
-    doc.setFontSize(6);
-    const disclaimer = "This report is for informational purposes only. Data compiled from public sources and may not reflect current conditions. Not a substitute for professional surveys or appraisals. Terra Firma Partners LLC makes no guarantees regarding accuracy or completeness.";
-    const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 30);
-    doc.text(disclaimerLines, pageWidth / 2, yPos, { align: "center" });
-
-    // Bottom bar
+    glossY += 65;
+    
+    // Final thank you
     doc.setFillColor(34, 83, 60);
-    doc.rect(0, pageHeight - 12, pageWidth, 12, "F");
+    doc.roundedRect(15, glossY, pageWidth - 30, 25, 3, 3, "F");
+    
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(8);
-    doc.text("© 2026 Terra Firma Partners LLC | www.terrafirmapartners.com", pageWidth / 2, pageHeight - 5, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Thank you for choosing Terra Firma Partners LLC", pageWidth / 2, glossY + 10, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("Questions? Contact us at info@terrafirmapartners.com", pageWidth / 2, glossY + 18, { align: "center" });
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 14, totalPages, reportNumber);
 
-    const pdfBuffer = doc.output("arraybuffer");
-    const pdfBase64 = Buffer.from(pdfBuffer).toString("base64");
+    // Generate PDF
+    const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
+    const base64Pdf = pdfBuffer.toString("base64");
 
-    // Update order with PDF path (in production, save to storage)
+    // Update order with PDF path (using base64 data URL as path)
     await prisma.order.update({
       where: { id: orderId },
       data: {
-        pdfPath: `report_${orderId}.pdf`,
+        pdfPath: `data:application/pdf;base64,${base64Pdf.substring(0, 50)}...`,
         status: "completed",
       },
     });
 
     return NextResponse.json({
       success: true,
-      pdf: pdfBase64,
-      filename: `terra_firma_report_${orderId.slice(0, 8)}.pdf`,
+      message: "PDF generated successfully",
+      pdfData: base64Pdf,
     });
   } catch (error) {
     console.error("PDF generation error:", error);
@@ -766,19 +1943,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function getLayerNotes(layerId: string): string {
-  const notes: Record<string, string> = {
-    flood_zones: "FEMA flood zone designations indicate the level of flood risk. Zone A and AE areas have a 1% annual chance of flooding (100-year flood). Zone X (shaded) has a 0.2% annual chance (500-year flood). Properties in high-risk zones typically require flood insurance for federally-backed mortgages.",
-    wetlands: "Wetland areas are protected under the Clean Water Act and may have restrictions on development. Activities affecting wetlands may require permits from the U.S. Army Corps of Engineers. Wetland presence can impact property value and development potential.",
-    topography: "Elevation data shows the terrain characteristics of the property. Steep slopes may affect construction costs, drainage, and erosion control requirements. Understanding topography is essential for site planning and stormwater management.",
-    soil_types: "Soil classifications affect construction methods, foundation requirements, and agricultural suitability. Some soil types may have poor drainage, high shrink-swell potential, or other characteristics that impact development.",
-    zoning: "Zoning designations determine permitted land uses, building heights, setbacks, and density. Understanding zoning is crucial for evaluating development potential and ensuring compliance with local regulations.",
-    property_boundaries: "Property boundary information helps identify the legal extent of the parcel. Always verify boundaries through an official survey before any transactions or improvements.",
-    power_substations: "Proximity to electrical substations may be relevant for industrial development, data centers, or properties requiring high power capacity. Some buyers may also consider proximity for residential property decisions.",
-    roads_transportation: "Road access and transportation infrastructure affect property accessibility, traffic patterns, and potential for commercial development. Consider proximity to highways, public transit, and freight routes.",
-  };
-
-  return notes[layerId] || "Additional analysis data and notes for this layer will be provided based on property-specific findings.";
 }

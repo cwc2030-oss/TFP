@@ -46,7 +46,8 @@ export default function MapPage() {
   const router = useRouter();
   const { data: session } = useSession() || {};
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
-  const [selectedLayers, setSelectedLayers] = useState<string[]>(["flood_zones"]);
+  // Basic Report - all 5 layers pre-selected
+  const [selectedLayers] = useState<string[]>(["flood_zones", "topography", "soil_types", "property_boundaries", "roads_transportation"]);
   const [showCheckout, setShowCheckout] = useState(false);
   const [guestEmail, setGuestEmail] = useState("");
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
@@ -57,9 +58,7 @@ export default function MapPage() {
     setError("");
   }, []);
 
-  const handleLayersChange = useCallback((layers: string[]) => {
-    setSelectedLayers(layers);
-  }, []);
+
 
   const handleProceedToCheckout = () => {
     if (!selectedParcel) {
@@ -133,9 +132,7 @@ export default function MapPage() {
         <div className="flex-1 relative">
           <InteractiveMap
             onParcelSelect={handleParcelSelect}
-            onLayersChange={handleLayersChange}
             onCheckout={handleProceedToCheckout}
-            initialLayers={selectedLayers}
           />
 
 {/* Order Summary card removed - checkout button now in parcel panel */}

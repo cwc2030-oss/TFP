@@ -1,54 +1,65 @@
 generator client {
-    provider = "prisma-client-js"
-    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
-    output = "/home/ubuntu/terra_firma_mapping/nextjs_space/node_modules/.prisma/client"
+  provider      = "prisma-client-js"
+  output        = "/home/ubuntu/terra_firma_mapping/nextjs_space/node_modules/.prisma/client"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-    id           String   @id @default(cuid())
-    email        String   @unique
-    passwordHash String
-    name         String?
-    company      String?
-    role         String   @default("user")
-    createdAt    DateTime @default(now())
-    updatedAt    DateTime @updatedAt
-    orders       Order[]
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  company      String?
+  role         String   @default("user")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  orders       Order[]
 }
 
 model MapLayer {
-    id           String   @id @default(cuid())
-    name         String   @unique
-    description  String?
-    source       String?
-    category     String?
-    isAvailable  Boolean  @default(true)
-    isPremium    Boolean  @default(false)
-    createdAt    DateTime @default(now())
-    updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  source      String?
+  category    String?
+  isAvailable Boolean  @default(true)
+  isPremium   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Order {
-    id              String   @id @default(cuid())
-    userId          String?
-    user            User?    @relation(fields: [userId], references: [id])
-    parcelAddress   String
-    parcelLat       Float
-    parcelLng       Float
-    parcelId        String?
-    selectedLayers  String   @default("[]")
-    guestEmail      String?
-    status          String   @default("pending")
-    paymentStatus   String   @default("pending")
-    paymentIntentId String?
-    stripeSessionId String?
-    pdfPath         String?
-    price           Float    @default(350)
-    createdAt       DateTime @default(now())
-    updatedAt       DateTime @updatedAt
+  id              String   @id @default(cuid())
+  userId          String?
+  parcelAddress   String
+  parcelLat       Float
+  parcelLng       Float
+  parcelId        String?
+  selectedLayers  String   @default("[]")
+  guestEmail      String?
+  status          String   @default("pending")
+  paymentStatus   String   @default("pending")
+  paymentIntentId String?
+  stripeSessionId String?
+  pdfPath         String?
+  price           Float    @default(350)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User?    @relation(fields: [userId], references: [id])
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  email     String
+  parcelId  String?
+  address   String?
+  source    String   @default("email_parcel")
+  createdAt DateTime @default(now())
+  
+  @@index([email])
 }

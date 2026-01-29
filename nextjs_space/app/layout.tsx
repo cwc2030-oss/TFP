@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import Navbar from "@/components/navbar";
@@ -10,19 +11,43 @@ const inter = Inter({ subsets: ["latin"] });
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXTAUTH_URL || "http://localhost:3000"),
-  title: "Terra Firma Partners LLC | Land Parcel Analysis",
+  metadataBase: new URL("https://terrafirma.partners"),
+  title: "Terra Firma Partners™ | Professional Land Analysis Reports",
   description:
-    "Professional land parcel analysis and mapping services for the Kansas City metro area. Generate detailed reports with flood zones, topography, zoning, and more.",
+    "Get instant land parcel analysis reports for any property in the USA. Flood zones, topography, soil types, ownership data & more. Professional PDF reports for $99.",
+  keywords: ["land analysis", "parcel report", "property report", "flood zone map", "land survey", "real estate analysis", "FEMA flood", "topography map", "soil report"],
+  authors: [{ name: "Terra Firma Partners LLC" }],
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
   },
   openGraph: {
-    title: "Terra Firma Partners LLC | Land Parcel Analysis",
+    type: "website",
+    locale: "en_US",
+    url: "https://terrafirma.partners",
+    siteName: "Terra Firma Partners™",
+    title: "Terra Firma Partners™ | Professional Land Analysis Reports",
     description:
-      "Professional land parcel analysis and mapping services for the Kansas City metro area.",
+      "Get instant land parcel analysis reports for any US property. Flood zones, topography, soil, ownership & more. $99 per report.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Terra Firma Partners - Land Analysis Reports",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Terra Firma Partners™ | Land Analysis Reports",
+    description: "Professional land parcel analysis reports for any US property. $99 per report.",
     images: ["/og-image.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
   },
 };
 
@@ -35,6 +60,22 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script src="https://apps.abacus.ai/chatllm/appllm-lib.js"></script>
+        {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID}`}
+              strategy="afterInteractive"
+            />
+            <Script id="google-analytics" strategy="afterInteractive">
+              {`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', '${process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID}');
+              `}
+            </Script>
+          </>
+        )}
       </head>
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>
         <Providers>
