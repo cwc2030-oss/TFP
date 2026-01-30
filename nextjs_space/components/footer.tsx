@@ -43,6 +43,16 @@ export default function Footer() {
                   My Account
                 </Link>
               </li>
+              <li>
+                <a 
+                  href="/sample-report.pdf" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-sm hover:text-emerald-400 transition-colors"
+                >
+                  Sample Report
+                </a>
+              </li>
             </ul>
           </div>
 
