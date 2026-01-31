@@ -7,8 +7,35 @@ import { MAP_LAYERS } from "@/lib/map-layers";
 
 export const dynamic = "force-dynamic";
 
-// Helper function to generate Google Maps Static API URLs
-function getMapImageUrl(lat: number, lng: number, zoom: number, maptype: 'satellite' | 'terrain' | 'hybrid', markers: boolean = true): string {
+// Build parcel boundary path for Google Maps Static API
+function buildParcelPath(coordinates: number[][][] | null): string {
+  if (!coordinates || coordinates.length === 0 || !coordinates[0]) {
+    return "";
+  }
+  
+  const ring = coordinates[0];
+  if (ring.length < 3) return "";
+  
+  const maxPoints = 50;
+  const step = ring.length > maxPoints ? Math.ceil(ring.length / maxPoints) : 1;
+  
+  const pathPoints = ring
+    .filter((_, i) => i % step === 0 || i === ring.length - 1)
+    .map(coord => `${coord[1]},${coord[0]}`)
+    .join("|");
+  
+  return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
+}
+
+// Helper function to generate Google Maps Static API URLs with optional boundary path
+function getMapImageUrl(
+  lat: number, 
+  lng: number, 
+  zoom: number, 
+  maptype: 'satellite' | 'terrain' | 'hybrid', 
+  markers: boolean = true, 
+  boundaryCoordinates: number[][][] | null = null
+): string {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || '';
   const size = '640x480';
   const scale = '2';
@@ -25,6 +52,14 @@ function getMapImageUrl(lat: number, lng: number, zoom: number, maptype: 'satell
   ];
   
   let url = parts.join('');
+  
+  // Add boundary path if coordinates provided
+  if (boundaryCoordinates) {
+    const pathParam = buildParcelPath(boundaryCoordinates);
+    if (pathParam) {
+      url += pathParam;
+    }
+  }
   
   if (markers) {
     url += '&markers=color:red|label:P|' + lat + ',' + lng;
@@ -252,27 +287,6 @@ const formatAcreage = (acres: number, sqft: number): string => {
   }
   return "Not Available";
 };
-
-// Build parcel boundary path for Google Maps Static API
-function buildParcelPath(coordinates: number[][][] | null): string {
-  if (!coordinates || coordinates.length === 0 || !coordinates[0]) {
-    return "";
-  }
-  
-  const ring = coordinates[0];
-  if (ring.length < 3) return "";
-  
-  const maxPoints = 50;
-  const step = ring.length > maxPoints ? Math.ceil(ring.length / maxPoints) : 1;
-  
-  const pathPoints = ring
-    .filter((_, i) => i % step === 0 || i === ring.length - 1)
-    .map(coord => `${coord[1]},${coord[0]}`)
-    .join("|");
-  
-  return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
-}
-
 // Fetch Google Maps Static API image as base64
 async function fetchGoogleMapImage(
   lat: number, 
@@ -1751,9 +1765,9 @@ export async function POST(request: NextRequest) {
       order.parcelLng || 0
     );
     
-    // Generate map image URLs
-    const satelliteUrl = getMapImageUrl(order.parcelLat || 0, order.parcelLng || 0, 17, 'satellite', true);
-    const terrainUrl = getMapImageUrl(order.parcelLat || 0, order.parcelLng || 0, 15, 'terrain', true);
+    // Generate map image URLs with property boundaries
+    const satelliteUrl = getMapImageUrl(order.parcelLat || 0, order.parcelLng || 0, 17, 'satellite', true, parcelData?.coordinates || null);
+    const terrainUrl = getMapImageUrl(order.parcelLat || 0, order.parcelLng || 0, 15, 'terrain', true, parcelData?.coordinates || null);
     
     // Convert images to base64
     const satelliteBase64 = await imageUrlToBase64(satelliteUrl);
