@@ -1276,13 +1276,22 @@ export async function POST(request: NextRequest) {
       propY = 35;
     }
     
-    // Building Footprints Section
-    if (parcelData?.buildingFootprintSqft || parcelData?.buildingCount) {
+    // Building Footprints Section - ENHANCED
+    if (parcelData?.buildingFootprintSqft || parcelData?.buildingCount || parcelData?.yearBuilt || parcelData?.numStories) {
+      // Calculate dynamic height based on available data
+      const hasStructureInfo = parcelData?.buildingFootprintSqft || parcelData?.buildingCount;
+      const hasBuildingDetails = parcelData?.yearBuilt || parcelData?.numStories;
+      const hasLivingSpace = parcelData?.buildingSqft || parcelData?.numBedrooms || parcelData?.numBathrooms;
+      
+      let boxHeight = 45; // Base height
+      if (hasBuildingDetails) boxHeight += 20;
+      if (hasLivingSpace) boxHeight += 15;
+      
       doc.setFillColor(243, 232, 255);
-      doc.roundedRect(15, propY, pageWidth - 30, 45, 3, 3, "F");
+      doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3, "F");
       doc.setDrawColor(139, 92, 246);
       doc.setLineWidth(1);
-      doc.roundedRect(15, propY, pageWidth - 30, 45, 3, 3);
+      doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3);
       
       doc.setFillColor(139, 92, 246);
       doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
@@ -1290,25 +1299,96 @@ export async function POST(request: NextRequest) {
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      doc.text("⭐ BUILDING FOOTPRINTS", 70, propY + 8, { align: "center" });
+      doc.text("⭐ BUILDING INSIGHTS", 70, propY + 8, { align: "center" });
       
-      const bfY = propY + 22;
+      let bfY = propY + 22;
       doc.setTextColor(40, 40, 40);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.text("Regrid has identified precise building structures on this property:", 25, bfY);
+      doc.text("Comprehensive building data from 156M+ property records:", 25, bfY);
       
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(139, 92, 246);
-      if (parcelData.buildingFootprintSqft) {
-        doc.text(`Total Building Area: ${parcelData.buildingFootprintSqft.toLocaleString()} sq ft`, 25, bfY + 10);
-      }
-      if (parcelData.buildingCount && parcelData.buildingCount > 0) {
-        doc.text(`Number of Structures: ${parcelData.buildingCount}`, 25, bfY + 18);
+      bfY += 10;
+      
+      // Structure Information
+      if (hasStructureInfo) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(139, 92, 246);
+        
+        if (parcelData.buildingFootprintSqft) {
+          doc.text(`📐 Total Footprint: ${parcelData.buildingFootprintSqft.toLocaleString()} sq ft`, 25, bfY);
+          bfY += 8;
+        }
+        if (parcelData.buildingCount && parcelData.buildingCount > 0) {
+          doc.text(`🏠 Number of Structures: ${parcelData.buildingCount}`, 25, bfY);
+          bfY += 8;
+        }
       }
       
-      propY += 55;
+      // Building Details (Age, Stories, Use)
+      if (hasBuildingDetails) {
+        const detailsLeft: string[] = [];
+        const detailsRight: string[] = [];
+        
+        if (parcelData.yearBuilt) {
+          const age = new Date().getFullYear() - parcelData.yearBuilt;
+          detailsLeft.push(`📅 Built: ${parcelData.yearBuilt} (${age} years old)`);
+        }
+        
+        if (parcelData.numStories && parcelData.numStories > 0) {
+          detailsRight.push(`🏢 Stories: ${parcelData.numStories}`);
+        }
+        
+        if (parcelData.useDescription && parcelData.useDescription !== "N/A") {
+          detailsLeft.push(`🏗️ Use: ${parcelData.useDescription}`);
+        }
+        
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(80, 80, 80);
+        
+        // Left column
+        detailsLeft.forEach((detail, idx) => {
+          doc.text(detail, 25, bfY + (idx * 7));
+        });
+        
+        // Right column
+        detailsRight.forEach((detail, idx) => {
+          doc.text(detail, 115, bfY + (idx * 7));
+        });
+        
+        bfY += Math.max(detailsLeft.length, detailsRight.length) * 7 + 3;
+      }
+      
+      // Living Space Details (for residential)
+      if (hasLivingSpace) {
+        const livingDetails: string[] = [];
+        
+        if (parcelData.buildingSqft && parcelData.buildingSqft > 0) {
+          livingDetails.push(`🏡 Living Space: ${parcelData.buildingSqft.toLocaleString()} sq ft`);
+        }
+        
+        if (parcelData.numBedrooms && parcelData.numBedrooms > 0) {
+          livingDetails.push(`🛏️ Bedrooms: ${parcelData.numBedrooms}`);
+        }
+        
+        if (parcelData.numBathrooms && parcelData.numBathrooms > 0) {
+          livingDetails.push(`🚿 Bathrooms: ${parcelData.numBathrooms}`);
+        }
+        
+        if (livingDetails.length > 0) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(80, 80, 80);
+          
+          livingDetails.forEach((detail, idx) => {
+            const xPos = 25 + (idx * 60);
+            doc.text(detail, xPos, bfY);
+          });
+        }
+      }
+      
+      propY += boxHeight + 10;
     }
     
     // Qualified Opportunity Zone Section
