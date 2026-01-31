@@ -13,8 +13,10 @@ import {
   MapPin,
   Calendar,
   TrendingUp,
+  CheckCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface Stats {
   totalUsers: number;
@@ -40,6 +42,7 @@ export default function AdminPage() {
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -78,6 +81,28 @@ export default function AdminPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const response = await fetch(`/api/admin/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update order");
+      }
+
+      // Refresh data
+      await fetchAdminData();
+    } catch (err) {
+      setError("Failed to update order status");
+    } finally {
+      setUpdatingOrderId(null);
+    }
   };
 
   if (status === "loading" || isLoading) {
@@ -225,6 +250,9 @@ export default function AdminPage() {
                         <th className="text-left py-3 px-4 text-sm font-medium text-stone-500">
                           Date
                         </th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-stone-500">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -268,6 +296,28 @@ export default function AdminPage() {
                             <span className="text-sm text-stone-500">
                               {formatDate(order.createdAt)}
                             </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {order.status === "pending" && (
+                              <Button
+                                onClick={() => updateOrderStatus(order.id, "paid")}
+                                disabled={updatingOrderId === order.id}
+                                size="sm"
+                                className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                              >
+                                {updatingOrderId === order.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <CheckCircle className="w-4 h-4 mr-1" />
+                                    Mark Paid
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                            {order.status === "paid" && (
+                              <span className="text-xs text-emerald-600">✓ Paid</span>
+                            )}
                           </td>
                         </tr>
                       ))}
