@@ -33,7 +33,9 @@ export async function POST(request: Request) {
       ? `${parcel.acreage.toFixed(2)} acres` 
       : `${(parcel.acreage * 43560).toFixed(0)} sq ft`;
 
-    const mapLink = `https://terra-firma-v2.abacusai.app/map?lat=${parcel.lat}&lng=${parcel.lng}`;
+    // Get the current app URL for links in email
+    const appUrl = process.env.NEXTAUTH_URL || "https://terrafirmapartners.abacusai.app";
+    const mapLink = `${appUrl}/map?lat=${parcel.lat}&lng=${parcel.lng}`;
 
     // Create beautiful HTML email
     const htmlBody = `
@@ -104,7 +106,6 @@ export async function POST(request: Request) {
     `;
 
     // Send email via Abacus API
-    const appUrl = process.env.NEXTAUTH_URL || "https://terra-firma-v2.abacusai.app";
     const hostname = new URL(appUrl).hostname;
 
     const response = await fetch("https://apps.abacus.ai/api/sendNotificationEmail", {
