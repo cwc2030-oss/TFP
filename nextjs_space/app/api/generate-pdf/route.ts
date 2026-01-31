@@ -7,6 +7,69 @@ import { MAP_LAYERS } from "@/lib/map-layers";
 
 export const dynamic = "force-dynamic";
 
+// Helper function to generate Google Maps Static API URLs
+function getMapImageUrl(lat: number, lng: number, zoom: number, maptype: 'satellite' | 'terrain' | 'hybrid', markers: boolean = true): string {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY || '';
+  const size = '640x480';
+  const scale = '2';
+  
+  const parts = [
+    'https:/',
+    '/maps.googleapis.com/maps/api/staticmap?',
+    'center=' + lat + ',' + lng,
+    '&zoom=' + zoom,
+    '&size=' + size,
+    '&scale=' + scale,
+    '&maptype=' + maptype,
+    '&key=' + apiKey
+  ];
+  
+  let url = parts.join('');
+  
+  if (markers) {
+    url += '&markers=color:red|label:P|' + lat + ',' + lng;
+  }
+  
+  return url;
+}
+
+// Helper function to fetch elevation data
+async function getElevationData(lat: number, lng: number): Promise<{ elevation: number; resolution: number } | null> {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY || '';
+    const elevUrl = 'https://' + 'maps.googleapis.com/maps/api/elevation/json?locations=' + lat + ',' + lng + '&key=' + apiKey;
+    const response = await fetch(elevUrl);
+    const data = await response.json();
+    
+    if (data.status === 'OK' && data.results && data.results.length > 0) {
+      return {
+        elevation: Math.round(data.results[0].elevation * 3.28084),
+        resolution: data.results[0].resolution
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching elevation data:', error);
+    return null;
+  }
+}
+
+// Helper function to convert image URL to base64
+async function imageUrlToBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64 = buffer.toString('base64');
+    return 'data:image/png;base64,' + base64;
+  } catch (error) {
+    console.error('Error converting image to base64:', error);
+    return null;
+  }
+}
+
 interface ParcelData {
   parcelId: string;
   owner: string;
@@ -679,7 +742,7 @@ export async function POST(request: NextRequest) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const reportNumber = generateReportNumber();
-    const totalPages = 14;
+    const totalPages = 15;
 
     // Fetch real parcel data from Regrid
     const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
@@ -1676,7 +1739,213 @@ export async function POST(request: NextRequest) {
     drawPageFooter(doc, pageWidth, pageHeight, 4, totalPages, reportNumber);
 
     // ============================================
-    // PAGES 5-8: CATEGORY ANALYSIS PAGES
+    // PAGE 5: TERRAIN & TOPOGRAPHY ANALYSIS
+    // ============================================
+    doc.addPage();
+    drawPageHeader(doc, pageWidth, "TERRAIN & TOPOGRAPHY ANALYSIS", [16, 185, 129]);
+    propY = 35;
+    
+    // Fetch elevation data
+    const elevationData = await getElevationData(
+      order.parcelLat || 0,
+      order.parcelLng || 0
+    );
+    
+    // Generate map image URLs
+    const satelliteUrl = getMapImageUrl(order.parcelLat || 0, order.parcelLng || 0, 17, 'satellite', true);
+    const terrainUrl = getMapImageUrl(order.parcelLat || 0, order.parcelLng || 0, 15, 'terrain', true);
+    
+    // Convert images to base64
+    const satelliteBase64 = await imageUrlToBase64(satelliteUrl);
+    const terrainBase64 = await imageUrlToBase64(terrainUrl);
+    
+    // ═══════════════════════════════════════════════════════════
+    // PREMIUM SECTION 5: TERRAIN OVERVIEW
+    // ═══════════════════════════════════════════════════════════
+    
+    // Premium gradient box
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(15, propY, pageWidth - 30, 90, 4, 4, "F");
+    doc.setDrawColor(16, 185, 129);
+    doc.setLineWidth(2);
+    doc.roundedRect(15, propY, pageWidth - 30, 90, 4, 4);
+    
+    // Premium header with icon badge
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(15, propY, pageWidth - 30, 16, 4, 4, "F");
+    doc.rect(15, propY + 8, pageWidth - 30, 8, "F");
+    
+    // Gold premium badge
+    doc.setFillColor(251, 191, 36);
+    doc.circle(25, propY + 8, 4, "F");
+    doc.setTextColor(16, 185, 129);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("★", 25, propY + 10, { align: "center" });
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("SATELLITE IMAGERY & ELEVATION", pageWidth / 2, propY + 11, { align: "center" });
+    
+    let terrainY = propY + 28;
+    
+    // Elevation data card (if available)
+    if (elevationData) {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(20, terrainY, pageWidth - 40, 22, 3, 3, "F");
+      doc.setDrawColor(16, 185, 129);
+      doc.setLineWidth(1);
+      doc.roundedRect(20, terrainY, pageWidth - 40, 22, 3, 3);
+      
+      doc.setTextColor(5, 150, 105);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("PROPERTY ELEVATION", 25, terrainY + 6);
+      
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text(elevationData.elevation.toLocaleString() + " ft", 25, terrainY + 15);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(100, 100, 100);
+      doc.text("above sea level", 80, terrainY + 15);
+      
+      terrainY += 28;
+    } else {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(20, terrainY, pageWidth - 40, 18, 3, 3, "F");
+      doc.setDrawColor(16, 185, 129);
+      doc.setLineWidth(1);
+      doc.roundedRect(20, terrainY, pageWidth - 40, 18, 3, 3);
+      
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("📍 Detailed elevation data will display terrain characteristics for this location", 25, terrainY + 11);
+      
+      terrainY += 24;
+    }
+    
+    // Imagery note
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7);
+    doc.setTextColor(100, 100, 100);
+    doc.text("High-resolution aerial and topographic views shown below", 20, terrainY + 2);
+    
+    propY += 102;
+    
+    // ═══════════════════════════════════════════════════════════
+    // SATELLITE VIEW
+    // ═══════════════════════════════════════════════════════════
+    
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(15, propY, pageWidth - 30, 110, 4, 4, "F");
+    doc.setDrawColor(16, 185, 129);
+    doc.setLineWidth(1.5);
+    doc.roundedRect(15, propY, pageWidth - 30, 110, 4, 4);
+    
+    // Section header
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(15, propY, pageWidth - 30, 14, 4, 4, "F");
+    doc.rect(15, propY + 7, pageWidth - 30, 7, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("🛰️ SATELLITE VIEW - CURRENT CONDITIONS", 20, propY + 9);
+    
+    // Add satellite image if available
+    if (satelliteBase64) {
+      try {
+        doc.addImage(satelliteBase64, 'PNG', 20, propY + 18, pageWidth - 40, 80);
+      } catch (error) {
+        console.error('Error adding satellite image:', error);
+        doc.setTextColor(100, 100, 100);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8);
+        doc.text("Satellite imagery temporarily unavailable", pageWidth / 2, propY + 58, { align: "center" });
+      }
+    } else {
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.text("Satellite imagery temporarily unavailable", pageWidth / 2, propY + 58, { align: "center" });
+    }
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("Aerial view showing current property conditions, vegetation, and structures", 20, propY + 104);
+    
+    propY += 118;
+    
+    // ═══════════════════════════════════════════════════════════
+    // TERRAIN/TOPOGRAPHY VIEW
+    // ═══════════════════════════════════════════════════════════
+    
+    // Check if page space available, if not add new page
+    if (propY + 110 > pageHeight - 30) {
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      doc.text("Data Source: Google Maps Satellite & Elevation API", 15, propY);
+      drawPageFooter(doc, pageWidth, pageHeight, 5, totalPages, reportNumber);
+      doc.addPage();
+      drawPageHeader(doc, pageWidth, "TERRAIN & TOPOGRAPHY ANALYSIS", [16, 185, 129]);
+      propY = 35;
+    }
+    
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(15, propY, pageWidth - 30, 110, 4, 4, "F");
+    doc.setDrawColor(16, 185, 129);
+    doc.setLineWidth(1.5);
+    doc.roundedRect(15, propY, pageWidth - 30, 110, 4, 4);
+    
+    // Section header
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(15, propY, pageWidth - 30, 14, 4, 4, "F");
+    doc.rect(15, propY + 7, pageWidth - 30, 7, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("🗻 TOPOGRAPHIC VIEW - TERRAIN FEATURES", 20, propY + 9);
+    
+    // Add terrain image if available
+    if (terrainBase64) {
+      try {
+        doc.addImage(terrainBase64, 'PNG', 20, propY + 18, pageWidth - 40, 80);
+      } catch (error) {
+        console.error('Error adding terrain image:', error);
+        doc.setTextColor(100, 100, 100);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8);
+        doc.text("Terrain imagery temporarily unavailable", pageWidth / 2, propY + 58, { align: "center" });
+      }
+    } else {
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.text("Terrain imagery temporarily unavailable", pageWidth / 2, propY + 58, { align: "center" });
+    }
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("Topographic map showing elevation changes, slopes, and natural terrain features", 20, propY + 104);
+    
+    propY += 118;
+    
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Data Source: Google Maps Satellite & Elevation API", 15, propY);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, 5, totalPages, reportNumber);
+
+    // ============================================
+    // PAGES 6-9: CATEGORY ANALYSIS PAGES
     // ============================================
     const categories = generateCategoryReports(parcelData, acres.toString(), zoningStr, order.parcelAddress);
     
@@ -1820,11 +2089,11 @@ export async function POST(request: NextRequest) {
       doc.setTextColor(120, 120, 120);
       doc.text(`Data Source: ${category.dataSource}`, 15, pageY);
       
-      drawPageFooter(doc, pageWidth, pageHeight, i + 5, totalPages, reportNumber);
+      drawPageFooter(doc, pageWidth, pageHeight, i + 6, totalPages, reportNumber);
     }
 
     // ============================================
-    // PAGE 9: GROWING POTENTIAL
+    // PAGE 10: GROWING POTENTIAL
     // ============================================
     const hardiness = getHardinessZone(order.parcelLat);
     
@@ -2002,10 +2271,10 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(120, 120, 120);
     doc.text("Data Source: USDA Plant Hardiness Zone Map, NOAA Climate Data", 15, growingY);
     
-    drawPageFooter(doc, pageWidth, pageHeight, 9, totalPages, reportNumber);
+    drawPageFooter(doc, pageWidth, pageHeight, 10, totalPages, reportNumber);
 
     // ============================================
-    // PAGE 10: USE-CASE SUITABILITY
+    // PAGE 11: USE-CASE SUITABILITY
     // ============================================
     const useCaseScores = generateUseCaseScores(acres.toString(), zoningStr);
     
@@ -2063,10 +2332,10 @@ export async function POST(request: NextRequest) {
     doc.setFont("helvetica", "normal");
     doc.text("★★★★★ Excellent  |  ★★★★☆ Very Good  |  ★★★☆☆ Good  |  ★★☆☆☆ Fair  |  ★☆☆☆☆ Limited", 20, useY + 17);
     
-    drawPageFooter(doc, pageWidth, pageHeight, 10, totalPages, reportNumber);
+    drawPageFooter(doc, pageWidth, pageHeight, 11, totalPages, reportNumber);
 
     // ============================================
-    // PAGE 11: UNDERSTANDING YOUR LAND RIGHTS
+    // PAGE 12: UNDERSTANDING YOUR LAND RIGHTS
     // ============================================
     doc.addPage();
     drawPageHeader(doc, pageWidth, "UNDERSTANDING YOUR LAND RIGHTS", [139, 92, 246]);
@@ -2151,10 +2420,10 @@ export async function POST(request: NextRequest) {
     doc.text("Easements grant others limited rights to use your property (e.g., utility access, road access). Review your title", 20, rightsY + 20);
     doc.text("commitment or deed for recorded easements. Common types include utility easements, access easements, and drainage easements.", 20, rightsY + 27);
     
-    drawPageFooter(doc, pageWidth, pageHeight, 11, totalPages, reportNumber);
+    drawPageFooter(doc, pageWidth, pageHeight, 12, totalPages, reportNumber);
 
     // ============================================
-    // PAGE 12: LAND STEWARDSHIP GUIDE
+    // PAGE 13: LAND STEWARDSHIP GUIDE
     // ============================================
     doc.addPage();
     drawPageHeader(doc, pageWidth, "LAND STEWARDSHIP GUIDE", [16, 185, 129]);
@@ -2230,10 +2499,10 @@ export async function POST(request: NextRequest) {
       stewY += 40;
     });
     
-    drawPageFooter(doc, pageWidth, pageHeight, 12, totalPages, reportNumber);
+    drawPageFooter(doc, pageWidth, pageHeight, 13, totalPages, reportNumber);
 
     // ============================================
-    // PAGE 13: NEXT STEPS & DUE DILIGENCE
+    // PAGE 14: NEXT STEPS & DUE DILIGENCE
     // ============================================
     doc.addPage();
     drawPageHeader(doc, pageWidth, "NEXT STEPS & DUE DILIGENCE", [59, 130, 246]);
@@ -2324,10 +2593,10 @@ export async function POST(request: NextRequest) {
       doc.text(prof.purpose, colX + 38, profY + rowOffset);
     });
     
-    drawPageFooter(doc, pageWidth, pageHeight, 13, totalPages, reportNumber);
+    drawPageFooter(doc, pageWidth, pageHeight, 14, totalPages, reportNumber);
 
     // ============================================
-    // PAGE 14: GLOSSARY & NOTES
+    // PAGE 15: GLOSSARY & NOTES
     // ============================================
     doc.addPage();
     drawPageHeader(doc, pageWidth, "GLOSSARY & NOTES", [107, 114, 128]);
@@ -2426,7 +2695,7 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(9);
     doc.text("Questions? Contact us at info@terrafirmapartners.com", pageWidth / 2, glossY + 18, { align: "center" });
     
-    drawPageFooter(doc, pageWidth, pageHeight, 14, totalPages, reportNumber);
+    drawPageFooter(doc, pageWidth, pageHeight, 15, totalPages, reportNumber);
 
     // Generate PDF
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
