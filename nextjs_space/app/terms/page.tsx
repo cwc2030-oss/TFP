@@ -33,7 +33,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-xl font-semibold text-stone-800 mt-8 mb-3">3. Payment and Refunds</h2>
             <p className="text-stone-600">
-              Land Analysis Reports are priced at $99 per report. Payment is processed securely through Stripe. 
+              Land Analysis Reports are priced at $350 per report. Payment is processed securely through Stripe. 
               Due to the digital nature of our reports, all sales are final once a report has been generated and delivered. 
               If you experience technical issues preventing report delivery, please contact us within 7 days for resolution.
             </p>

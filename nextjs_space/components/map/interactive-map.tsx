@@ -926,7 +926,7 @@ export default function InteractiveMap({
               ${isMobile ? 'py-3 px-6 text-base' : 'py-4 px-8 text-lg gap-3'}`}
           >
             <FileText className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
-            Order Land Analysis – $99
+            Order Land Analysis – $350
           </button>
           <p className={`text-white text-center mt-2 drop-shadow-lg bg-black/50 rounded-full px-4 py-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>
             {isMobile ? 'Tap for parcel details' : 'Click to see parcel details & order report'}
@@ -1085,7 +1085,7 @@ export default function InteractiveMap({
             <div className="pt-4 mt-4 border-t border-stone-200">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-stone-600">Basic Land Report</span>
-                <span className="text-xl font-bold text-emerald-700">$99</span>
+                <span className="text-xl font-bold text-emerald-700">$350</span>
               </div>
               <button
                 onClick={onCheckout}

@@ -83,7 +83,7 @@ export async function POST(request: Request) {
           <!-- Report Upsell -->
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin-top: 20px;">
             <h3 style="color: #166534; margin: 0 0 10px 0; font-size: 16px;">📋 Want the Full Picture?</h3>
-            <p style="color: #15803d; margin: 0 0 15px 0; font-size: 14px;">Our $99 Land Analysis Report includes:</p>
+            <p style="color: #15803d; margin: 0 0 15px 0; font-size: 14px;">Our $350 Land Analysis Report includes:</p>
             <ul style="color: #166534; margin: 0; padding-left: 20px; font-size: 14px;">
               <li>FEMA Flood Zone Analysis</li>
               <li>Topography & Elevation Maps</li>
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
               <li>Roads & Access Points</li>
             </ul>
             <div style="text-align: center; margin-top: 15px;">
-              <a href="${mapLink}" style="display: inline-block; background: #166534; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">Order Full Report - $99</a>
+              <a href="${mapLink}" style="display: inline-block; background: #166534; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">Order Full Report - $350</a>
             </div>
           </div>
         </div>

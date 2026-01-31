@@ -225,7 +225,7 @@ export default function MapPage() {
               <div className="border-t border-stone-200 pt-4 mb-6">
                 <div className="flex items-center justify-between">
                   <span className="text-lg text-stone-700">Total</span>
-                  <span className="text-3xl font-bold text-emerald-700">$99</span>
+                  <span className="text-3xl font-bold text-emerald-700">$350</span>
                 </div>
               </div>
 

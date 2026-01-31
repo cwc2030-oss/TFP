@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://terrafirma.partners"),
   title: "Terra Firma Partners™ | Professional Land Analysis Reports",
   description:
-    "Get instant land parcel analysis reports for any property in the USA. Flood zones, topography, soil types, ownership data & more. Professional PDF reports for $99.",
+    "Get instant land parcel analysis reports for any property in the USA. Flood zones, topography, soil types, ownership data & more. Professional PDF reports for $350.",
   keywords: ["land analysis", "parcel report", "property report", "flood zone map", "land survey", "real estate analysis", "FEMA flood", "topography map", "soil report"],
   authors: [{ name: "Terra Firma Partners LLC" }],
   icons: {
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     siteName: "Terra Firma Partners™",
     title: "Terra Firma Partners™ | Professional Land Analysis Reports",
     description:
-      "Get instant land parcel analysis reports for any US property. Flood zones, topography, soil, ownership & more. $99 per report.",
+      "Get instant land parcel analysis reports for any US property. Flood zones, topography, soil, ownership & more. $350 per report.",
     images: [
       {
         url: "/og-image.png",
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Terra Firma Partners™ | Land Analysis Reports",
-    description: "Professional land parcel analysis reports for any US property. $99 per report.",
+    description: "Professional land parcel analysis reports for any US property. $350 per report.",
     images: ["/og-image.png"],
   },
   robots: {
