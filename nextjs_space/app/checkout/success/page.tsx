@@ -57,7 +57,16 @@ function SuccessContent() {
         body: JSON.stringify({ orderId }),
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
+
+      if (data.error) {
+        alert(`Download failed: ${data.error}`);
+        return;
+      }
 
       if (data.pdf) {
         const byteCharacters = atob(data.pdf);
@@ -78,9 +87,15 @@ function SuccessContent() {
         window.URL.revokeObjectURL(url);
 
         setDownloadComplete(true);
+        
+        // Show success message
+        alert("Report downloaded successfully! A confirmation email has also been sent to your inbox. Check your email (including spam folder) for a copy.");
+      } else {
+        alert("Download failed: No PDF data received. Please try again or contact support at info@terrafirmapartners.com");
       }
     } catch (error) {
       console.error("Download error:", error);
+      alert("Download failed. Please check your internet connection and try again. If the problem persists, contact support at info@terrafirmapartners.com");
     } finally {
       setIsDownloading(false);
     }

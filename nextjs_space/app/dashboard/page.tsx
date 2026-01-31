@@ -71,7 +71,16 @@ export default function DashboardPage() {
         body: JSON.stringify({ orderId }),
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
+
+      if (data.error) {
+        alert(`Download failed: ${data.error}`);
+        return;
+      }
 
       if (data.pdf) {
         // Convert base64 to blob and download
@@ -92,11 +101,17 @@ export default function DashboardPage() {
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
 
+        // Show success message
+        alert("Report downloaded successfully! A confirmation email has also been sent to your inbox.");
+
         // Refresh orders to show updated status
         fetchOrders();
+      } else {
+        alert("Download failed: No PDF data received. Please try again or contact support.");
       }
     } catch (error) {
       console.error("Download error:", error);
+      alert("Download failed. Please check your internet connection and try again. If the problem persists, contact support.");
     } finally {
       setDownloadingId(null);
     }
