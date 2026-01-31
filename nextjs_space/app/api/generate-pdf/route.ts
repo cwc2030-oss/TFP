@@ -2048,7 +2048,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: "PDF generated successfully",
-      pdfData: base64Pdf,
+      pdf: base64Pdf,
+      filename: `terra_firma_report_${order.id}.pdf`,
     });
   } catch (error) {
     console.error("PDF generation error:", error);
