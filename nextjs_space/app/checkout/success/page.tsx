@@ -17,9 +17,34 @@ import { Card, CardContent } from "@/components/ui/card";
 function SuccessContent() {
   const searchParams = useSearchParams();
   const orderId = searchParams?.get("orderId") || "";
+  const sessionId = searchParams?.get("session_id") || "";
   const isDemo = searchParams?.get("demo") === "true";
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadComplete, setDownloadComplete] = useState(false);
+  const [orderCompleted, setOrderCompleted] = useState(false);
+
+  // Complete the order when page loads
+  useEffect(() => {
+    const completeOrder = async () => {
+      if (!orderId || orderCompleted) return;
+      
+      try {
+        const response = await fetch(`/api/orders/${orderId}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: sessionId || `demo_${Date.now()}` }),
+        });
+        
+        if (response.ok) {
+          setOrderCompleted(true);
+        }
+      } catch (error) {
+        console.error("Error completing order:", error);
+      }
+    };
+    
+    completeOrder();
+  }, [orderId, sessionId, orderCompleted]);
 
   const handleDownload = async () => {
     if (!orderId) return;
