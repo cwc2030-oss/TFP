@@ -1279,268 +1279,394 @@ export async function POST(request: NextRequest) {
       propY = 35;
     }
     
-    // Building Insights Section - ALWAYS DISPLAY
-    // Calculate dynamic height based on available data
+    // ═══════════════════════════════════════════════════════════
+    // PREMIUM SECTION 1: BUILDING INTELLIGENCE
+    // ═══════════════════════════════════════════════════════════
     const hasStructureInfo = parcelData?.buildingFootprintSqft || parcelData?.buildingCount;
     const hasBuildingDetails = parcelData?.yearBuilt || parcelData?.numStories;
     const hasLivingSpace = parcelData?.buildingSqft || parcelData?.numBedrooms || parcelData?.numBathrooms;
     const hasAnyBuildingData = hasStructureInfo || hasBuildingDetails || hasLivingSpace;
     
-    let boxHeight = hasAnyBuildingData ? 45 : 55; // Base height (larger if no data for explanation)
-    if (hasBuildingDetails) boxHeight += 20;
-    if (hasLivingSpace) boxHeight += 15;
+    let boxHeight = hasAnyBuildingData ? 60 : 65;
+    if (hasBuildingDetails) boxHeight += 18;
+    if (hasLivingSpace) boxHeight += 18;
     
-    doc.setFillColor(243, 232, 255);
-    doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3, "F");
-    doc.setDrawColor(139, 92, 246);
-    doc.setLineWidth(1);
-    doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3);
+    // Premium gradient box with shadow effect
+    doc.setFillColor(250, 250, 255);
+    doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 4, 4, "F");
+    doc.setDrawColor(124, 58, 237);
+    doc.setLineWidth(2);
+    doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 4, 4);
     
-    doc.setFillColor(139, 92, 246);
-    doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
-    doc.rect(15, propY + 6, 110, 6, "F");
-    doc.setTextColor(255, 255, 255);
+    // Premium header with icon badge
+    doc.setFillColor(124, 58, 237);
+    doc.roundedRect(15, propY, pageWidth - 30, 16, 4, 4, "F");
+    doc.rect(15, propY + 8, pageWidth - 30, 8, "F");
+    
+    // Gold premium badge
+    doc.setFillColor(251, 191, 36);
+    doc.circle(25, propY + 8, 4, "F");
+    doc.setTextColor(124, 58, 237);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("⭐ BUILDING INSIGHTS", 70, propY + 8, { align: "center" });
+    doc.text("★", 25, propY + 10, { align: "center" });
     
-    let bfY = propY + 22;
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("BUILDING INTELLIGENCE", pageWidth / 2, propY + 11, { align: "center" });
+    
+    let bfY = propY + 26;
     
     if (!hasAnyBuildingData) {
-      // No building data available - show informative message
-      doc.setTextColor(40, 40, 40);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.text("No recorded structures found on this property in county assessor records.", 25, bfY);
-      bfY += 10;
-      doc.setTextColor(80, 80, 80);
-      doc.setFontSize(8);
-      const explanationLines = [
-        "• This typically indicates vacant land or recently developed property",
-        "• Building permits and structures may not yet be reflected in county databases",
-        "• Recommend on-site inspection to verify current conditions",
-        "• Contact county assessor for most current building records"
-      ];
-      explanationLines.forEach((line, idx) => {
-        doc.text(line, 30, bfY + (idx * 7));
-      });
-    } else {
-      // Has building data - show comprehensive info
-      doc.setTextColor(40, 40, 40);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.text("Comprehensive building data from 156M+ property records:", 25, bfY);
-      
-      bfY += 10;
-      
-      // Structure Information
-      if (hasStructureInfo) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.setTextColor(139, 92, 246);
-        
-        if (parcelData.buildingFootprintSqft) {
-          doc.text(`📐 Total Footprint: ${parcelData.buildingFootprintSqft.toLocaleString()} sq ft`, 25, bfY);
-          bfY += 8;
-        }
-        if (parcelData.buildingCount && parcelData.buildingCount > 0) {
-          doc.text(`🏠 Number of Structures: ${parcelData.buildingCount}`, 25, bfY);
-          bfY += 8;
-        }
-      }
-      
-      // Building Details (Age, Stories, Use)
-      if (hasBuildingDetails) {
-        const detailsLeft: string[] = [];
-        const detailsRight: string[] = [];
-        
-        if (parcelData.yearBuilt) {
-          const age = new Date().getFullYear() - parcelData.yearBuilt;
-          detailsLeft.push(`📅 Built: ${parcelData.yearBuilt} (${age} years old)`);
-        }
-        
-        if (parcelData.numStories && parcelData.numStories > 0) {
-          detailsRight.push(`🏢 Stories: ${parcelData.numStories}`);
-        }
-        
-        if (parcelData.useDescription && parcelData.useDescription !== "N/A") {
-          detailsLeft.push(`🏗️ Use: ${parcelData.useDescription}`);
-        }
-        
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(80, 80, 80);
-        
-        // Left column
-        detailsLeft.forEach((detail, idx) => {
-          doc.text(detail, 25, bfY + (idx * 7));
-        });
-        
-        // Right column
-        detailsRight.forEach((detail, idx) => {
-          doc.text(detail, 115, bfY + (idx * 7));
-        });
-        
-        bfY += Math.max(detailsLeft.length, detailsRight.length) * 7 + 3;
-      }
-      
-      // Living Space Details (for residential)
-      if (hasLivingSpace) {
-        const livingDetails: string[] = [];
-        
-        if (parcelData.buildingSqft && parcelData.buildingSqft > 0) {
-          livingDetails.push(`🏡 Living Space: ${parcelData.buildingSqft.toLocaleString()} sq ft`);
-        }
-        
-        if (parcelData.numBedrooms && parcelData.numBedrooms > 0) {
-          livingDetails.push(`🛏️ Bedrooms: ${parcelData.numBedrooms}`);
-        }
-        
-        if (parcelData.numBathrooms && parcelData.numBathrooms > 0) {
-          livingDetails.push(`🚿 Bathrooms: ${parcelData.numBathrooms}`);
-        }
-        
-        if (livingDetails.length > 0) {
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9);
-          doc.setTextColor(80, 80, 80);
-          
-          livingDetails.forEach((detail, idx) => {
-            const xPos = 25 + (idx * 60);
-            doc.text(detail, xPos, bfY);
-          });
-        }
-      }
-    }
-    
-    propY += boxHeight + 10;
-    
-    // Qualified Opportunity Zone Section
-    if (parcelData?.isQualifiedOpportunityZone) {
-      doc.setFillColor(236, 253, 245);
-      doc.roundedRect(15, propY, pageWidth - 30, 55, 3, 3, "F");
-      doc.setDrawColor(16, 185, 129);
+      // Executive-style vacant land presentation
+      doc.setFillColor(239, 246, 255);
+      doc.roundedRect(20, bfY, pageWidth - 40, 28, 3, 3, "F");
+      doc.setDrawColor(191, 219, 254);
       doc.setLineWidth(1);
-      doc.roundedRect(15, propY, pageWidth - 30, 55, 3, 3);
+      doc.roundedRect(20, bfY, pageWidth - 40, 28, 3, 3);
       
-      doc.setFillColor(16, 185, 129);
-      doc.roundedRect(15, propY, 160, 12, 3, 3, "F");
-      doc.rect(15, propY + 6, 160, 6, "F");
-      doc.setTextColor(255, 255, 255);
+      doc.setTextColor(30, 58, 138);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      doc.text("💰 QUALIFIED OPPORTUNITY ZONE", 95, propY + 8, { align: "center" });
+      doc.text("⌂ VACANT LAND STATUS", 25, bfY + 8);
       
-      const qozY = propY + 24;
-      doc.setTextColor(6, 78, 59);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text("✓ THIS PROPERTY IS IN A FEDERAL QOZ", 25, qozY);
-      
+      doc.setTextColor(60, 60, 60);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(40, 40, 40);
-      doc.text("Federal tax incentives available: Defer and reduce capital gains taxes on investments", 25, qozY + 10);
-      doc.text("in this zone. Consult with a tax professional about potential savings.", 25, qozY + 17);
+      doc.setFontSize(8);
+      doc.text("No structures identified in county records. Property appears to be undeveloped land.", 25, bfY + 16);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(100, 100, 100);
+      doc.text("Recommendation: Verify current status via on-site inspection or county assessor.", 25, bfY + 22);
+    } else {
+      // Premium data cards layout
+      let cardY = bfY;
       
-      if (parcelData.qozTract) {
+      // Card 1: Structure Summary
+      if (hasStructureInfo) {
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(216, 180, 254);
+        doc.setLineWidth(1);
+        doc.roundedRect(20, cardY, (pageWidth - 50) / 2, 24, 3, 3, "FD");
+        
+        doc.setTextColor(124, 58, 237);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8);
-        doc.setTextColor(80, 80, 80);
-        doc.text(`Census Tract: ${parcelData.qozTract}`, 25, qozY + 27);
+        doc.text("STRUCTURE OVERVIEW", 25, cardY + 7);
+        
+        doc.setTextColor(40, 40, 40);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        if (parcelData.buildingFootprintSqft) {
+          doc.text(parcelData.buildingFootprintSqft.toLocaleString(), 25, cardY + 17);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(100, 100, 100);
+          doc.text("sq ft footprint", 25, cardY + 21);
+        }
+        
+        // Second metric in same card
+        if (parcelData.buildingCount && parcelData.buildingCount > 0) {
+          doc.setTextColor(40, 40, 40);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(16);
+          doc.text(parcelData.buildingCount.toString(), 70, cardY + 17);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(100, 100, 100);
+          doc.text("structures", 70, cardY + 21);
+        }
+        
+        cardY += 28;
       }
       
-      propY += 65;
+      // Card 2: Building Characteristics
+      if (hasBuildingDetails) {
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(216, 180, 254);
+        doc.setLineWidth(1);
+        doc.roundedRect(20, cardY, pageWidth - 40, 18, 3, 3, "FD");
+        
+        doc.setTextColor(124, 58, 237);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("CHARACTERISTICS", 25, cardY + 7);
+        
+        doc.setTextColor(60, 60, 60);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        
+        const chars: string[] = [];
+        if (parcelData.yearBuilt) {
+          const age = new Date().getFullYear() - parcelData.yearBuilt;
+          chars.push(`Built ${parcelData.yearBuilt} (${age}y)`);
+        }
+        if (parcelData.numStories) chars.push(`${parcelData.numStories} stories`);
+        if (parcelData.useDescription && parcelData.useDescription !== "N/A") {
+          chars.push(parcelData.useDescription);
+        }
+        
+        doc.text(chars.join("  •  "), 25, cardY + 13);
+        cardY += 22;
+      }
+      
+      // Card 3: Living Space (residential)
+      if (hasLivingSpace) {
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(216, 180, 254);
+        doc.setLineWidth(1);
+        doc.roundedRect(20, cardY, pageWidth - 40, 18, 3, 3, "FD");
+        
+        doc.setTextColor(124, 58, 237);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("LIVING SPACE", 25, cardY + 7);
+        
+        doc.setTextColor(60, 60, 60);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        
+        const living: string[] = [];
+        if (parcelData.buildingSqft) living.push(`${parcelData.buildingSqft.toLocaleString()} sq ft`);
+        if (parcelData.numBedrooms) living.push(`${parcelData.numBedrooms} bed`);
+        if (parcelData.numBathrooms) living.push(`${parcelData.numBathrooms} bath`);
+        
+        doc.text(living.join("  •  "), 25, cardY + 13);
+      }
     }
     
-    // FEMA Risk Index Section
-    if (parcelData?.femaNriRiskRating) {
-      const riskColor = parcelData.femaNriRiskRating.toLowerCase().includes("very high") ? [239, 68, 68] :
-                        parcelData.femaNriRiskRating.toLowerCase().includes("high") ? [249, 115, 22] :
-                        parcelData.femaNriRiskRating.toLowerCase().includes("moderate") ? [234, 179, 8] :
-                        [34, 197, 94];
+    propY += boxHeight + 12;
+    
+    // ═══════════════════════════════════════════════════════════
+    // PREMIUM SECTION 2: TAX INCENTIVE ZONE
+    // ═══════════════════════════════════════════════════════════
+    if (parcelData?.isQualifiedOpportunityZone) {
+      doc.setFillColor(247, 254, 231);
+      doc.roundedRect(15, propY, pageWidth - 30, 65, 4, 4, "F");
+      doc.setDrawColor(16, 185, 129);
+      doc.setLineWidth(2);
+      doc.roundedRect(15, propY, pageWidth - 30, 65, 4, 4);
       
-      doc.setFillColor(254, 242, 242);
-      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3, "F");
-      doc.setDrawColor(riskColor[0], riskColor[1], riskColor[2]);
-      doc.setLineWidth(1);
-      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3);
+      // Premium header
+      doc.setFillColor(16, 185, 129);
+      doc.roundedRect(15, propY, pageWidth - 30, 16, 4, 4, "F");
+      doc.rect(15, propY + 8, pageWidth - 30, 8, "F");
       
-      doc.setFillColor(riskColor[0], riskColor[1], riskColor[2]);
-      doc.roundedRect(15, propY, 130, 12, 3, 3, "F");
-      doc.rect(15, propY + 6, 130, 6, "F");
-      doc.setTextColor(255, 255, 255);
+      doc.setFillColor(251, 191, 36);
+      doc.circle(25, propY + 8, 4, "F");
+      doc.setTextColor(16, 185, 129);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      doc.text("⚠️ FEMA NATIONAL RISK INDEX", 80, propY + 8, { align: "center" });
+      doc.text("★", 25, propY + 10, { align: "center" });
       
-      const riskY = propY + 24;
-      doc.setTextColor(40, 40, 40);
+      doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
-      doc.text(`Risk Rating: ${parcelData.femaNriRiskRating}`, 25, riskY);
+      doc.text("TAX INCENTIVE ZONE", pageWidth / 2, propY + 11, { align: "center" });
       
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.text("FEMA's National Risk Index combines 18 natural hazards including flood, wildfire,", 25, riskY + 10);
-      doc.text("tornado, earthquake, and drought. This rating may impact insurance requirements.", 25, riskY + 17);
+      const qozY = propY + 28;
       
-      if (parcelData.femaFloodZone && parcelData.femaFloodZone !== "X") {
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(220, 38, 38);
-        doc.text(`Flood Zone: ${parcelData.femaFloodZone}${parcelData.femaFloodZoneSubtype ? ` (${parcelData.femaFloodZoneSubtype})` : ""}`, 25, riskY + 27);
-      }
+      // Status badge
+      doc.setFillColor(220, 252, 231);
+      doc.roundedRect(20, qozY, 85, 14, 3, 3, "F");
+      doc.setDrawColor(16, 185, 129);
+      doc.setLineWidth(1);
+      doc.roundedRect(20, qozY, 85, 14, 3, 3);
       
-      propY += 60;
-    }
-    
-    // School Districts Section
-    if (parcelData?.elementarySchoolDistrict || parcelData?.secondarySchoolDistrict || parcelData?.unifiedSchoolDistrict) {
-      doc.setFillColor(255, 251, 235);
-      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3, "F");
-      doc.setDrawColor(245, 158, 11);
-      doc.setLineWidth(0.5);
-      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3);
-      
-      doc.setFillColor(245, 158, 11);
-      doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
-      doc.rect(15, propY + 6, 110, 6, "F");
-      doc.setTextColor(255, 255, 255);
+      doc.setTextColor(6, 78, 59);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text("🎓 SCHOOL DISTRICTS", 70, propY + 8, { align: "center" });
+      doc.setFontSize(9);
+      doc.text("✓ FEDERAL QOZ CERTIFIED", 62.5, qozY + 9, { align: "center" });
       
-      const schoolY = propY + 22;
+      // Benefits description
       doc.setTextColor(40, 40, 40);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
+      doc.setFontSize(8);
+      doc.text("Federal tax benefits: Defer and potentially reduce capital gains taxes on qualified", 20, qozY + 22);
+      doc.text("investments. Significant savings available for long-term investments (7+ years).", 20, qozY + 28);
       
-      if (parcelData.unifiedSchoolDistrict) {
-        doc.setFont("helvetica", "bold");
-        doc.text("Unified District:", 25, schoolY);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(16, 185, 129);
+      doc.text("» Consult tax professional for investment structuring", 20, qozY + 36);
+      
+      if (parcelData.qozTract) {
         doc.setFont("helvetica", "normal");
-        doc.text(parcelData.unifiedSchoolDistrict, 70, schoolY);
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`Census Tract: ${parcelData.qozTract}`, 20, qozY + 42);
+      }
+      
+      propY += 77;
+    }
+    
+    // ═══════════════════════════════════════════════════════════
+    // PREMIUM SECTION 3: RISK ASSESSMENT
+    // ═══════════════════════════════════════════════════════════
+    if (parcelData?.femaNriRiskRating) {
+      const riskLower = parcelData.femaNriRiskRating.toLowerCase();
+      const isVeryHigh = riskLower.includes("very high");
+      const isHigh = riskLower.includes("high") && !isVeryHigh;
+      const isModerate = riskLower.includes("moderate");
+      
+      const riskColor = isVeryHigh ? [239, 68, 68] : isHigh ? [249, 115, 22] : isModerate ? [234, 179, 8] : [34, 197, 94];
+      const bgColor = isVeryHigh ? [254, 242, 242] : isHigh ? [255, 247, 237] : isModerate ? [254, 249, 195] : [240, 253, 244];
+      
+      doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
+      doc.roundedRect(15, propY, pageWidth - 30, 62, 4, 4, "F");
+      doc.setDrawColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.setLineWidth(2);
+      doc.roundedRect(15, propY, pageWidth - 30, 62, 4, 4);
+      
+      // Premium header
+      doc.setFillColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.roundedRect(15, propY, pageWidth - 30, 16, 4, 4, "F");
+      doc.rect(15, propY + 8, pageWidth - 30, 8, "F");
+      
+      doc.setFillColor(251, 191, 36);
+      doc.circle(25, propY + 8, 4, "F");
+      doc.setTextColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("★", 25, propY + 10, { align: "center" });
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("NATURAL HAZARD RISK ASSESSMENT", pageWidth / 2, propY + 11, { align: "center" });
+      
+      const riskY = propY + 28;
+      
+      // Risk rating badge
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(20, riskY, 70, 16, 3, 3, "F");
+      doc.setDrawColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.setLineWidth(1.5);
+      doc.roundedRect(20, riskY, 70, 16, 3, 3);
+      
+      doc.setTextColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(parcelData.femaNriRiskRating.toUpperCase(), 55, riskY + 10, { align: "center" });
+      
+      // Description
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.text("FEMA National Risk Index (18 hazard composite: flood, wildfire, tornado, earthquake, etc.)", 20, riskY + 24);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.text("May impact insurance costs and lender requirements", 20, riskY + 30);
+      
+      // Flood zone if applicable
+      if (parcelData.femaFloodZone && parcelData.femaFloodZone !== "X") {
+        doc.setFillColor(254, 226, 226);
+        doc.roundedRect(100, riskY, pageWidth - 130, 16, 3, 3, "F");
+        doc.setDrawColor(220, 38, 38);
+        doc.setLineWidth(1);
+        doc.roundedRect(100, riskY, pageWidth - 130, 16, 3, 3);
+        
+        doc.setTextColor(153, 27, 27);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text(`⚠ FLOOD ZONE: ${parcelData.femaFloodZone}`, 105, riskY + 10);
+      }
+      
+      propY += 74;
+    }
+    
+    // ═══════════════════════════════════════════════════════════
+    // PREMIUM SECTION 4: EDUCATION ZONES
+    // ═══════════════════════════════════════════════════════════
+    if (parcelData?.elementarySchoolDistrict || parcelData?.secondarySchoolDistrict || parcelData?.unifiedSchoolDistrict) {
+      doc.setFillColor(255, 251, 235);
+      doc.roundedRect(15, propY, pageWidth - 30, 58, 4, 4, "F");
+      doc.setDrawColor(234, 179, 8);
+      doc.setLineWidth(2);
+      doc.roundedRect(15, propY, pageWidth - 30, 58, 4, 4);
+      
+      // Premium header
+      doc.setFillColor(234, 179, 8);
+      doc.roundedRect(15, propY, pageWidth - 30, 16, 4, 4, "F");
+      doc.rect(15, propY + 8, pageWidth - 30, 8, "F");
+      
+      doc.setFillColor(251, 191, 36);
+      doc.circle(25, propY + 8, 4, "F");
+      doc.setTextColor(234, 179, 8);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("★", 25, propY + 10, { align: "center" });
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("EDUCATION ZONES", pageWidth / 2, propY + 11, { align: "center" });
+      
+      const schoolY = propY + 28;
+      
+      // District cards
+      if (parcelData.unifiedSchoolDistrict) {
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(20, schoolY, pageWidth - 40, 16, 3, 3, "F");
+        doc.setDrawColor(234, 179, 8);
+        doc.setLineWidth(1);
+        doc.roundedRect(20, schoolY, pageWidth - 40, 16, 3, 3);
+        
+        doc.setTextColor(146, 64, 14);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("UNIFIED K-12 DISTRICT", 25, schoolY + 6);
+        
+        doc.setTextColor(40, 40, 40);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(parcelData.unifiedSchoolDistrict, 25, schoolY + 12);
       } else {
+        let cardY = schoolY;
         if (parcelData.elementarySchoolDistrict) {
+          doc.setFillColor(255, 255, 255);
+          doc.roundedRect(20, cardY, pageWidth - 40, 14, 3, 3, "F");
+          doc.setDrawColor(234, 179, 8);
+          doc.setLineWidth(1);
+          doc.roundedRect(20, cardY, pageWidth - 40, 14, 3, 3);
+          
+          doc.setTextColor(146, 64, 14);
           doc.setFont("helvetica", "bold");
-          doc.text("Elementary:", 25, schoolY);
+          doc.setFontSize(7);
+          doc.text("ELEMENTARY", 25, cardY + 5);
+          
+          doc.setTextColor(40, 40, 40);
           doc.setFont("helvetica", "normal");
-          doc.text(parcelData.elementarySchoolDistrict, 70, schoolY);
+          doc.setFontSize(8);
+          doc.text(parcelData.elementarySchoolDistrict, 25, cardY + 10);
+          cardY += 16;
         }
+        
         if (parcelData.secondarySchoolDistrict) {
+          doc.setFillColor(255, 255, 255);
+          doc.roundedRect(20, cardY, pageWidth - 40, 14, 3, 3, "F");
+          doc.setDrawColor(234, 179, 8);
+          doc.setLineWidth(1);
+          doc.roundedRect(20, cardY, pageWidth - 40, 14, 3, 3);
+          
+          doc.setTextColor(146, 64, 14);
           doc.setFont("helvetica", "bold");
-          doc.text("Secondary:", 25, schoolY + 8);
+          doc.setFontSize(7);
+          doc.text("SECONDARY (MIDDLE/HIGH)", 25, cardY + 5);
+          
+          doc.setTextColor(40, 40, 40);
           doc.setFont("helvetica", "normal");
-          doc.text(parcelData.secondarySchoolDistrict, 70, schoolY + 8);
+          doc.setFontSize(8);
+          doc.text(parcelData.secondarySchoolDistrict, 25, cardY + 10);
         }
       }
       
       doc.setFont("helvetica", "italic");
-      doc.setFontSize(8);
+      doc.setFontSize(7);
       doc.setTextColor(120, 120, 120);
-      doc.text("School district boundaries impact property values and education access.", 25, schoolY + 18);
+      doc.text("School boundaries significantly impact property values and may affect tax rates", 20, schoolY + 36);
       
-      propY += 60;
+      propY += 70;
     }
     
     doc.setFontSize(7);
