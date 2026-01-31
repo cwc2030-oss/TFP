@@ -66,8 +66,20 @@ export default function InteractiveMap({
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   const [parcelData, setParcelData] = useState<ParcelData | null>(null);
   const [neighboringParcels, setNeighboringParcels] = useState<ParcelData[]>([]);
-  // Basic Report layers - pre-selected for $99 report, no user configuration
-  const selectedLayers = ["flood_zones", "topography", "soil_types", "property_boundaries", "roads_transportation"];
+  // All layers included in reports - Basic + Premium
+  const selectedLayers = [
+    // Original layers
+    "flood_zones", 
+    "topography", 
+    "soil_types", 
+    "property_boundaries", 
+    "roads_transportation",
+    // Premium layers (NEW!)
+    "building_footprints",
+    "qualified_opportunity_zones", 
+    "fema_risk_index",
+    "school_districts"
+  ];
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
