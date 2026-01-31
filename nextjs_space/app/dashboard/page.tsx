@@ -119,6 +119,13 @@ export default function DashboardPage() {
             Completed
           </span>
         );
+      case "paid":
+        return (
+          <span className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+            <CheckCircle className="w-3 h-3" />
+            paid
+          </span>
+        );
       case "pending":
         return (
           <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
@@ -216,7 +223,7 @@ export default function DashboardPage() {
                 <div>
                   <p className="text-sm text-stone-500">Ready to Download</p>
                   <p className="text-2xl font-bold text-stone-800">
-                    {orders.filter((o) => o.status === "completed" || o.status === "demo_checkout").length}
+                    {orders.filter((o) => o.status === "completed" || o.status === "paid" || o.status === "demo_checkout").length}
                   </p>
                 </div>
               </div>
@@ -301,7 +308,7 @@ export default function DashboardPage() {
 
                         <div className="flex items-center gap-3">
                           {getStatusBadge(order.status)}
-                          {(order.status === "completed" || order.status === "demo_checkout") && (
+                          {(order.status === "completed" || order.status === "paid" || order.status === "demo_checkout") && (
                             <Button
                               onClick={() => handleDownload(order.id)}
                               disabled={downloadingId === order.id}
