@@ -41,6 +41,20 @@ interface ParcelData {
   // Census & Location
   censusTract: string | null;
   county: string | null;
+  // Premium Data - Building Footprints
+  buildingFootprintSqft: number | null;
+  buildingCount: number | null;
+  // Premium Data - Qualified Opportunity Zone
+  isQualifiedOpportunityZone: boolean;
+  qozTract: string | null;
+  // Premium Data - FEMA Risk
+  femaNriRiskRating: string | null;
+  femaFloodZone: string | null;
+  femaFloodZoneSubtype: string | null;
+  // Premium Data - School Districts
+  elementarySchoolDistrict: string | null;
+  secondarySchoolDistrict: string | null;
+  unifiedSchoolDistrict: string | null;
 }
 
 const formatDate = (date: Date) => {
@@ -149,6 +163,17 @@ async function fetchRegridParcelData(lat: number, lng: number, address: string):
       plssSection: fields.plss_section || null,
       censusTract: fields.census_tract || null,
       county: fields.county || null,
+      // Premium Data
+      buildingFootprintSqft: fields.recrdareano || fields.area_building || null,
+      buildingCount: fields.ll_address_count || null,
+      isQualifiedOpportunityZone: fields.qoz === "Yes" || fields.qoz === "1" || fields.qoz === true,
+      qozTract: fields.qoz_tract || null,
+      femaNriRiskRating: fields.fema_nri_risk_rating || null,
+      femaFloodZone: fields.fema_flood_zone || null,
+      femaFloodZoneSubtype: fields.fema_flood_zone_subtype || null,
+      elementarySchoolDistrict: fields.census_elementary_school_district || null,
+      secondarySchoolDistrict: fields.census_secondary_school_district || null,
+      unifiedSchoolDistrict: fields.census_unified_school_district || null,
     };
   } catch (error) {
     console.error("Failed to fetch Regrid parcel data:", error);
@@ -1235,9 +1260,188 @@ export async function POST(request: NextRequest) {
     });
     
     propY += 55;
+    
+    // ============================================
+    // PREMIUM INSIGHTS SECTION
+    // ============================================
+    
+    // Check if page space available, if not add new page
+    if (propY + 120 > pageHeight - 30) {
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      doc.text("Data Source: County Records, US Census Bureau via Regrid", 15, propY);
+      drawPageFooter(doc, pageWidth, pageHeight, 4, totalPages, reportNumber);
+      doc.addPage();
+      drawPageHeader(doc, pageWidth, "PREMIUM INSIGHTS", [139, 92, 246]);
+      propY = 35;
+    }
+    
+    // Building Footprints Section
+    if (parcelData?.buildingFootprintSqft || parcelData?.buildingCount) {
+      doc.setFillColor(243, 232, 255);
+      doc.roundedRect(15, propY, pageWidth - 30, 45, 3, 3, "F");
+      doc.setDrawColor(139, 92, 246);
+      doc.setLineWidth(1);
+      doc.roundedRect(15, propY, pageWidth - 30, 45, 3, 3);
+      
+      doc.setFillColor(139, 92, 246);
+      doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
+      doc.rect(15, propY + 6, 110, 6, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("⭐ BUILDING FOOTPRINTS", 70, propY + 8, { align: "center" });
+      
+      const bfY = propY + 22;
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("Regrid has identified precise building structures on this property:", 25, bfY);
+      
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(139, 92, 246);
+      if (parcelData.buildingFootprintSqft) {
+        doc.text(`Total Building Area: ${parcelData.buildingFootprintSqft.toLocaleString()} sq ft`, 25, bfY + 10);
+      }
+      if (parcelData.buildingCount && parcelData.buildingCount > 0) {
+        doc.text(`Number of Structures: ${parcelData.buildingCount}`, 25, bfY + 18);
+      }
+      
+      propY += 55;
+    }
+    
+    // Qualified Opportunity Zone Section
+    if (parcelData?.isQualifiedOpportunityZone) {
+      doc.setFillColor(236, 253, 245);
+      doc.roundedRect(15, propY, pageWidth - 30, 55, 3, 3, "F");
+      doc.setDrawColor(16, 185, 129);
+      doc.setLineWidth(1);
+      doc.roundedRect(15, propY, pageWidth - 30, 55, 3, 3);
+      
+      doc.setFillColor(16, 185, 129);
+      doc.roundedRect(15, propY, 160, 12, 3, 3, "F");
+      doc.rect(15, propY + 6, 160, 6, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("💰 QUALIFIED OPPORTUNITY ZONE", 95, propY + 8, { align: "center" });
+      
+      const qozY = propY + 24;
+      doc.setTextColor(6, 78, 59);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("✓ THIS PROPERTY IS IN A FEDERAL QOZ", 25, qozY);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(40, 40, 40);
+      doc.text("Federal tax incentives available: Defer and reduce capital gains taxes on investments", 25, qozY + 10);
+      doc.text("in this zone. Consult with a tax professional about potential savings.", 25, qozY + 17);
+      
+      if (parcelData.qozTract) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(80, 80, 80);
+        doc.text(`Census Tract: ${parcelData.qozTract}`, 25, qozY + 27);
+      }
+      
+      propY += 65;
+    }
+    
+    // FEMA Risk Index Section
+    if (parcelData?.femaNriRiskRating) {
+      const riskColor = parcelData.femaNriRiskRating.toLowerCase().includes("very high") ? [239, 68, 68] :
+                        parcelData.femaNriRiskRating.toLowerCase().includes("high") ? [249, 115, 22] :
+                        parcelData.femaNriRiskRating.toLowerCase().includes("moderate") ? [234, 179, 8] :
+                        [34, 197, 94];
+      
+      doc.setFillColor(254, 242, 242);
+      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3, "F");
+      doc.setDrawColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.setLineWidth(1);
+      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3);
+      
+      doc.setFillColor(riskColor[0], riskColor[1], riskColor[2]);
+      doc.roundedRect(15, propY, 130, 12, 3, 3, "F");
+      doc.rect(15, propY + 6, 130, 6, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("⚠️ FEMA NATIONAL RISK INDEX", 80, propY + 8, { align: "center" });
+      
+      const riskY = propY + 24;
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Risk Rating: ${parcelData.femaNriRiskRating}`, 25, riskY);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("FEMA's National Risk Index combines 18 natural hazards including flood, wildfire,", 25, riskY + 10);
+      doc.text("tornado, earthquake, and drought. This rating may impact insurance requirements.", 25, riskY + 17);
+      
+      if (parcelData.femaFloodZone && parcelData.femaFloodZone !== "X") {
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(220, 38, 38);
+        doc.text(`Flood Zone: ${parcelData.femaFloodZone}${parcelData.femaFloodZoneSubtype ? ` (${parcelData.femaFloodZoneSubtype})` : ""}`, 25, riskY + 27);
+      }
+      
+      propY += 60;
+    }
+    
+    // School Districts Section
+    if (parcelData?.elementarySchoolDistrict || parcelData?.secondarySchoolDistrict || parcelData?.unifiedSchoolDistrict) {
+      doc.setFillColor(255, 251, 235);
+      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3, "F");
+      doc.setDrawColor(245, 158, 11);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(15, propY, pageWidth - 30, 50, 3, 3);
+      
+      doc.setFillColor(245, 158, 11);
+      doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
+      doc.rect(15, propY + 6, 110, 6, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("🎓 SCHOOL DISTRICTS", 70, propY + 8, { align: "center" });
+      
+      const schoolY = propY + 22;
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      
+      if (parcelData.unifiedSchoolDistrict) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Unified District:", 25, schoolY);
+        doc.setFont("helvetica", "normal");
+        doc.text(parcelData.unifiedSchoolDistrict, 70, schoolY);
+      } else {
+        if (parcelData.elementarySchoolDistrict) {
+          doc.setFont("helvetica", "bold");
+          doc.text("Elementary:", 25, schoolY);
+          doc.setFont("helvetica", "normal");
+          doc.text(parcelData.elementarySchoolDistrict, 70, schoolY);
+        }
+        if (parcelData.secondarySchoolDistrict) {
+          doc.setFont("helvetica", "bold");
+          doc.text("Secondary:", 25, schoolY + 8);
+          doc.setFont("helvetica", "normal");
+          doc.text(parcelData.secondarySchoolDistrict, 70, schoolY + 8);
+        }
+      }
+      
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(120, 120, 120);
+      doc.text("School district boundaries impact property values and education access.", 25, schoolY + 18);
+      
+      propY += 60;
+    }
+    
     doc.setFontSize(7);
     doc.setTextColor(120, 120, 120);
-    doc.text("Data Source: County Records, US Census Bureau via Regrid", 15, propY);
+    doc.text("Data Source: County Records, US Census Bureau, FEMA, IRS via Regrid", 15, propY);
     
     drawPageFooter(doc, pageWidth, pageHeight, 4, totalPages, reportNumber);
 

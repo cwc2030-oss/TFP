@@ -77,6 +77,20 @@ interface ParcelResponse {
   censusBlock: string | null;
   // County info
   county: string | null;
+  // Premium Data - Building Footprints
+  buildingFootprintSqft: number | null;
+  buildingCount: number | null;
+  // Premium Data - Qualified Opportunity Zone
+  isQualifiedOpportunityZone: boolean;
+  qozTract: string | null;
+  // Premium Data - FEMA Risk
+  femaNriRiskRating: string | null;
+  femaFloodZone: string | null;
+  femaFloodZoneSubtype: string | null;
+  // Premium Data - School Districts
+  elementarySchoolDistrict: string | null;
+  secondarySchoolDistrict: string | null;
+  unifiedSchoolDistrict: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -212,6 +226,20 @@ export async function GET(request: NextRequest) {
       censusBlock: fields.census_block || null,
       // County
       county: fields.county || null,
+      // Premium Data - Building Footprints
+      buildingFootprintSqft: fields.recrdareano || fields.area_building || null,
+      buildingCount: fields.ll_address_count || null,
+      // Premium Data - Qualified Opportunity Zone
+      isQualifiedOpportunityZone: fields.qoz === "Yes" || fields.qoz === "1" || fields.qoz === true,
+      qozTract: fields.qoz_tract || null,
+      // Premium Data - FEMA Risk
+      femaNriRiskRating: fields.fema_nri_risk_rating || null,
+      femaFloodZone: fields.fema_flood_zone || null,
+      femaFloodZoneSubtype: fields.fema_flood_zone_subtype || null,
+      // Premium Data - School Districts
+      elementarySchoolDistrict: fields.census_elementary_school_district || null,
+      secondarySchoolDistrict: fields.census_secondary_school_district || null,
+      unifiedSchoolDistrict: fields.census_unified_school_district || null,
     };
 
     return NextResponse.json({ parcels: [parcel] });
@@ -319,6 +347,16 @@ export async function POST(request: NextRequest) {
           lat: parseFloat(fields.lat) || 0,
           lng: parseFloat(fields.lon) || 0,
           regridPath: fields.path || feature.properties?.path || "",
+          buildingFootprintSqft: fields.recrdareano || fields.area_building || null,
+          buildingCount: fields.ll_address_count || null,
+          isQualifiedOpportunityZone: fields.qoz === "Yes" || fields.qoz === "1" || fields.qoz === true,
+          qozTract: fields.qoz_tract || null,
+          femaNriRiskRating: fields.fema_nri_risk_rating || null,
+          femaFloodZone: fields.fema_flood_zone || null,
+          femaFloodZoneSubtype: fields.fema_flood_zone_subtype || null,
+          elementarySchoolDistrict: fields.census_elementary_school_district || null,
+          secondarySchoolDistrict: fields.census_secondary_school_district || null,
+          unifiedSchoolDistrict: fields.census_unified_school_district || null,
         });
       }
     });
