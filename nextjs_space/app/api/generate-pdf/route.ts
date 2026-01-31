@@ -629,13 +629,16 @@ function generateUseCaseScores(acreage: string, zoning: string): { use: string; 
 
 // Draw star rating
 function drawStars(doc: jsPDF, stars: number, x: number, y: number) {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
   for (let i = 0; i < 5; i++) {
     if (i < stars) {
-      doc.setFillColor(234, 179, 8);
+      doc.setTextColor(234, 179, 8);
+      doc.text("★", x + (i * 5), y);
     } else {
-      doc.setFillColor(229, 231, 235);
+      doc.setTextColor(229, 231, 235);
+      doc.text("☆", x + (i * 5), y);
     }
-    doc.circle(x + (i * 5), y, 2, "F");
   }
 }
 
@@ -1276,32 +1279,53 @@ export async function POST(request: NextRequest) {
       propY = 35;
     }
     
-    // Building Footprints Section - ENHANCED
-    if (parcelData?.buildingFootprintSqft || parcelData?.buildingCount || parcelData?.yearBuilt || parcelData?.numStories) {
-      // Calculate dynamic height based on available data
-      const hasStructureInfo = parcelData?.buildingFootprintSqft || parcelData?.buildingCount;
-      const hasBuildingDetails = parcelData?.yearBuilt || parcelData?.numStories;
-      const hasLivingSpace = parcelData?.buildingSqft || parcelData?.numBedrooms || parcelData?.numBathrooms;
-      
-      let boxHeight = 45; // Base height
-      if (hasBuildingDetails) boxHeight += 20;
-      if (hasLivingSpace) boxHeight += 15;
-      
-      doc.setFillColor(243, 232, 255);
-      doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3, "F");
-      doc.setDrawColor(139, 92, 246);
-      doc.setLineWidth(1);
-      doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3);
-      
-      doc.setFillColor(139, 92, 246);
-      doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
-      doc.rect(15, propY + 6, 110, 6, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text("⭐ BUILDING INSIGHTS", 70, propY + 8, { align: "center" });
-      
-      let bfY = propY + 22;
+    // Building Insights Section - ALWAYS DISPLAY
+    // Calculate dynamic height based on available data
+    const hasStructureInfo = parcelData?.buildingFootprintSqft || parcelData?.buildingCount;
+    const hasBuildingDetails = parcelData?.yearBuilt || parcelData?.numStories;
+    const hasLivingSpace = parcelData?.buildingSqft || parcelData?.numBedrooms || parcelData?.numBathrooms;
+    const hasAnyBuildingData = hasStructureInfo || hasBuildingDetails || hasLivingSpace;
+    
+    let boxHeight = hasAnyBuildingData ? 45 : 55; // Base height (larger if no data for explanation)
+    if (hasBuildingDetails) boxHeight += 20;
+    if (hasLivingSpace) boxHeight += 15;
+    
+    doc.setFillColor(243, 232, 255);
+    doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3, "F");
+    doc.setDrawColor(139, 92, 246);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, propY, pageWidth - 30, boxHeight, 3, 3);
+    
+    doc.setFillColor(139, 92, 246);
+    doc.roundedRect(15, propY, 110, 12, 3, 3, "F");
+    doc.rect(15, propY + 6, 110, 6, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("⭐ BUILDING INSIGHTS", 70, propY + 8, { align: "center" });
+    
+    let bfY = propY + 22;
+    
+    if (!hasAnyBuildingData) {
+      // No building data available - show informative message
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("No recorded structures found on this property in county assessor records.", 25, bfY);
+      bfY += 10;
+      doc.setTextColor(80, 80, 80);
+      doc.setFontSize(8);
+      const explanationLines = [
+        "• This typically indicates vacant land or recently developed property",
+        "• Building permits and structures may not yet be reflected in county databases",
+        "• Recommend on-site inspection to verify current conditions",
+        "• Contact county assessor for most current building records"
+      ];
+      explanationLines.forEach((line, idx) => {
+        doc.text(line, 30, bfY + (idx * 7));
+      });
+    } else {
+      // Has building data - show comprehensive info
       doc.setTextColor(40, 40, 40);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
@@ -1387,9 +1411,9 @@ export async function POST(request: NextRequest) {
           });
         }
       }
-      
-      propY += boxHeight + 10;
     }
+    
+    propY += boxHeight + 10;
     
     // Qualified Opportunity Zone Section
     if (parcelData?.isQualifiedOpportunityZone) {
@@ -1754,6 +1778,82 @@ export async function POST(request: NextRequest) {
     });
     
     growingY += 100;
+    
+    // GROWING SEASON VISUAL CHART
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(15, growingY, pageWidth - 30, 55, 3, 3, "F");
+    doc.setDrawColor(34, 197, 94);
+    doc.setLineWidth(1);
+    doc.roundedRect(15, growingY, pageWidth - 30, 55, 3, 3);
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("GROWING SEASON TIMELINE", pageWidth / 2, growingY + 8, { align: "center" });
+    
+    // Month labels and timeline
+    const chartY = growingY + 20;
+    const chartWidth = pageWidth - 50;
+    const monthWidth = chartWidth / 12;
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    
+    // Draw month labels
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(100, 100, 100);
+    months.forEach((month, idx) => {
+      const x = 25 + (idx * monthWidth) + (monthWidth / 2);
+      doc.text(month, x, chartY, { align: "center" });
+    });
+    
+    // Draw base timeline
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(1);
+    doc.line(25, chartY + 8, 25 + chartWidth, chartY + 8);
+    
+    // Calculate frost-free period based on zone
+    let frostFreeStart = 4; // May (0-indexed)
+    let frostFreeEnd = 9; // October
+    
+    // Adjust based on hardiness zone
+    if (hardiness.zone.includes("3") || hardiness.zone.includes("4")) {
+      frostFreeStart = 5; // Late May
+      frostFreeEnd = 8; // Early September
+    } else if (hardiness.zone.includes("9") || hardiness.zone.includes("10")) {
+      frostFreeStart = 2; // March
+      frostFreeEnd = 11; // December
+    } else if (hardiness.zone.includes("7") || hardiness.zone.includes("8")) {
+      frostFreeStart = 3; // April
+      frostFreeEnd = 10; // November
+    }
+    
+    // Draw frost-free growing period (green bar)
+    const growStartX = 25 + (frostFreeStart * monthWidth);
+    const growEndX = 25 + ((frostFreeEnd + 1) * monthWidth);
+    doc.setFillColor(34, 197, 94);
+    doc.roundedRect(growStartX, chartY + 3, growEndX - growStartX, 10, 2, 2, "F");
+    
+    // Draw frost risk periods (light blue bars)
+    doc.setFillColor(191, 219, 254);
+    if (frostFreeStart > 0) {
+      doc.roundedRect(25, chartY + 3, growStartX - 25, 10, 2, 2, "F");
+    }
+    if (frostFreeEnd < 11) {
+      doc.roundedRect(growEndX, chartY + 3, 25 + chartWidth - growEndX, 10, 2, 2, "F");
+    }
+    
+    // Legend
+    doc.setFontSize(7);
+    doc.setTextColor(40, 40, 40);
+    doc.setFillColor(34, 197, 94);
+    doc.rect(30, chartY + 18, 8, 4, "F");
+    doc.text("Frost-Free Growing Season", 40, chartY + 21);
+    
+    doc.setFillColor(191, 219, 254);
+    doc.rect(110, chartY + 18, 8, 4, "F");
+    doc.text("Frost Risk Period", 120, chartY + 21);
+    
+    growingY += 65;
     
     // Soil info
     doc.setFillColor(248, 250, 252);
