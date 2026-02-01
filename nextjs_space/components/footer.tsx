@@ -45,7 +45,7 @@ export default function Footer() {
               </li>
               <li>
                 <a 
-                  href="/sample-report.pdf" 
+                  href="/api/sample-report" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-sm hover:text-emerald-400 transition-colors"

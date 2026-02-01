@@ -588,7 +588,7 @@ export async function GET() {
     doc.setFontSize(9);
     
     const valuationData = [
-      ["Market Value:", parcelData.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "Not Available"],
+      ["Tax Assessed Value:", parcelData.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "Not Available"],
       ["Land Value:", parcelData.landValue ? `$${parcelData.landValue.toLocaleString()}` : "Not Available"],
       ["Improvement Value:", parcelData.improvementValue ? `$${parcelData.improvementValue.toLocaleString()}` : "$0 (Vacant Land)"],
       ["Tax Year:", parcelData.taxYear || "N/A"],
