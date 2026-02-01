@@ -6,9 +6,9 @@ export const revalidate = 0;
 
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
-  parcelAddress: "Sample Road, Leeton, Johnson County, MO 64761, USA",
-  parcelLat: 38.6447214,
-  parcelLng: -93.6672555,
+  parcelAddress: "437 SE Highway AA, Bethlehem, Henry County, MO 64735, USA",
+  parcelLat: 38.359054,
+  parcelLng: -93.716372,
 };
 
 interface ParcelData {
@@ -114,24 +114,24 @@ function getDefaultSampleData(): ParcelData {
     parcelId: "XX-XXX-XXX-XX-XXX-XXX.XX",
     owner: "LAND OWNER",
     mailingAddress: "[Mailing Address Redacted]",
-    siteAddress: "Sample Road, Leeton, MO 64761",
-    acreage: 101.48,
-    sqft: 4420725,
+    siteAddress: "437 SE Highway AA, Bethlehem, MO 64735",
+    acreage: 9.51,
+    sqft: 414314,
     zoning: "A-1 Agricultural",
-    useDescription: "Agricultural - Vacant Land",
+    useDescription: "Agricultural - Residential",
     coordinates: null,
-    marketValue: 348500,
-    landValue: 348500,
-    improvementValue: 0,
+    marketValue: 1124800,
+    landValue: 63000,
+    improvementValue: 1061800,
     taxYear: "2024",
     saleDate: "2020-03-15",
     salePrice: 425000,
-    county: "Johnson",
+    county: "Henry",
     state: "Missouri",
-    legalDescription: "THE NW 1/4 OF SECTION 34, TOWNSHIP 45N, RANGE 26W, JOHNSON COUNTY, MISSOURI",
-    plssTownship: "T45N",
-    plssRange: "R26W",
-    plssSection: "S34",
+    legalDescription: "N. 506.5' OF E. 860' OF S'2 SW'4 NW'4 (EX. CO. HWY. R/W)",
+    plssTownship: "041N",
+    plssRange: "025W",
+    plssSection: "Section 08",
   };
 }
 
@@ -881,8 +881,8 @@ export async function GET() {
     const premiumInsights = [
       { title: "QUALIFIED OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246], icon: "$" },
       { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for natural hazards", color: [34, 197, 94], icon: "✓" },
-      { title: "BUILDING FOOTPRINTS", value: "No Structures", desc: "Vacant land ready for development", color: [59, 130, 246], icon: "⌂" },
-      { title: "SCHOOL DISTRICT", value: "Leeton R-X", desc: "Local public school district", color: [234, 88, 12], icon: "★" },
+      { title: "BUILDING FOOTPRINTS", value: "4,768 sq ft", desc: "Single structure built in 2018", color: [59, 130, 246], icon: "⌂" },
+      { title: "SCHOOL DISTRICT", value: "Clinton R-III", desc: "Local public school district", color: [234, 88, 12], icon: "★" },
     ];
     
     premiumInsights.forEach((insight, i) => {
