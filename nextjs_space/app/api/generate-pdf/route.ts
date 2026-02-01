@@ -1004,7 +1004,7 @@ export async function POST(request: NextRequest) {
       { label: "Zoning Designation", value: zoningStr },
       { label: "Current Owner", value: parcelData?.owner?.substring(0, 30) || "N/A" },
       { label: "County", value: county },
-      { label: "Market Value", value: parcelData?.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A" },
+      { label: "Tax Assessed Value", value: parcelData?.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A" },
       { label: "Coordinates", value: `${order.parcelLat.toFixed(6)}°N, ${Math.abs(order.parcelLng).toFixed(6)}°W` },
     ];
     
@@ -1111,16 +1111,16 @@ export async function POST(request: NextRequest) {
     const valStartX = 20;
     const valY = ownerY + 24;
     
-    // Total Market Value
+    // Tax Assessed Value
     doc.setTextColor(80, 80, 80);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("TOTAL MARKET VALUE", valStartX, valY);
+    doc.text("TAX ASSESSED VALUE", valStartX, valY);
     doc.setTextColor(34, 83, 60);
     doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
-    const marketVal = parcelData?.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A";
-    doc.text(marketVal, valStartX, valY + 12);
+    const assessedVal = parcelData?.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A";
+    doc.text(assessedVal, valStartX, valY + 12);
     
     // Land Value
     doc.setTextColor(80, 80, 80);
@@ -1146,8 +1146,8 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(80, 80, 80);
     doc.setFontSize(7);
     doc.setFont("helvetica", "italic");
-    doc.text("Note: Assessed values are determined by the county for tax purposes and may not reflect current market conditions.", 25, ownerY + 55);
-    doc.text(`Tax Year: ${parcelData?.taxYear || 'N/A'}`, 25, ownerY + 62);
+    doc.text("Note: Tax assessed values are set by the county and typically represent 60-70% of actual market value.", 25, ownerY + 55);
+    doc.text(`Actual market value may be 30-40% higher. Tax Year: ${parcelData?.taxYear || 'N/A'}`, 25, ownerY + 62);
     
     ownerY += 80;
     
