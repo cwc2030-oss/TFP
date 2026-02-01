@@ -183,14 +183,24 @@ function generateReportNumber(): string {
 
 async function loadLogoImage(): Promise<string | null> {
   try {
-    const logoUrl = "https://cdn.abacus.ai/images/a218da49-35b3-4581-83cf-641e0b734762.png";
-    const response = await fetch(logoUrl, { signal: AbortSignal.timeout(10000) });
-    if (response.ok) {
-      const buffer = await response.arrayBuffer();
-      return `data:image/png;base64,${Buffer.from(buffer).toString("base64")}`;
-    }
+    // Try to load JPEG version (no transparency issues)
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const logoPath = path.join(process.cwd(), "public", "logo-tfp-solid.jpg");
+    const buffer = await fs.readFile(logoPath);
+    return `data:image/jpeg;base64,${buffer.toString("base64")}`;
   } catch (error) {
-    console.error("Failed to load logo:", error);
+    console.error("Failed to load logo from file:", error);
+    // Fallback to PNG
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const logoPath = path.join(process.cwd(), "public", "logo-tfp.png");
+      const buffer = await fs.readFile(logoPath);
+      return `data:image/png;base64,${buffer.toString("base64")}`;
+    } catch (e) {
+      console.error("Failed to load logo PNG:", e);
+    }
   }
   return null;
 }
@@ -213,15 +223,30 @@ async function fetchGoogleMapImage(
   parcelCoordinates: number[][][] | null = null
 ): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error("Google Maps API key not configured");
+    return null;
+  }
 
   try {
     const parcelPath = buildParcelPath(parcelCoordinates);
-    const mapUrl = `https://i.ytimg.com/vi/2q4WMN9wKNw/maxresdefault.jpg?sqp=-oaymwEmCIAKENAF8quKqQMa8AEB-AH-CYAC0AWKAgwIABABGGUgZShlMA8=&rs=AOn4CLDxQUqlTP-ALiL4LySAbxVZ3jwzJA`;
+    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
+    const params = new URLSearchParams({
+      center: `${lat},${lng}`,
+      zoom: zoom.toString(),
+      size: "640x400",
+      maptype: mapType,
+      key: apiKey
+    });
+    const mapUrl = `${baseUrl}?${params.toString()}${parcelPath}`;
+    
     const response = await fetch(mapUrl, { signal: AbortSignal.timeout(15000) });
     if (response.ok && response.headers.get('content-type')?.includes('image')) {
       const buffer = await response.arrayBuffer();
-      return `data:image/png;base64,${Buffer.from(buffer).toString("base64")}`;
+      const imageType = mapType === "terrain" ? "png" : "jpeg";
+      return `data:image/${imageType};base64,${Buffer.from(buffer).toString("base64")}`;
+    } else {
+      console.error("Map fetch failed:", response.status, response.statusText);
     }
   } catch (error) {
     console.error("Failed to fetch map image:", error);
@@ -311,7 +336,7 @@ function drawSimpleMap(doc: jsPDF, lat: number, lng: number, x: number, y: numbe
 function drawPageHeader(doc: jsPDF, pageWidth: number, title: string, logoImage: string | null) {
   doc.setFillColor(34, 83, 60);
   doc.rect(18, 18, pageWidth - 36, 18, "F");
-  if (logoImage) { try { doc.addImage(logoImage, "PNG", 20, 19, 16, 16); } catch (e) {} }
+  if (logoImage) { try { doc.addImage(logoImage, "JPEG", 20, 19, 16, 16); } catch (e) {} }
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
@@ -361,7 +386,7 @@ export async function GET() {
     
     doc.setFillColor(34, 83, 60);
     doc.rect(18, 18, pageWidth - 36, 32, "F");
-    if (logoImage) { try { doc.addImage(logoImage, "PNG", 22, 20, 28, 28); } catch (e) {} }
+    if (logoImage) { try { doc.addImage(logoImage, "JPEG", 22, 20, 28, 28); } catch (e) {} }
     
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
@@ -1125,7 +1150,7 @@ export async function GET() {
     doc.setFillColor(34, 83, 60);
     doc.roundedRect(30, yPos, pageWidth - 60, 35, 5, 5, "F");
     
-    if (logoImage) { try { doc.addImage(logoImage, "PNG", pageWidth / 2 - 15, yPos + 3, 30, 30); } catch (e) {} }
+    if (logoImage) { try { doc.addImage(logoImage, "JPEG", pageWidth / 2 - 15, yPos + 3, 30, 30); } catch (e) {} }
     
     yPos += 45;
     
