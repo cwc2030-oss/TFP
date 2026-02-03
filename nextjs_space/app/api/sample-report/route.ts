@@ -7,9 +7,9 @@ export const revalidate = 0;
 
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
-  parcelAddress: "437 SE Highway AA, Bethlehem, Henry County, MO 64735, USA",
-  parcelLat: 38.359054,
-  parcelLng: -93.716372,
+  parcelAddress: "439 SE State Hwy PP, Leeton, MO 64761, USA",
+  parcelLat: 38.641668,
+  parcelLng: -93.666698,
 };
 
 interface ParcelData {
