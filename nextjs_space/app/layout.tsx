@@ -10,8 +10,10 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const dynamic = "force-dynamic";
 
+const OG_IMAGE_URL = "https://terrafirmapartners.abacusai.app/og-image.png";
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://terrafirma.partners"),
+  metadataBase: new URL("https://terrafirmapartners.abacusai.app"),
   title: "Terra Firma Partners™ | Professional Land Analysis Reports",
   description:
     "Get instant land parcel analysis reports for any property in the USA. Flood zones, topography, soil types, ownership data & more. Professional PDF reports for $350.",
@@ -25,14 +27,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://terrafirma.partners",
+    url: "https://terrafirmapartners.abacusai.app",
     siteName: "Terra Firma Partners™",
     title: "Terra Firma Partners™ | Professional Land Analysis Reports",
     description:
       "Get instant land parcel analysis reports for any US property. Flood zones, topography, soil, ownership & more. $350 per report.",
     images: [
       {
-        url: "/og-image.png",
+        url: OG_IMAGE_URL,
         width: 1200,
         height: 630,
         alt: "Terra Firma Partners - Land Analysis Reports",
@@ -43,7 +45,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Terra Firma Partners™ | Land Analysis Reports",
     description: "Professional land parcel analysis reports for any US property. $350 per report.",
-    images: ["/og-image.png"],
+    images: [OG_IMAGE_URL],
   },
   robots: {
     index: true,
