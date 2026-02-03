@@ -1285,17 +1285,17 @@ export async function POST(request: NextRequest) {
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
 
-    // Generate and return PDF
+    // Generate and return PDF as base64 JSON for dashboard download
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
-    return new NextResponse(pdfBuffer, {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": "inline; filename=terra_firma_sample_report.pdf",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-      },
+    const pdfBase64 = pdfBuffer.toString("base64");
+    const filename = `TFP-${parcelData.siteAddress?.replace(/[^a-zA-Z0-9]/g, "-") || order.id}.pdf`;
+    
+    return NextResponse.json({
+      pdf: pdfBase64,
+      filename: filename,
     });
   } catch (error) {
-    console.error("Sample report generation error:", error);
-    return NextResponse.json({ error: "Failed to generate sample report" }, { status: 500 });
+    console.error("PDF generation error:", error);
+    return NextResponse.json({ error: "Failed to generate report" }, { status: 500 });
   }
 }
