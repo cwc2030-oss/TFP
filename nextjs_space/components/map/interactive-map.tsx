@@ -956,10 +956,10 @@ export default function InteractiveMap({
 
       {/* Full Parcel Data Panel - Shows when expanded */}
       {parcelData && showFullPanel && (
-        <div className={`absolute z-10 bg-white/95 backdrop-blur-sm shadow-lg border border-emerald-300 overflow-y-auto
+        <div className={`absolute z-10 bg-white/95 backdrop-blur-sm shadow-lg border border-emerald-300 flex flex-col
           ${isMobile 
             ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[70vh] border-b-0' 
-            : 'bottom-4 left-4 w-96 rounded-lg max-h-[60vh]'
+            : 'bottom-4 left-4 w-80 rounded-lg max-h-[75vh]'
           }`}>
           {/* Mobile drag indicator */}
           {isMobile && (
@@ -967,163 +967,95 @@ export default function InteractiveMap({
               <div className="w-12 h-1.5 bg-stone-300 rounded-full" />
             </div>
           )}
-          <div className={`p-4 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white ${isMobile ? 'pt-1' : ''}`}>
-            <div className="flex items-start justify-between">
-              <div className="flex items-start gap-3">
-                <CheckCircle className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-stone-800">Parcel Information</p>
-                  <p className="text-xs text-stone-500">Powered by Regrid</p>
-                </div>
+          
+          {/* Sticky Header with Actions */}
+          <div className={`p-3 border-b border-stone-200 bg-gradient-to-r from-emerald-50 to-white flex-shrink-0 ${isMobile ? 'pt-1' : ''}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-700 flex-shrink-0" />
+                <p className="font-semibold text-stone-800 text-sm">{parcelData.siteAddress || 'Selected Parcel'}</p>
               </div>
               <button onClick={() => setShowFullPanel(false)} className="text-stone-400 hover:text-stone-600 p-1" title="Minimize">
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
+            </div>
+            
+            {/* Action Buttons - Always Visible */}
+            <div className="space-y-2">
+              <button
+                onClick={onCheckout}
+                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
+              >
+                <FileText className="w-4 h-4" />
+                Order Report – $350
+              </button>
+              <div className="flex gap-2">
+                <a
+                  href="/api/sample-report?v=20260122"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 border border-emerald-700 text-emerald-700 hover:bg-emerald-50 py-2 px-3 rounded-lg font-medium flex items-center justify-center gap-1.5 transition-colors text-xs"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Sample
+                </a>
+                <button
+                  onClick={() => setShowEmailModal(true)}
+                  className="flex-1 border border-stone-300 text-stone-600 hover:bg-stone-50 py-2 px-3 rounded-lg font-medium flex items-center justify-center gap-1.5 transition-colors text-xs"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Email
+                </button>
+              </div>
             </div>
           </div>
           
-          <div className="p-4 space-y-4">
-            {/* Parcel ID */}
-            <div className="flex items-start gap-3">
-              <MapPin className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Parcel ID (APN)</p>
-                <p className="font-mono text-sm text-stone-800">{parcelData.parcelId}</p>
+          {/* Scrollable Content */}
+          <div className="p-3 space-y-2 overflow-y-auto flex-1">
+            {/* Compact Property Details Grid */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-stone-50 rounded p-2">
+                <p className="text-stone-500 uppercase text-[10px]">Lot Size</p>
+                <p className="text-stone-800 font-medium">{formatAcreage(parcelData.acreage)}</p>
+              </div>
+              <div className="bg-stone-50 rounded p-2">
+                <p className="text-stone-500 uppercase text-[10px]">Zoning</p>
+                <p className="text-stone-800 font-medium truncate">{parcelData.zoning !== "N/A" ? parcelData.zoning : parcelData.useDescription || 'N/A'}</p>
               </div>
             </div>
-
-            {/* Owner */}
-            <div className="flex items-start gap-3">
-              <User className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Owner</p>
-                <p className="text-sm text-stone-800 font-medium">{parcelData.owner}</p>
-              </div>
-            </div>
-
-            {/* Mailing Address */}
-            <div className="flex items-start gap-3">
-              <Home className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Mailing Address</p>
-                <p className="text-sm text-stone-800">{parcelData.mailingAddress}</p>
-              </div>
-            </div>
-
-            {/* Site Address */}
-            <div className="flex items-start gap-3">
-              <MapPinned className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Site Address</p>
-                <p className="text-sm text-stone-800">{parcelData.siteAddress}</p>
-              </div>
-            </div>
-
-            {/* Acreage */}
-            <div className="flex items-start gap-3">
-              <Ruler className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Lot Size</p>
-                <p className="text-sm text-stone-800">
-                  {formatAcreage(parcelData.acreage)}
-                  {parcelData.sqft > 0 && (
-                    <span className="text-stone-500 ml-2">({parcelData.sqft.toLocaleString()} sq ft)</span>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            {/* Zoning */}
-            <div className="flex items-start gap-3">
-              <Building2 className="w-4 h-4 text-emerald-700 mt-1 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-stone-500 uppercase tracking-wide">Zoning / Use</p>
-                <p className="text-sm text-stone-800">
-                  {parcelData.zoning !== "N/A" ? parcelData.zoning : parcelData.useDescription}
-                </p>
+            
+            {/* Owner & APN */}
+            <div className="bg-stone-50 rounded p-2 text-xs">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-stone-500 uppercase text-[10px]">Owner</p>
+                  <p className="text-stone-800 font-medium">{parcelData.owner}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-stone-500 uppercase text-[10px]">APN</p>
+                  <p className="text-stone-800 font-mono text-[11px]">{parcelData.parcelId}</p>
+                </div>
               </div>
             </div>
 
             {/* Neighboring parcels count */}
             {neighboringParcels.length > 0 && (
-              <div className="pt-3 mt-3 border-t border-stone-200">
-                <p className="text-xs text-indigo-600 flex items-center gap-1">
-                  <MapPinned className="w-3 h-3" />
-                  {neighboringParcels.length} neighboring parcel{neighboringParcels.length !== 1 ? "s" : ""} shown in purple • Click to select
-                </p>
-              </div>
+              <p className="text-xs text-indigo-600 flex items-center gap-1 py-1">
+                <MapPinned className="w-3 h-3" />
+                {neighboringParcels.length} neighbor{neighboringParcels.length !== 1 ? "s" : ""} in purple • Click to select
+              </p>
             )}
 
-            {/* Basic Report Includes */}
-            <div className="pt-4 mt-4 border-t-2 border-emerald-200">
-              <p className="text-sm font-semibold text-stone-800 mb-2">Basic Report Includes:</p>
-              <ul className="text-xs text-stone-600 space-y-1">
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
-                  FEMA Flood Zones
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
-                  Topography & Elevation
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
-                  Soil Types
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
-                  Property Boundaries
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
-                  Roads & Transportation
-                </li>
-              </ul>
-            </div>
-
-            {/* Checkout Button */}
-            <div className="pt-4 mt-4 border-t border-stone-200">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-stone-600">Basic Land Report</span>
-                <span className="text-xl font-bold text-emerald-700">$350</span>
+            {/* Report Includes - Compact */}
+            <div className="pt-2 border-t border-stone-200">
+              <p className="text-xs font-semibold text-stone-700 mb-1.5">Report Includes:</p>
+              <div className="flex flex-wrap gap-1">
+                {['Flood Zones', 'Topography', 'Soils', 'Boundaries', 'Roads'].map((item) => (
+                  <span key={item} className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full">
+                    ✓ {item}
+                  </span>
+                ))}
               </div>
-              <button
-                onClick={onCheckout}
-                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
-              >
-                <FileText className="w-4 h-4" />
-                Order Property Report
-              </button>
-              <a
-                href="/api/sample-report?v=20260122"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full mt-2 border border-emerald-700 text-emerald-700 hover:bg-emerald-50 py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
-              >
-                <Eye className="w-4 h-4" />
-                Preview Sample Report
-              </a>
-              <button
-                onClick={() => setShowEmailModal(true)}
-                className="w-full mt-2 border border-stone-300 text-stone-600 hover:bg-stone-50 py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
-              >
-                <Mail className="w-4 h-4" />
-                Email Me This Parcel
-              </button>
-              <p className="text-xs text-stone-400 text-center mt-2">
-                Save parcel details to your inbox
-              </p>
-            </div>
-
-            {/* Controls hint */}
-            <div className="pt-3 mt-3 border-t border-stone-200">
-              <p className="text-xs text-stone-500 flex items-center gap-1">
-                <Eye className="w-3 h-3" />
-                {isMobile 
-                  ? 'Pinch to zoom • Drag to pan • Two fingers to rotate'
-                  : 'Drag to pan • Scroll to zoom • Ctrl+drag to rotate'
-                }
-              </p>
             </div>
           </div>
         </div>
