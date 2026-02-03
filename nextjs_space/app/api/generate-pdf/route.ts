@@ -33,7 +33,7 @@ interface ParcelData {
 }
 
 // Fetch REAL parcel data from Regrid API with caching
-async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelData | null> {
+async function fetchRegridParcelData(lat: number, lng: number, address?: string): Promise<ParcelData | null> {
   // Check cache first
   const cached = await getCachedParcel(lat, lng);
   if (cached) {
@@ -70,8 +70,15 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
   }
 
   try {
-    console.log(`[PDF] Fetching fresh parcel data from Regrid for ${lat}, ${lng}`);
-    const searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
+    // Try address search first if provided (more reliable than exact coordinates)
+    let searchUrl: string;
+    if (address) {
+      console.log(`[PDF] Searching Regrid by address: ${address}`);
+      searchUrl = `https://app.regrid.com/api/v1/search.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
+    } else {
+      console.log(`[PDF] Fetching from Regrid by coordinates: ${lat}, ${lng}`);
+      searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
+    }
     const searchResponse = await fetch(searchUrl, {
       headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(15000),
@@ -407,7 +414,7 @@ export async function POST(request: NextRequest) {
     const reportNumber = generateReportNumber();
     const totalPages = 8;
     
-    const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng);
+    const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
     const parcelData = regridData || getDefaultSampleData();
     const logoImage = await loadLogoImage();
     const funFacts = generateFunFacts(parcelData.acreage, parcelData.county, parcelData.state);
