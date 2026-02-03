@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 
-// Version 2.0 - Regrid Pro API with nationwide coverage
+// Version 2.1 - Regrid Pro API with caching
 export const dynamic = "force-dynamic";
 
 interface RegridParcel {
@@ -116,6 +117,60 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Check cache first for coordinate-based lookups
+    if (lat && lng) {
+      const cached = await getCachedParcel(parseFloat(lat), parseFloat(lng));
+      if (cached) {
+        // Return cached data in the expected format
+        const parcel: ParcelResponse = {
+          parcelId: cached.parcelId,
+          owner: cached.owner,
+          mailingAddress: cached.mailingAddress,
+          siteAddress: cached.siteAddress,
+          acreage: cached.acreage,
+          sqft: cached.sqft,
+          zoning: cached.zoning,
+          useDescription: cached.useDescription,
+          coordinates: cached.coordinates || [],
+          geometryType: "Polygon",
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          regridPath: "",
+          marketValue: cached.marketValue,
+          landValue: cached.landValue,
+          improvementValue: cached.improvementValue,
+          taxYear: cached.taxYear,
+          saleDate: cached.saleDate,
+          salePrice: cached.salePrice,
+          lastOwnershipTransfer: null,
+          yearBuilt: null,
+          numStories: null,
+          numBedrooms: null,
+          numBathrooms: null,
+          buildingSqft: null,
+          legalDescription: cached.legalDescription,
+          subdivision: null,
+          plssTownship: cached.plssTownship,
+          plssRange: cached.plssRange,
+          plssSection: cached.plssSection,
+          censusTract: null,
+          censusBlock: null,
+          county: cached.county,
+          buildingFootprintSqft: null,
+          buildingCount: null,
+          isQualifiedOpportunityZone: cached.qozStatus === "Yes",
+          qozTract: null,
+          femaNriRiskRating: null,
+          femaFloodZone: cached.femaFloodZone || null,
+          femaFloodZoneSubtype: null,
+          elementarySchoolDistrict: cached.schoolDistrict || null,
+          secondarySchoolDistrict: null,
+          unifiedSchoolDistrict: null,
+        };
+        return NextResponse.json({ parcels: [parcel], cached: true });
+      }
+    }
+
     // Use the search endpoint (more reliable than typeahead)
     let searchUrl: string;
     
@@ -241,6 +296,43 @@ export async function GET(request: NextRequest) {
       secondarySchoolDistrict: fields.census_secondary_school_district || null,
       unifiedSchoolDistrict: fields.census_unified_school_district || null,
     };
+
+    // Cache the result for future lookups
+    const parcelLat = parseFloat(fields.lat) || (lat ? parseFloat(lat) : 0);
+    const parcelLng = parseFloat(fields.lon) || (lng ? parseFloat(lng) : 0);
+    
+    if (parcelLat && parcelLng) {
+      const cacheData: CachedParcelData = {
+        parcelId: parcel.parcelId,
+        owner: parcel.owner,
+        mailingAddress: parcel.mailingAddress,
+        siteAddress: parcel.siteAddress,
+        acreage: parcel.acreage,
+        sqft: parcel.sqft,
+        zoning: parcel.zoning,
+        useDescription: parcel.useDescription,
+        coordinates: feature.geometry?.coordinates as number[][][] || null,
+        marketValue: parcel.marketValue,
+        landValue: parcel.landValue,
+        improvementValue: parcel.improvementValue,
+        taxYear: parcel.taxYear,
+        saleDate: parcel.saleDate,
+        salePrice: parcel.salePrice,
+        county: parcel.county || "",
+        state: fields.state2 || "",
+        legalDescription: parcel.legalDescription,
+        plssTownship: parcel.plssTownship,
+        plssRange: parcel.plssRange,
+        plssSection: parcel.plssSection,
+        buildingFootprints: parcel.buildingFootprintSqft?.toString() || null,
+        qozStatus: parcel.isQualifiedOpportunityZone ? "Yes" : "No",
+        femaFloodZone: parcel.femaFloodZone,
+        schoolDistrict: parcel.unifiedSchoolDistrict || parcel.elementarySchoolDistrict,
+      };
+      
+      // Cache in background (don't await)
+      setCachedParcel(parcelLat, parcelLng, cacheData).catch(console.error);
+    }
 
     return NextResponse.json({ parcels: [parcel] });
 

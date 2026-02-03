@@ -63,3 +63,15 @@ model Lead {
   
   @@index([email])
 }
+
+model ParcelCache {
+  id          String   @id @default(cuid())
+  lat         Float
+  lng         Float
+  data        String   // JSON stringified parcel data
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime // Cache expiration (e.g., 30 days)
+  
+  @@unique([lat, lng])
+  @@index([lat, lng])
+}

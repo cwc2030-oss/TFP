@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { jsPDF } from "jspdf";
+import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -31,8 +32,37 @@ interface ParcelData {
   plssSection: string | null;
 }
 
-// Fetch REAL parcel data from Regrid API
+// Fetch REAL parcel data from Regrid API with caching
 async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelData | null> {
+  // Check cache first
+  const cached = await getCachedParcel(lat, lng);
+  if (cached) {
+    console.log(`[PDF] Using cached parcel data for ${lat}, ${lng}`);
+    return {
+      parcelId: cached.parcelId,
+      owner: cached.owner,
+      mailingAddress: cached.mailingAddress,
+      siteAddress: cached.siteAddress,
+      acreage: cached.acreage,
+      sqft: cached.sqft,
+      zoning: cached.zoning,
+      useDescription: cached.useDescription,
+      coordinates: cached.coordinates,
+      marketValue: cached.marketValue,
+      landValue: cached.landValue,
+      improvementValue: cached.improvementValue,
+      taxYear: cached.taxYear,
+      saleDate: cached.saleDate,
+      salePrice: cached.salePrice,
+      county: cached.county,
+      state: cached.state,
+      legalDescription: cached.legalDescription,
+      plssTownship: cached.plssTownship,
+      plssRange: cached.plssRange,
+      plssSection: cached.plssSection,
+    };
+  }
+
   const apiKey = process.env.REGRID_API_KEY;
   if (!apiKey) {
     console.error("Regrid API key not configured");
@@ -40,6 +70,7 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
   }
 
   try {
+    console.log(`[PDF] Fetching fresh parcel data from Regrid for ${lat}, ${lng}`);
     const searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
     const searchResponse = await fetch(searchUrl, {
       headers: { "Accept": "application/json" },
@@ -76,7 +107,7 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
       fields.szip || fields.situs_zip
     ].filter(Boolean);
 
-    return {
+    const result: ParcelData = {
       parcelId: fields.parcelnumb || fields.parcelnumb_no_formatting || "XX-XXX-XXX",
       owner: "LAND OWNER",
       mailingAddress: "[Mailing Address Redacted]",
@@ -99,6 +130,14 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
       plssRange: fields.plss_range || null,
       plssSection: fields.plss_section || null,
     };
+
+    // Cache the result
+    const cacheData: CachedParcelData = {
+      ...result,
+    };
+    setCachedParcel(lat, lng, cacheData).catch(console.error);
+
+    return result;
   } catch (error) {
     console.error("Regrid fetch error:", error);
     return null;
