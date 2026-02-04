@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
-import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
+import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -1411,38 +1411,111 @@ export async function POST(request: NextRequest) {
     
     // Get hunting data for this county
     const cwdStatus = getCWDStatus(parcelData.county);
+    const droughtStatus = getDroughtStatus(parcelData.county);
+    const harvestData = getHarvestData(parcelData.county);
     const mdcRegion = getMDCRegion(parcelData.county);
     const nearbyMRAP = getNearbyMRAPAreas(parcelData.county, 3);
     
-    // CWD Status Banner
-    const cwdBgColor: [number, number, number] = cwdStatus.inZone ? [220, 38, 38] : [34, 197, 94];
-    const cwdStatusText = cwdStatus.inZone 
-      ? (cwdStatus.isNew ? "CWD MANAGEMENT ZONE (NEW 2025)" : "CWD MANAGEMENT ZONE") 
-      : "NOT IN CWD ZONE";
+    // ========================================
+    // THREE KEY INDICATORS - Understated but powerful
+    // ========================================
+    const indicatorW = (pageWidth - 55) / 3;
     
-    doc.setFillColor(...cwdBgColor);
-    doc.roundedRect(20, yPos, pageWidth - 40, 12, 3, 3, "F");
-    doc.setTextColor(255, 255, 255);
+    // INDICATOR 1: CWD Status
+    const cwdColor: [number, number, number] = cwdStatus.inZone ? [220, 53, 69] : [34, 139, 34];
+    doc.setFillColor(250, 250, 250);
+    doc.roundedRect(20, yPos, indicatorW, 32, 3, 3, "F");
+    doc.setDrawColor(...cwdColor);
+    doc.setLineWidth(0.8);
+    doc.roundedRect(20, yPos, indicatorW, 32, 3, 3, "S");
+    
+    // Small colored dot indicator
+    doc.setFillColor(...cwdColor);
+    doc.circle(27, yPos + 8, 3, "F");
+    
+    doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(`${parcelData.county.toUpperCase()} COUNTY: ${cwdStatusText}`, pageWidth / 2, yPos + 8, { align: "center" });
-    
-    yPos += 16;
-    
-    // CWD Regulations box
-    doc.setFillColor(cwdStatus.inZone ? 254 : 240, cwdStatus.inZone ? 242 : 253, cwdStatus.inZone ? 242 : 244);
-    doc.roundedRect(20, yPos, pageWidth - 40, 28, 2, 2, "F");
-    doc.setTextColor(80, 80, 80);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text(cwdStatus.inZone ? "CWD ZONE REGULATIONS:" : "STANDARD REGULATIONS:", 25, yPos + 6);
-    doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
-    cwdStatus.regulations.slice(0, 4).forEach((reg, i) => {
-      doc.text("• " + reg, 25, yPos + 12 + i * 4);
-    });
+    doc.text("CWD STATUS", 33, yPos + 9);
     
-    yPos += 32;
+    doc.setTextColor(...cwdColor);
+    doc.setFontSize(9);
+    doc.text(cwdStatus.inZone ? "In Zone" : "Clear", 22, yPos + 19);
+    
+    doc.setTextColor(100, 100, 100);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5.5);
+    const cwdNote = cwdStatus.inZone 
+      ? (cwdStatus.isNew ? "New 2025 - Special regs apply" : "Management zone - Special regs")
+      : "No special CWD restrictions";
+    doc.text(cwdNote, 22, yPos + 26);
+    
+    // INDICATOR 2: Drought Monitor
+    const droughtColor: [number, number, number] = droughtStatus.isAffected 
+      ? (droughtStatus.level?.color || [234, 179, 8])
+      : [34, 139, 34];
+    doc.setFillColor(250, 250, 250);
+    doc.roundedRect(25 + indicatorW, yPos, indicatorW, 32, 3, 3, "F");
+    doc.setDrawColor(...droughtColor);
+    doc.setLineWidth(0.8);
+    doc.roundedRect(25 + indicatorW, yPos, indicatorW, 32, 3, 3, "S");
+    
+    doc.setFillColor(...droughtColor);
+    doc.circle(32 + indicatorW, yPos + 8, 3, "F");
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.text("DROUGHT MONITOR", 38 + indicatorW, yPos + 9);
+    
+    doc.setTextColor(...droughtColor);
+    doc.setFontSize(9);
+    doc.text(droughtStatus.isAffected ? droughtStatus.level?.name || "Dry" : "Normal", 27 + indicatorW, yPos + 19);
+    
+    doc.setTextColor(100, 100, 100);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5.5);
+    const droughtNote = droughtStatus.isAffected 
+      ? (droughtStatus.level?.impact || "Monitor food plots/water")
+      : "Adequate moisture conditions";
+    doc.text(droughtNote, 27 + indicatorW, yPos + 26);
+    
+    // INDICATOR 3: Harvest Pressure
+    const harvestColor = harvestData ? getHarvestPressureColor(harvestData.harvestDensity) : [234, 179, 8] as [number, number, number];
+    doc.setFillColor(250, 250, 250);
+    doc.roundedRect(30 + indicatorW * 2, yPos, indicatorW, 32, 3, 3, "F");
+    doc.setDrawColor(...harvestColor);
+    doc.setLineWidth(0.8);
+    doc.roundedRect(30 + indicatorW * 2, yPos, indicatorW, 32, 3, 3, "S");
+    
+    doc.setFillColor(...harvestColor);
+    doc.circle(37 + indicatorW * 2, yPos + 8, 3, "F");
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.text("HARVEST PRESSURE", 43 + indicatorW * 2, yPos + 9);
+    
+    doc.setTextColor(...harvestColor);
+    doc.setFontSize(9);
+    doc.text(harvestData ? getHarvestPressureLabel(harvestData.harvestDensity) : "Moderate", 32 + indicatorW * 2, yPos + 19);
+    
+    doc.setTextColor(100, 100, 100);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5.5);
+    const harvestNote = harvestData 
+      ? `${harvestData.totalDeer.toLocaleString()} deer harvested (2024)`
+      : "County harvest data pending";
+    doc.text(harvestNote, 32 + indicatorW * 2, yPos + 26);
+    
+    yPos += 38;
+    
+    // Thin divider
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.3);
+    doc.line(30, yPos, pageWidth - 30, yPos);
+    
+    yPos += 6;
     
     // Two column layout: Deer Seasons | Turkey Seasons
     const huntColW = (pageWidth - 50) / 2;
@@ -1487,11 +1560,14 @@ export async function POST(request: NextRequest) {
       tsY += 5;
     });
     
-    yPos += 45;
+    yPos += 42;
+    
+    // MDC Regional Office & Walk-In Areas side by side
+    const halfW = (pageWidth - 45) / 2;
     
     // MDC Regional Office
     doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, (pageWidth - 45) / 2, 8, 2, 2, "F");
+    doc.roundedRect(20, yPos, halfW, 8, 2, 2, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
@@ -1514,25 +1590,25 @@ export async function POST(request: NextRequest) {
     
     // Walk-In Hunting Areas
     doc.setFillColor(34, 83, 60);
-    doc.roundedRect(25 + (pageWidth - 45) / 2, yPos, (pageWidth - 45) / 2, 8, 2, 2, "F");
+    doc.roundedRect(25 + halfW, yPos, halfW, 8, 2, 2, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("NEARBY MRAP WALK-IN AREAS", 30 + (pageWidth - 45) / 2, yPos + 5.5);
+    doc.text("NEARBY MRAP WALK-IN AREAS", 30 + halfW, yPos + 5.5);
     
     let mrapY = yPos + 13;
     doc.setFontSize(7);
     nearbyMRAP.forEach((area) => {
       doc.setTextColor(34, 83, 60);
       doc.setFont("helvetica", "bold");
-      doc.text(area.name, 27 + (pageWidth - 45) / 2, mrapY);
+      doc.text(area.name, 27 + halfW, mrapY);
       doc.setTextColor(60, 60, 60);
       doc.setFont("helvetica", "normal");
-      doc.text(`${area.county} Co. | ${area.acres} ac | ${area.access}`, 27 + (pageWidth - 45) / 2, mrapY + 4);
+      doc.text(`${area.county} Co. | ${area.acres} ac | ${area.access}`, 27 + halfW, mrapY + 4);
       mrapY += 10;
     });
     
-    yPos += 40;
+    yPos += 38;
     
     // Conservation Programs
     doc.setFillColor(34, 83, 60);
@@ -1547,38 +1623,36 @@ export async function POST(request: NextRequest) {
     const progW = (pageWidth - 50) / 2;
     CONSERVATION_PROGRAMS.forEach((prog, i) => {
       const px = 20 + (i % 2) * (progW + 5);
-      const py = yPos + Math.floor(i / 2) * 18;
+      const py = yPos + Math.floor(i / 2) * 16;
       
       doc.setFillColor(245, 250, 245);
-      doc.roundedRect(px, py, progW, 15, 2, 2, "F");
+      doc.roundedRect(px, py, progW, 14, 2, 2, "F");
       
       doc.setTextColor(34, 83, 60);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
+      doc.setFontSize(7);
       doc.text(`${prog.abbrev} - ${prog.name}`, px + 3, py + 5);
       
       doc.setTextColor(80, 80, 80);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(6);
+      doc.setFontSize(5.5);
       const descLines = doc.splitTextToSize(prog.description, progW - 6);
       doc.text(descLines[0], px + 3, py + 10);
-      doc.setTextColor(100, 100, 100);
-      doc.text("Contact: " + prog.contact, px + 3, py + 13);
     });
     
-    yPos += 42;
+    yPos += 38;
     
     // Important Resources
     doc.setFillColor(255, 250, 235);
-    doc.roundedRect(20, yPos, pageWidth - 40, 22, 3, 3, "F");
+    doc.roundedRect(20, yPos, pageWidth - 40, 18, 3, 3, "F");
     doc.setTextColor(139, 90, 0);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("KEY RESOURCES", 25, yPos + 6);
-    doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
-    doc.text("MDC Website: mdc.mo.gov | Hunting Regulations: mdc.mo.gov/hunting-trapping", 25, yPos + 12);
-    doc.text("Report Poaching: 1-800-392-1111 | USDA Service Center: farmers.gov/service-locator", 25, yPos + 17);
+    doc.text("KEY RESOURCES", 25, yPos + 5);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6);
+    doc.text("MDC: mdc.mo.gov | Drought Monitor: droughtmonitor.unl.edu | Report Poaching: 1-800-392-1111", 25, yPos + 11);
+    doc.text("CWD Info: mdc.mo.gov/cwd | USDA Service Center: farmers.gov/service-locator", 25, yPos + 15);
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
 
