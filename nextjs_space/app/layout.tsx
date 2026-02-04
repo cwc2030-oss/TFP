@@ -14,10 +14,16 @@ const OG_IMAGE_URL = "https://terrafirmapartners.abacusai.app/og-image.png";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://terrafirmapartners.abacusai.app"),
-  title: "Terra Firma Partners™ | Professional Land Analysis Reports",
+  title: "Terra Firma Partners™ | Hunting Land Analysis Reports | Missouri",
   description:
-    "Get instant land parcel analysis reports for any property in the USA. Flood zones, topography, soil types, ownership data & more. Professional PDF reports for $350.",
-  keywords: ["land analysis", "parcel report", "property report", "flood zone map", "land survey", "real estate analysis", "FEMA flood", "topography map", "soil report"],
+    "Professional land analysis for hunting and recreational property buyers. CWD status, harvest pressure, drought conditions, flood zones, soil data & more. Know the land before you buy. $350 per report.",
+  keywords: [
+    "hunting land report", "recreational land analysis", "CWD status Missouri", 
+    "deer hunting property", "land analysis report", "harvest pressure data",
+    "Missouri hunting land", "rural land report", "parcel analysis", 
+    "flood zone map", "soil report", "hunting acreage", "land buyer report",
+    "trophy deer land", "recreational property Missouri"
+  ],
   authors: [{ name: "Terra Firma Partners LLC" }],
   icons: {
     icon: "/favicon.svg",
@@ -29,22 +35,22 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: "https://terrafirmapartners.abacusai.app",
     siteName: "Terra Firma Partners™",
-    title: "Terra Firma Partners™ | Professional Land Analysis Reports",
+    title: "Terra Firma Partners™ | Hunting Land Analysis Reports",
     description:
-      "Get instant land parcel analysis reports for any US property. Flood zones, topography, soil, ownership & more. $350 per report.",
+      "Know the land before you buy. CWD status, harvest pressure, drought, flood zones & soil data for hunting and recreational property. $350 per report.",
     images: [
       {
         url: OG_IMAGE_URL,
         width: 1200,
         height: 630,
-        alt: "Terra Firma Partners - Land Analysis Reports",
+        alt: "Terra Firma Partners - Hunting Land Analysis Reports",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Terra Firma Partners™ | Land Analysis Reports",
-    description: "Professional land parcel analysis reports for any US property. $350 per report.",
+    title: "Terra Firma Partners™ | Hunting Land Reports",
+    description: "CWD status, harvest pressure, drought & flood data for hunting land buyers. $350 per report.",
     images: [OG_IMAGE_URL],
   },
   robots: {

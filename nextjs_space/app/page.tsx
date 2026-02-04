@@ -14,6 +14,9 @@ import {
   Mountain,
   Zap,
   LayoutGrid,
+  Target,
+  TreePine,
+  Droplets,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +27,9 @@ export default function HomePage() {
     <div className="pt-16">
       {/* Hero Section */}
       <HeroSection />
+
+      {/* Hunting Focus Section */}
+      <HuntingFocusSection />
 
       {/* Features Section */}
       <FeaturesSection />
@@ -60,13 +66,19 @@ function HeroSection() {
           transition={{ duration: 0.8 }}
           className="text-center"
         >
+          <div className="inline-flex items-center gap-2 bg-emerald-700/50 text-emerald-200 px-4 py-2 rounded-full text-sm mb-6">
+            <Target className="w-4 h-4" />
+            <span>Missouri's Hunting Land Experts</span>
+          </div>
+          
           <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">
-            Professional Land Parcel
-            <span className="text-emerald-400"> Analysis</span>
+            Know the Land
+            <span className="text-emerald-400"> Before You Buy</span>
           </h1>
           <p className="text-xl text-emerald-100 max-w-3xl mx-auto mb-8">
-            Comprehensive mapping reports for properties across the entire United States.
-            Flood zones, topography, zoning, and more - all in one detailed PDF report.
+            Professional land analysis for hunters and recreational buyers. 
+            CWD status, harvest pressure, drought conditions, flood zones, and soil data — 
+            everything serious land buyers need in one comprehensive report.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -76,15 +88,16 @@ function HeroSection() {
                 className="bg-white text-emerald-800 hover:bg-emerald-50 shadow-lg px-8"
               >
                 <Map className="w-5 h-5 mr-2" />
-                Start Mapping
+                Analyze a Property
               </Button>
             </Link>
-            <Link href="/pricing">
+            <Link href="/api/sample-report" target="_blank">
               <Button
                 size="lg"
                 className="bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-500 px-8"
               >
-                View Pricing
+                <FileText className="w-5 h-5 mr-2" />
+                View Sample Report
               </Button>
             </Link>
           </div>
@@ -92,22 +105,99 @@ function HeroSection() {
           <div className="mt-12 flex flex-wrap items-center justify-center gap-6 text-emerald-200">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
-              <span>🇺🇸 All 50 States</span>
+              <span>CWD Disease Status</span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
-              <span>FEMA Flood Data</span>
+              <span>Harvest Pressure Data</span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
-              <span>8+ Map Layers</span>
+              <span>Drought Monitoring</span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
-              <span>PDF Reports</span>
+              <span>FEMA Flood Zones</span>
             </div>
           </div>
         </motion.div>
+      </div>
+    </section>
+  );
+}
+
+function HuntingFocusSection() {
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true });
+
+  const huntingFeatures = [
+    {
+      icon: Target,
+      title: "CWD Status",
+      subtitle: "Chronic Wasting Disease",
+      description: "Know if the county is CWD-positive before you invest. Affects herd health and hunting regulations.",
+      color: "text-red-600",
+      bgColor: "bg-red-50",
+    },
+    {
+      icon: TreePine,
+      title: "Harvest Pressure",
+      subtitle: "County Deer Harvest Data",
+      description: "See historical harvest density. Low pressure areas often mean better trophy potential.",
+      color: "text-amber-600",
+      bgColor: "bg-amber-50",
+    },
+    {
+      icon: Droplets,
+      title: "Drought Severity",
+      subtitle: "Current Conditions",
+      description: "Drought affects deer movement, food plots, and water sources. Critical for land management.",
+      color: "text-blue-600",
+      bgColor: "bg-blue-50",
+    },
+  ];
+
+  return (
+    <section ref={ref} className="py-16 bg-stone-900">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6 }}
+          className="text-center mb-10"
+        >
+          <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
+            Intelligence No Other Land Report Provides
+          </h2>
+          <p className="text-stone-400 max-w-2xl mx-auto">
+            We built this for hunters and recreational land buyers — the data that actually matters 
+            when you're evaluating a 40-acre tract.
+          </p>
+        </motion.div>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {huntingFeatures.map((feature, index) => (
+            <motion.div
+              key={feature.title}
+              initial={{ opacity: 0, y: 20 }}
+              animate={isInView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.6, delay: index * 0.1 }}
+            >
+              <Card className="h-full bg-stone-800 border-stone-700 hover:border-emerald-600 transition-colors">
+                <CardContent className="p-6">
+                  <div className={`w-12 h-12 ${feature.bgColor} rounded-lg flex items-center justify-center mb-4`}>
+                    <feature.icon className={`w-6 h-6 ${feature.color}`} />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white mb-1">
+                    {feature.title}
+                  </h3>
+                  <p className="text-xs text-stone-500 mb-3">{feature.subtitle}</p>
+                  <p className="text-stone-400 text-sm">{feature.description}</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -120,27 +210,27 @@ function FeaturesSection() {
   const features = [
     {
       icon: Map,
-      title: "Interactive Mapping",
+      title: "Search Any Property",
       description:
-        "Click to select any parcel or search by address in the Kansas City metro area.",
+        "Enter any address nationwide. We pull parcel boundaries, acreage, and owner data instantly.",
     },
     {
       icon: Layers,
-      title: "Multiple Data Layers",
+      title: "8+ Data Layers",
       description:
-        "Choose from flood zones, topography, soil types, zoning, and more.",
+        "Flood zones, topography, soils, wetlands, zoning — plus hunting-specific intelligence.",
     },
     {
       icon: FileText,
-      title: "Professional Reports",
+      title: "Professional PDF Report",
       description:
-        "Download detailed PDF reports with maps, data, and analysis for each layer.",
+        "Bank-ready documentation. Share with lenders, partners, or keep for your records.",
     },
     {
       icon: Shield,
-      title: "Trusted Sources",
+      title: "Trusted Data Sources",
       description:
-        "Data from FEMA, USGS, USDA, and local government agencies.",
+        "FEMA, USGS, USDA, Missouri Dept. of Conservation, and county assessor records.",
     },
   ];
 
@@ -154,11 +244,11 @@ function FeaturesSection() {
           className="text-center mb-12"
         >
           <h2 className="text-3xl md:text-4xl font-bold text-stone-800 mb-4">
-            Everything You Need for Land Analysis
+            Built for Serious Land Buyers
           </h2>
           <p className="text-stone-600 max-w-2xl mx-auto">
-            Whether you're a realtor, land buyer, or broker, our tools provide the
-            insights you need for informed decisions.
+            Whether you're scouting hunting acreage, evaluating a recreational tract, 
+            or advising clients on rural property — our reports give you the edge.
           </p>
         </motion.div>
 
@@ -353,12 +443,16 @@ function CTASection() {
           transition={{ duration: 0.6 }}
         >
           <h2 className="text-3xl md:text-4xl font-bold text-stone-800 mb-4">
-            Ready to Analyze Your Property?
+            Found a Property Worth Scouting?
           </h2>
-          <p className="text-stone-600 mb-8">
-            Get a comprehensive land parcel report for just{" "}
+          <p className="text-stone-600 mb-4">
+            Get the full picture before you make an offer.{" "}
             <span className="text-emerald-700 font-bold text-2xl">${count}</span>{" "}
             per report.
+          </p>
+          <p className="text-stone-500 text-sm mb-8 max-w-xl mx-auto">
+            CWD status • Harvest pressure • Drought conditions • Flood zones • Soil data • 
+            Topography • Owner info • Tax records — all in one professional PDF.
           </p>
 
           <Link href="/map">
@@ -366,13 +460,13 @@ function CTASection() {
               size="lg"
               className="bg-emerald-700 hover:bg-emerald-800 text-white shadow-lg px-10"
             >
-              Get Started Now
+              Analyze a Property
               <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
           </Link>
 
           <p className="text-sm text-stone-500 mt-6">
-            Serving the Kansas City metro area - Missouri & Kansas
+            Nationwide parcel data • Missouri hunting intelligence • Trusted by land buyers
           </p>
         </motion.div>
       </div>
