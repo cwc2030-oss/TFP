@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
+import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -413,7 +414,7 @@ export async function POST(request: NextRequest) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const reportNumber = generateReportNumber();
-    const totalPages = 9;
+    const totalPages = 10;
     
     const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
     const parcelData = regridData || getDefaultSampleData();
@@ -1399,7 +1400,190 @@ export async function POST(request: NextRequest) {
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
 
     // ============================================
-    // PAGE 9: CERTIFICATE OF ANALYSIS
+    // PAGE 9: HUNTING & CONSERVATION RESOURCES
+    // ============================================
+    doc.addPage();
+    drawCertificateBorder(doc, pageWidth, pageHeight);
+    
+    drawPageHeader(doc, pageWidth, "HUNTING & CONSERVATION RESOURCES", logoImage);
+    
+    yPos = 42;
+    
+    // Get hunting data for this county
+    const cwdStatus = getCWDStatus(parcelData.county);
+    const mdcRegion = getMDCRegion(parcelData.county);
+    const nearbyMRAP = getNearbyMRAPAreas(parcelData.county, 3);
+    
+    // CWD Status Banner
+    const cwdBgColor: [number, number, number] = cwdStatus.inZone ? [220, 38, 38] : [34, 197, 94];
+    const cwdStatusText = cwdStatus.inZone 
+      ? (cwdStatus.isNew ? "CWD MANAGEMENT ZONE (NEW 2025)" : "CWD MANAGEMENT ZONE") 
+      : "NOT IN CWD ZONE";
+    
+    doc.setFillColor(...cwdBgColor);
+    doc.roundedRect(20, yPos, pageWidth - 40, 12, 3, 3, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`${parcelData.county.toUpperCase()} COUNTY: ${cwdStatusText}`, pageWidth / 2, yPos + 8, { align: "center" });
+    
+    yPos += 16;
+    
+    // CWD Regulations box
+    doc.setFillColor(cwdStatus.inZone ? 254 : 240, cwdStatus.inZone ? 242 : 253, cwdStatus.inZone ? 242 : 244);
+    doc.roundedRect(20, yPos, pageWidth - 40, 28, 2, 2, "F");
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(cwdStatus.inZone ? "CWD ZONE REGULATIONS:" : "STANDARD REGULATIONS:", 25, yPos + 6);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    cwdStatus.regulations.slice(0, 4).forEach((reg, i) => {
+      doc.text("• " + reg, 25, yPos + 12 + i * 4);
+    });
+    
+    yPos += 32;
+    
+    // Two column layout: Deer Seasons | Turkey Seasons
+    const huntColW = (pageWidth - 50) / 2;
+    
+    // Deer Seasons
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(20, yPos, huntColW, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("DEER SEASONS 2025-2026", 20 + huntColW / 2, yPos + 5.5, { align: "center" });
+    
+    let dsY = yPos + 12;
+    doc.setFontSize(6.5);
+    DEER_SEASONS_2025_2026.forEach((season) => {
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.text(season.season + ":", 22, dsY);
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(season.dates, 50, dsY);
+      dsY += 5;
+    });
+    
+    // Turkey Seasons
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(25 + huntColW, yPos, huntColW, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("TURKEY SEASONS 2025-2026", 25 + huntColW + huntColW / 2, yPos + 5.5, { align: "center" });
+    
+    let tsY = yPos + 12;
+    doc.setFontSize(6.5);
+    TURKEY_SEASONS_2025_2026.forEach((season) => {
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.text(season.season + ":", 27 + huntColW, tsY);
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(season.dates, 57 + huntColW, tsY);
+      tsY += 5;
+    });
+    
+    yPos += 45;
+    
+    // MDC Regional Office
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(20, yPos, (pageWidth - 45) / 2, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("YOUR MDC REGIONAL OFFICE", 25, yPos + 5.5);
+    
+    if (mdcRegion) {
+      let mdcY = yPos + 13;
+      doc.setFontSize(7);
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.text(mdcRegion.name, 22, mdcY);
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(mdcRegion.address, 22, mdcY + 5);
+      doc.text(mdcRegion.city, 22, mdcY + 10);
+      doc.text(mdcRegion.phone, 22, mdcY + 15);
+      doc.setTextColor(59, 130, 246);
+      doc.text(mdcRegion.email, 22, mdcY + 20);
+    }
+    
+    // Walk-In Hunting Areas
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(25 + (pageWidth - 45) / 2, yPos, (pageWidth - 45) / 2, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("NEARBY MRAP WALK-IN AREAS", 30 + (pageWidth - 45) / 2, yPos + 5.5);
+    
+    let mrapY = yPos + 13;
+    doc.setFontSize(7);
+    nearbyMRAP.forEach((area) => {
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.text(area.name, 27 + (pageWidth - 45) / 2, mrapY);
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${area.county} Co. | ${area.acres} ac | ${area.access}`, 27 + (pageWidth - 45) / 2, mrapY + 4);
+      mrapY += 10;
+    });
+    
+    yPos += 40;
+    
+    // Conservation Programs
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("CONSERVATION PROGRAMS FOR LANDOWNERS", pageWidth / 2, yPos + 5.5, { align: "center" });
+    
+    yPos += 12;
+    
+    const progW = (pageWidth - 50) / 2;
+    CONSERVATION_PROGRAMS.forEach((prog, i) => {
+      const px = 20 + (i % 2) * (progW + 5);
+      const py = yPos + Math.floor(i / 2) * 18;
+      
+      doc.setFillColor(245, 250, 245);
+      doc.roundedRect(px, py, progW, 15, 2, 2, "F");
+      
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text(`${prog.abbrev} - ${prog.name}`, px + 3, py + 5);
+      
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6);
+      const descLines = doc.splitTextToSize(prog.description, progW - 6);
+      doc.text(descLines[0], px + 3, py + 10);
+      doc.setTextColor(100, 100, 100);
+      doc.text("Contact: " + prog.contact, px + 3, py + 13);
+    });
+    
+    yPos += 42;
+    
+    // Important Resources
+    doc.setFillColor(255, 250, 235);
+    doc.roundedRect(20, yPos, pageWidth - 40, 22, 3, 3, "F");
+    doc.setTextColor(139, 90, 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("KEY RESOURCES", 25, yPos + 6);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("MDC Website: mdc.mo.gov | Hunting Regulations: mdc.mo.gov/hunting-trapping", 25, yPos + 12);
+    doc.text("Report Poaching: 1-800-392-1111 | USDA Service Center: farmers.gov/service-locator", 25, yPos + 17);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
+
+    // ============================================
+    // PAGE 10: CERTIFICATE OF ANALYSIS
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -1491,7 +1675,7 @@ export async function POST(request: NextRequest) {
     const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 60);
     doc.text(disclaimerLines, pageWidth / 2, yPos, { align: "center" });
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 10, totalPages);
 
     // Generate and return PDF as base64 JSON for dashboard download
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
