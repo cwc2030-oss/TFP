@@ -880,7 +880,16 @@ export async function GET() {
     // Rating stars
     doc.setTextColor(184, 134, 11);
     doc.setFontSize(14);
-    doc.text("★".repeat(farmlandRating.rating) + "☆".repeat(5 - farmlandRating.rating), pageWidth - 25, yPos + 8, { align: "right" });
+    // Draw star rating using filled/empty circles
+    const starX = pageWidth - 25;
+    for (let i = 0; i < 5; i++) {
+      if (i < farmlandRating.rating) {
+        doc.setFillColor(218, 165, 32); // Gold for filled
+      } else {
+        doc.setFillColor(200, 200, 200); // Gray for empty
+      }
+      doc.circle(starX - (4 - i) * 6, yPos + 6, 2, 'F');
+    }
     
     doc.setTextColor(34, 83, 60);
     doc.setFontSize(16);
@@ -1017,7 +1026,16 @@ export async function GET() {
     doc.setFontSize(9);
     doc.text("DRAINAGE ASSESSMENT: " + drainageRating.label.toUpperCase(), 25, yPos + 8);
     doc.setTextColor(184, 134, 11);
-    doc.text("★".repeat(drainageRating.rating) + "☆".repeat(5 - drainageRating.rating), pageWidth - 25, yPos + 8, { align: "right" });
+    // Draw drainage star rating using filled/empty circles
+    const drainageStarX = pageWidth - 25;
+    for (let i = 0; i < 5; i++) {
+      if (i < drainageRating.rating) {
+        doc.setFillColor(218, 165, 32); // Gold for filled
+      } else {
+        doc.setFillColor(200, 200, 200); // Gray for empty
+      }
+      doc.circle(drainageStarX - (4 - i) * 6, yPos + 6, 2, 'F');
+    }
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
@@ -1075,9 +1093,15 @@ export async function GET() {
       doc.setFontSize(8);
       doc.text(item.use, rx + 3, ry + 6);
       
-      // Star rating
-      doc.setTextColor(184, 134, 11);
-      doc.text("★".repeat(item.rating) + "☆".repeat(5 - item.rating), rx + 60, ry + 6);
+      // Star rating using circles
+      for (let s = 0; s < 5; s++) {
+        if (s < item.rating) {
+          doc.setFillColor(218, 165, 32); // Gold for filled
+        } else {
+          doc.setFillColor(200, 200, 200); // Gray for empty
+        }
+        doc.circle(rx + 62 + s * 5, ry + 5, 1.5, 'F');
+      }
       
       doc.setTextColor(100, 100, 100);
       doc.setFont("helvetica", "normal");
@@ -1093,7 +1117,7 @@ export async function GET() {
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text("★ PREMIUM INSIGHTS", pageWidth / 2, yPos + 7, { align: "center" });
+    doc.text("PREMIUM INSIGHTS", pageWidth / 2, yPos + 7, { align: "center" });
     
     yPos += 14;
     
@@ -1103,9 +1127,9 @@ export async function GET() {
     
     const premiumInsights = [
       { title: "QUALIFIED OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246], icon: "$" },
-      { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for natural hazards", color: [34, 197, 94], icon: "✓" },
-      { title: "BUILDING FOOTPRINTS", value: "4,768 sq ft", desc: "Single structure built in 2018", color: [59, 130, 246], icon: "⌂" },
-      { title: "SCHOOL DISTRICT", value: "Clinton R-III", desc: "Local public school district", color: [234, 88, 12], icon: "★" },
+      { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for natural hazards", color: [34, 197, 94], icon: "OK" },
+      { title: "BUILDING FOOTPRINTS", value: "4,768 sq ft", desc: "Single structure built in 2018", color: [59, 130, 246], icon: "H" },
+      { title: "SCHOOL DISTRICT", value: "Clinton R-III", desc: "Local public school district", color: [234, 88, 12], icon: "S" },
     ];
     
     premiumInsights.forEach((insight, i) => {
