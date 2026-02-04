@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -397,13 +398,16 @@ export async function GET() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const reportNumber = generateReportNumber();
-    const totalPages = 8; // Streamlined from 13 pages
+    const totalPages = 9; // Added soil analysis page
     const order = SAMPLE_ORDER;
     
     const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng);
     const parcelData = regridData || getDefaultSampleData();
     const logoImage = await loadLogoImage();
     const funFacts = generateFunFacts(parcelData.acreage, parcelData.county, parcelData.state);
+    
+    // Fetch USDA soil data
+    const soilData = await fetchSoilData(order.parcelLat, order.parcelLng);
 
     const acreage = parcelData.acreage || 100;
     let optimalZoom = 15;
@@ -851,7 +855,187 @@ export async function GET() {
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 4, totalPages);
 
     // ============================================
-    // PAGE 5: LAND USE & PREMIUM INSIGHTS
+    // PAGE 5: SOIL ANALYSIS (USDA Data)
+    // ============================================
+    doc.addPage();
+    drawCertificateBorder(doc, pageWidth, pageHeight);
+    drawSampleWatermark(doc, pageWidth, pageHeight);
+    drawPageHeader(doc, pageWidth, "SOIL ANALYSIS", logoImage);
+    
+    yPos = 42;
+    
+    // Farmland Classification Hero Banner
+    const farmlandRating = getFarmlandRating(soilData.farmlandClass);
+    doc.setFillColor(245, 250, 245);
+    doc.roundedRect(20, yPos, pageWidth - 40, 28, 3, 3, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(1);
+    doc.roundedRect(20, yPos, pageWidth - 40, 28, 3, 3, "S");
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("USDA FARMLAND CLASSIFICATION", 25, yPos + 8);
+    
+    // Rating stars
+    doc.setTextColor(184, 134, 11);
+    doc.setFontSize(14);
+    doc.text("★".repeat(farmlandRating.rating) + "☆".repeat(5 - farmlandRating.rating), pageWidth - 25, yPos + 8, { align: "right" });
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFontSize(16);
+    doc.text(farmlandRating.label.toUpperCase(), 25, yPos + 20);
+    
+    doc.setTextColor(100, 100, 100);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.text(soilData.farmlandClass || "Classification data not available", 25, yPos + 25);
+    
+    yPos += 34;
+    
+    // Soil Type Section
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("SOIL COMPOSITION", 25, yPos + 6);
+    
+    yPos += 12;
+    
+    // Two-column soil details
+    const soilColW = (pageWidth - 45) / 2;
+    
+    // Left column
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(20, yPos, soilColW, 55, 2, 2, "F");
+    
+    const leftSoilFields = [
+      ["Soil Type:", soilData.mapUnitName || "N/A"],
+      ["Map Unit Key:", soilData.mapUnitKey || "N/A"],
+      ["Drainage Class:", soilData.drainageClass || "N/A"],
+      ["Hydrologic Group:", soilData.hydrologicGroup || "N/A"],
+      ["Slope:", soilData.slopeGradient || "N/A"],
+    ];
+    
+    let sY = yPos + 7;
+    doc.setFontSize(8);
+    leftSoilFields.forEach(([label, value]) => {
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.text(label, 24, sY);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(40, 40, 40);
+      const displayVal = String(value).substring(0, 35);
+      doc.text(displayVal, 24, sY + 5);
+      sY += 11;
+    });
+    
+    // Right column
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(25 + soilColW, yPos, soilColW, 55, 2, 2, "F");
+    
+    const rightSoilFields = [
+      ["Land Capability:", `Class ${soilData.landCapabilityClass}${soilData.landCapabilitySubclass}`],
+      ["Surface pH:", soilData.ph ? soilData.ph.toFixed(1) : "N/A"],
+      ["Organic Matter:", soilData.organicMatter ? `${soilData.organicMatter.toFixed(1)}%` : "N/A"],
+      ["CEC:", soilData.cec ? `${soilData.cec.toFixed(1)} meq/100g` : "N/A"],
+      ["Flood Frequency:", soilData.floodFrequency || "N/A"],
+    ];
+    
+    sY = yPos + 7;
+    rightSoilFields.forEach(([label, value]) => {
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.text(label, 29 + soilColW, sY);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(40, 40, 40);
+      doc.text(String(value).substring(0, 35), 29 + soilColW, sY + 5);
+      sY += 11;
+    });
+    
+    yPos += 60;
+    
+    // Land Capability interpretation
+    doc.setFillColor(255, 250, 235);
+    doc.roundedRect(20, yPos, pageWidth - 40, 18, 2, 2, "F");
+    doc.setTextColor(184, 134, 11);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("LAND CAPABILITY INTERPRETATION", 25, yPos + 7);
+    doc.setTextColor(100, 80, 40);
+    doc.setFont("helvetica", "normal");
+    doc.text(getCapabilityDescription(soilData.landCapabilityClass), 25, yPos + 13);
+    
+    yPos += 24;
+    
+    // Crop Productivity & Suitability Section
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("PRODUCTIVITY & SUITABILITY RATINGS", 25, yPos + 6);
+    
+    yPos += 12;
+    
+    // Four boxes for ratings
+    const ratingBoxW = (pageWidth - 55) / 4;
+    const ratingBoxes = [
+      { label: "CORN YIELD", value: soilData.cropYieldCorn ? `${Math.round(soilData.cropYieldCorn)} bu/ac` : "N/A", color: [234, 179, 8] },
+      { label: "SOYBEAN YIELD", value: soilData.cropYieldSoy ? `${Math.round(soilData.cropYieldSoy)} bu/ac` : "N/A", color: [34, 197, 94] },
+      { label: "SEPTIC SUITABILITY", value: soilData.septicSuitability.substring(0, 12), color: [59, 130, 246] },
+      { label: "BUILDING SUITABILITY", value: soilData.buildingSuitability.substring(0, 12), color: [139, 92, 246] },
+    ];
+    
+    ratingBoxes.forEach((box, i) => {
+      const bx = 20 + i * (ratingBoxW + 5);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(bx, yPos, ratingBoxW, 28, 2, 2, "F");
+      doc.setDrawColor(box.color[0], box.color[1], box.color[2]);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(bx, yPos, ratingBoxW, 28, 2, 2, "S");
+      
+      doc.setTextColor(80, 80, 80);
+      doc.setFontSize(6);
+      doc.setFont("helvetica", "bold");
+      doc.text(box.label, bx + ratingBoxW / 2, yPos + 7, { align: "center" });
+      
+      doc.setTextColor(box.color[0], box.color[1], box.color[2]);
+      doc.setFontSize(10);
+      doc.text(box.value, bx + ratingBoxW / 2, yPos + 18, { align: "center" });
+    });
+    
+    yPos += 35;
+    
+    // Drainage Rating visual
+    const drainageRating = getDrainageRating(soilData.drainageClass);
+    doc.setFillColor(59, 130, 246, 0.1);
+    doc.roundedRect(20, yPos, pageWidth - 40, 22, 2, 2, "F");
+    doc.setTextColor(59, 130, 246);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("DRAINAGE ASSESSMENT: " + drainageRating.label.toUpperCase(), 25, yPos + 8);
+    doc.setTextColor(184, 134, 11);
+    doc.text("★".repeat(drainageRating.rating) + "☆".repeat(5 - drainageRating.rating), pageWidth - 25, yPos + 8, { align: "right" });
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("Drainage affects septic systems, foundations, crop selection, and flood risk. Well-drained soils are ideal for most uses.", 25, yPos + 16);
+    
+    yPos += 28;
+    
+    // USDA Data Source Note
+    doc.setTextColor(100, 100, 100);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7);
+    doc.text("Source: USDA Natural Resources Conservation Service - Soil Data Access (SDA)", 25, yPos);
+    doc.text("Data represents dominant soil conditions. Actual conditions may vary. Site-specific testing recommended.", 25, yPos + 5);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 5, totalPages);
+
+    // ============================================
+    // PAGE 6: LAND USE & PREMIUM INSIGHTS
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -972,10 +1156,10 @@ export async function GET() {
       doc.text(funFacts[1] || "Premium insights help you make informed land investment decisions.", 25, yPos + 12);
     }
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 5, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 6, totalPages);
 
     // ============================================
-    // PAGE 6: GROWING ZONES & MARKET DATA
+    // PAGE 7: GROWING ZONES & MARKET DATA
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -1066,10 +1250,10 @@ export async function GET() {
       doc.text(info, 25, yPos + i * 6);
     });
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 6, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
 
     // ============================================
-    // PAGE 7: RESOURCES & DEMOGRAPHICS
+    // PAGE 8: RESOURCES & DEMOGRAPHICS
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -1174,10 +1358,10 @@ export async function GET() {
     doc.text("Contact information provided for reference. Please verify current numbers.", 25, yPos + 13);
     doc.text("Terra Firma Partners is not affiliated with these organizations.", 25, yPos + 17);
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
 
     // ============================================
-    // PAGE 8: CERTIFICATE OF ANALYSIS
+    // PAGE 9: CERTIFICATE OF ANALYSIS
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -1269,7 +1453,7 @@ export async function GET() {
     const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 60);
     doc.text(disclaimerLines, pageWidth / 2, yPos, { align: "center" });
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
 
     // Generate and return PDF
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
