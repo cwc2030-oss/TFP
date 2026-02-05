@@ -1399,6 +1399,13 @@ export async function GET() {
     doc.setFontSize(8);
     doc.text(cwdStatus.inZone ? "Special regulations apply" : "Standard harvest rules", 25, yPos + 51);
     
+    // Date stamp for CWD data
+    doc.setTextColor(120, 120, 120);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7);
+    const cwdDate = new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    doc.text(`Verified: ${cwdDate}`, 25, yPos + 58);
+    
     // CARD 2: DROUGHT MONITOR
     const droughtColor: [number, number, number] = droughtStatus.isAffected 
       ? (droughtStatus.level?.color || [234, 179, 8])
