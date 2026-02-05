@@ -9,9 +9,9 @@ export const revalidate = 0;
 
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
-  parcelAddress: "439 SE State Hwy PP, Leeton, MO 64761, USA",
-  parcelLat: 38.641668,
-  parcelLng: -93.666698,
+  parcelAddress: "2100 S State Route Y, Pleasant Hill, MO 64080, USA",
+  parcelLat: 38.7892,
+  parcelLng: -94.2654,
 };
 
 interface ParcelData {
@@ -155,19 +155,19 @@ function getDefaultSampleData(): ParcelData {
     parcelId: "XX-XXX-XXX-XX-XXX-XXX.XX",
     owner: "LAND OWNER",
     mailingAddress: "[Mailing Address Redacted]",
-    siteAddress: "439 SE State Hwy PP, Leeton, MO 64761",
-    acreage: 9.51,
-    sqft: 414314,
+    siteAddress: "2100 S State Route Y, Pleasant Hill, MO 64080",
+    acreage: 117.52,
+    sqft: 5120071,
     zoning: "A-1 Agricultural",
-    useDescription: "Agricultural - Residential",
+    useDescription: "Agricultural - Recreational",
     coordinates: null,
-    marketValue: 1124800,
-    landValue: 63000,
-    improvementValue: 1061800,
+    marketValue: 528840,
+    landValue: 528840,
+    improvementValue: 0,
     taxYear: "2024",
-    saleDate: "2020-03-15",
-    salePrice: 425000,
-    county: "Johnson",
+    saleDate: "2022-06-15",
+    salePrice: 499000,
+    county: "Cass",
     state: "Missouri",
     legalDescription: "N. 506.5' OF E. 860' OF S'2 SW'4 NW'4 (EX. CO. HWY. R/W)",
     plssTownship: "041N",
