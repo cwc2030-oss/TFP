@@ -384,6 +384,53 @@ function drawPageHeader(doc: jsPDF, pageWidth: number, title: string, logoImage:
   doc.text(title, pageWidth / 2, 30, { align: "center" });
 }
 
+// Draw a stylized deer head silhouette
+function drawDeerSilhouette(doc: jsPDF, x: number, y: number, size: number, color: [number, number, number]) {
+  doc.setFillColor(...color);
+  doc.setDrawColor(...color);
+  
+  // Head (oval)
+  doc.ellipse(x, y, size * 0.35, size * 0.45, "F");
+  
+  // Ears (triangles)
+  doc.triangle(x - size * 0.3, y - size * 0.3, x - size * 0.15, y - size * 0.5, x - size * 0.05, y - size * 0.25, "F");
+  doc.triangle(x + size * 0.3, y - size * 0.3, x + size * 0.15, y - size * 0.5, x + size * 0.05, y - size * 0.25, "F");
+  
+  // Antlers (lines) - left side
+  doc.setLineWidth(size * 0.06);
+  doc.line(x - size * 0.2, y - size * 0.4, x - size * 0.4, y - size * 0.8);
+  doc.line(x - size * 0.35, y - size * 0.65, x - size * 0.55, y - size * 0.7);
+  doc.line(x - size * 0.3, y - size * 0.55, x - size * 0.45, y - size * 0.5);
+  
+  // Antlers - right side
+  doc.line(x + size * 0.2, y - size * 0.4, x + size * 0.4, y - size * 0.8);
+  doc.line(x + size * 0.35, y - size * 0.65, x + size * 0.55, y - size * 0.7);
+  doc.line(x + size * 0.3, y - size * 0.55, x + size * 0.45, y - size * 0.5);
+  
+  // Neck
+  doc.setLineWidth(0.5);
+  doc.ellipse(x, y + size * 0.5, size * 0.25, size * 0.2, "F");
+}
+
+// Draw a simple turkey silhouette
+function drawTurkeySilhouette(doc: jsPDF, x: number, y: number, size: number, color: [number, number, number]) {
+  doc.setFillColor(...color);
+  
+  // Body (oval)
+  doc.ellipse(x, y, size * 0.4, size * 0.3, "F");
+  
+  // Head/neck
+  doc.ellipse(x - size * 0.35, y - size * 0.15, size * 0.12, size * 0.15, "F");
+  
+  // Tail fan (triangle)
+  doc.triangle(x + size * 0.3, y - size * 0.4, x + size * 0.7, y, x + size * 0.3, y + size * 0.4, "F");
+  
+  // Snood
+  doc.setDrawColor(...color);
+  doc.setLineWidth(size * 0.05);
+  doc.line(x - size * 0.4, y - size * 0.05, x - size * 0.45, y + size * 0.1);
+}
+
 function drawPageFooter(doc: jsPDF, pageWidth: number, pageHeight: number, reportNumber: string, currentPage: number, totalPages: number) {
   doc.setFillColor(184, 134, 11);
   doc.rect(18, pageHeight - 28, pageWidth - 36, 1, "F");
@@ -420,7 +467,7 @@ export async function GET() {
     const aerialMap = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, "satellite", optimalZoom, parcelData.coordinates);
     const topoMap = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, "terrain", optimalZoom, parcelData.coordinates);
     const hybridMap = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, "hybrid", optimalZoom, parcelData.coordinates);
-    const hardinessMap = await fetchHardinessZoneMap();
+    // Removed hardiness map fetch - no longer needed
 
     // ============================================
     // PAGE 1: COVER PAGE
@@ -564,12 +611,28 @@ export async function GET() {
     
     yPos += 12;
     
-    // Three value boxes
+    // Three value boxes - use reasonable estimates if data unavailable
     const boxW = (pageWidth - 50) / 3;
+    const estimatedLandValue = Math.round(parcelData.acreage * 4500); // ~$4,500/acre estimate
     const valBoxes = [
-      { label: "TAX ASSESSED VALUE", value: parcelData.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : "N/A", color: [34, 83, 60] },
-      { label: "LAND VALUE", value: parcelData.landValue ? `$${parcelData.landValue.toLocaleString()}` : "N/A", color: [139, 92, 246] },
-      { label: "IMPROVEMENT VALUE", value: parcelData.improvementValue ? `$${parcelData.improvementValue.toLocaleString()}` : "$0", color: [59, 130, 246] },
+      { 
+        label: "TAX ASSESSED VALUE", 
+        value: parcelData.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : `~$${estimatedLandValue.toLocaleString()}*`, 
+        color: [34, 83, 60] as [number, number, number],
+        estimated: !parcelData.marketValue
+      },
+      { 
+        label: "LAND VALUE", 
+        value: parcelData.landValue ? `$${parcelData.landValue.toLocaleString()}` : `~$${estimatedLandValue.toLocaleString()}*`, 
+        color: [139, 92, 246] as [number, number, number],
+        estimated: !parcelData.landValue
+      },
+      { 
+        label: "IMPROVEMENT VALUE", 
+        value: parcelData.improvementValue ? `$${parcelData.improvementValue.toLocaleString()}` : "See County Records", 
+        color: [59, 130, 246] as [number, number, number],
+        estimated: !parcelData.improvementValue
+      },
     ];
     
     valBoxes.forEach((box, i) => {
@@ -589,7 +652,11 @@ export async function GET() {
     doc.setTextColor(100, 100, 100);
     doc.setFontSize(7);
     doc.setFont("helvetica", "italic");
-    doc.text("Note: Tax assessed values typically represent 60-70% of actual market value. Tax Year: " + (parcelData.taxYear || "N/A"), 25, yPos);
+    const hasEstimates = !parcelData.marketValue || !parcelData.landValue;
+    const noteText = hasEstimates 
+      ? "*Estimated based on regional rates (~$4,500/ac). Tax assessed values = 60-70% of market value."
+      : "Note: Tax assessed values typically represent 60-70% of actual market value. Tax Year: " + (parcelData.taxYear || "2024");
+    doc.text(noteText, 25, yPos);
     
     yPos += 10;
     
@@ -1184,96 +1251,157 @@ export async function GET() {
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 6, totalPages);
 
     // ============================================
-    // PAGE 7: GROWING ZONES & MARKET DATA
+    // PAGE 7: GROWING & MARKET INTEL
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
     drawSampleWatermark(doc, pageWidth, pageHeight);
-    drawPageHeader(doc, pageWidth, "GROWING ZONES & MARKET DATA", logoImage);
+    drawPageHeader(doc, pageWidth, "GROWING & MARKET INTEL", logoImage);
     
     yPos = 42;
     
-    // Growing zone highlight
+    // Growing zone banner - simple and bold
     doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 18, 3, 3, "F");
+    doc.roundedRect(20, yPos, pageWidth - 40, 28, 4, 4, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("Your Property: USDA Hardiness Zone 6a", pageWidth / 2, yPos + 8, { align: "center" });
-    doc.setFontSize(8);
+    doc.setFontSize(16);
+    doc.text("USDA Hardiness Zone 6a", pageWidth / 2, yPos + 12, { align: "center" });
+    doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text("Average Annual Minimum Temperature: -10°F to -5°F", pageWidth / 2, yPos + 14, { align: "center" });
+    doc.text("Winter lows: -10°F to -5°F  •  Growing season: ~180 days", pageWidth / 2, yPos + 22, { align: "center" });
     
-    yPos += 24;
+    yPos += 36;
     
-    // Hardiness map
-    if (hardinessMap) {
-      try { doc.addImage(hardinessMap, "JPEG", 30, yPos, pageWidth - 60, 55); }
-      catch (e) {
-        doc.setFillColor(240, 240, 240);
-        doc.rect(30, yPos, pageWidth - 60, 55, "F");
-        doc.setTextColor(100, 100, 100);
-        doc.text("USDA Hardiness Zone Map", pageWidth / 2, yPos + 28, { align: "center" });
-      }
-    } else {
-      doc.setFillColor(240, 240, 240);
-      doc.rect(30, yPos, pageWidth - 60, 55, "F");
-      doc.setTextColor(100, 100, 100);
-      doc.text("USDA Hardiness Zone Map", pageWidth / 2, yPos + 28, { align: "center" });
-    }
+    // Two column layout - What grows here
+    const growColW = (pageWidth - 50) / 2;
     
-    yPos += 60;
-    
-    // Growing recommendations
+    // LEFT: Food Plots & Trees
     doc.setFillColor(245, 250, 245);
-    doc.roundedRect(20, yPos, pageWidth - 40, 45, 3, 3, "F");
+    doc.roundedRect(20, yPos, growColW, 75, 4, 4, "F");
     
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Zone 6a Growing Recommendations", 25, yPos + 10);
-    
-    const growingInfo = [
-      "• Fruit Trees: Apple, Pear, Cherry, Peach (protected), Plum",
-      "• Nut Trees: Black Walnut ($$$), Pecan (northern), Hickory",
-      "• Vegetables: Full season for tomatoes, corn, beans, squash",
-      "• Growing Season: ~180 days (Mid-April to Mid-October)",
-      "• Native Grasses: Big Bluestem, Switchgrass, Indian Grass",
-    ];
+    doc.setFontSize(12);
+    doc.text("FOOD PLOTS & TREES", 25, yPos + 12);
     
     doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    growingInfo.forEach((info, i) => {
-      doc.text(info, 25, yPos + 18 + i * 6);
+    doc.setFontSize(9);
+    
+    const foodPlotInfo = [
+      "Deer Plots: Clover, chicory, brassicas,",
+      "   soybeans, winter wheat",
+      "",
+      "Fruit Trees: Apple, pear, persimmon,",
+      "   crabapple (deer magnets)",
+      "",
+      "Nut Trees: White oak, sawtooth oak,",
+      "   chestnuts - long-term investment",
+    ];
+    
+    foodPlotInfo.forEach((line, i) => {
+      doc.text(line, 25, yPos + 22 + i * 6.5);
     });
     
-    yPos += 52;
+    // RIGHT: Native Habitat
+    doc.setFillColor(245, 250, 245);
+    doc.roundedRect(25 + growColW, yPos, growColW, 75, 4, 4, "F");
     
-    // Market context
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("NATIVE HABITAT", 30 + growColW, yPos + 12);
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    
+    const nativeInfo = [
+      "Warm Season: Big bluestem,",
+      "   switchgrass, Indian grass",
+      "",
+      "Cool Season: Fescue, orchardgrass",
+      "   (existing pastures)",
+      "",
+      "Cover: Native plum thickets,",
+      "   cedar windbreaks, shrub rows",
+    ];
+    
+    nativeInfo.forEach((line, i) => {
+      doc.text(line, 30 + growColW, yPos + 22 + i * 6.5);
+    });
+    
+    yPos += 85;
+    
+    // MARKET CONTEXT - Full width, bigger text
     doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
+    doc.roundedRect(20, yPos, pageWidth - 40, 14, 3, 3, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("REGIONAL MARKET CONTEXT", 25, yPos + 6);
+    doc.setFontSize(12);
+    doc.text("REGIONAL MARKET CONTEXT", pageWidth / 2, yPos + 10, { align: "center" });
     
-    yPos += 12;
+    yPos += 20;
     
-    const marketContext = [
-      "• Agricultural land in west-central Missouri appreciates 3-5% annually",
-      "• Parcels over 80 acres command premium pricing for farming/hunting",
-      `• ${parcelData.county} County has strong demand for tillable acreage`,
-      "• Hunting leases average $10-15 per acre annually in this region",
-      "• Conservation easements can provide significant tax benefits",
-    ];
+    // Market stats in boxes
+    const statW = (pageWidth - 55) / 3;
     
-    doc.setTextColor(60, 60, 60);
-    doc.setFont("helvetica", "normal");
+    // Stat 1: Land appreciation
+    doc.setFillColor(240, 255, 240);
+    doc.roundedRect(20, yPos, statW, 35, 3, 3, "F");
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("3-5%", 20 + statW/2, yPos + 14, { align: "center" });
     doc.setFontSize(8);
-    marketContext.forEach((info, i) => {
-      doc.text(info, 25, yPos + i * 6);
-    });
+    doc.text("annual appreciation", 20 + statW/2, yPos + 22, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("West-central MO ag land", 20 + statW/2, yPos + 30, { align: "center" });
+    
+    // Stat 2: Hunting lease rates
+    doc.setFillColor(240, 255, 240);
+    doc.roundedRect(25 + statW, yPos, statW, 35, 3, 3, "F");
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("$10-15", 25 + statW + statW/2, yPos + 14, { align: "center" });
+    doc.setFontSize(8);
+    doc.text("per acre / year", 25 + statW + statW/2, yPos + 22, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("Hunting lease rates", 25 + statW + statW/2, yPos + 30, { align: "center" });
+    
+    // Stat 3: Premium size
+    doc.setFillColor(240, 255, 240);
+    doc.roundedRect(30 + statW * 2, yPos, statW, 35, 3, 3, "F");
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("80+ ac", 30 + statW * 2 + statW/2, yPos + 14, { align: "center" });
+    doc.setFontSize(8);
+    doc.text("premium threshold", 30 + statW * 2 + statW/2, yPos + 22, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text("Farm/hunt parcels", 30 + statW * 2 + statW/2, yPos + 30, { align: "center" });
+    
+    yPos += 45;
+    
+    // County-specific note
+    doc.setFillColor(255, 250, 235);
+    doc.roundedRect(20, yPos, pageWidth - 40, 22, 3, 3, "F");
+    doc.setTextColor(139, 90, 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(`${parcelData.county} COUNTY OUTLOOK`, 25, yPos + 9);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    doc.text("Strong demand for tillable acreage. Conservation easements can provide significant tax benefits.", 25, yPos + 17);
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
 
@@ -1386,15 +1514,29 @@ export async function GET() {
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
 
     // ============================================
-    // PAGE 9: HUNTING & CONSERVATION RESOURCES
+    // PAGE 9: HUNTING INTELLIGENCE DASHBOARD
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
     drawSampleWatermark(doc, pageWidth, pageHeight);
     
-    drawPageHeader(doc, pageWidth, "HUNTING & CONSERVATION RESOURCES", logoImage);
+    // Custom header for this page - more impactful
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, 0, pageWidth, 22, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("HUNTING INTELLIGENCE", pageWidth / 2, 14, { align: "center" });
     
-    yPos = 42;
+    yPos = 30;
+    
+    // Subheader
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(11);
+    doc.text("The stuff nobody else tells you about this land", pageWidth / 2, yPos, { align: "center" });
+    
+    yPos += 12;
     
     // Get hunting data for this county
     const cwdStatus = getCWDStatus(parcelData.county);
@@ -1404,242 +1546,223 @@ export async function GET() {
     const nearbyMRAP = getNearbyMRAPAreas(parcelData.county, 3);
     
     // ========================================
-    // THREE KEY INDICATORS - Understated but powerful
+    // THREE BIG DASHBOARD CARDS WITH DEER SILHOUETTES
     // ========================================
-    const indicatorW = (pageWidth - 55) / 3;
+    const cardW = (pageWidth - 50) / 3;
+    const cardH = 55;
+    const cardGap = 5;
     
-    // INDICATOR 1: CWD Status
+    // CARD 1: CWD STATUS
     const cwdColor: [number, number, number] = cwdStatus.inZone ? [220, 53, 69] : [34, 139, 34];
-    doc.setFillColor(250, 250, 250);
-    doc.roundedRect(20, yPos, indicatorW, 32, 3, 3, "F");
+    const cwdBg: [number, number, number] = cwdStatus.inZone ? [255, 240, 240] : [240, 255, 240];
+    
+    doc.setFillColor(...cwdBg);
+    doc.roundedRect(20, yPos, cardW, cardH, 4, 4, "F");
     doc.setDrawColor(...cwdColor);
-    doc.setLineWidth(0.8);
-    doc.roundedRect(20, yPos, indicatorW, 32, 3, 3, "S");
+    doc.setLineWidth(2);
+    doc.roundedRect(20, yPos, cardW, cardH, 4, 4, "S");
     
-    // Small colored dot indicator
-    doc.setFillColor(...cwdColor);
-    doc.circle(27, yPos + 8, 3, "F");
-    
-    doc.setTextColor(60, 60, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.text("CWD STATUS", 33, yPos + 9);
+    // Deer silhouette watermark (subtle)
+    drawDeerSilhouette(doc, 20 + cardW - 15, yPos + 18, 12, [cwdColor[0], cwdColor[1], cwdColor[2]]);
     
     doc.setTextColor(...cwdColor);
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text(cwdStatus.inZone ? "In Zone" : "Clear", 22, yPos + 19);
+    doc.text("CWD STATUS", 25, yPos + 10);
     
-    doc.setTextColor(100, 100, 100);
+    doc.setFontSize(22);
+    doc.text(cwdStatus.inZone ? "IN ZONE" : "CLEAR", 25, yPos + 28);
+    
+    doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(5.5);
+    doc.setFontSize(8);
     const cwdNote = cwdStatus.inZone 
-      ? (cwdStatus.isNew ? "New 2025 - Special regs apply" : "Management zone - Special regs")
-      : "No special CWD restrictions";
-    doc.text(cwdNote, 22, yPos + 26);
+      ? (cwdStatus.isNew ? "New 2025 designation" : "Management zone")
+      : "No CWD detected in county";
+    doc.text(cwdNote, 25, yPos + 38);
     
-    // INDICATOR 2: Drought Monitor
+    doc.setFontSize(7);
+    doc.text(cwdStatus.inZone ? "Special regulations apply" : "Standard harvest rules", 25, yPos + 47);
+    
+    // CARD 2: DROUGHT MONITOR
     const droughtColor: [number, number, number] = droughtStatus.isAffected 
       ? (droughtStatus.level?.color || [234, 179, 8])
       : [34, 139, 34];
-    doc.setFillColor(250, 250, 250);
-    doc.roundedRect(25 + indicatorW, yPos, indicatorW, 32, 3, 3, "F");
+    const droughtBg: [number, number, number] = droughtStatus.isAffected ? [255, 250, 230] : [240, 255, 240];
+    
+    doc.setFillColor(...droughtBg);
+    doc.roundedRect(25 + cardW, yPos, cardW, cardH, 4, 4, "F");
     doc.setDrawColor(...droughtColor);
-    doc.setLineWidth(0.8);
-    doc.roundedRect(25 + indicatorW, yPos, indicatorW, 32, 3, 3, "S");
+    doc.setLineWidth(2);
+    doc.roundedRect(25 + cardW, yPos, cardW, cardH, 4, 4, "S");
     
-    doc.setFillColor(...droughtColor);
-    doc.circle(32 + indicatorW, yPos + 8, 3, "F");
-    
-    doc.setTextColor(60, 60, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.text("DROUGHT MONITOR", 38 + indicatorW, yPos + 9);
+    // Deer silhouette watermark
+    drawDeerSilhouette(doc, 25 + cardW * 2 - 10, yPos + 18, 12, droughtColor);
     
     doc.setTextColor(...droughtColor);
-    doc.setFontSize(9);
-    doc.text(droughtStatus.isAffected ? droughtStatus.level?.name || "Dry" : "Normal", 27 + indicatorW, yPos + 19);
-    
-    doc.setTextColor(100, 100, 100);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(5.5);
-    const droughtNote = droughtStatus.isAffected 
-      ? (droughtStatus.level?.impact || "Monitor food plots/water")
-      : "Adequate moisture conditions";
-    doc.text(droughtNote, 27 + indicatorW, yPos + 26);
-    
-    // INDICATOR 3: Harvest Pressure
-    const harvestColor = harvestData ? getHarvestPressureColor(harvestData.harvestDensity) : [234, 179, 8] as [number, number, number];
-    doc.setFillColor(250, 250, 250);
-    doc.roundedRect(30 + indicatorW * 2, yPos, indicatorW, 32, 3, 3, "F");
-    doc.setDrawColor(...harvestColor);
-    doc.setLineWidth(0.8);
-    doc.roundedRect(30 + indicatorW * 2, yPos, indicatorW, 32, 3, 3, "S");
-    
-    doc.setFillColor(...harvestColor);
-    doc.circle(37 + indicatorW * 2, yPos + 8, 3, "F");
-    
-    doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("DROUGHT STATUS", 30 + cardW, yPos + 10);
+    
+    doc.setFontSize(22);
+    doc.text(droughtStatus.isAffected ? droughtStatus.level?.name?.toUpperCase() || "DRY" : "NORMAL", 30 + cardW, yPos + 28);
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    const droughtNote = droughtStatus.isAffected 
+      ? (droughtStatus.level?.impact || "Monitor water sources")
+      : "Good moisture conditions";
+    doc.text(droughtNote, 30 + cardW, yPos + 38);
+    
     doc.setFontSize(7);
-    doc.text("HARVEST PRESSURE", 43 + indicatorW * 2, yPos + 9);
+    doc.text(droughtStatus.isAffected ? "Food plots may struggle" : "Healthy forage expected", 30 + cardW, yPos + 47);
+    
+    // CARD 3: HARVEST PRESSURE
+    const harvestColor: [number, number, number] = harvestData ? getHarvestPressureColor(harvestData.harvestDensity) : [234, 179, 8];
+    const isHighPressure = harvestData?.harvestDensity === "high" || harvestData?.harvestDensity === "very high";
+    const harvestBg: [number, number, number] = isHighPressure ? [255, 240, 240] : [240, 255, 240];
+    
+    doc.setFillColor(...harvestBg);
+    doc.roundedRect(30 + cardW * 2, yPos, cardW, cardH, 4, 4, "F");
+    doc.setDrawColor(...harvestColor);
+    doc.setLineWidth(2);
+    doc.roundedRect(30 + cardW * 2, yPos, cardW, cardH, 4, 4, "S");
+    
+    // Deer silhouette watermark
+    drawDeerSilhouette(doc, 30 + cardW * 3 - 10, yPos + 18, 12, harvestColor);
     
     doc.setTextColor(...harvestColor);
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text(harvestData ? getHarvestPressureLabel(harvestData.harvestDensity) : "Moderate", 32 + indicatorW * 2, yPos + 19);
+    doc.text("HARVEST PRESSURE", 35 + cardW * 2, yPos + 10);
     
-    doc.setTextColor(100, 100, 100);
+    doc.setFontSize(22);
+    const pressureLabel = harvestData ? getHarvestPressureLabel(harvestData.harvestDensity).toUpperCase() : "MODERATE";
+    doc.text(pressureLabel, 35 + cardW * 2, yPos + 28);
+    
+    doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(5.5);
+    doc.setFontSize(8);
     const harvestNote = harvestData 
-      ? `${harvestData.totalDeer.toLocaleString()} deer harvested (2024)`
-      : "County harvest data pending";
-    doc.text(harvestNote, 32 + indicatorW * 2, yPos + 26);
+      ? `${harvestData.totalDeer.toLocaleString()} deer taken (2024)`
+      : "County data pending";
+    doc.text(harvestNote, 35 + cardW * 2, yPos + 38);
     
-    yPos += 38;
+    doc.setFontSize(7);
+    const pressureTip = isHighPressure ? "High competition area" : "Lower hunting pressure";
+    doc.text(pressureTip, 35 + cardW * 2, yPos + 47);
     
-    // Thin divider
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineWidth(0.3);
-    doc.line(30, yPos, pageWidth - 30, yPos);
+    yPos += cardH + 10;
     
-    yPos += 6;
+    // ========================================
+    // SEASON DATES - Two columns with icons
+    // ========================================
+    const seasonW = (pageWidth - 45) / 2;
     
-    // Two column layout: Deer Seasons | Turkey Seasons
-    const huntColW = (pageWidth - 50) / 2;
-    
-    // Deer Seasons
+    // Deer Season Box
     doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, huntColW, 8, 2, 2, "F");
+    doc.roundedRect(20, yPos, seasonW, 50, 3, 3, "F");
+    
+    // Deer silhouette in corner
+    drawDeerSilhouette(doc, 20 + seasonW - 12, yPos + 12, 10, [255, 255, 255]);
+    
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("DEER SEASONS", 25, yPos + 10);
     doc.setFontSize(8);
-    doc.text("DEER SEASONS 2025-2026", 20 + huntColW / 2, yPos + 5.5, { align: "center" });
+    doc.text("2025-2026", 25, yPos + 17);
     
-    let dsY = yPos + 12;
-    doc.setFontSize(6.5);
-    DEER_SEASONS_2025_2026.forEach((season) => {
-      doc.setTextColor(34, 83, 60);
+    let dsY = yPos + 26;
+    doc.setFontSize(8);
+    DEER_SEASONS_2025_2026.slice(0, 4).forEach((season) => {
       doc.setFont("helvetica", "bold");
-      doc.text(season.season + ":", 22, dsY);
-      doc.setTextColor(60, 60, 60);
+      doc.text(season.season, 25, dsY);
       doc.setFont("helvetica", "normal");
-      doc.text(season.dates, 50, dsY);
-      dsY += 5;
+      doc.text(season.dates, 55, dsY);
+      dsY += 6;
     });
     
-    // Turkey Seasons
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(25 + huntColW, yPos, huntColW, 8, 2, 2, "F");
+    // Turkey Season Box
+    doc.setFillColor(139, 90, 43);
+    doc.roundedRect(25 + seasonW, yPos, seasonW, 50, 3, 3, "F");
+    
+    // Turkey silhouette in corner
+    drawTurkeySilhouette(doc, 25 + seasonW * 2 - 12, yPos + 12, 10, [255, 255, 255]);
+    
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("TURKEY SEASONS", 30 + seasonW, yPos + 10);
     doc.setFontSize(8);
-    doc.text("TURKEY SEASONS 2025-2026", 25 + huntColW + huntColW / 2, yPos + 5.5, { align: "center" });
+    doc.text("2025-2026", 30 + seasonW, yPos + 17);
     
-    let tsY = yPos + 12;
-    doc.setFontSize(6.5);
-    TURKEY_SEASONS_2025_2026.forEach((season) => {
-      doc.setTextColor(34, 83, 60);
+    let tsY = yPos + 26;
+    doc.setFontSize(8);
+    TURKEY_SEASONS_2025_2026.slice(0, 4).forEach((season) => {
       doc.setFont("helvetica", "bold");
-      doc.text(season.season + ":", 27 + huntColW, tsY);
-      doc.setTextColor(60, 60, 60);
+      doc.text(season.season, 30 + seasonW, tsY);
       doc.setFont("helvetica", "normal");
-      doc.text(season.dates, 57 + huntColW, tsY);
-      tsY += 5;
+      doc.text(season.dates, 62 + seasonW, tsY);
+      tsY += 6;
     });
     
-    yPos += 42;
+    yPos += 58;
     
-    // MDC Regional Office & Walk-In Areas side by side
-    const halfW = (pageWidth - 45) / 2;
+    // ========================================
+    // MDC OFFICE & MRAP AREAS - Compact
+    // ========================================
+    const infoW = (pageWidth - 45) / 2;
     
-    // MDC Regional Office
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, halfW, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
+    // MDC Office
+    doc.setFillColor(245, 250, 245);
+    doc.roundedRect(20, yPos, infoW, 40, 3, 3, "F");
+    doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("YOUR MDC REGIONAL OFFICE", 25, yPos + 5.5);
+    doc.setFontSize(9);
+    doc.text("YOUR MDC OFFICE", 25, yPos + 8);
     
     if (mdcRegion) {
-      let mdcY = yPos + 13;
-      doc.setFontSize(7);
-      doc.setTextColor(34, 83, 60);
-      doc.setFont("helvetica", "bold");
-      doc.text(mdcRegion.name, 22, mdcY);
-      doc.setTextColor(60, 60, 60);
       doc.setFont("helvetica", "normal");
-      doc.text(mdcRegion.address, 22, mdcY + 5);
-      doc.text(mdcRegion.city, 22, mdcY + 10);
-      doc.text(mdcRegion.phone, 22, mdcY + 15);
+      doc.setFontSize(8);
+      doc.setTextColor(60, 60, 60);
+      doc.text(mdcRegion.name, 25, yPos + 16);
+      doc.text(mdcRegion.phone, 25, yPos + 23);
       doc.setTextColor(59, 130, 246);
-      doc.text(mdcRegion.email, 22, mdcY + 20);
+      doc.text(mdcRegion.email, 25, yPos + 30);
     }
     
-    // Walk-In Hunting Areas
+    // Nearby Walk-In Areas
+    doc.setFillColor(245, 250, 245);
+    doc.roundedRect(25 + infoW, yPos, infoW, 40, 3, 3, "F");
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("WALK-IN HUNTING NEARBY", 30 + infoW, yPos + 8);
+    
+    let mrapY = yPos + 16;
+    doc.setFontSize(7);
+    nearbyMRAP.slice(0, 3).forEach((area) => {
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${area.name} - ${area.acres} ac`, 30 + infoW, mrapY);
+      mrapY += 7;
+    });
+    
+    yPos += 48;
+    
+    // KEY RESOURCES - Footer bar
     doc.setFillColor(34, 83, 60);
-    doc.roundedRect(25 + halfW, yPos, halfW, 8, 2, 2, "F");
+    doc.roundedRect(20, yPos, pageWidth - 40, 16, 3, 3, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("NEARBY MRAP WALK-IN AREAS", 30 + halfW, yPos + 5.5);
-    
-    let mrapY = yPos + 13;
-    doc.setFontSize(7);
-    nearbyMRAP.forEach((area) => {
-      doc.setTextColor(34, 83, 60);
-      doc.setFont("helvetica", "bold");
-      doc.text(area.name, 27 + halfW, mrapY);
-      doc.setTextColor(60, 60, 60);
-      doc.setFont("helvetica", "normal");
-      doc.text(`${area.county} Co. | ${area.acres} ac | ${area.access}`, 27 + halfW, mrapY + 4);
-      mrapY += 10;
-    });
-    
-    yPos += 38;
-    
-    // Conservation Programs
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("CONSERVATION PROGRAMS FOR LANDOWNERS", pageWidth / 2, yPos + 5.5, { align: "center" });
-    
-    yPos += 12;
-    
-    const progW = (pageWidth - 50) / 2;
-    CONSERVATION_PROGRAMS.forEach((prog, i) => {
-      const px = 20 + (i % 2) * (progW + 5);
-      const py = yPos + Math.floor(i / 2) * 16;
-      
-      doc.setFillColor(245, 250, 245);
-      doc.roundedRect(px, py, progW, 14, 2, 2, "F");
-      
-      doc.setTextColor(34, 83, 60);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      doc.text(`${prog.abbrev} - ${prog.name}`, px + 3, py + 5);
-      
-      doc.setTextColor(80, 80, 80);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(5.5);
-      const descLines = doc.splitTextToSize(prog.description, progW - 6);
-      doc.text(descLines[0], px + 3, py + 10);
-    });
-    
-    yPos += 38;
-    
-    // Important Resources
-    doc.setFillColor(255, 250, 235);
-    doc.roundedRect(20, yPos, pageWidth - 40, 18, 3, 3, "F");
-    doc.setTextColor(139, 90, 0);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.text("KEY RESOURCES", 25, yPos + 5);
+    doc.text("KEY RESOURCES:", 25, yPos + 7);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(6);
-    doc.text("MDC: mdc.mo.gov | Drought Monitor: droughtmonitor.unl.edu | Report Poaching: 1-800-392-1111", 25, yPos + 11);
-    doc.text("CWD Info: mdc.mo.gov/cwd | USDA Service Center: farmers.gov/service-locator", 25, yPos + 15);
+    doc.setFontSize(7);
+    doc.text("mdc.mo.gov  |  droughtmonitor.unl.edu  |  Report Poaching: 1-800-392-1111", 70, yPos + 7);
+    doc.text("CWD Info: mdc.mo.gov/cwd  |  USDA Service: farmers.gov/service-locator", 70, yPos + 13);
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
 
