@@ -1843,8 +1843,10 @@ export async function GET() {
     return new NextResponse(pdfBuffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": "inline; filename=terra_firma_sample_report.pdf",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Content-Disposition": "inline; filename=terra_firma_free_look.pdf",
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
       },
     });
   } catch (error) {
