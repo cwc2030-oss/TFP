@@ -76,7 +76,7 @@ export default function PricingPage() {
                     Select Your Property
                   </Button>
                 </Link>
-                <Link href="/api/sample-report" target="_blank" className="block">
+                <Link href="/api/sample-report?v=20260205" target="_blank" className="block">
                   <Button variant="outline" className="w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 py-6 text-lg font-semibold">
                     Take a Free Look
                   </Button>

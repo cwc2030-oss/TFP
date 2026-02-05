@@ -991,7 +991,7 @@ export default function InteractiveMap({
               </button>
               <div className="flex gap-2">
                 <a
-                  href="/api/sample-report?v=20260122"
+                  href="/api/sample-report?v=20260205"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 border border-emerald-700 text-emerald-700 hover:bg-emerald-50 py-2 px-3 rounded-lg font-medium flex items-center justify-center gap-1.5 transition-colors text-xs"
@@ -1065,7 +1065,7 @@ export default function InteractiveMap({
       {!selectedParcel && mapLoaded && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-3">
           <a
-            href="/api/sample-report?v=20260122"
+            href="/api/sample-report?v=20260205"
             target="_blank"
             rel="noopener noreferrer"
             className="bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2.5 rounded-full text-sm font-medium flex items-center gap-2 shadow-lg transition-colors"

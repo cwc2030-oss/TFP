@@ -116,7 +116,7 @@ function HeroSection() {
                   Look Up a Property
                 </Button>
               </Link>
-              <Link href="/api/sample-report" target="_blank">
+              <Link href="/api/sample-report?v=20260205" target="_blank">
                 <Button
                   size="lg"
                   className="bg-stone-700 text-white hover:bg-stone-600 border border-stone-500 px-8"
