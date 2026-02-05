@@ -1364,7 +1364,7 @@ export async function GET() {
     // THREE BIG DASHBOARD CARDS WITH DEER SILHOUETTES
     // ========================================
     const cardW = (pageWidth - 50) / 3;
-    const cardH = 55;
+    const cardH = 62;
     const cardGap = 5;
     
     // CARD 1: CWD STATUS
