@@ -510,16 +510,25 @@ export async function GET() {
     }
     
     let infoY = mapY + heroMapHeight + 8;
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(25, infoY, pageWidth - 50, 28, 3, 3, "F");
+    
+    // BIG ACREAGE DISPLAY - Most prominent element
+    doc.setFillColor(184, 134, 11);
+    doc.roundedRect(25, infoY, pageWidth - 50, 22, 3, 3, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("SUBJECT PROPERTY", pageWidth / 2, infoY + 8, { align: "center" });
+    doc.setFontSize(32);
+    doc.text(`${parcelData.acreage.toFixed(2)} ACRES`, pageWidth / 2, infoY + 16, { align: "center" });
+    
+    infoY += 26;
+    
+    // Property details below
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(25, infoY, pageWidth - 50, 20, 3, 3, "F");
+    doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text(order.parcelAddress, pageWidth / 2, infoY + 16, { align: "center" });
-    doc.text(`${parcelData.acreage.toFixed(2)} Acres | ${parcelData.county} County, ${parcelData.state}`, pageWidth / 2, infoY + 23, { align: "center" });
+    doc.text(order.parcelAddress, pageWidth / 2, infoY + 8, { align: "center" });
+    doc.text(`${parcelData.county} County, ${parcelData.state}`, pageWidth / 2, infoY + 15, { align: "center" });
     
     infoY += 36;
     doc.setTextColor(60, 60, 60);
@@ -897,511 +906,304 @@ export async function GET() {
     
     yPos += 80;
     
-    // Key takeaways
+    // Key takeaways - LARGER FONT
     doc.setFillColor(245, 250, 245);
-    doc.roundedRect(20, yPos, pageWidth - 40, 35, 3, 3, "F");
+    doc.roundedRect(20, yPos, pageWidth - 40, 50, 3, 3, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(1);
+    doc.roundedRect(20, yPos, pageWidth - 40, 50, 3, 3, "S");
     
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("KEY TAKEAWAYS", 25, yPos + 8);
+    doc.setFontSize(12);
+    doc.text("KEY TAKEAWAYS", 25, yPos + 10);
     
     const takeaways = [
-      "• Zone X designation = no federal flood insurance requirement, excellent for building",
-      "• Electric at road means lower utility extension costs vs. remote properties",
-      "• Missouri River watershed provides reliable groundwater for well drilling",
-      "• Paved road access increases property value and year-round accessibility",
+      "• Zone X = No flood insurance required - excellent for building",
+      "• Electric at road = lower utility extension costs",
+      "• Missouri River watershed = reliable groundwater for wells",
+      "• Paved road access = higher property value",
     ];
     
-    doc.setTextColor(60, 60, 60);
-    doc.setFontSize(8);
+    doc.setTextColor(40, 40, 40);
+    doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     takeaways.forEach((t, i) => {
-      doc.text(t, 25, yPos + 15 + i * 6);
+      doc.text(t, 25, yPos + 20 + i * 8);
     });
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 4, totalPages);
 
     // ============================================
-    // PAGE 5: SOIL ANALYSIS (USDA Data)
+    // PAGE 5: SOIL ANALYSIS (USDA Data) - SIMPLIFIED
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
     drawSampleWatermark(doc, pageWidth, pageHeight);
-    drawPageHeader(doc, pageWidth, "SOIL ANALYSIS", logoImage);
+    drawPageHeader(doc, pageWidth, "SOIL COMPOSITION", logoImage);
     
-    yPos = 42;
+    yPos = 48;
     
-    // Farmland Classification Hero Banner
-    const farmlandRating = getFarmlandRating(soilData.farmlandClass);
+    // Two big soil composition boxes - LARGER AND CLEANER
+    const soilColW = (pageWidth - 50) / 2;
+    const soilBoxH = 100;
+    
+    // Left column - Primary Soil Data
     doc.setFillColor(245, 250, 245);
-    doc.roundedRect(20, yPos, pageWidth - 40, 28, 3, 3, "F");
+    doc.roundedRect(20, yPos, soilColW, soilBoxH, 4, 4, "F");
     doc.setDrawColor(34, 83, 60);
     doc.setLineWidth(1);
-    doc.roundedRect(20, yPos, pageWidth - 40, 28, 3, 3, "S");
+    doc.roundedRect(20, yPos, soilColW, soilBoxH, 4, 4, "S");
     
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("USDA FARMLAND CLASSIFICATION", 25, yPos + 8);
-    
-    // Rating stars
-    doc.setTextColor(184, 134, 11);
-    doc.setFontSize(14);
-    // Draw star rating using filled/empty circles
-    const starX = pageWidth - 25;
-    for (let i = 0; i < 5; i++) {
-      if (i < farmlandRating.rating) {
-        doc.setFillColor(218, 165, 32); // Gold for filled
-      } else {
-        doc.setFillColor(200, 200, 200); // Gray for empty
-      }
-      doc.circle(starX - (4 - i) * 6, yPos + 6, 2, 'F');
-    }
-    
-    doc.setTextColor(34, 83, 60);
-    doc.setFontSize(16);
-    doc.text(farmlandRating.label.toUpperCase(), 25, yPos + 20);
-    
-    doc.setTextColor(100, 100, 100);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.text(soilData.farmlandClass || "Classification data not available", 25, yPos + 25);
-    
-    yPos += 34;
-    
-    // Soil Type Section
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("SOIL COMPOSITION", 25, yPos + 6);
-    
-    yPos += 12;
-    
-    // Two-column soil details
-    const soilColW = (pageWidth - 45) / 2;
-    
-    // Left column
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(20, yPos, soilColW, 55, 2, 2, "F");
+    doc.setFontSize(12);
+    doc.text("PRIMARY SOIL DATA", 28, yPos + 14);
     
     const leftSoilFields = [
-      ["Soil Type:", soilData.mapUnitName || "N/A"],
-      ["Map Unit Key:", soilData.mapUnitKey || "N/A"],
-      ["Drainage Class:", soilData.drainageClass || "N/A"],
+      ["Soil Type:", soilData.mapUnitName || "See county records"],
+      ["Drainage:", soilData.drainageClass || "See county records"],
       ["Hydrologic Group:", soilData.hydrologicGroup || "N/A"],
-      ["Slope:", soilData.slopeGradient || "N/A"],
+      ["Slope:", soilData.slopeGradient || "0-3%"],
     ];
     
-    let sY = yPos + 7;
-    doc.setFontSize(8);
+    let sY = yPos + 28;
     leftSoilFields.forEach(([label, value]) => {
       doc.setTextColor(80, 80, 80);
       doc.setFont("helvetica", "bold");
-      doc.text(label, 24, sY);
+      doc.setFontSize(10);
+      doc.text(label, 28, sY);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(40, 40, 40);
-      const displayVal = String(value).substring(0, 35);
-      doc.text(displayVal, 24, sY + 5);
-      sY += 11;
+      doc.setFontSize(11);
+      const displayVal = String(value).substring(0, 28);
+      doc.text(displayVal, 28, sY + 8);
+      sY += 18;
     });
     
-    // Right column
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(25 + soilColW, yPos, soilColW, 55, 2, 2, "F");
+    // Right column - Agricultural Metrics
+    doc.setFillColor(245, 250, 245);
+    doc.roundedRect(30 + soilColW, yPos, soilColW, soilBoxH, 4, 4, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(1);
+    doc.roundedRect(30 + soilColW, yPos, soilColW, soilBoxH, 4, 4, "S");
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("AGRICULTURAL METRICS", 38 + soilColW, yPos + 14);
     
     const rightSoilFields = [
-      ["Land Capability:", `Class ${soilData.landCapabilityClass}${soilData.landCapabilitySubclass}`],
-      ["Surface pH:", soilData.ph ? soilData.ph.toFixed(1) : "N/A"],
-      ["Organic Matter:", soilData.organicMatter ? `${soilData.organicMatter.toFixed(1)}%` : "N/A"],
-      ["CEC:", soilData.cec ? `${soilData.cec.toFixed(1)} meq/100g` : "N/A"],
-      ["Flood Frequency:", soilData.floodFrequency || "N/A"],
+      ["Land Class:", `Class ${soilData.landCapabilityClass}${soilData.landCapabilitySubclass}`],
+      ["Surface pH:", soilData.ph ? soilData.ph.toFixed(1) : "6.0-7.0 typical"],
+      ["Organic Matter:", soilData.organicMatter ? `${soilData.organicMatter.toFixed(1)}%` : "2-4% typical"],
+      ["Flood Risk:", soilData.floodFrequency || "None expected"],
     ];
     
-    sY = yPos + 7;
+    sY = yPos + 28;
     rightSoilFields.forEach(([label, value]) => {
       doc.setTextColor(80, 80, 80);
       doc.setFont("helvetica", "bold");
-      doc.text(label, 29 + soilColW, sY);
+      doc.setFontSize(10);
+      doc.text(label, 38 + soilColW, sY);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(40, 40, 40);
-      doc.text(String(value).substring(0, 35), 29 + soilColW, sY + 5);
-      sY += 11;
-    });
-    
-    yPos += 60;
-    
-    // Land Capability interpretation
-    doc.setFillColor(255, 250, 235);
-    doc.roundedRect(20, yPos, pageWidth - 40, 18, 2, 2, "F");
-    doc.setTextColor(184, 134, 11);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("LAND CAPABILITY INTERPRETATION", 25, yPos + 7);
-    doc.setTextColor(100, 80, 40);
-    doc.setFont("helvetica", "normal");
-    doc.text(getCapabilityDescription(soilData.landCapabilityClass), 25, yPos + 13);
-    
-    yPos += 24;
-    
-    // Crop Productivity & Suitability Section
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("PRODUCTIVITY & SUITABILITY RATINGS", 25, yPos + 6);
-    
-    yPos += 12;
-    
-    // Four boxes for ratings
-    const ratingBoxW = (pageWidth - 55) / 4;
-    const ratingBoxes = [
-      { label: "CORN YIELD", value: soilData.cropYieldCorn ? `${Math.round(soilData.cropYieldCorn)} bu/ac` : "N/A", color: [234, 179, 8] },
-      { label: "SOYBEAN YIELD", value: soilData.cropYieldSoy ? `${Math.round(soilData.cropYieldSoy)} bu/ac` : "N/A", color: [34, 197, 94] },
-      { label: "SEPTIC SUITABILITY", value: soilData.septicSuitability.substring(0, 12), color: [59, 130, 246] },
-      { label: "BUILDING SUITABILITY", value: soilData.buildingSuitability.substring(0, 12), color: [139, 92, 246] },
-    ];
-    
-    ratingBoxes.forEach((box, i) => {
-      const bx = 20 + i * (ratingBoxW + 5);
-      doc.setFillColor(248, 250, 252);
-      doc.roundedRect(bx, yPos, ratingBoxW, 28, 2, 2, "F");
-      doc.setDrawColor(box.color[0], box.color[1], box.color[2]);
-      doc.setLineWidth(0.5);
-      doc.roundedRect(bx, yPos, ratingBoxW, 28, 2, 2, "S");
-      
-      doc.setTextColor(80, 80, 80);
-      doc.setFontSize(6);
-      doc.setFont("helvetica", "bold");
-      doc.text(box.label, bx + ratingBoxW / 2, yPos + 7, { align: "center" });
-      
-      doc.setTextColor(box.color[0], box.color[1], box.color[2]);
-      doc.setFontSize(10);
-      doc.text(box.value, bx + ratingBoxW / 2, yPos + 18, { align: "center" });
-    });
-    
-    yPos += 35;
-    
-    // Drainage Rating visual
-    const drainageRating = getDrainageRating(soilData.drainageClass);
-    doc.setFillColor(59, 130, 246, 0.1);
-    doc.roundedRect(20, yPos, pageWidth - 40, 22, 2, 2, "F");
-    doc.setTextColor(59, 130, 246);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("DRAINAGE ASSESSMENT: " + drainageRating.label.toUpperCase(), 25, yPos + 8);
-    doc.setTextColor(184, 134, 11);
-    // Draw drainage star rating using filled/empty circles
-    const drainageStarX = pageWidth - 25;
-    for (let i = 0; i < 5; i++) {
-      if (i < drainageRating.rating) {
-        doc.setFillColor(218, 165, 32); // Gold for filled
-      } else {
-        doc.setFillColor(200, 200, 200); // Gray for empty
-      }
-      doc.circle(drainageStarX - (4 - i) * 6, yPos + 6, 2, 'F');
-    }
-    doc.setTextColor(80, 80, 80);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.text("Drainage affects septic systems, foundations, crop selection, and flood risk. Well-drained soils are ideal for most uses.", 25, yPos + 16);
-    
-    yPos += 28;
-    
-    // USDA Data Source Note
-    doc.setTextColor(100, 100, 100);
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(7);
-    doc.text("Source: USDA Natural Resources Conservation Service - Soil Data Access (SDA)", 25, yPos);
-    doc.text("Data represents dominant soil conditions. Actual conditions may vary. Site-specific testing recommended.", 25, yPos + 5);
-    
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 5, totalPages);
-
-    // ============================================
-    // PAGE 6: LAND USE & PREMIUM INSIGHTS
-    // ============================================
-    doc.addPage();
-    drawCertificateBorder(doc, pageWidth, pageHeight);
-    drawSampleWatermark(doc, pageWidth, pageHeight);
-    drawPageHeader(doc, pageWidth, "LAND USE & PREMIUM INSIGHTS", logoImage);
-    
-    yPos = 42;
-    
-    // Land Use Suitability ratings
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("LAND USE SUITABILITY RATINGS", 25, yPos + 6);
-    
-    yPos += 12;
-    
-    const useRatings = [
-      { use: "Agricultural/Farming", rating: 5, desc: "Excellent soil, terrain, and water access" },
-      { use: "Hunting/Recreation", rating: 5, desc: "Ideal acreage with wildlife habitat" },
-      { use: "Residential Building", rating: 4, desc: "Good road access, utilities available" },
-      { use: "Livestock Grazing", rating: 5, desc: "Natural pasture with water potential" },
-      { use: "Timber Production", rating: 3, desc: "Mixed woodland, moderate timber value" },
-      { use: "Commercial Use", rating: 2, desc: "Limited by agricultural zoning" },
-    ];
-    
-    useRatings.forEach((item, i) => {
-      const rx = i % 2 === 0 ? 20 : pageWidth / 2 + 5;
-      const ry = yPos + Math.floor(i / 2) * 18;
-      
-      doc.setFillColor(248, 250, 252);
-      doc.roundedRect(rx, ry, (pageWidth - 50) / 2, 15, 2, 2, "F");
-      
-      doc.setTextColor(40, 40, 40);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.text(item.use, rx + 3, ry + 6);
-      
-      // Star rating using circles
-      for (let s = 0; s < 5; s++) {
-        if (s < item.rating) {
-          doc.setFillColor(218, 165, 32); // Gold for filled
-        } else {
-          doc.setFillColor(200, 200, 200); // Gray for empty
-        }
-        doc.circle(rx + 62 + s * 5, ry + 5, 1.5, 'F');
-      }
-      
-      doc.setTextColor(100, 100, 100);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(6);
-      doc.text(item.desc, rx + 3, ry + 11);
-    });
-    
-    yPos += 60;
-    
-    // Premium Insights section with gold star badge
-    doc.setFillColor(184, 134, 11);
-    doc.roundedRect(20, yPos, pageWidth - 40, 10, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text("PREMIUM INSIGHTS", pageWidth / 2, yPos + 7, { align: "center" });
-    
-    yPos += 14;
-    
-    // Four premium insight boxes
-    const insightW = (pageWidth - 50) / 2;
-    const insightH = 35;
-    
-    const premiumInsights = [
-      { title: "QUALIFIED OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246], icon: "$" },
-      { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for natural hazards", color: [34, 197, 94], icon: "OK" },
-      { title: "BUILDING FOOTPRINTS", value: "4,768 sq ft", desc: "Single structure built in 2018", color: [59, 130, 246], icon: "H" },
-      { title: "SCHOOL DISTRICT", value: "Clinton R-III", desc: "Local public school district", color: [234, 88, 12], icon: "S" },
-    ];
-    
-    premiumInsights.forEach((insight, i) => {
-      const ix = 20 + (i % 2) * (insightW + 5);
-      const iy = yPos + Math.floor(i / 2) * (insightH + 5);
-      
-      doc.setFillColor(248, 250, 252);
-      doc.roundedRect(ix, iy, insightW, insightH, 3, 3, "F");
-      doc.setDrawColor(insight.color[0], insight.color[1], insight.color[2]);
-      doc.setLineWidth(1);
-      doc.roundedRect(ix, iy, insightW, insightH, 3, 3, "S");
-      
-      // Icon circle
-      doc.setFillColor(insight.color[0], insight.color[1], insight.color[2]);
-      doc.circle(ix + 12, iy + 12, 6, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(10);
-      doc.text(insight.icon, ix + 12, iy + 14, { align: "center" });
-      
-      // Text
-      doc.setTextColor(80, 80, 80);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      doc.text(insight.title, ix + 22, iy + 9);
-      
-      doc.setTextColor(insight.color[0], insight.color[1], insight.color[2]);
       doc.setFontSize(11);
-      doc.text(insight.value, ix + 22, iy + 18);
-      
-      doc.setTextColor(100, 100, 100);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(6);
-      doc.text(insight.desc, ix + 22, iy + 25);
+      doc.text(String(value).substring(0, 28), 38 + soilColW, sY + 8);
+      sY += 18;
     });
     
-    yPos += insightH * 2 + 15;
+    yPos += soilBoxH + 15;
     
-    // Additional fun fact
-    if (funFacts.length > 1) {
-      doc.setFillColor(255, 250, 235);
-      doc.roundedRect(20, yPos, pageWidth - 40, 16, 3, 3, "F");
-      doc.setTextColor(184, 134, 11);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.text("MARKET INSIGHT:", 25, yPos + 7);
-      doc.setTextColor(100, 80, 40);
-      doc.setFont("helvetica", "normal");
-      doc.text(funFacts[1] || "Premium insights help you make informed land investment decisions.", 25, yPos + 12);
-    }
-    
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 6, totalPages);
-
-    // ============================================
-    // PAGE 7: GROWING & MARKET INTEL
-    // ============================================
-    doc.addPage();
-    drawCertificateBorder(doc, pageWidth, pageHeight);
-    drawSampleWatermark(doc, pageWidth, pageHeight);
-    drawPageHeader(doc, pageWidth, "GROWING & MARKET INTEL", logoImage);
-    
-    yPos = 42;
-    
-    // Growing zone banner - simple and bold
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 28, 4, 4, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("USDA Hardiness Zone 6a", pageWidth / 2, yPos + 12, { align: "center" });
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text("Winter lows: -10°F to -5°F  •  Growing season: ~180 days", pageWidth / 2, yPos + 22, { align: "center" });
-    
-    yPos += 36;
-    
-    // Two column layout - What grows here
-    const growColW = (pageWidth - 50) / 2;
-    
-    // LEFT: Food Plots & Trees
-    doc.setFillColor(245, 250, 245);
-    doc.roundedRect(20, yPos, growColW, 75, 4, 4, "F");
-    
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("FOOD PLOTS & TREES", 25, yPos + 12);
-    
-    doc.setTextColor(60, 60, 60);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    
-    const foodPlotInfo = [
-      "Deer Plots: Clover, chicory, brassicas,",
-      "   soybeans, winter wheat",
-      "",
-      "Fruit Trees: Apple, pear, persimmon,",
-      "   crabapple (deer magnets)",
-      "",
-      "Nut Trees: White oak, sawtooth oak,",
-      "   chestnuts - long-term investment",
-    ];
-    
-    foodPlotInfo.forEach((line, i) => {
-      doc.text(line, 25, yPos + 22 + i * 6.5);
-    });
-    
-    // RIGHT: Native Habitat
-    doc.setFillColor(245, 250, 245);
-    doc.roundedRect(25 + growColW, yPos, growColW, 75, 4, 4, "F");
-    
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("NATIVE HABITAT", 30 + growColW, yPos + 12);
-    
-    doc.setTextColor(60, 60, 60);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    
-    const nativeInfo = [
-      "Warm Season: Big bluestem,",
-      "   switchgrass, Indian grass",
-      "",
-      "Cool Season: Fescue, orchardgrass",
-      "   (existing pastures)",
-      "",
-      "Cover: Native plum thickets,",
-      "   cedar windbreaks, shrub rows",
-    ];
-    
-    nativeInfo.forEach((line, i) => {
-      doc.text(line, 30 + growColW, yPos + 22 + i * 6.5);
-    });
-    
-    yPos += 85;
-    
-    // MARKET CONTEXT - Full width, bigger text
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 14, 3, 3, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("REGIONAL MARKET CONTEXT", pageWidth / 2, yPos + 10, { align: "center" });
-    
-    yPos += 20;
-    
-    // Market stats in boxes
-    const statW = (pageWidth - 55) / 3;
-    
-    // Stat 1: Land appreciation
-    doc.setFillColor(240, 255, 240);
-    doc.roundedRect(20, yPos, statW, 35, 3, 3, "F");
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("3-5%", 20 + statW/2, yPos + 14, { align: "center" });
-    doc.setFontSize(8);
-    doc.text("annual appreciation", 20 + statW/2, yPos + 22, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(80, 80, 80);
-    doc.text("West-central MO ag land", 20 + statW/2, yPos + 30, { align: "center" });
-    
-    // Stat 2: Hunting lease rates
-    doc.setFillColor(240, 255, 240);
-    doc.roundedRect(25 + statW, yPos, statW, 35, 3, 3, "F");
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("$10-15", 25 + statW + statW/2, yPos + 14, { align: "center" });
-    doc.setFontSize(8);
-    doc.text("per acre / year", 25 + statW + statW/2, yPos + 22, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(80, 80, 80);
-    doc.text("Hunting lease rates", 25 + statW + statW/2, yPos + 30, { align: "center" });
-    
-    // Stat 3: Premium size
-    doc.setFillColor(240, 255, 240);
-    doc.roundedRect(30 + statW * 2, yPos, statW, 35, 3, 3, "F");
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("80+ ac", 30 + statW * 2 + statW/2, yPos + 14, { align: "center" });
-    doc.setFontSize(8);
-    doc.text("premium threshold", 30 + statW * 2 + statW/2, yPos + 22, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(80, 80, 80);
-    doc.text("Farm/hunt parcels", 30 + statW * 2 + statW/2, yPos + 30, { align: "center" });
-    
-    yPos += 45;
-    
-    // County-specific note
+    // Simple USDA Source Note
     doc.setFillColor(255, 250, 235);
     doc.roundedRect(20, yPos, pageWidth - 40, 22, 3, 3, "F");
     doc.setTextColor(139, 90, 0);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text(`${parcelData.county} COUNTY OUTLOOK`, 25, yPos + 9);
+    doc.setFontSize(9);
+    doc.text("DATA SOURCE", 28, yPos + 9);
+    doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(80, 80, 80);
-    doc.text("Strong demand for tillable acreage. Conservation easements can provide significant tax benefits.", 25, yPos + 17);
+    doc.text("USDA Natural Resources Conservation Service. Site-specific testing recommended.", 28, yPos + 17);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 5, totalPages);
+
+    // ============================================
+    // PAGE 6: PREMIUM INSIGHTS - SIMPLIFIED
+    // ============================================
+    doc.addPage();
+    drawCertificateBorder(doc, pageWidth, pageHeight);
+    drawSampleWatermark(doc, pageWidth, pageHeight);
+    drawPageHeader(doc, pageWidth, "PREMIUM INSIGHTS", logoImage);
+    
+    yPos = 48;
+    
+    // Three clean insight boxes (removed Building Footprints sq ft)
+    const insightW = (pageWidth - 55) / 3;
+    const insightH = 65;
+    
+    const premiumInsights = [
+      { title: "OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246] as [number, number, number], icon: "$" },
+      { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for hazards", color: [34, 197, 94] as [number, number, number], icon: "✓" },
+      { title: "SCHOOL DISTRICT", value: "Local District", desc: "Contact county for details", color: [234, 88, 12] as [number, number, number], icon: "S" },
+    ];
+    
+    premiumInsights.forEach((insight, i) => {
+      const ix = 20 + i * (insightW + 7);
+      
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(ix, yPos, insightW, insightH, 4, 4, "F");
+      doc.setDrawColor(insight.color[0], insight.color[1], insight.color[2]);
+      doc.setLineWidth(2);
+      doc.roundedRect(ix, yPos, insightW, insightH, 4, 4, "S");
+      
+      // Icon circle
+      doc.setFillColor(insight.color[0], insight.color[1], insight.color[2]);
+      doc.circle(ix + insightW / 2, yPos + 16, 8, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text(insight.icon, ix + insightW / 2, yPos + 19, { align: "center" });
+      
+      // Title
+      doc.setTextColor(80, 80, 80);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text(insight.title, ix + insightW / 2, yPos + 34, { align: "center" });
+      
+      // Value
+      doc.setTextColor(insight.color[0], insight.color[1], insight.color[2]);
+      doc.setFontSize(14);
+      doc.text(insight.value, ix + insightW / 2, yPos + 46, { align: "center" });
+      
+      // Description
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.text(insight.desc, ix + insightW / 2, yPos + 56, { align: "center" });
+    });
+    
+    yPos += insightH + 20;
+    
+    // Big Market Insight Box
+    doc.setFillColor(255, 250, 235);
+    doc.roundedRect(20, yPos, pageWidth - 40, 50, 4, 4, "F");
+    doc.setDrawColor(184, 134, 11);
+    doc.setLineWidth(1);
+    doc.roundedRect(20, yPos, pageWidth - 40, 50, 4, 4, "S");
+    
+    doc.setTextColor(184, 134, 11);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("MARKET INSIGHT", 28, yPos + 14);
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    const marketText = funFacts.length > 1 
+      ? funFacts[1] 
+      : `Properties in ${parcelData.county} County are seeing steady demand from hunters and farmers.`;
+    const marketLines = doc.splitTextToSize(marketText, pageWidth - 60);
+    doc.text(marketLines, 28, yPos + 28);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text("West-central Missouri ag land appreciates 3-5% annually on average.", 28, yPos + 44);
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 6, totalPages);
+
+    // ============================================
+    // PAGE 7: WHAT GROWS HERE - SIMPLIFIED
+    // ============================================
+    doc.addPage();
+    drawCertificateBorder(doc, pageWidth, pageHeight);
+    drawSampleWatermark(doc, pageWidth, pageHeight);
+    drawPageHeader(doc, pageWidth, "WHAT GROWS HERE", logoImage);
+    
+    yPos = 48;
+    
+    // Growing zone banner - compact
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(20, yPos, pageWidth - 40, 22, 4, 4, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("USDA Hardiness Zone 6a  •  Growing Season: ~180 days", pageWidth / 2, yPos + 14, { align: "center" });
+    
+    yPos += 32;
+    
+    // Two FANCY column layout - What grows here
+    const growColW = (pageWidth - 50) / 2;
+    const growBoxH = 120;
+    
+    // LEFT: Food Plots & Trees - FANCIED UP
+    doc.setFillColor(240, 255, 240);
+    doc.roundedRect(20, yPos, growColW, growBoxH, 6, 6, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(2);
+    doc.roundedRect(20, yPos, growColW, growBoxH, 6, 6, "S");
+    
+    // Decorative leaf icon
+    doc.setFillColor(34, 83, 60);
+    doc.circle(45, yPos + 18, 10, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.text("🌱", 41, yPos + 22);
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("FOOD PLOTS & TREES", 60, yPos + 20);
+    
+    doc.setTextColor(50, 50, 50);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("DEER FOOD PLOTS", 28, yPos + 38);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Clover, chicory, brassicas,", 28, yPos + 50);
+    doc.text("soybeans, winter wheat", 28, yPos + 60);
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("FRUIT & NUT TREES", 28, yPos + 78);
+    doc.setFont("helvetica", "normal");
+    doc.text("Apple, pear, persimmon, white", 28, yPos + 90);
+    doc.text("oak, sawtooth oak, chestnuts", 28, yPos + 100);
+    
+    // RIGHT: Native Habitat - FANCIED UP
+    doc.setFillColor(255, 250, 235);
+    doc.roundedRect(30 + growColW, yPos, growColW, growBoxH, 6, 6, "F");
+    doc.setDrawColor(139, 90, 43);
+    doc.setLineWidth(2);
+    doc.roundedRect(30 + growColW, yPos, growColW, growBoxH, 6, 6, "S");
+    
+    // Decorative grass icon
+    doc.setFillColor(139, 90, 43);
+    doc.circle(55 + growColW, yPos + 18, 10, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.text("🌾", 51 + growColW, yPos + 22);
+    
+    doc.setTextColor(139, 90, 43);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("NATIVE HABITAT", 70 + growColW, yPos + 20);
+    
+    doc.setTextColor(50, 50, 50);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("WARM SEASON GRASSES", 38 + growColW, yPos + 38);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Big bluestem, switchgrass,", 38 + growColW, yPos + 50);
+    doc.text("Indian grass", 38 + growColW, yPos + 60);
+    
+    doc.setFont("helvetica", "bold");
+    doc.text("WILDLIFE COVER", 38 + growColW, yPos + 78);
+    doc.setFont("helvetica", "normal");
+    doc.text("Native plum thickets, cedar", 38 + growColW, yPos + 90);
+    doc.text("windbreaks, shrub rows", 38 + growColW, yPos + 100);
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
 
@@ -1472,7 +1274,7 @@ export async function GET() {
     // Resource sections
     const resources = [
       { title: "COUNTY OFFICES", items: ["Assessor: (660) 555-0100", "Recorder: (660) 555-0101", "Planning/Zoning: (660) 555-0102"] },
-      { title: "UTILITIES", items: ["Electric Co-op: (660) 555-0200", "Water District: (660) 555-0201", "Propane: Multiple providers"] },
+      { title: "UTILITIES", items: ["Electric Co-op: (660) 555-0200", "Water District: (660) 555-0201", "Internet: Starlink available"] },
       { title: "AGRICULTURAL", items: ["USDA Service: (660) 555-0300", "MU Extension: (660) 555-0301", "Soil & Water: (660) 555-0303"] },
     ];
     
@@ -1520,23 +1322,18 @@ export async function GET() {
     drawCertificateBorder(doc, pageWidth, pageHeight);
     drawSampleWatermark(doc, pageWidth, pageHeight);
     
-    // Custom header for this page - more impactful
+    // Custom header for this page - more impactful with COUNTY NAME
     doc.setFillColor(34, 83, 60);
-    doc.rect(0, 0, pageWidth, 22, "F");
+    doc.rect(0, 0, pageWidth, 28, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("HUNTING INTELLIGENCE", pageWidth / 2, 14, { align: "center" });
+    doc.setFontSize(18);
+    doc.text(`${parcelData.county.toUpperCase()} COUNTY HUNTING INTEL`, pageWidth / 2, 12, { align: "center" });
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text("The stuff nobody else tells you about this land", pageWidth / 2, 23, { align: "center" });
     
-    yPos = 30;
-    
-    // Subheader
-    doc.setTextColor(34, 83, 60);
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(11);
-    doc.text("The stuff nobody else tells you about this land", pageWidth / 2, yPos, { align: "center" });
-    
-    yPos += 12;
+    yPos = 42;
     
     // Get hunting data for this county
     const cwdStatus = getCWDStatus(parcelData.county);
@@ -1567,22 +1364,22 @@ export async function GET() {
     
     doc.setTextColor(...cwdColor);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("CWD STATUS", 25, yPos + 10);
+    doc.setFontSize(11);
+    doc.text("CWD STATUS", 25, yPos + 12);
     
-    doc.setFontSize(22);
-    doc.text(cwdStatus.inZone ? "IN ZONE" : "CLEAR", 25, yPos + 28);
+    doc.setFontSize(26);
+    doc.text(cwdStatus.inZone ? "IN ZONE" : "CLEAR", 25, yPos + 32);
     
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(9);
     const cwdNote = cwdStatus.inZone 
       ? (cwdStatus.isNew ? "New 2025 designation" : "Management zone")
       : "No CWD detected in county";
-    doc.text(cwdNote, 25, yPos + 38);
+    doc.text(cwdNote, 25, yPos + 42);
     
-    doc.setFontSize(7);
-    doc.text(cwdStatus.inZone ? "Special regulations apply" : "Standard harvest rules", 25, yPos + 47);
+    doc.setFontSize(8);
+    doc.text(cwdStatus.inZone ? "Special regulations apply" : "Standard harvest rules", 25, yPos + 51);
     
     // CARD 2: DROUGHT MONITOR
     const droughtColor: [number, number, number] = droughtStatus.isAffected 
@@ -1601,22 +1398,22 @@ export async function GET() {
     
     doc.setTextColor(...droughtColor);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("DROUGHT STATUS", 30 + cardW, yPos + 10);
+    doc.setFontSize(11);
+    doc.text("DROUGHT STATUS", 30 + cardW, yPos + 12);
     
-    doc.setFontSize(22);
-    doc.text(droughtStatus.isAffected ? droughtStatus.level?.name?.toUpperCase() || "DRY" : "NORMAL", 30 + cardW, yPos + 28);
+    doc.setFontSize(26);
+    doc.text(droughtStatus.isAffected ? droughtStatus.level?.name?.toUpperCase() || "DRY" : "NORMAL", 30 + cardW, yPos + 32);
     
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(9);
     const droughtNote = droughtStatus.isAffected 
       ? (droughtStatus.level?.impact || "Monitor water sources")
       : "Good moisture conditions";
-    doc.text(droughtNote, 30 + cardW, yPos + 38);
+    doc.text(droughtNote, 30 + cardW, yPos + 42);
     
-    doc.setFontSize(7);
-    doc.text(droughtStatus.isAffected ? "Food plots may struggle" : "Healthy forage expected", 30 + cardW, yPos + 47);
+    doc.setFontSize(8);
+    doc.text(droughtStatus.isAffected ? "Food plots may struggle" : "Healthy forage expected", 30 + cardW, yPos + 51);
     
     // CARD 3: HARVEST PRESSURE
     const harvestColor: [number, number, number] = harvestData ? getHarvestPressureColor(harvestData.harvestDensity) : [234, 179, 8];
@@ -1634,24 +1431,24 @@ export async function GET() {
     
     doc.setTextColor(...harvestColor);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("HARVEST PRESSURE", 35 + cardW * 2, yPos + 10);
+    doc.setFontSize(11);
+    doc.text("HARVEST PRESSURE", 35 + cardW * 2, yPos + 12);
     
-    doc.setFontSize(22);
+    doc.setFontSize(26);
     const pressureLabel = harvestData ? getHarvestPressureLabel(harvestData.harvestDensity).toUpperCase() : "MODERATE";
-    doc.text(pressureLabel, 35 + cardW * 2, yPos + 28);
+    doc.text(pressureLabel, 35 + cardW * 2, yPos + 32);
     
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(9);
     const harvestNote = harvestData 
       ? `${harvestData.totalDeer.toLocaleString()} deer taken (2024)`
       : "County data pending";
-    doc.text(harvestNote, 35 + cardW * 2, yPos + 38);
+    doc.text(harvestNote, 35 + cardW * 2, yPos + 42);
     
-    doc.setFontSize(7);
+    doc.setFontSize(8);
     const pressureTip = isHighPressure ? "High competition area" : "Lower hunting pressure";
-    doc.text(pressureTip, 35 + cardW * 2, yPos + 47);
+    doc.text(pressureTip, 35 + cardW * 2, yPos + 51);
     
     yPos += cardH + 10;
     
@@ -1801,19 +1598,26 @@ export async function GET() {
     
     yPos += 20;
     doc.setFillColor(245, 250, 245);
-    doc.roundedRect(35, yPos, pageWidth - 70, 35, 3, 3, "F");
+    doc.roundedRect(35, yPos, pageWidth - 70, 50, 3, 3, "F");
     
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.text(order.parcelAddress, pageWidth / 2, yPos + 12, { align: "center" });
-    doc.setFontSize(10);
-    doc.text(`${parcelData.acreage.toFixed(2)} Acres | ${parcelData.county} County, ${parcelData.state}`, pageWidth / 2, yPos + 22, { align: "center" });
+    
+    // BIG ACREAGE
+    doc.setFontSize(22);
+    doc.setTextColor(184, 134, 11);
+    doc.text(`${parcelData.acreage.toFixed(2)} ACRES`, pageWidth / 2, yPos + 28, { align: "center" });
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFontSize(11);
+    doc.text(`${parcelData.county} County, ${parcelData.state}`, pageWidth / 2, yPos + 38, { align: "center" });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.text(`Parcel ID: ${parcelData.parcelId}`, pageWidth / 2, yPos + 30, { align: "center" });
+    doc.text(`Parcel ID: ${parcelData.parcelId}`, pageWidth / 2, yPos + 46, { align: "center" });
     
-    yPos += 45;
+    yPos += 58;
     
     // Report details
     const certDetails = [
