@@ -1060,7 +1060,7 @@ export async function GET() {
     const premiumInsights = [
       { title: "OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246] as [number, number, number], icon: "$" },
       { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for hazards", color: [34, 197, 94] as [number, number, number], icon: "✓" },
-      { title: "SCHOOL DISTRICT", value: "Local District", desc: "Contact county for details", color: [234, 88, 12] as [number, number, number], icon: "S" },
+      { title: "SCHOOL DISTRICT", value: `${parcelData.county} County`, desc: "Contact county for details", color: [234, 88, 12] as [number, number, number], icon: "S" },
     ];
     
     premiumInsights.forEach((insight, i) => {
@@ -1180,8 +1180,10 @@ export async function GET() {
     doc.text("soybeans, winter wheat", 28, yPos + 60);
     
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
     doc.text("FRUIT & NUT TREES", 28, yPos + 78);
     doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
     doc.text("Apple, pear, persimmon, white", 28, yPos + 90);
     doc.text("oak, sawtooth oak, chestnuts", 28, yPos + 100);
     
@@ -1214,8 +1216,10 @@ export async function GET() {
     doc.text("Indian grass", 38 + growColW, yPos + 60);
     
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
     doc.text("WILDLIFE COVER", 38 + growColW, yPos + 78);
     doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
     doc.text("Native plum thickets, cedar", 38 + growColW, yPos + 90);
     doc.text("windbreaks, shrub rows", 38 + growColW, yPos + 100);
     
