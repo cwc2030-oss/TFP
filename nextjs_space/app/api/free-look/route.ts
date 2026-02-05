@@ -610,64 +610,78 @@ export async function GET() {
     
     yPos += 82;
     
-    // Valuation section
+    // Property Tax Snapshot section (clean, clear format)
     doc.setFillColor(34, 83, 60);
     doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("VALUATION & OWNERSHIP", 25, yPos + 6);
+    doc.text("PROPERTY TAX SNAPSHOT", 25, yPos + 6);
     
     yPos += 12;
     
-    // Three value boxes - use reasonable estimates if data unavailable
-    const boxW = (pageWidth - 50) / 3;
-    const estimatedLandValue = Math.round(parcelData.acreage * 4500); // ~$4,500/acre estimate
-    const valBoxes = [
-      { 
-        label: "TAX ASSESSED VALUE", 
-        value: parcelData.marketValue ? `$${parcelData.marketValue.toLocaleString()}` : `~$${estimatedLandValue.toLocaleString()}*`, 
-        color: [34, 83, 60] as [number, number, number],
-        estimated: !parcelData.marketValue
-      },
-      { 
-        label: "LAND VALUE", 
-        value: parcelData.landValue ? `$${parcelData.landValue.toLocaleString()}` : `~$${estimatedLandValue.toLocaleString()}*`, 
-        color: [139, 92, 246] as [number, number, number],
-        estimated: !parcelData.landValue
-      },
-      { 
-        label: "IMPROVEMENT VALUE", 
-        value: parcelData.improvementValue ? `$${parcelData.improvementValue.toLocaleString()}` : "See County Records", 
-        color: [59, 130, 246] as [number, number, number],
-        estimated: !parcelData.improvementValue
-      },
+    // Calculate tax values - Missouri agricultural land assessment
+    const estimatedMarketValue = Math.round(parcelData.acreage * 4500); // ~$4,500/acre for ag land
+    const assessedValue = parcelData.marketValue || Math.round(estimatedMarketValue * 0.12); // Agricultural = 12% of market
+    const classificationPct = 12; // Agricultural classification in Missouri
+    const effectiveTaxRate = 3.12; // Typical rural MO rate per $100
+    const estimatedAnnualTax = Math.round((assessedValue / 100) * effectiveTaxRate);
+    const isEstimated = !parcelData.marketValue;
+    
+    // Property Tax Snapshot box
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(20, yPos, pageWidth - 40, 52, 3, 3, "F");
+    doc.setDrawColor(34, 83, 60);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(20, yPos, pageWidth - 40, 52, 3, 3, "S");
+    
+    // Tax details - clean bullet list format
+    const taxItems = [
+      { label: "Assessed Value (Tax Basis):", value: `$${assessedValue.toLocaleString()}${isEstimated ? "*" : ""}` },
+      { label: "Classification:", value: `Agricultural (${classificationPct}%)` },
+      { label: "Effective Tax Rate:", value: `$${effectiveTaxRate.toFixed(2)} / $100` },
+      { label: "Estimated Annual Property Tax:", value: `~$${estimatedAnnualTax.toLocaleString()}` },
     ];
     
-    valBoxes.forEach((box, i) => {
-      const bx = 20 + i * (boxW + 5);
-      doc.setFillColor(248, 250, 252);
-      doc.roundedRect(bx, yPos, boxW - 2, 28, 2, 2, "F");
-      doc.setTextColor(80, 80, 80);
-      doc.setFontSize(7);
+    let taxY = yPos + 10;
+    doc.setFontSize(10);
+    taxItems.forEach((item) => {
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text("•", 26, taxY);
       doc.setFont("helvetica", "bold");
-      doc.text(box.label, bx + (boxW - 2) / 2, yPos + 8, { align: "center" });
-      doc.setTextColor(box.color[0], box.color[1], box.color[2]);
-      doc.setFontSize(14);
-      doc.text(box.value, bx + (boxW - 2) / 2, yPos + 20, { align: "center" });
+      doc.text(item.label, 32, taxY);
+      doc.setTextColor(34, 83, 60);
+      doc.setFont("helvetica", "bold");
+      const labelWidth = doc.getTextWidth(item.label);
+      doc.text(item.value, 34 + labelWidth, taxY);
+      taxY += 10;
     });
     
-    yPos += 32;
-    doc.setTextColor(100, 100, 100);
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "italic");
-    const hasEstimates = !parcelData.marketValue || !parcelData.landValue;
-    const noteText = hasEstimates 
-      ? "*Estimated based on regional rates (~$4,500/ac). Tax assessed values = 60-70% of market value."
-      : "Note: Tax assessed values typically represent 60-70% of actual market value. Tax Year: " + (parcelData.taxYear || "2024");
-    doc.text(noteText, 25, yPos);
+    yPos += 56;
     
-    yPos += 10;
+    // Interpretation Note box
+    doc.setFillColor(255, 251, 235); // Warm cream background
+    doc.roundedRect(20, yPos, pageWidth - 40, 22, 2, 2, "F");
+    doc.setDrawColor(180, 140, 60);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(20, yPos, pageWidth - 40, 22, 2, 2, "S");
+    
+    // Interpretation note header
+    doc.setTextColor(120, 90, 40);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("Interpretation Note:", 25, yPos + 6);
+    
+    // Interpretation note text
+    doc.setTextColor(80, 70, 50);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7.5);
+    const noteText = '"This value is assigned for taxation purposes only and does not represent market value. It is best interpreted as an indicator of annual holding cost and classification status."';
+    const noteLines = doc.splitTextToSize(noteText, pageWidth - 50);
+    doc.text(noteLines, 25, yPos + 12);
+    
+    yPos += 26;
     
     // Legal description
     doc.setFillColor(34, 83, 60);
