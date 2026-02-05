@@ -1071,7 +1071,7 @@ export default function InteractiveMap({
             className="bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2.5 rounded-full text-sm font-medium flex items-center gap-2 shadow-lg transition-colors"
           >
             <Eye className="w-4 h-4" />
-            View Sample Report
+            Take a Free Look
           </a>
           <div className="bg-black/70 text-white px-6 py-3 rounded-full text-sm">
             {currentZoom >= MIN_CLICK_ZOOM ? (

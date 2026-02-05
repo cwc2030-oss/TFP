@@ -121,7 +121,7 @@ function HeroSection() {
                   size="lg"
                   className="bg-stone-700 text-white hover:bg-stone-600 border border-stone-500 px-8"
                 >
-                  See a Sample Report
+                  Take a Free Look
                 </Button>
               </Link>
             </div>

@@ -399,7 +399,7 @@ export async function GET() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const reportNumber = generateReportNumber();
-    const totalPages = 10; // Added soil analysis + hunting pages
+    const totalPages = 11; // Added soil analysis + hunting pages + unwritten rules tease
     const order = SAMPLE_ORDER;
     
     const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng);
@@ -1737,6 +1737,106 @@ export async function GET() {
     doc.text(disclaimerLines, pageWidth / 2, yPos, { align: "center" });
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 10, totalPages);
+
+    // ========== PAGE 11: Unwritten Rules Tease ==========
+    doc.addPage();
+    yPos = 25;
+    
+    // Header
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, 0, pageWidth, 18, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("BONUS: Included with Every Paid Report", pageWidth / 2, 12, { align: "center" });
+    
+    yPos = 40;
+    
+    // Main title
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.text("The Unwritten Rules", pageWidth / 2, yPos, { align: "center" });
+    yPos += 10;
+    doc.setFontSize(16);
+    doc.text("of Rural Land", pageWidth / 2, yPos, { align: "center" });
+    
+    yPos += 8;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(11);
+    doc.setTextColor(100, 100, 100);
+    doc.text("A Missouri Field Guide to Neighboring Well", pageWidth / 2, yPos, { align: "center" });
+    
+    yPos += 20;
+    
+    // Intro quote box
+    doc.setFillColor(245, 245, 240);
+    doc.roundedRect(25, yPos, pageWidth - 50, 28, 3, 3, "F");
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(11);
+    const quoteText = "Your deed says what you own. This guide tells you how to live on it.";
+    doc.text(quoteText, pageWidth / 2, yPos + 12, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("— The stuff your realtor won't tell you", pageWidth / 2, yPos + 21, { align: "center" });
+    
+    yPos += 45;
+    
+    // What's covered section
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("What You'll Learn:", 30, yPos);
+    yPos += 12;
+    
+    const topics = [
+      ["🚧", "Fences & Boundaries", "Why the fence ain't always the property line"],
+      ["🚪", "Gates & Crossings", "The unspoken rules of rural access"],
+      ["🔊", "Noise & Seasons", "Tractors at dawn, chainsaws on Saturdays"],
+      ["🦌", "Wildlife & Water", "Deer don't read deeds — neither do creeks"],
+      ["🤝", "The Neighbor Code", "How to earn trust, not lawsuits"],
+    ];
+    
+    topics.forEach(([emoji, title, desc]) => {
+      doc.setTextColor(60, 60, 60);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(`${emoji}  ${title}`, 35, yPos);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(desc, 50, yPos + 6);
+      yPos += 18;
+    });
+    
+    yPos += 10;
+    
+    // Bottom callout box
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(25, yPos, pageWidth - 50, 45, 3, 3, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("This 2-page guide is included FREE", pageWidth / 2, yPos + 14, { align: "center" });
+    doc.text("with every paid Land Analysis Report.", pageWidth / 2, yPos + 24, { align: "center" });
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Ready to get the full picture?  →  TerraFirmaPartners.com", pageWidth / 2, yPos + 36, { align: "center" });
+    
+    yPos += 60;
+    
+    // Footer note
+    doc.setTextColor(120, 120, 120);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.text("Rural land runs on an operating system nobody writes down.", pageWidth / 2, yPos, { align: "center" });
+    doc.text("The families who've been here for generations absorbed it growing up.", pageWidth / 2, yPos + 5, { align: "center" });
+    doc.text("If you're new to the country — this guide helps you fit right in.", pageWidth / 2, yPos + 10, { align: "center" });
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 11, totalPages);
 
     // Generate and return PDF
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));

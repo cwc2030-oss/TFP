@@ -50,7 +50,7 @@ export default function Footer() {
                   rel="noopener noreferrer"
                   className="text-sm hover:text-emerald-400 transition-colors"
                 >
-                  Sample Report
+                  Free Look
                 </a>
               </li>
             </ul>

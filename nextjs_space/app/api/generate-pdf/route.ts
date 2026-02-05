@@ -414,7 +414,7 @@ export async function POST(request: NextRequest) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const reportNumber = generateReportNumber();
-    const totalPages = 10;
+    const totalPages = 12; // Including 2-page Unwritten Rules bonus
     
     const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
     const parcelData = regridData || getDefaultSampleData();
@@ -1750,6 +1750,242 @@ export async function POST(request: NextRequest) {
     doc.text(disclaimerLines, pageWidth / 2, yPos, { align: "center" });
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 10, totalPages);
+
+    // ========== PAGE 11: Unwritten Rules of Rural Land (Part 1) ==========
+    doc.addPage();
+    yPos = 20;
+    
+    // Header bar
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, 0, pageWidth, 18, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("BONUS: The Unwritten Rules of Rural Land", pageWidth / 2, 12, { align: "center" });
+    
+    yPos = 30;
+    
+    // Title
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text("The Unwritten Rules of Rural Land", pageWidth / 2, yPos, { align: "center" });
+    yPos += 7;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(11);
+    doc.setTextColor(100, 100, 100);
+    doc.text("A Missouri Field Guide to Neighboring Well", pageWidth / 2, yPos, { align: "center" });
+    
+    yPos += 15;
+    
+    // Intro quote
+    doc.setFillColor(245, 245, 240);
+    doc.roundedRect(20, yPos, pageWidth - 40, 16, 2, 2, "F");
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(10);
+    doc.text("Your deed says what you own. This page tells you how to live on it.", pageWidth / 2, yPos + 10, { align: "center" });
+    
+    yPos += 26;
+    
+    // Section: Fences & Boundaries
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("🚧  Fences & Boundaries", 20, yPos);
+    yPos += 7;
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const fenceText = [
+      "The fence ain't always the line. Old fences follow working history, not surveys. Your neighbor's",
+      "daddy might've set that post in 1962 based on a handshake, not a plat map. That's okay. Don't",
+      "move it without a conversation. Leave buffers alone — that scrubby tree line between properties?",
+      "It's there on purpose. Don't clear right up to the edge unless you've talked about it first."
+    ];
+    fenceText.forEach(line => {
+      doc.text(line, 25, yPos);
+      yPos += 5;
+    });
+    
+    yPos += 8;
+    
+    // Section: Gates & Crossings
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("🚪  Gates & Crossings", 20, yPos);
+    yPos += 7;
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const gatesText = [
+      "Leave gates how you found 'em. Open means open. Closed means closed. This isn't decorative",
+      "— there's livestock logic behind it. Paths exist. You might find worn trails, creek crossings, or",
+      "two-tracks that wander across your new property. Some have been used for decades. Ask around",
+      "before you block them."
+    ];
+    gatesText.forEach(line => {
+      doc.text(line, 25, yPos);
+      yPos += 5;
+    });
+    
+    yPos += 8;
+    
+    // Section: Noise, Activity & Seasons
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("🔊  Noise, Activity & Seasons", 20, yPos);
+    yPos += 7;
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const noiseText = [
+      "Rural ain't quiet. Tractors at dawn. Chainsaws on Saturdays. Dogs that bark at deer. Roosters.",
+      "This is the soundtrack — not a disturbance. Hunting season is real. Trucks parked on field edges",
+      "at 4am in November? Turkey hunters in full camo crossing the back forty in April? That's not",
+      "trespassing — that's tradition. If you didn't post it and they've hunted it for years, expect a",
+      "conversation before you shut it down. Hay gets cut when hay's ready. Your neighbor might be",
+      "running equipment at 10pm in June. That's not rude — that's rain coming tomorrow."
+    ];
+    noiseText.forEach(line => {
+      doc.text(line, 25, yPos);
+      yPos += 5;
+    });
+    
+    yPos += 8;
+    
+    // Section: Wildlife & Water
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("🦌  Wildlife & Water", 20, yPos);
+    yPos += 7;
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const wildlifeText = [
+      "Deer don't read deeds. Wildlife crosses every line. So do their hunters' eyes. Be a good neighbor",
+      "about sight lines and food plots. Creeks are shared. That drainage ditch, wet-weather creek, or",
+      "pond overflow doesn't belong to anybody fully. Don't dam it. Don't poison it. Don't assume."
+    ];
+    wildlifeText.forEach(line => {
+      doc.text(line, 25, yPos);
+      yPos += 5;
+    });
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 11, totalPages);
+
+    // ========== PAGE 12: Unwritten Rules of Rural Land (Part 2) ==========
+    doc.addPage();
+    yPos = 20;
+    
+    // Header bar
+    doc.setFillColor(34, 83, 60);
+    doc.rect(0, 0, pageWidth, 18, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("BONUS: The Unwritten Rules of Rural Land (continued)", pageWidth / 2, 12, { align: "center" });
+    
+    yPos = 30;
+    
+    // Section: The Neighbor Code
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("🤝  The Neighbor Code", 20, yPos);
+    yPos += 10;
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    
+    const neighborRules = [
+      ["Wave.", "Every time. Even if you don't know 'em yet."],
+      ["Assume good intent.", "That guy on your property line with a chainsaw? Probably cleaning up a fallen tree that's half on his side. Say thanks before you say \"hey.\""],
+      ["Talk before you change things.", "New fence. New driveway. New buildings. If it's visible from their porch or audible from their bedroom, a heads-up goes a long way."],
+      ["Don't be the one who \"lawyered up.\"", "You can win a boundary dispute and lose every neighbor for a mile. Out here, reputation lasts longer than lawsuits."],
+    ];
+    
+    neighborRules.forEach(([rule, explanation]) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(`• ${rule}`, 25, yPos);
+      yPos += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const expLines = doc.splitTextToSize(explanation, pageWidth - 55);
+      expLines.forEach((line: string) => {
+        doc.text(line, 30, yPos);
+        yPos += 5;
+      });
+      yPos += 4;
+    });
+    
+    yPos += 10;
+    
+    // Bottom line box
+    doc.setFillColor(245, 245, 240);
+    doc.roundedRect(20, yPos, pageWidth - 40, 35, 3, 3, "F");
+    
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("The Bottom Line", pageWidth / 2, yPos + 10, { align: "center" });
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("These aren't rules. They're how it works.", pageWidth / 2, yPos + 18, { align: "center" });
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.text("And if you mess up? A six-pack and an apology go further than you'd think.", pageWidth / 2, yPos + 26, { align: "center" });
+    
+    yPos += 50;
+    
+    // Final note
+    doc.setTextColor(100, 100, 100);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.text("This isn't legal advice. It's land sense. Actual neighbor expectations vary — and that's the point.", pageWidth / 2, yPos, { align: "center" });
+    
+    yPos += 15;
+    
+    // About section
+    doc.setFillColor(34, 83, 60);
+    doc.roundedRect(25, yPos, pageWidth - 50, 40, 3, 3, "F");
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("About This Guide", pageWidth / 2, yPos + 10, { align: "center" });
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const aboutText = "Understanding land means understanding how it's been lived on. This guide was written for buyers, investors, and newcomers navigating the unwritten customs of rural Missouri.";
+    const aboutLines = doc.splitTextToSize(aboutText, pageWidth - 60);
+    let aboutY = yPos + 18;
+    aboutLines.forEach((line: string) => {
+      doc.text(line, pageWidth / 2, aboutY, { align: "center" });
+      aboutY += 5;
+    });
+    
+    doc.setFont("helvetica", "italic");
+    doc.text("The best land decisions start with local knowledge.", pageWidth / 2, yPos + 33, { align: "center" });
+    
+    yPos += 55;
+    
+    // Closing
+    doc.setTextColor(34, 83, 60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Questions about a property?", pageWidth / 2, yPos, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.text("TerraFirmaPartners.com  —  Your neighbor in the land business.", pageWidth / 2, yPos + 7, { align: "center" });
+    
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 12, totalPages);
 
     // Generate and return PDF as base64 JSON for dashboard download
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
