@@ -1059,9 +1059,9 @@ export async function GET() {
     const insightH = 65;
     
     const premiumInsights = [
-      { title: "OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246] as [number, number, number], icon: "$" },
-      { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for hazards", color: [34, 197, 94] as [number, number, number], icon: "✓" },
-      { title: "SCHOOL DISTRICT", value: `${parcelData.county} County`, desc: "Contact county for details", color: [234, 88, 12] as [number, number, number], icon: "S" },
+      { title: "OPPORTUNITY ZONE", value: "Not in QOZ", desc: "Standard tax treatment applies", color: [139, 92, 246] as [number, number, number], icon: "$", drawCheck: false },
+      { title: "FEMA RISK INDEX", value: "Low Risk", desc: "Below national average for hazards", color: [34, 197, 94] as [number, number, number], icon: "", drawCheck: true },
+      { title: "SCHOOL DISTRICT", value: `${parcelData.county} County`, desc: "Contact county for details", color: [234, 88, 12] as [number, number, number], icon: "S", drawCheck: false },
     ];
     
     premiumInsights.forEach((insight, i) => {
@@ -1076,10 +1076,21 @@ export async function GET() {
       // Icon circle
       doc.setFillColor(insight.color[0], insight.color[1], insight.color[2]);
       doc.circle(ix + insightW / 2, yPos + 16, 8, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
-      doc.text(insight.icon, ix + insightW / 2, yPos + 19, { align: "center" });
+      
+      if (insight.drawCheck) {
+        // Draw checkmark using lines
+        doc.setDrawColor(255, 255, 255);
+        doc.setLineWidth(2);
+        const cx = ix + insightW / 2;
+        const cy = yPos + 16;
+        doc.line(cx - 4, cy, cx - 1, cy + 4); // short leg
+        doc.line(cx - 1, cy + 4, cx + 5, cy - 3); // long leg
+      } else {
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text(insight.icon, ix + insightW / 2, yPos + 19, { align: "center" });
+      }
       
       // Title
       doc.setTextColor(80, 80, 80);
@@ -1159,12 +1170,15 @@ export async function GET() {
     doc.setLineWidth(2);
     doc.roundedRect(20, yPos, growColW, growBoxH, 6, 6, "S");
     
-    // Decorative leaf icon
+    // Decorative leaf icon - draw a simple leaf shape
     doc.setFillColor(34, 83, 60);
     doc.circle(45, yPos + 18, 10, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(14);
-    doc.text("🌱", 41, yPos + 22);
+    // Draw simple leaf inside circle
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(1.5);
+    doc.line(45, yPos + 24, 45, yPos + 13); // stem
+    doc.setFillColor(255, 255, 255);
+    doc.ellipse(45, yPos + 15, 4, 6, "F"); // leaf shape
     
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
@@ -1195,12 +1209,15 @@ export async function GET() {
     doc.setLineWidth(2);
     doc.roundedRect(30 + growColW, yPos, growColW, growBoxH, 6, 6, "S");
     
-    // Decorative grass icon
+    // Decorative grass icon - draw simple grass blades
     doc.setFillColor(139, 90, 43);
     doc.circle(55 + growColW, yPos + 18, 10, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(14);
-    doc.text("🌾", 51 + growColW, yPos + 22);
+    // Draw three grass blades inside circle
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(1.5);
+    doc.line(53 + growColW, yPos + 23, 53 + growColW, yPos + 13); // left blade
+    doc.line(55 + growColW, yPos + 24, 55 + growColW, yPos + 11); // center blade
+    doc.line(57 + growColW, yPos + 23, 57 + growColW, yPos + 13); // right blade
     
     doc.setTextColor(139, 90, 43);
     doc.setFont("helvetica", "bold");
