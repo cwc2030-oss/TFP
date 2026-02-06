@@ -9,7 +9,8 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { sessionId } = await request.json();
+    const body = await request.json();
+    const { sessionId, demo } = body;
     const orderId = params.id;
 
     // Find the order
@@ -25,15 +26,15 @@ export async function POST(
     }
 
     // If order is already completed, just return success
-    if (order.status === "paid" || order.status === "completed") {
+    if (order.status === "paid" || order.status === "completed" || order.status === "demo_checkout") {
       return NextResponse.json({ success: true, order });
     }
 
-    // If it's a demo order (no Stripe), mark as completed
-    if (!sessionId || sessionId.startsWith("demo_")) {
+    // If it's a demo order (admin demo checkout), mark as demo_checkout
+    if (demo === true || !sessionId || sessionId.startsWith("demo_")) {
       const updatedOrder = await prisma.order.update({
         where: { id: orderId },
-        data: { status: "paid" },
+        data: { status: demo ? "demo_checkout" : "paid" },
       });
       return NextResponse.json({ success: true, order: updatedOrder });
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import dynamic from "next/dynamic";
@@ -13,6 +13,7 @@ import {
   X,
   MapPin,
   Mail,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +52,26 @@ export default function MapPage() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [guestEmail, setGuestEmail] = useState("");
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [isDemoCheckout, setIsDemoCheckout] = useState(false);
   const [error, setError] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (session?.user?.email) {
+        try {
+          const res = await fetch("/api/admin/stats");
+          if (res.ok) {
+            setIsAdmin(true);
+          }
+        } catch {
+          setIsAdmin(false);
+        }
+      }
+    };
+    checkAdmin();
+  }, [session]);
 
   const handleParcelSelect = useCallback((parcel: SelectedParcel | null) => {
     setSelectedParcel(parcel);
@@ -72,15 +92,19 @@ export default function MapPage() {
     setShowCheckout(true);
   };
 
-  const handleCreateOrder = async () => {
+  const handleCreateOrder = async (isDemo = false) => {
     if (!selectedParcel) return;
 
-    if (!session && !guestEmail) {
+    if (!session && !guestEmail && !isDemo) {
       setError("Please enter your email address or sign in");
       return;
     }
 
-    setIsCreatingOrder(true);
+    if (isDemo) {
+      setIsDemoCheckout(true);
+    } else {
+      setIsCreatingOrder(true);
+    }
     setError("");
 
     try {
@@ -96,6 +120,7 @@ export default function MapPage() {
           parcelBounds: selectedParcel.bounds,
           selectedLayers,
           guestEmail: session ? undefined : guestEmail,
+          isDemo: isDemo, // Flag for demo orders
         }),
       });
 
@@ -104,6 +129,18 @@ export default function MapPage() {
       }
 
       const { order } = await orderResponse.json();
+
+      // If demo mode, skip Stripe and go directly to success
+      if (isDemo) {
+        // Mark order as demo-paid
+        await fetch(`/api/orders/${order.id}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ demo: true }),
+        });
+        router.push(`/checkout/success?orderId=${order.id}&demo=true`);
+        return;
+      }
 
       // Proceed to checkout
       const checkoutResponse = await fetch("/api/checkout", {
@@ -122,6 +159,7 @@ export default function MapPage() {
       setError("An error occurred. Please try again.");
     } finally {
       setIsCreatingOrder(false);
+      setIsDemoCheckout(false);
     }
   };
 
@@ -237,8 +275,8 @@ export default function MapPage() {
               )}
 
               <Button
-                onClick={handleCreateOrder}
-                disabled={isCreatingOrder}
+                onClick={() => handleCreateOrder(false)}
+                disabled={isCreatingOrder || isDemoCheckout}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white h-12 text-lg"
               >
                 {isCreatingOrder ? (
@@ -250,6 +288,28 @@ export default function MapPage() {
                   "Proceed to Payment"
                 )}
               </Button>
+
+              {/* Admin Demo Checkout - Skip Stripe */}
+              {isAdmin && (
+                <Button
+                  onClick={() => handleCreateOrder(true)}
+                  disabled={isCreatingOrder || isDemoCheckout}
+                  variant="outline"
+                  className="w-full mt-3 border-amber-500 text-amber-700 hover:bg-amber-50 h-10"
+                >
+                  {isDemoCheckout ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Creating Demo...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 mr-2" />
+                      Demo Checkout (Admin Only)
+                    </>
+                  )}
+                </Button>
+              )}
 
               <p className="text-xs text-stone-500 text-center mt-4">
                 Secure payment powered by Stripe
