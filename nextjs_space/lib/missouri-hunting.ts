@@ -14,7 +14,7 @@ export interface DroughtLevel {
 }
 
 export const DROUGHT_LEVELS: DroughtLevel[] = [
-  { code: "D0", name: "Abnormally Dry", description: "Going into drought", color: [255, 255, 0], impact: "Soil moisture low; food plots stressed" },
+  { code: "D0", name: "Abnormally Dry", description: "Going into drought", color: [184, 134, 11], impact: "Soil moisture low; food plots stressed" },
   { code: "D1", name: "Moderate Drought", description: "Drought conditions", color: [252, 211, 127], impact: "Crops stressed; ponds dropping" },
   { code: "D2", name: "Severe Drought", description: "Significant impacts", color: [255, 170, 0], impact: "Water sources scarce; deer concentrated" },
   { code: "D3", name: "Extreme Drought", description: "Major impacts", color: [230, 0, 0], impact: "Widespread crop loss; wildlife stressed" },

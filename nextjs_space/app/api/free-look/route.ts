@@ -1160,7 +1160,7 @@ export async function GET() {
     yPos += 32;
     
     // Two FANCY column layout - What grows here
-    const growColW = (pageWidth - 50) / 2;
+    const growColW = (pageWidth - 60) / 2;  // Narrower columns for more gap
     const growBoxH = 120;
     
     // LEFT: Food Plots & Trees - FANCIED UP
@@ -1202,51 +1202,52 @@ export async function GET() {
     doc.text("Apple, pear, persimmon, white", 28, yPos + 90);
     doc.text("oak, sawtooth oak, chestnuts", 28, yPos + 100);
     
-    // RIGHT: Native Habitat - FANCIED UP
+    // RIGHT: Native Habitat - FANCIED UP (40px gap from left box)
+    const rightBoxX = 40 + growColW;
     doc.setFillColor(255, 250, 235);
-    doc.roundedRect(30 + growColW, yPos, growColW, growBoxH, 6, 6, "F");
+    doc.roundedRect(rightBoxX, yPos, growColW, growBoxH, 6, 6, "F");
     doc.setDrawColor(139, 90, 43);
     doc.setLineWidth(2);
-    doc.roundedRect(30 + growColW, yPos, growColW, growBoxH, 6, 6, "S");
+    doc.roundedRect(rightBoxX, yPos, growColW, growBoxH, 6, 6, "S");
     
     // Decorative grass icon - draw simple grass blades
     doc.setFillColor(139, 90, 43);
-    doc.circle(55 + growColW, yPos + 18, 10, "F");
+    doc.circle(rightBoxX + 35, yPos + 18, 10, "F");
     // Draw three grass blades inside circle
     doc.setDrawColor(255, 255, 255);
     doc.setLineWidth(1.5);
-    doc.line(53 + growColW, yPos + 23, 53 + growColW, yPos + 13); // left blade
-    doc.line(55 + growColW, yPos + 24, 55 + growColW, yPos + 11); // center blade
-    doc.line(57 + growColW, yPos + 23, 57 + growColW, yPos + 13); // right blade
+    doc.line(rightBoxX + 33, yPos + 23, rightBoxX + 33, yPos + 13); // left blade
+    doc.line(rightBoxX + 35, yPos + 24, rightBoxX + 35, yPos + 11); // center blade
+    doc.line(rightBoxX + 37, yPos + 23, rightBoxX + 37, yPos + 13); // right blade
     
     doc.setTextColor(139, 90, 43);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text("NATIVE HABITAT", 70 + growColW, yPos + 20);
+    doc.text("NATIVE HABITAT", rightBoxX + 50, yPos + 20);
     
     doc.setTextColor(50, 50, 50);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("WARM SEASON GRASSES", 38 + growColW, yPos + 38);
+    doc.text("WARM SEASON GRASSES", rightBoxX + 8, yPos + 38);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("Big bluestem, switchgrass,", 38 + growColW, yPos + 50);
-    doc.text("Indian grass", 38 + growColW, yPos + 60);
+    doc.text("Big bluestem, switchgrass,", rightBoxX + 8, yPos + 50);
+    doc.text("Indian grass", rightBoxX + 8, yPos + 60);
     
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("WILDLIFE COVER", 38 + growColW, yPos + 78);
+    doc.text("WILDLIFE COVER", rightBoxX + 8, yPos + 78);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("Native plum thickets, cedar", 38 + growColW, yPos + 90);
-    doc.text("windbreaks, shrub rows", 38 + growColW, yPos + 100);
+    doc.text("Native plum thickets, cedar", rightBoxX + 8, yPos + 90);
+    doc.text("windbreaks, shrub rows", rightBoxX + 8, yPos + 100);
     
     yPos += growBoxH + 15;
     
     // ============================================
     // TIMBER VALUE SECTION - CLEAN TWO-BOX LAYOUT
     // ============================================
-    const timberBoxW = (pageWidth - 50) / 2;
+    const timberBoxW = (pageWidth - 60) / 2;  // Match the grow boxes width
     const timberBoxH = 75;
     
     // LEFT BOX - Stumpage Prices
@@ -1288,7 +1289,7 @@ export async function GET() {
     });
     
     // RIGHT BOX - Timber Potential Rating
-    const rightBoxX = 30 + timberBoxW;
+    const timberRightX = 40 + timberBoxW;
     
     // Calculate timber potential based on acreage
     const acres = parcelData.acreage || 117.52;
@@ -1310,30 +1311,30 @@ export async function GET() {
     }
     
     doc.setFillColor(timberColor[0], timberColor[1], timberColor[2]);
-    doc.roundedRect(rightBoxX, yPos, timberBoxW, 12, 3, 3, "F");
+    doc.roundedRect(timberRightX, yPos, timberBoxW, 12, 3, 3, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("YOUR TIMBER POTENTIAL", rightBoxX + timberBoxW / 2, yPos + 8, { align: "center" });
+    doc.text("YOUR TIMBER POTENTIAL", timberRightX + timberBoxW / 2, yPos + 8, { align: "center" });
     
     doc.setFillColor(250, 250, 250);
-    doc.roundedRect(rightBoxX, yPos + 12, timberBoxW, timberBoxH - 12, 0, 0, "F");
+    doc.roundedRect(timberRightX, yPos + 12, timberBoxW, timberBoxH - 12, 0, 0, "F");
     doc.setDrawColor(timberColor[0], timberColor[1], timberColor[2]);
     doc.setLineWidth(1.5);
-    doc.roundedRect(rightBoxX, yPos, timberBoxW, timberBoxH, 3, 3, "S");
+    doc.roundedRect(timberRightX, yPos, timberBoxW, timberBoxH, 3, 3, "S");
     
     // Big rating in center
     doc.setTextColor(timberColor[0], timberColor[1], timberColor[2]);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(28);
-    doc.text(timberRating, rightBoxX + timberBoxW / 2, yPos + 38, { align: "center" });
+    doc.text(timberRating, timberRightX + timberBoxW / 2, yPos + 38, { align: "center" });
     
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.text(timberDesc, rightBoxX + timberBoxW / 2, yPos + 50, { align: "center" });
+    doc.text(timberDesc, timberRightX + timberBoxW / 2, yPos + 50, { align: "center" });
     doc.setFontSize(8);
-    doc.text(timberNote, rightBoxX + timberBoxW / 2, yPos + 60, { align: "center" });
+    doc.text(timberNote, timberRightX + timberBoxW / 2, yPos + 60, { align: "center" });
     
     // Source note below both boxes
     yPos += timberBoxH + 4;
