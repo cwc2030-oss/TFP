@@ -1248,7 +1248,7 @@ export async function GET() {
     // TIMBER VALUE SECTION - CLEAN TWO-BOX LAYOUT
     // ============================================
     const timberBoxW = (pageWidth - 60) / 2;  // Match the grow boxes width
-    const timberBoxH = 75;
+    const timberBoxH = 60;  // Reduced from 75 to fit on page
     
     // LEFT BOX - Stumpage Prices
     doc.setFillColor(139, 90, 43);
@@ -1276,16 +1276,16 @@ export async function GET() {
       ["Hickory", "$150 - $300"],
     ];
     
-    let timberPriceY = yPos + 34;
+    let timberPriceY = yPos + 30;
     timberPrices.forEach(([species, price]) => {
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
+      doc.setFontSize(8);
       doc.setTextColor(60, 60, 60);
       doc.text(species, 28, timberPriceY);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(34, 83, 60);
       doc.text(price, 20 + timberBoxW - 8, timberPriceY, { align: "right" });
-      timberPriceY += 10;
+      timberPriceY += 8;
     });
     
     // RIGHT BOX - Timber Potential Rating
@@ -1326,15 +1326,15 @@ export async function GET() {
     // Big rating in center
     doc.setTextColor(timberColor[0], timberColor[1], timberColor[2]);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(28);
-    doc.text(timberRating, timberRightX + timberBoxW / 2, yPos + 38, { align: "center" });
+    doc.setFontSize(22);
+    doc.text(timberRating, timberRightX + timberBoxW / 2, yPos + 32, { align: "center" });
     
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(timberDesc, timberRightX + timberBoxW / 2, yPos + 50, { align: "center" });
     doc.setFontSize(8);
-    doc.text(timberNote, timberRightX + timberBoxW / 2, yPos + 60, { align: "center" });
+    doc.text(timberDesc, timberRightX + timberBoxW / 2, yPos + 42, { align: "center" });
+    doc.setFontSize(7);
+    doc.text(timberNote, timberRightX + timberBoxW / 2, yPos + 50, { align: "center" });
     
     // Source note below both boxes
     yPos += timberBoxH + 4;
