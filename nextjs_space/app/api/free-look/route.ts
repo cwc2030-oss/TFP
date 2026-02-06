@@ -1227,91 +1227,103 @@ export async function GET() {
     yPos += growBoxH + 15;
     
     // ============================================
-    // TIMBER VALUE SECTION - NEW
+    // TIMBER VALUE SECTION - CLEAN TWO-BOX LAYOUT
     // ============================================
-    doc.setFillColor(139, 90, 43); // Brown header
-    doc.roundedRect(20, yPos, pageWidth - 40, 10, 3, 3, "F");
+    const timberBoxW = (pageWidth - 50) / 2;
+    const timberBoxH = 75;
+    
+    // LEFT BOX - Stumpage Prices
+    doc.setFillColor(139, 90, 43);
+    doc.roundedRect(20, yPos, timberBoxW, 12, 3, 3, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text("TIMBER VALUE SNAPSHOT", pageWidth / 2, yPos + 7, { align: "center" });
+    doc.setFontSize(10);
+    doc.text("TIMBER PRICES", 20 + timberBoxW / 2, yPos + 8, { align: "center" });
     
-    yPos += 14;
-    
-    // Timber content box
     doc.setFillColor(255, 250, 240);
-    doc.roundedRect(20, yPos, pageWidth - 40, 58, 4, 4, "F");
+    doc.roundedRect(20, yPos + 12, timberBoxW, timberBoxH - 12, 0, 0, "F");
     doc.setDrawColor(139, 90, 43);
-    doc.setLineWidth(1);
-    doc.roundedRect(20, yPos, pageWidth - 40, 58, 4, 4, "S");
+    doc.setLineWidth(0.5);
+    doc.roundedRect(20, yPos, timberBoxW, timberBoxH, 3, 3, "S");
     
-    // Left side - Stumpage Prices
-    doc.setTextColor(139, 90, 43);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("MISSOURI STUMPAGE PRICES (per MBF)", 28, yPos + 10);
-    
-    doc.setTextColor(60, 60, 60);
-    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "italic");
     doc.setFontSize(8);
+    doc.text("Missouri Stumpage (per MBF)", 28, yPos + 22);
     
-    // Current MO timber prices (MDC Q4 2025 data approximations)
     const timberPrices = [
-      ["White Oak (veneer):", "$800 - $2,500+"],
-      ["Red Oak (sawlog):", "$250 - $450"],
-      ["Black Walnut:", "$1,200 - $4,000+"],
-      ["Hickory:", "$150 - $300"],
+      ["White Oak (veneer)", "$800 - $2,500+"],
+      ["Red Oak (sawlog)", "$250 - $450"],
+      ["Black Walnut", "$1,200 - $4,000+"],
+      ["Hickory", "$150 - $300"],
     ];
     
-    let timberPriceY = yPos + 20;
+    let timberPriceY = yPos + 34;
     timberPrices.forEach(([species, price]) => {
       doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(60, 60, 60);
       doc.text(species, 28, timberPriceY);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(34, 83, 60);
-      doc.text(price, 75, timberPriceY);
-      doc.setTextColor(60, 60, 60);
-      timberPriceY += 9;
+      doc.text(price, 20 + timberBoxW - 8, timberPriceY, { align: "right" });
+      timberPriceY += 10;
     });
     
-    // Right side - Timber Potential indicator
-    const timberBoxX = pageWidth / 2 + 10;
-    doc.setTextColor(139, 90, 43);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("TIMBER POTENTIAL", timberBoxX, yPos + 10);
+    // RIGHT BOX - Timber Potential Rating
+    const rightBoxX = 30 + timberBoxW;
     
     // Calculate timber potential based on acreage
     const acres = parcelData.acreage || 117.52;
     let timberRating = "LOW";
-    let timberColor: [number, number, number] = [220, 53, 69]; // red
-    let timberNote = "< 40 acres - Limited harvest value";
+    let timberColor: [number, number, number] = [220, 53, 69];
+    let timberNote = "Limited harvest value";
+    let timberDesc = "< 40 acres";
     
     if (acres >= 80) {
       timberRating = "HIGH";
       timberColor = [34, 139, 34];
-      timberNote = "80+ acres - Commercial harvest viable";
+      timberNote = "Commercial harvest viable";
+      timberDesc = "80+ acres";
     } else if (acres >= 40) {
       timberRating = "MODERATE";
       timberColor = [184, 134, 11];
-      timberNote = "40-80 acres - Selective cut potential";
+      timberNote = "Selective cut potential";
+      timberDesc = "40-80 acres";
     }
     
-    // Big rating display
+    doc.setFillColor(timberColor[0], timberColor[1], timberColor[2]);
+    doc.roundedRect(rightBoxX, yPos, timberBoxW, 12, 3, 3, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("YOUR TIMBER POTENTIAL", rightBoxX + timberBoxW / 2, yPos + 8, { align: "center" });
+    
+    doc.setFillColor(250, 250, 250);
+    doc.roundedRect(rightBoxX, yPos + 12, timberBoxW, timberBoxH - 12, 0, 0, "F");
+    doc.setDrawColor(timberColor[0], timberColor[1], timberColor[2]);
+    doc.setLineWidth(1.5);
+    doc.roundedRect(rightBoxX, yPos, timberBoxW, timberBoxH, 3, 3, "S");
+    
+    // Big rating in center
     doc.setTextColor(timberColor[0], timberColor[1], timberColor[2]);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.text(timberRating, timberBoxX, yPos + 30);
+    doc.setFontSize(28);
+    doc.text(timberRating, rightBoxX + timberBoxW / 2, yPos + 38, { align: "center" });
     
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(timberDesc, rightBoxX + timberBoxW / 2, yPos + 50, { align: "center" });
     doc.setFontSize(8);
-    doc.text(timberNote, timberBoxX, yPos + 40);
+    doc.text(timberNote, rightBoxX + timberBoxW / 2, yPos + 60, { align: "center" });
     
+    // Source note below both boxes
+    yPos += timberBoxH + 4;
     doc.setFontSize(7);
     doc.setTextColor(120, 120, 120);
-    doc.text("Prices vary by quality, access & mill distance.", timberBoxX, yPos + 50);
-    doc.text("Source: MDC Timber Price Trends", 28, yPos + 54);
+    doc.setFont("helvetica", "italic");
+    doc.text("Source: MDC Timber Price Trends  •  Prices vary by quality, access & mill distance", pageWidth / 2, yPos, { align: "center" });
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
 
@@ -1727,7 +1739,9 @@ export async function GET() {
     
     doc.setTextColor(34, 83, 60);
     doc.setFontSize(11);
-    doc.text(`${parcelData.county} County, ${parcelData.state}`, pageWidth / 2, yPos + 38, { align: "center" });
+    // Capitalize county name properly
+    const countyName = parcelData.county.charAt(0).toUpperCase() + parcelData.county.slice(1).toLowerCase();
+    doc.text(`${countyName} County, ${parcelData.state}`, pageWidth / 2, yPos + 38, { align: "center" });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.text(`Parcel ID: ${parcelData.parcelId}`, pageWidth / 2, yPos + 46, { align: "center" });
@@ -1833,18 +1847,20 @@ export async function GET() {
     yPos += 12;
     
     const topics = [
-      ["🚧", "Fences & Boundaries", "Why the fence ain't always the property line"],
-      ["🚪", "Gates & Crossings", "The unspoken rules of rural access"],
-      ["🔊", "Noise & Seasons", "Tractors at dawn, chainsaws on Saturdays"],
-      ["🦌", "Wildlife & Water", "Deer don't read deeds — neither do creeks"],
-      ["🤝", "The Neighbor Code", "How to earn trust, not lawsuits"],
+      ["1.", "Fences & Boundaries", "Why the fence ain't always the property line"],
+      ["2.", "Gates & Crossings", "The unspoken rules of rural access"],
+      ["3.", "Noise & Seasons", "Tractors at dawn, chainsaws on Saturdays"],
+      ["4.", "Wildlife & Water", "Deer don't read deeds — neither do creeks"],
+      ["5.", "The Neighbor Code", "How to earn trust, not lawsuits"],
     ];
     
-    topics.forEach(([emoji, title, desc]) => {
-      doc.setTextColor(60, 60, 60);
+    topics.forEach(([num, title, desc]) => {
+      doc.setTextColor(34, 83, 60);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text(`${emoji}  ${title}`, 35, yPos);
+      doc.setFontSize(11);
+      doc.text(num, 32, yPos);
+      doc.setTextColor(60, 60, 60);
+      doc.text(title, 42, yPos);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(100, 100, 100);

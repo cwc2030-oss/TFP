@@ -1881,7 +1881,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text("🚧  Fences & Boundaries", 20, yPos);
+    doc.text("1.  Fences & Boundaries", 20, yPos);
     yPos += 7;
     doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "normal");
@@ -1903,7 +1903,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text("🚪  Gates & Crossings", 20, yPos);
+    doc.text("2.  Gates & Crossings", 20, yPos);
     yPos += 7;
     doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "normal");
@@ -1925,7 +1925,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text("🔊  Noise, Activity & Seasons", 20, yPos);
+    doc.text("3.  Noise, Activity & Seasons", 20, yPos);
     yPos += 7;
     doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "normal");
@@ -1949,7 +1949,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text("🦌  Wildlife & Water", 20, yPos);
+    doc.text("4.  Wildlife & Water", 20, yPos);
     yPos += 7;
     doc.setTextColor(60, 60, 60);
     doc.setFont("helvetica", "normal");
@@ -1984,7 +1984,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text("🤝  The Neighbor Code", 20, yPos);
+    doc.text("5.  The Neighbor Code", 20, yPos);
     yPos += 10;
     
     doc.setTextColor(60, 60, 60);
