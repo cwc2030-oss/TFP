@@ -1301,25 +1301,7 @@ export async function POST(request: NextRequest) {
     
     yPos += 24;
     
-    // Hardiness map
-    if (hardinessMap) {
-      try { doc.addImage(hardinessMap, "JPEG", 30, yPos, pageWidth - 60, 55); }
-      catch (e) {
-        doc.setFillColor(240, 240, 240);
-        doc.rect(30, yPos, pageWidth - 60, 55, "F");
-        doc.setTextColor(100, 100, 100);
-        doc.text("USDA Hardiness Zone Map", pageWidth / 2, yPos + 28, { align: "center" });
-      }
-    } else {
-      doc.setFillColor(240, 240, 240);
-      doc.rect(30, yPos, pageWidth - 60, 55, "F");
-      doc.setTextColor(100, 100, 100);
-      doc.text("USDA Hardiness Zone Map", pageWidth / 2, yPos + 28, { align: "center" });
-    }
-    
-    yPos += 60;
-    
-    // Growing recommendations
+    // Growing recommendations (map removed per user request)
     doc.setFillColor(245, 250, 245);
     doc.roundedRect(20, yPos, pageWidth - 40, 45, 3, 3, "F");
     

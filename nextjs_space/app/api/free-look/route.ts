@@ -1161,7 +1161,7 @@ export async function GET() {
     
     // Two FANCY column layout - What grows here
     const growColW = (pageWidth - 60) / 2;  // Narrower columns for more gap
-    const growBoxH = 120;
+    const growBoxH = 100;  // Reduced from 120 to fit timber boxes on page
     
     // LEFT: Food Plots & Trees - FANCIED UP
     doc.setFillColor(240, 255, 240);
@@ -1187,20 +1187,19 @@ export async function GET() {
     
     doc.setTextColor(50, 50, 50);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("DEER FOOD PLOTS", 28, yPos + 38);
+    doc.setFontSize(9);
+    doc.text("DEER FOOD PLOTS", 28, yPos + 36);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Clover, chicory, brassicas,", 28, yPos + 50);
-    doc.text("soybeans, winter wheat", 28, yPos + 60);
+    doc.setFontSize(9);
+    doc.text("Clover, chicory, brassicas, soybeans", 28, yPos + 47);
     
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("FRUIT & NUT TREES", 28, yPos + 78);
+    doc.setFontSize(9);
+    doc.text("FRUIT & NUT TREES", 28, yPos + 64);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Apple, pear, persimmon, white", 28, yPos + 90);
-    doc.text("oak, sawtooth oak, chestnuts", 28, yPos + 100);
+    doc.setFontSize(9);
+    doc.text("Apple, pear, persimmon, white oak,", 28, yPos + 75);
+    doc.text("sawtooth oak, chestnuts", 28, yPos + 85);
     
     // RIGHT: Native Habitat - FANCIED UP (40px gap from left box)
     const rightBoxX = 40 + growColW;
@@ -1227,22 +1226,21 @@ export async function GET() {
     
     doc.setTextColor(50, 50, 50);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("WARM SEASON GRASSES", rightBoxX + 8, yPos + 38);
+    doc.setFontSize(9);
+    doc.text("WARM SEASON GRASSES", rightBoxX + 8, yPos + 36);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Big bluestem, switchgrass,", rightBoxX + 8, yPos + 50);
-    doc.text("Indian grass", rightBoxX + 8, yPos + 60);
+    doc.setFontSize(9);
+    doc.text("Big bluestem, switchgrass, Indian grass", rightBoxX + 8, yPos + 47);
     
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("WILDLIFE COVER", rightBoxX + 8, yPos + 78);
+    doc.setFontSize(9);
+    doc.text("WILDLIFE COVER", rightBoxX + 8, yPos + 64);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Native plum thickets, cedar", rightBoxX + 8, yPos + 90);
-    doc.text("windbreaks, shrub rows", rightBoxX + 8, yPos + 100);
+    doc.setFontSize(9);
+    doc.text("Native plum thickets, cedar windbreaks,", rightBoxX + 8, yPos + 75);
+    doc.text("shrub rows", rightBoxX + 8, yPos + 85);
     
-    yPos += growBoxH + 15;
+    yPos += growBoxH + 10;  // Reduced gap from 15 to 10
     
     // ============================================
     // TIMBER VALUE SECTION - CLEAN TWO-BOX LAYOUT
