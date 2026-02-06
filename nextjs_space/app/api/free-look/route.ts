@@ -10,8 +10,8 @@ export const revalidate = 0;
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
   parcelAddress: "2100 S State Route Y, Pleasant Hill, MO 64080, USA",
-  parcelLat: 38.7957,  // Center of sample polygon
-  parcelLng: -94.2717, // Center of sample polygon
+  parcelLat: 38.7958,  // Center of sample polygon
+  parcelLng: -94.2733, // Center of sample polygon
 };
 
 interface ParcelData {
@@ -151,18 +151,15 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
 }
 
 function getDefaultSampleData(): ParcelData {
-  // Sample parcel polygon coordinates for 117-acre property near Pleasant Hill, MO
-  // This creates a realistic irregular polygon typical of rural Missouri parcels
+  // Sample parcel polygon for ~117-acre property near Pleasant Hill, MO
+  // Rural Missouri parcels typically follow section lines - mostly rectangular
+  // 117 acres ≈ 0.5 mile x 0.37 mile (half-quarter section shape)
   const sampleCoordinates: number[][][] = [[
-    [-94.2780, 38.8010],  // NW corner
-    [-94.2720, 38.8015],  // N edge point
-    [-94.2650, 38.8008],  // NE corner
-    [-94.2645, 38.7960],  // E edge point
-    [-94.2655, 38.7905],  // SE corner (slight jog)
-    [-94.2710, 38.7900],  // S edge point
-    [-94.2785, 38.7910],  // SW corner
-    [-94.2790, 38.7955],  // W edge point
-    [-94.2780, 38.8010],  // Close polygon (back to NW)
+    [-94.2785, 38.7995],  // NW corner
+    [-94.2680, 38.7995],  // NE corner  
+    [-94.2680, 38.7920],  // SE corner
+    [-94.2785, 38.7920],  // SW corner
+    [-94.2785, 38.7995],  // Close polygon (back to NW)
   ]];
 
   return {
