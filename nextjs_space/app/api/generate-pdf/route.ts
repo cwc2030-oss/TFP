@@ -1289,6 +1289,95 @@ export async function POST(request: NextRequest) {
       doc.text(info, 25, yPos + i * 6);
     });
     
+    yPos += 38;
+    
+    // ============================================
+    // TIMBER VALUE SECTION
+    // ============================================
+    doc.setFillColor(139, 90, 43); // Brown header
+    doc.roundedRect(20, yPos, pageWidth - 40, 10, 3, 3, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("TIMBER VALUE SNAPSHOT", pageWidth / 2, yPos + 7, { align: "center" });
+    
+    yPos += 14;
+    
+    // Timber content box
+    doc.setFillColor(255, 250, 240);
+    doc.roundedRect(20, yPos, pageWidth - 40, 58, 4, 4, "F");
+    doc.setDrawColor(139, 90, 43);
+    doc.setLineWidth(1);
+    doc.roundedRect(20, yPos, pageWidth - 40, 58, 4, 4, "S");
+    
+    // Left side - Stumpage Prices
+    doc.setTextColor(139, 90, 43);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("MISSOURI STUMPAGE PRICES (per MBF)", 28, yPos + 10);
+    
+    doc.setTextColor(60, 60, 60);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    
+    // Current MO timber prices (MDC Q4 2025 data approximations)
+    const timberPrices = [
+      ["White Oak (veneer):", "$800 - $2,500+"],
+      ["Red Oak (sawlog):", "$250 - $450"],
+      ["Black Walnut:", "$1,200 - $4,000+"],
+      ["Hickory:", "$150 - $300"],
+    ];
+    
+    let timberPriceY = yPos + 20;
+    timberPrices.forEach(([species, price]) => {
+      doc.setFont("helvetica", "normal");
+      doc.text(species, 28, timberPriceY);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(34, 83, 60);
+      doc.text(price, 75, timberPriceY);
+      doc.setTextColor(60, 60, 60);
+      timberPriceY += 9;
+    });
+    
+    // Right side - Timber Potential indicator
+    const timberBoxX = pageWidth / 2 + 10;
+    doc.setTextColor(139, 90, 43);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("TIMBER POTENTIAL", timberBoxX, yPos + 10);
+    
+    // Calculate timber potential based on acreage
+    const timberAcres = parcelData.acreage || 80;
+    let timberRating = "LOW";
+    let timberColor: [number, number, number] = [220, 53, 69]; // red
+    let timberNote = "< 40 acres - Limited harvest value";
+    
+    if (timberAcres >= 80) {
+      timberRating = "HIGH";
+      timberColor = [34, 139, 34];
+      timberNote = "80+ acres - Commercial harvest viable";
+    } else if (timberAcres >= 40) {
+      timberRating = "MODERATE";
+      timberColor = [184, 134, 11];
+      timberNote = "40-80 acres - Selective cut potential";
+    }
+    
+    // Big rating display
+    doc.setTextColor(timberColor[0], timberColor[1], timberColor[2]);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.text(timberRating, timberBoxX, yPos + 30);
+    
+    doc.setTextColor(80, 80, 80);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(timberNote, timberBoxX, yPos + 40);
+    
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Prices vary by quality, access & mill distance.", timberBoxX, yPos + 50);
+    doc.text("Source: MDC Timber Price Trends", 28, yPos + 54);
+    
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
 
     // ============================================
