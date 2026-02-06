@@ -446,7 +446,7 @@ export async function GET() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const reportNumber = generateReportNumber();
-    const totalPages = 11; // Added soil analysis + hunting pages + unwritten rules tease
+    const totalPages = 10; // Removed Resources page from Free Look
     const order = SAMPLE_ORDER;
     
     // For Free Look, always use our curated sample data to showcase best features
@@ -1342,130 +1342,8 @@ export async function GET() {
     doc.text("Source: MDC Timber Price Trends  •  Prices vary by quality, access & mill distance", pageWidth / 2, yPos, { align: "center" });
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 7, totalPages);
-
     // ============================================
-    // PAGE 8: RESOURCES & DEMOGRAPHICS
-    // ============================================
-    doc.addPage();
-    drawCertificateBorder(doc, pageWidth, pageHeight);
-    drawSampleWatermark(doc, pageWidth, pageHeight);
-    drawPageHeader(doc, pageWidth, "RESOURCES & AREA INFORMATION", logoImage);
-    
-    yPos = 42;
-    
-    // County-specific data lookup
-    const countyDataMap: Record<string, { seat: string; pop: string; density: string; income: string; home: string; areaCode: string; cities: string[] }> = {
-      "adair": { seat: "Kirksville", pop: "25,000", density: "28 per sq mi", income: "$42,500", home: "$125,000", areaCode: "660", cities: ["Kirksville: County seat (ATSU)", "Macon: 25 mi south", "Moberly: 45 mi south", "Quincy, IL: 60 mi east", "Columbia: 90 mi (Mizzou)"] },
-      "johnson": { seat: "Warrensburg", pop: "54,000", density: "62 per sq mi", income: "$58,500", home: "$185,000", areaCode: "660", cities: ["Warrensburg: County seat (UCM)", "Sedalia: 22 mi (State Fair)", "Kansas City: 55 mi (metro)", "Whiteman AFB: 12 mi", "Columbia: 75 mi (Mizzou)"] },
-      "cass": { seat: "Harrisonville", pop: "105,000", density: "154 per sq mi", income: "$72,000", home: "$245,000", areaCode: "816", cities: ["Harrisonville: County seat", "Belton: 10 mi north", "Pleasant Hill: 15 mi east", "Kansas City: 35 mi (metro)", "Lee's Summit: 20 mi north"] },
-      "benton": { seat: "Warsaw", pop: "20,000", density: "26 per sq mi", income: "$45,000", home: "$165,000", areaCode: "660", cities: ["Warsaw: County seat", "Lake of the Ozarks: 25 mi", "Sedalia: 35 mi north", "Springfield: 85 mi south", "Kansas City: 100 mi north"] },
-      "henry": { seat: "Clinton", pop: "22,000", density: "29 per sq mi", income: "$44,000", home: "$130,000", areaCode: "660", cities: ["Clinton: County seat", "Windsor: 15 mi east", "Warrensburg: 25 mi north", "Kansas City: 75 mi (metro)", "Sedalia: 40 mi northeast"] },
-      "pettis": { seat: "Sedalia", pop: "42,000", density: "60 per sq mi", income: "$48,000", home: "$145,000", areaCode: "660", cities: ["Sedalia: County seat (State Fair)", "Warrensburg: 25 mi west", "Columbia: 65 mi east", "Kansas City: 90 mi (metro)", "Jefferson City: 60 mi east"] },
-    };
-    
-    const countyKey = parcelData.county.toLowerCase();
-    const countyInfo = countyDataMap[countyKey] || {
-      seat: `${parcelData.county} (verify)`,
-      pop: "See census data",
-      density: "Varies",
-      income: "See census data",
-      home: "See local MLS",
-      areaCode: "660",
-      cities: [`${parcelData.county}: County seat`, "Kansas City: Major metro", "St. Louis: Major metro", "Springfield: Regional hub", "Columbia: Mizzou"]
-    };
-    
-    // County demographics
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, (pageWidth - 45) / 2, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text(`${parcelData.county.toUpperCase()} COUNTY`, 25, yPos + 5.5);
-    
-    const demographics = [
-      ["Population:", countyInfo.pop + " (est.)"],
-      ["Density:", countyInfo.density],
-      ["Med. Income:", countyInfo.income],
-      ["Med. Home:", countyInfo.home],
-      ["County Seat:", countyInfo.seat],
-    ];
-    
-    let dY = yPos + 14;
-    doc.setFontSize(8);
-    demographics.forEach(([label, value]) => {
-      doc.setTextColor(80, 80, 80);
-      doc.setFont("helvetica", "bold");
-      doc.text(label, 24, dY);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(40, 40, 40);
-      doc.text(value, 55, dY);
-      dY += 8;
-    });
-    
-    // Nearby cities
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(25 + (pageWidth - 45) / 2, yPos, (pageWidth - 45) / 2, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.text("NEARBY CITIES", 30 + (pageWidth - 45) / 2, yPos + 5.5);
-    
-    let cY = yPos + 14;
-    countyInfo.cities.forEach(city => {
-      doc.setTextColor(60, 60, 60);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.text("• " + city, 30 + (pageWidth - 45) / 2, cY);
-      cY += 8;
-    });
-    
-    yPos += 60;
-    
-    // Resource sections - use county-specific area code
-    const resources = [
-      { title: "COUNTY OFFICES", items: [`Assessor: (${countyInfo.areaCode}) 555-0100`, `Recorder: (${countyInfo.areaCode}) 555-0101`, `Planning/Zoning: (${countyInfo.areaCode}) 555-0102`] },
-      { title: "UTILITIES", items: [`Electric Co-op: (${countyInfo.areaCode}) 555-0200`, `Water District: (${countyInfo.areaCode}) 555-0201`, "Internet: Starlink available"] },
-      { title: "AGRICULTURAL", items: [`USDA Service: (${countyInfo.areaCode}) 555-0300`, `MU Extension: (${countyInfo.areaCode}) 555-0301`, `Soil & Water: (${countyInfo.areaCode}) 555-0303`] },
-    ];
-    
-    resources.forEach((section, i) => {
-      const sx = 20 + i * ((pageWidth - 40) / 3 + 2);
-      const sw = (pageWidth - 50) / 3;
-      
-      doc.setFillColor(34, 83, 60);
-      doc.roundedRect(sx, yPos, sw, 8, 2, 2, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      doc.text(section.title, sx + sw / 2, yPos + 5.5, { align: "center" });
-      
-      let sY = yPos + 13;
-      doc.setTextColor(60, 60, 60);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
-      section.items.forEach(item => {
-        doc.text(item, sx + 2, sY);
-        sY += 7;
-      });
-    });
-    
-    yPos += 45;
-    
-    // Disclaimer
-    doc.setFillColor(255, 250, 235);
-    doc.roundedRect(20, yPos, pageWidth - 40, 20, 3, 3, "F");
-    doc.setTextColor(139, 90, 0);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("IMPORTANT NOTICE", 25, yPos + 7);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.text("Contact information provided for reference. Please verify current numbers.", 25, yPos + 13);
-    doc.text("Terra Firma Partners is not affiliated with these organizations.", 25, yPos + 17);
-    
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
-
-    // ============================================
-    // PAGE 9: HUNTING INTELLIGENCE DASHBOARD
+    // PAGE 8: HUNTING INTELLIGENCE DASHBOARD (was Page 9)
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -1717,10 +1595,10 @@ export async function GET() {
     doc.text("mdc.mo.gov  |  droughtmonitor.unl.edu  |  Report Poaching: 1-800-392-1111", 70, yPos + 7);
     doc.text("CWD Info: mdc.mo.gov/cwd  |  USDA Service: farmers.gov/service-locator", 70, yPos + 13);
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 8, totalPages);
 
     // ============================================
-    // PAGE 10: CERTIFICATE OF ANALYSIS
+    // PAGE 9: CERTIFICATE OF ANALYSIS (was Page 10)
     // ============================================
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
@@ -1821,9 +1699,9 @@ export async function GET() {
     const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 60);
     doc.text(disclaimerLines, pageWidth / 2, yPos, { align: "center" });
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 10, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
 
-    // ========== PAGE 11: Unwritten Rules Tease ==========
+    // ========== PAGE 10: Unwritten Rules Tease (was Page 11) ==========
     doc.addPage();
     yPos = 25;
     
@@ -1923,7 +1801,7 @@ export async function GET() {
     doc.text("The families who've been here for generations absorbed it growing up.", pageWidth / 2, yPos + 5, { align: "center" });
     doc.text("If you're new to the country — this guide helps you fit right in.", pageWidth / 2, yPos + 10, { align: "center" });
     
-    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 11, totalPages);
+    drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 10, totalPages);
 
     // Generate and return PDF
     const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
