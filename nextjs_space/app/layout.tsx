@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://terrafirmapartners.abacusai.app"),
   title: "Terra Firma Partners™ | Hunting Land Analysis Reports | Missouri",
   description:
-    "Professional land analysis for hunting and recreational property buyers. CWD status, harvest pressure, drought conditions, flood zones, soil data & more. Know the land before you buy. $350 per report.",
+    "Find your forest. Know your land. Professional analysis for hunting and recreational property buyers. CWD status, harvest pressure, drought conditions, flood zones, soil data & more. $350 per report.",
   keywords: [
     "hunting land report", "recreational land analysis", "CWD status Missouri", 
     "deer hunting property", "land analysis report", "harvest pressure data",
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
     siteName: "Terra Firma Partners™",
     title: "Terra Firma Partners™ | Hunting Land Analysis Reports",
     description:
-      "Know the land before you buy. CWD status, harvest pressure, drought, flood zones & soil data for hunting and recreational property. $350 per report.",
+      "Find your forest. Know your land. CWD status, harvest pressure, drought, flood zones & soil data for hunting property. $350 per report.",
     images: [
       {
         url: OG_IMAGE_URL,
@@ -49,8 +49,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Terra Firma Partners™ | Hunting Land Reports",
-    description: "CWD status, harvest pressure, drought & flood data for hunting land buyers. $350 per report.",
+    title: "Terra Firma Partners™ | Find Your Forest",
+    description: "Find your forest. Know your land. CWD status, harvest pressure, drought & flood data for hunting land buyers.",
     images: [OG_IMAGE_URL],
   },
   robots: {

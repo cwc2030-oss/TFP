@@ -91,8 +91,8 @@ function HeroSection() {
             </div>
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
-              Howdy, neighbor.
-              <span className="block text-emerald-400 mt-2">Let's talk land.</span>
+              Find your forest.
+              <span className="block text-emerald-400 mt-2">Know your land.</span>
             </h1>
             
             <p className="text-xl text-stone-300 mb-4 leading-relaxed">
