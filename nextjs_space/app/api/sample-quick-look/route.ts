@@ -244,7 +244,7 @@ export async function GET() {
     // Footer
     doc.setFontSize(7);
     doc.setTextColor(150, 150, 150);
-    doc.text("Page 1 of 2 • Broker Quick Look Report • www.terrafirmapartners.com • (573) 508-3830", pageWidth / 2, pageHeight - 14, { align: "center" });
+    doc.text("Page 1 of 2 • Broker Quick Look Report • www.terrafirmapartners.com • (660) 362-2797", pageWidth / 2, pageHeight - 14, { align: "center" });
 
     // ========== PAGE 2: DEAL-KILLER CHECKLIST ==========
     doc.addPage();
@@ -381,7 +381,7 @@ export async function GET() {
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("Questions? Call (573) 508-3830", pageWidth / 2, yPos + 8, { align: "center" });
+    doc.text("Questions? Call (660) 362-2797", pageWidth / 2, yPos + 8, { align: "center" });
 
     // Footer
     doc.setFontSize(7);

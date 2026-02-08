@@ -214,7 +214,7 @@ export default function BrokersPage() {
           </div>
           <div className="flex items-center justify-center gap-2 text-stone-400">
             <Phone className="w-5 h-5" />
-            <span>Questions? Call Clark at <a href="tel:+15735083830" className="text-amber-400 hover:text-amber-300">(573) 508-3830</a></span>
+            <span>Questions? Call Clark at <a href="tel:+16603622797" className="text-amber-400 hover:text-amber-300">(660) 362-2797</a></span>
           </div>
         </div>
       </section>
