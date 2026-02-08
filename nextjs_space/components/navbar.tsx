@@ -63,6 +63,9 @@ export default function Navbar() {
             <NavLink href="/pricing" active={pathname === "/pricing"}>
               Pricing
             </NavLink>
+            <NavLink href="/brokers" active={pathname === "/brokers"}>
+              For Brokers
+            </NavLink>
 
             {!mounted || status === "loading" ? (
               <div className="w-8 h-8 rounded-full bg-stone-200 animate-pulse" />
@@ -147,6 +150,9 @@ export default function Navbar() {
               </MobileNavLink>
               <MobileNavLink href="/pricing" onClick={() => setIsMenuOpen(false)}>
                 Pricing
+              </MobileNavLink>
+              <MobileNavLink href="/brokers" onClick={() => setIsMenuOpen(false)}>
+                For Brokers
               </MobileNavLink>
 
               <div className="pt-4 border-t border-stone-200">
