@@ -47,6 +47,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Product pricing configuration
+const PRODUCT_PRICING = {
+  full_report: 350,
+  quick_look: 49,
+} as const;
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -59,6 +65,7 @@ export async function POST(request: NextRequest) {
       parcelLng,
       selectedLayers,
       guestEmail,
+      productType = "full_report", // Default to full report
     } = body;
 
     if (!parcelAddress || parcelLat === undefined || parcelLng === undefined) {
@@ -67,6 +74,17 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Validate product type
+    if (!["full_report", "quick_look"].includes(productType)) {
+      return NextResponse.json(
+        { error: "Invalid product type" },
+        { status: 400 }
+      );
+    }
+
+    // Get price based on product type
+    const price = PRODUCT_PRICING[productType as keyof typeof PRODUCT_PRICING];
 
     // Get user ID if logged in
     let userId = null;
@@ -84,7 +102,8 @@ export async function POST(request: NextRequest) {
         parcelLat,
         parcelLng,
         selectedLayers: JSON.stringify(selectedLayers || []),
-        price: 350,
+        price,
+        productType,
         status: "pending",
         userId,
         guestEmail: !userId ? guestEmail : null,

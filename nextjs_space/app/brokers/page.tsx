@@ -161,21 +161,35 @@ export default function BrokersPage() {
         </div>
       </section>
 
-      {/* Coming Soon - Broker Quick Look */}
+      {/* Broker Quick Look - Now Available */}
       <section className="py-16 bg-gradient-to-r from-amber-50 to-stone-50 border-y border-amber-200">
-        <div className="max-w-4xl mx-auto px-4 text-center">
-          <p className="text-amber-700 font-medium mb-2 uppercase text-sm tracking-wide">Coming Soon</p>
-          <h2 className="text-2xl md:text-3xl font-bold text-stone-800 mb-4">
-            Broker Quick Look — $49
-          </h2>
-          <p className="text-stone-600 max-w-2xl mx-auto mb-6">
-            A streamlined 2-page report designed specifically for listing attachments. 
-            Covers the essentials: boundaries, acreage verification, flood zones, road access, 
-            and buildability basics. Perfect for every listing in your portfolio.
-          </p>
-          <p className="text-stone-500 text-sm">
-            Interested in early access? Give us a call.
-          </p>
+        <div className="max-w-4xl mx-auto px-4">
+          <div className="text-center mb-8">
+            <p className="text-amber-700 font-medium mb-2 uppercase text-sm tracking-wide">Now Available</p>
+            <h2 className="text-2xl md:text-3xl font-bold text-stone-800 mb-4">
+              Broker Quick Look — $49
+            </h2>
+            <p className="text-stone-600 max-w-2xl mx-auto">
+              A streamlined 2-page report designed specifically for listing attachments. 
+              Covers the essentials: boundaries, acreage verification, flood zones, road access, 
+              and buildability basics. Perfect for every listing in your portfolio.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link
+              href="/map"
+              className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-white font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
+            >
+              Order Quick Look — $49
+              <ArrowRight className="w-5 h-5" />
+            </Link>
+            <Link
+              href="/pricing"
+              className="inline-flex items-center justify-center gap-2 bg-white hover:bg-stone-50 text-stone-700 font-semibold px-8 py-4 rounded-lg transition-colors text-lg border border-stone-300"
+            >
+              Compare Products
+            </Link>
+          </div>
         </div>
       </section>
 

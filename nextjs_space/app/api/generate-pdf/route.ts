@@ -457,6 +457,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
+    // Route Quick Look orders to the dedicated endpoint
+    if (order.productType === "quick_look") {
+      const quickLookResponse = await fetch(new URL("/api/broker-quick-look", request.url).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      });
+      return quickLookResponse;
+    }
+
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();

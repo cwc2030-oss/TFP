@@ -29,6 +29,7 @@ interface Order {
   status: string;
   pdfPath: string | null;
   createdAt: string;
+  productType?: string;
 }
 
 export default function DashboardPage() {

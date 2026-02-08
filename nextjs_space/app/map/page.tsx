@@ -43,6 +43,23 @@ interface SelectedParcel {
   bounds?: { lat: number; lng: number }[];
 }
 
+type ProductType = "full_report" | "quick_look";
+
+const PRODUCTS = {
+  quick_look: {
+    name: "Broker Quick Look",
+    price: 49,
+    description: "2-page deal-killer checklist",
+    features: ["Verified acreage & boundaries", "FEMA flood zone status", "CWD zone check", "Soil buildability", "Road access verification"],
+  },
+  full_report: {
+    name: "Full Land Analysis",
+    price: 350,
+    description: "9-page comprehensive report",
+    features: ["Everything in Quick Look", "Detailed hunting intel", "Harvest pressure data", "Complete soil analysis", "County resources & contacts", "Deer/Turkey season dates"],
+  },
+} as const;
+
 export default function MapPage() {
   const router = useRouter();
   const { data: session } = useSession() || {};
@@ -50,6 +67,7 @@ export default function MapPage() {
   // Basic Report - all 5 layers pre-selected
   const [selectedLayers] = useState<string[]>(["flood_zones", "topography", "soil_types", "property_boundaries", "roads_transportation"]);
   const [showCheckout, setShowCheckout] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<ProductType>("full_report");
   const [guestEmail, setGuestEmail] = useState("");
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isDemoCheckout, setIsDemoCheckout] = useState(false);
@@ -120,6 +138,7 @@ export default function MapPage() {
           parcelBounds: selectedParcel.bounds,
           selectedLayers,
           guestEmail: session ? undefined : guestEmail,
+          productType: selectedProduct,
           isDemo: isDemo, // Flag for demo orders
         }),
       });
@@ -198,43 +217,89 @@ export default function MapPage() {
                 </button>
               </div>
 
-              {/* Order Details */}
-              <div className="space-y-4 mb-6">
-                <div className="bg-stone-50 rounded-lg p-4">
-                  <div className="flex items-start gap-3">
-                    <MapPin className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-stone-800">
-                        {selectedParcel?.address}
-                      </p>
-                      <p className="text-xs text-stone-500 mt-1">
-                        {selectedParcel?.parcelId && `Parcel ID: ${selectedParcel.parcelId}`}
-                      </p>
-                    </div>
+              {/* Property Info */}
+              <div className="bg-stone-50 rounded-lg p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <MapPin className="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-stone-800">
+                      {selectedParcel?.address}
+                    </p>
+                    <p className="text-xs text-stone-500 mt-1">
+                      {selectedParcel?.parcelId && `Parcel ID: ${selectedParcel.parcelId}`}
+                    </p>
                   </div>
                 </div>
+              </div>
 
-                <div className="bg-stone-50 rounded-lg p-4">
-                  <p className="text-sm font-medium text-stone-800 mb-2">
-                    Selected Layers ({selectedLayers.length})
-                  </p>
-                  <div className="space-y-1">
-                    {selectedLayers.map((layerId) => {
-                      const layer = MAP_LAYERS.find((l) => l.id === layerId);
-                      return (
-                        <div key={layerId} className="flex items-center gap-2">
-                          <div
-                            className="w-2 h-2 rounded-full"
-                            style={{ backgroundColor: layer?.color }}
-                          />
-                          <span className="text-sm text-stone-600">
-                            {layer?.displayName || layerId}
-                          </span>
-                        </div>
-                      );
-                    })}
+              {/* Product Selection */}
+              <div className="space-y-3 mb-6">
+                <p className="text-sm font-medium text-stone-700">Choose Your Report</p>
+                
+                {/* Quick Look Option */}
+                <button
+                  onClick={() => setSelectedProduct("quick_look")}
+                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                    selectedProduct === "quick_look"
+                      ? "border-amber-500 bg-amber-50"
+                      : "border-stone-200 hover:border-stone-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        selectedProduct === "quick_look" ? "border-amber-500" : "border-stone-300"
+                      }`}>
+                        {selectedProduct === "quick_look" && (
+                          <div className="w-2 h-2 rounded-full bg-amber-500" />
+                        )}
+                      </div>
+                      <span className="font-semibold text-stone-800">{PRODUCTS.quick_look.name}</span>
+                    </div>
+                    <span className="text-lg font-bold text-amber-600">${PRODUCTS.quick_look.price}</span>
                   </div>
-                </div>
+                  <p className="text-xs text-stone-500 ml-6">{PRODUCTS.quick_look.description}</p>
+                  <ul className="mt-2 ml-6 space-y-1">
+                    {PRODUCTS.quick_look.features.slice(0, 3).map((f, i) => (
+                      <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
+                        <span className="text-amber-500">✓</span> {f}
+                      </li>
+                    ))}
+                  </ul>
+                </button>
+
+                {/* Full Report Option */}
+                <button
+                  onClick={() => setSelectedProduct("full_report")}
+                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                    selectedProduct === "full_report"
+                      ? "border-emerald-500 bg-emerald-50"
+                      : "border-stone-200 hover:border-stone-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        selectedProduct === "full_report" ? "border-emerald-500" : "border-stone-300"
+                      }`}>
+                        {selectedProduct === "full_report" && (
+                          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                        )}
+                      </div>
+                      <span className="font-semibold text-stone-800">{PRODUCTS.full_report.name}</span>
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">Most Popular</span>
+                    </div>
+                    <span className="text-lg font-bold text-emerald-600">${PRODUCTS.full_report.price}</span>
+                  </div>
+                  <p className="text-xs text-stone-500 ml-6">{PRODUCTS.full_report.description}</p>
+                  <ul className="mt-2 ml-6 space-y-1">
+                    {PRODUCTS.full_report.features.slice(0, 4).map((f, i) => (
+                      <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
+                        <span className="text-emerald-500">✓</span> {f}
+                      </li>
+                    ))}
+                  </ul>
+                </button>
               </div>
 
               {/* Guest Email */}
@@ -262,8 +327,13 @@ export default function MapPage() {
               {/* Price */}
               <div className="border-t border-stone-200 pt-4 mb-6">
                 <div className="flex items-center justify-between">
-                  <span className="text-lg text-stone-700">Total</span>
-                  <span className="text-3xl font-bold text-emerald-700">$350</span>
+                  <div>
+                    <span className="text-lg text-stone-700">Total</span>
+                    <p className="text-xs text-stone-500">{PRODUCTS[selectedProduct].name}</p>
+                  </div>
+                  <span className={`text-3xl font-bold ${selectedProduct === "quick_look" ? "text-amber-600" : "text-emerald-700"}`}>
+                    ${PRODUCTS[selectedProduct].price}
+                  </span>
                 </div>
               </div>
 

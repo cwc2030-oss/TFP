@@ -48,6 +48,7 @@ model Order {
   stripeSessionId String?
   pdfPath         String?
   price           Float    @default(350)
+  productType     String   @default("full_report")  // "full_report" or "quick_look"
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User?    @relation(fields: [userId], references: [id])

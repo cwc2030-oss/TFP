@@ -23,82 +23,132 @@ export default function PricingPage() {
           </p>
         </div>
 
-        {/* Pricing Card */}
-        <div className="max-w-lg mx-auto">
-          <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-800">
-            {/* Badge */}
-            <div className="bg-amber-400 text-amber-900 text-center py-2 px-4 font-semibold text-sm">
-              ⭐ Everything Included – Premium Value
+        {/* Pricing Cards */}
+        <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
+          
+          {/* Broker Quick Look Card */}
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-amber-400">
+            <div className="bg-amber-500 text-white text-center py-2 px-4 font-semibold text-sm">
+              🏡 Perfect for Listings
             </div>
             
-            {/* Pricing Header */}
-            <div className="p-8 text-center">
-              <h2 className="text-3xl font-bold text-white mb-2">
-                Land Analysis Report
+            <div className="p-8 text-center border-b border-stone-200">
+              <h2 className="text-2xl font-bold text-stone-800 mb-2">
+                Broker Quick Look
               </h2>
-              <div className="mt-6">
-                <span className="text-5xl font-bold text-white">$350</span>
-                <span className="text-emerald-100 text-lg ml-2">per report</span>
+              <div className="mt-4">
+                <span className="text-5xl font-bold text-amber-600">$49</span>
+                <span className="text-stone-500 text-lg ml-2">per report</span>
               </div>
-              <p className="text-emerald-100 mt-4 text-sm">
-                Comprehensive property intelligence in minutes
+              <p className="text-stone-500 mt-3 text-sm">
+                2-page deal-killer checklist
               </p>
             </div>
 
-            {/* Features List */}
-            <div className="bg-white p-8">
-              <h3 className="font-semibold text-stone-900 mb-4 text-lg">
-                Every Report Includes:
+            <div className="p-8">
+              <h3 className="font-semibold text-stone-900 mb-4 text-sm uppercase tracking-wide">
+                Includes:
               </h3>
               <ul className="space-y-3">
                 {[
-                  "9 Premium Data Layers (Flood, Soil, Topography & More)",
-                  "Building Footprints & Structure Analysis",
-                  "FEMA Risk Index & Flood Zone Details",
-                  "Qualified Opportunity Zone Status",
-                  "School District Information",
-                  "Property Boundaries & Acreage",
-                  "Ownership & Tax Records",
-                  "3D Satellite Imagery & Map Views",
-                  "Professional PDF Report (Instant Download)",
-                  "No Subscription Required"
+                  "Verified acreage & legal boundaries",
+                  "FEMA flood zone status",
+                  "CWD management zone check",
+                  "Soil buildability rating",
+                  "Road access verification",
+                  "Satellite map with parcel overlay",
+                  "Instant PDF download"
                 ].map((feature, idx) => (
                   <li key={idx} className="flex items-start gap-3">
-                    <Check className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                    <span className="text-stone-700">{feature}</span>
+                    <Check className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-700 text-sm">{feature}</span>
                   </li>
                 ))}
               </ul>
 
-              <div className="mt-8 space-y-3">
+              <div className="mt-8">
                 <Link href="/map" className="block">
-                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-6 text-lg font-semibold">
-                    Select Your Property
-                  </Button>
-                </Link>
-                <Link href="/api/free-look?v=20260205" target="_blank" className="block">
-                  <Button variant="outline" className="w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 py-6 text-lg font-semibold">
-                    Take a Free Look
+                  <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white py-5 text-base font-semibold">
+                    Get Quick Look
                   </Button>
                 </Link>
               </div>
             </div>
           </div>
 
-          {/* Trust Indicators */}
-          <div className="mt-12 grid grid-cols-3 gap-6 text-center">
-            <div className="flex flex-col items-center">
-              <Clock className="h-8 w-8 text-emerald-600 mb-2" />
-              <p className="text-sm text-stone-600 font-medium">Instant Delivery</p>
+          {/* Full Land Analysis Card */}
+          <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-800 relative">
+            <div className="absolute top-0 right-0 bg-white text-emerald-700 px-3 py-1 text-xs font-bold rounded-bl-lg">
+              MOST POPULAR
             </div>
-            <div className="flex flex-col items-center">
-              <Shield className="h-8 w-8 text-emerald-600 mb-2" />
-              <p className="text-sm text-stone-600 font-medium">Secure Payment</p>
+            <div className="bg-emerald-800 text-emerald-100 text-center py-2 px-4 font-semibold text-sm">
+              ⭐ Complete Property Intelligence
             </div>
-            <div className="flex flex-col items-center">
-              <FileText className="h-8 w-8 text-emerald-600 mb-2" />
-              <p className="text-sm text-stone-600 font-medium">Professional PDF</p>
+            
+            <div className="p-8 text-center">
+              <h2 className="text-2xl font-bold text-white mb-2">
+                Full Land Analysis
+              </h2>
+              <div className="mt-4">
+                <span className="text-5xl font-bold text-white">$350</span>
+                <span className="text-emerald-100 text-lg ml-2">per report</span>
+              </div>
+              <p className="text-emerald-100 mt-3 text-sm">
+                9-page comprehensive report
+              </p>
             </div>
+
+            <div className="bg-white p-8">
+              <h3 className="font-semibold text-stone-900 mb-4 text-sm uppercase tracking-wide">
+                Everything in Quick Look, plus:
+              </h3>
+              <ul className="space-y-3">
+                {[
+                  "Detailed hunting intel & harvest data",
+                  "Deer/turkey season dates & bag limits",
+                  "Complete USDA soil analysis",
+                  "Drainage & farmland classification",
+                  "County resources & contacts",
+                  "Regional area information",
+                  "Conservation program info",
+                  "Drought status monitoring"
+                ].map((feature, idx) => (
+                  <li key={idx} className="flex items-start gap-3">
+                    <Check className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-700 text-sm">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-8 space-y-3">
+                <Link href="/map" className="block">
+                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-5 text-base font-semibold">
+                    Get Full Report
+                  </Button>
+                </Link>
+                <Link href="/api/free-look" target="_blank" className="block">
+                  <Button variant="outline" className="w-full border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 py-5 text-base font-semibold">
+                    Preview Sample Report
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trust Indicators */}
+        <div className="mt-12 max-w-2xl mx-auto grid grid-cols-3 gap-6 text-center">
+          <div className="flex flex-col items-center">
+            <Clock className="h-8 w-8 text-emerald-600 mb-2" />
+            <p className="text-sm text-stone-600 font-medium">Instant Delivery</p>
+          </div>
+          <div className="flex flex-col items-center">
+            <Shield className="h-8 w-8 text-emerald-600 mb-2" />
+            <p className="text-sm text-stone-600 font-medium">Secure Payment</p>
+          </div>
+          <div className="flex flex-col items-center">
+            <FileText className="h-8 w-8 text-emerald-600 mb-2" />
+            <p className="text-sm text-stone-600 font-medium">Professional PDF</p>
           </div>
         </div>
 
