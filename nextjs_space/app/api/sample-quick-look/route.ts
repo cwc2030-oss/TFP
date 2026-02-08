@@ -154,27 +154,28 @@ export async function GET() {
     doc.text(`Generated: ${reportDate}`, pageWidth / 2, 48, { align: "center" });
     doc.text("Terra Firma Partners LLC", pageWidth - 22, 48, { align: "right" });
 
-    // Property Address Title
-    let yPos = 58;
+    // Property Address Title - More breathing room
+    let yPos = 60;
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
+    doc.setFontSize(16);
     doc.text("PROPERTY OVERVIEW", 22, yPos);
-    yPos += 8;
+    yPos += 12;
 
     doc.setTextColor(0, 0, 0);
-    doc.setFontSize(11);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
     const addressLines = doc.splitTextToSize(SAMPLE_DATA.siteAddress, pageWidth - 50);
     doc.text(addressLines, 22, yPos);
-    yPos += addressLines.length * 5 + 6;
+    yPos += addressLines.length * 6 + 10;
 
-    // Map Image
-    const mapHeight = 75;
+    // Map Image - Larger and more prominent
+    const mapHeight = 90;
     if (mapImageSatellite) {
       try {
         doc.addImage(mapImageSatellite, "JPEG", 22, yPos, pageWidth - 44, mapHeight);
         doc.setDrawColor(34, 83, 60);
-        doc.setLineWidth(0.5);
+        doc.setLineWidth(1);
         doc.rect(22, yPos, pageWidth - 44, mapHeight);
       } catch (e) {
         doc.setFillColor(235, 245, 235);
@@ -188,17 +189,19 @@ export async function GET() {
       doc.setTextColor(100);
       doc.text("Satellite imagery - Available in your report", pageWidth / 2, yPos + mapHeight / 2, { align: "center" });
     }
-    yPos += mapHeight + 8;
+    yPos += mapHeight + 12;
 
-    // Key Property Details - Two Column Layout
+    // Key Property Details - Two Column Layout with more space
+    const detailsBoxHeight = 58;
     doc.setFillColor(250, 250, 250);
-    doc.rect(22, yPos, pageWidth - 44, 48, "F");
-    doc.setDrawColor(200, 200, 200);
-    doc.rect(22, yPos, pageWidth - 44, 48);
+    doc.rect(22, yPos, pageWidth - 44, detailsBoxHeight, "F");
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.5);
+    doc.rect(22, yPos, pageWidth - 44, detailsBoxHeight);
 
-    const col1X = 28;
-    const col2X = pageWidth / 2 + 5;
-    let detailY = yPos + 8;
+    const col1X = 30;
+    const col2X = pageWidth / 2 + 8;
+    let detailY = yPos + 10;
 
     const drawDetailRow = (label: string, value: string, x: number, y: number) => {
       doc.setFont("helvetica", "bold");
@@ -206,36 +209,37 @@ export async function GET() {
       doc.setTextColor(100, 100, 100);
       doc.text(label, x, y);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
+      doc.setFontSize(11);
       doc.setTextColor(0, 0, 0);
-      doc.text(value, x, y + 5);
+      doc.text(value, x, y + 6);
     };
 
     // Column 1
     drawDetailRow("VERIFIED ACREAGE", `${SAMPLE_DATA.acreage.toFixed(2)} acres`, col1X, detailY);
-    drawDetailRow("COUNTY", `${SAMPLE_DATA.county} County, ${SAMPLE_DATA.state}`, col1X, detailY + 14);
-    drawDetailRow("PARCEL ID", SAMPLE_DATA.parcelId, col1X, detailY + 28);
+    drawDetailRow("COUNTY", `${SAMPLE_DATA.county} County, ${SAMPLE_DATA.state}`, col1X, detailY + 18);
+    drawDetailRow("PARCEL ID", SAMPLE_DATA.parcelId, col1X, detailY + 36);
 
     // Column 2
     drawDetailRow("ZONING", SAMPLE_DATA.zoning, col2X, detailY);
-    drawDetailRow("USE TYPE", SAMPLE_DATA.useDescription, col2X, detailY + 14);
-    drawDetailRow("SCHOOL DISTRICT", SAMPLE_DATA.elementarySchoolDistrict, col2X, detailY + 28);
+    drawDetailRow("USE TYPE", SAMPLE_DATA.useDescription, col2X, detailY + 18);
+    drawDetailRow("SCHOOL DISTRICT", SAMPLE_DATA.elementarySchoolDistrict, col2X, detailY + 36);
 
-    yPos += 56;
+    yPos += detailsBoxHeight + 10;
 
-    // Legal Description Box
+    // Legal Description Box - More prominent
+    const legalBoxHeight = 28;
     doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(200, 200, 200);
-    doc.rect(22, yPos, pageWidth - 44, 22, "FD");
+    doc.setDrawColor(180, 180, 180);
+    doc.rect(22, yPos, pageWidth - 44, legalBoxHeight, "FD");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
-    doc.text("LEGAL DESCRIPTION", 28, yPos + 6);
+    doc.text("LEGAL DESCRIPTION", 30, yPos + 8);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
-    const legalLines = doc.splitTextToSize(SAMPLE_DATA.legalDescription, pageWidth - 56);
-    doc.text(legalLines.slice(0, 3), 28, yPos + 12);
+    const legalLines = doc.splitTextToSize(SAMPLE_DATA.legalDescription, pageWidth - 60);
+    doc.text(legalLines.slice(0, 3), 30, yPos + 16);
 
     // Footer
     doc.setFontSize(7);
