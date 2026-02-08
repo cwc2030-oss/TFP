@@ -137,7 +137,7 @@ async function fetchGoogleMapImage(
 
   try {
     const parcelPath = buildParcelPath(parcelCoordinates);
-    const baseUrl = "https://lh3.googleusercontent.com/f7oQQ7ImS1jAT0UJSbl8WK2TRigRhmXOgtyLNY6F9bjbOEW3Vs0Ee9NZoompPx6n63kJmEq6NeNM9uxVoaOwdGn9zi5HaJbcPdc=e365-pa-nu-s0";
+    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
     const params = new URLSearchParams({
       center: `${lat},${lng}`,
       zoom: zoom.toString(),

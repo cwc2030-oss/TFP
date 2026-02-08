@@ -43,7 +43,7 @@ async function fetchGoogleMapImage(): Promise<string | null> {
 
   try {
     const parcelPath = buildSampleParcelPath();
-    const baseUrl = "https://learn.microsoft.com/en-us/azure/azure-maps/media/zoom-levels-and-tile-grid/quadkey-tile-pyramid.png";
+    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
     const params = new URLSearchParams({
       center: `${SAMPLE_DATA.lat},${SAMPLE_DATA.lng}`,
       zoom: "16",
