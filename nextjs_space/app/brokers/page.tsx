@@ -72,10 +72,10 @@ export default function BrokersPage() {
                 <ArrowRight className="w-5 h-5" />
               </Link>
               <Link
-                href="/api/free-look"
+                href="/api/sample-quick-look"
                 className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white font-semibold px-8 py-4 rounded-lg transition-colors text-lg border border-white/20"
               >
-                See Sample Report
+                See Sample Quick Look
               </Link>
             </div>
           </div>
