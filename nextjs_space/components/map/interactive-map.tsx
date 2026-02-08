@@ -292,12 +292,16 @@ export default function InteractiveMap({
     clearParcelPolygons();
     
     try {
-      // Try address-based search first (more reliable), fallback to coordinates if no address
-      const params = address 
-        ? `address=${encodeURIComponent(address)}`
-        : `lat=${lat}&lng=${lng}`;
-      const response = await fetch(`/api/parcels?${params}`);
-      const data = await response.json();
+      // Try coordinate-based search (more reliable than address)
+      // Address search is unreliable with Regrid API
+      const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
+      let data = await response.json();
+      
+      // If no results with coordinates, try address as fallback
+      if ((!data.parcels || data.parcels.length === 0) && address) {
+        const addressResponse = await fetch(`/api/parcels?address=${encodeURIComponent(address)}`);
+        data = await addressResponse.json();
+      }
       
       if (data.parcels && data.parcels.length > 0) {
         const mainParcel = data.parcels[0];
