@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
@@ -62,6 +62,7 @@ const PRODUCTS = {
 
 export default function MapPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session } = useSession() || {};
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   // Basic Report - all 5 layers pre-selected
@@ -73,6 +74,14 @@ export default function MapPage() {
   const [isDemoCheckout, setIsDemoCheckout] = useState(false);
   const [error, setError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Read product type from URL parameter
+  useEffect(() => {
+    const productParam = searchParams.get("product");
+    if (productParam === "quick_look" || productParam === "full_report") {
+      setSelectedProduct(productParam);
+    }
+  }, [searchParams]);
 
   // Check if user is admin
   useEffect(() => {

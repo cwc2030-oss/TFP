@@ -65,7 +65,7 @@ export default function BrokersPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Link
-                href="/map"
+                href="/map?product=quick_look"
                 className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
               >
                 Run a Report Now
@@ -147,7 +147,7 @@ export default function BrokersPage() {
                 <p className="text-4xl font-bold text-stone-800 mb-4">$350</p>
                 <p className="text-stone-600 mb-6">Per parcel • 9-page PDF • Instant delivery</p>
                 <Link
-                  href="/map"
+                  href="/map?product=full_report"
                   className="block w-full text-center bg-green-700 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition-colors"
                 >
                   Generate Report
@@ -177,7 +177,7 @@ export default function BrokersPage() {
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
-              href="/map"
+              href="/map?product=quick_look"
               className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-white font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
             >
               Order Quick Look — $49
@@ -205,7 +205,7 @@ export default function BrokersPage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
             <Link
-              href="/map"
+              href="/map?product=quick_look"
               className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
             >
               Start Your First Report
