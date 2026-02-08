@@ -154,23 +154,23 @@ export async function GET() {
     doc.text(`Generated: ${reportDate}`, pageWidth / 2, 48, { align: "center" });
     doc.text("Terra Firma Partners LLC", pageWidth - 22, 48, { align: "right" });
 
-    // Property Address Title - More breathing room
-    let yPos = 60;
+    // Property Address Title
+    let yPos = 58;
     doc.setTextColor(34, 83, 60);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
+    doc.setFontSize(14);
     doc.text("PROPERTY OVERVIEW", 22, yPos);
-    yPos += 12;
+    yPos += 10;
 
     doc.setTextColor(0, 0, 0);
-    doc.setFontSize(13);
+    doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     const addressLines = doc.splitTextToSize(SAMPLE_DATA.siteAddress, pageWidth - 50);
     doc.text(addressLines, 22, yPos);
-    yPos += addressLines.length * 6 + 10;
+    yPos += addressLines.length * 5 + 8;
 
-    // Map Image - Larger and more prominent
-    const mapHeight = 90;
+    // Map Image - Centered on the page
+    const mapHeight = 72;
     if (mapImageSatellite) {
       try {
         doc.addImage(mapImageSatellite, "JPEG", 22, yPos, pageWidth - 44, mapHeight);
@@ -189,57 +189,57 @@ export async function GET() {
       doc.setTextColor(100);
       doc.text("Satellite imagery - Available in your report", pageWidth / 2, yPos + mapHeight / 2, { align: "center" });
     }
-    yPos += mapHeight + 12;
+    yPos += mapHeight + 8;
 
-    // Key Property Details - Two Column Layout with more space
-    const detailsBoxHeight = 58;
+    // Key Property Details - Two Column Layout
+    const detailsBoxHeight = 50;
     doc.setFillColor(250, 250, 250);
     doc.rect(22, yPos, pageWidth - 44, detailsBoxHeight, "F");
     doc.setDrawColor(180, 180, 180);
     doc.setLineWidth(0.5);
     doc.rect(22, yPos, pageWidth - 44, detailsBoxHeight);
 
-    const col1X = 30;
-    const col2X = pageWidth / 2 + 8;
-    let detailY = yPos + 10;
+    const col1X = 28;
+    const col2X = pageWidth / 2 + 5;
+    let detailY = yPos + 9;
 
     const drawDetailRow = (label: string, value: string, x: number, y: number) => {
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
+      doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text(label, x, y);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(11);
+      doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
-      doc.text(value, x, y + 6);
+      doc.text(value, x, y + 5);
     };
 
     // Column 1
     drawDetailRow("VERIFIED ACREAGE", `${SAMPLE_DATA.acreage.toFixed(2)} acres`, col1X, detailY);
-    drawDetailRow("COUNTY", `${SAMPLE_DATA.county} County, ${SAMPLE_DATA.state}`, col1X, detailY + 18);
-    drawDetailRow("PARCEL ID", SAMPLE_DATA.parcelId, col1X, detailY + 36);
+    drawDetailRow("COUNTY", `${SAMPLE_DATA.county} County, ${SAMPLE_DATA.state}`, col1X, detailY + 15);
+    drawDetailRow("PARCEL ID", SAMPLE_DATA.parcelId, col1X, detailY + 30);
 
     // Column 2
     drawDetailRow("ZONING", SAMPLE_DATA.zoning, col2X, detailY);
-    drawDetailRow("USE TYPE", SAMPLE_DATA.useDescription, col2X, detailY + 18);
-    drawDetailRow("SCHOOL DISTRICT", SAMPLE_DATA.elementarySchoolDistrict, col2X, detailY + 36);
+    drawDetailRow("USE TYPE", SAMPLE_DATA.useDescription, col2X, detailY + 15);
+    drawDetailRow("SCHOOL DISTRICT", SAMPLE_DATA.elementarySchoolDistrict, col2X, detailY + 30);
 
-    yPos += detailsBoxHeight + 10;
+    yPos += detailsBoxHeight + 6;
 
-    // Legal Description Box - More prominent
-    const legalBoxHeight = 28;
+    // Legal Description Box
+    const legalBoxHeight = 24;
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(180, 180, 180);
     doc.rect(22, yPos, pageWidth - 44, legalBoxHeight, "FD");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text("LEGAL DESCRIPTION", 30, yPos + 8);
+    doc.text("LEGAL DESCRIPTION", 28, yPos + 7);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
-    const legalLines = doc.splitTextToSize(SAMPLE_DATA.legalDescription, pageWidth - 60);
-    doc.text(legalLines.slice(0, 3), 30, yPos + 16);
+    const legalLines = doc.splitTextToSize(SAMPLE_DATA.legalDescription, pageWidth - 56);
+    doc.text(legalLines.slice(0, 2), 28, yPos + 14);
 
     // Footer
     doc.setFontSize(7);
