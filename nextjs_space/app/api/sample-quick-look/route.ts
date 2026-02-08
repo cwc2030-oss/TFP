@@ -192,7 +192,7 @@ export async function GET() {
     yPos += mapHeight + 8;
 
     // Key Property Details - Two Column Layout
-    const detailsBoxHeight = 50;
+    const detailsBoxHeight = 58;
     doc.setFillColor(250, 250, 250);
     doc.rect(22, yPos, pageWidth - 44, detailsBoxHeight, "F");
     doc.setDrawColor(180, 180, 180);
@@ -201,7 +201,7 @@ export async function GET() {
 
     const col1X = 28;
     const col2X = pageWidth / 2 + 5;
-    let detailY = yPos + 9;
+    let detailY = yPos + 12;
 
     const drawDetailRow = (label: string, value: string, x: number, y: number) => {
       doc.setFont("helvetica", "bold");
@@ -216,30 +216,30 @@ export async function GET() {
 
     // Column 1
     drawDetailRow("VERIFIED ACREAGE", `${SAMPLE_DATA.acreage.toFixed(2)} acres`, col1X, detailY);
-    drawDetailRow("COUNTY", `${SAMPLE_DATA.county} County, ${SAMPLE_DATA.state}`, col1X, detailY + 15);
-    drawDetailRow("PARCEL ID", SAMPLE_DATA.parcelId, col1X, detailY + 30);
+    drawDetailRow("COUNTY", `${SAMPLE_DATA.county} County, ${SAMPLE_DATA.state}`, col1X, detailY + 17);
+    drawDetailRow("PARCEL ID", SAMPLE_DATA.parcelId, col1X, detailY + 34);
 
     // Column 2
     drawDetailRow("ZONING", SAMPLE_DATA.zoning, col2X, detailY);
-    drawDetailRow("USE TYPE", SAMPLE_DATA.useDescription, col2X, detailY + 15);
-    drawDetailRow("SCHOOL DISTRICT", SAMPLE_DATA.elementarySchoolDistrict, col2X, detailY + 30);
+    drawDetailRow("USE TYPE", SAMPLE_DATA.useDescription, col2X, detailY + 17);
+    drawDetailRow("SCHOOL DISTRICT", SAMPLE_DATA.elementarySchoolDistrict, col2X, detailY + 34);
 
     yPos += detailsBoxHeight + 6;
 
     // Legal Description Box
-    const legalBoxHeight = 24;
+    const legalBoxHeight = 28;
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(180, 180, 180);
     doc.rect(22, yPos, pageWidth - 44, legalBoxHeight, "FD");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text("LEGAL DESCRIPTION", 28, yPos + 7);
+    doc.text("LEGAL DESCRIPTION", 28, yPos + 9);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
     const legalLines = doc.splitTextToSize(SAMPLE_DATA.legalDescription, pageWidth - 56);
-    doc.text(legalLines.slice(0, 2), 28, yPos + 14);
+    doc.text(legalLines.slice(0, 2), 28, yPos + 17);
 
     // Footer
     doc.setFontSize(7);

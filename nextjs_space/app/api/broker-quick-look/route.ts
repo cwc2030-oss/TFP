@@ -306,7 +306,7 @@ export async function POST(request: NextRequest) {
     yPos += mapHeight + 8;
 
     // Key Property Details - Two Column Layout
-    const detailsBoxHeight = 50;
+    const detailsBoxHeight = 58;
     doc.setFillColor(250, 250, 250);
     doc.rect(22, yPos, pageWidth - 44, detailsBoxHeight, "F");
     doc.setDrawColor(180, 180, 180);
@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
 
     const col1X = 28;
     const col2X = pageWidth / 2 + 5;
-    let detailY = yPos + 9;
+    let detailY = yPos + 12;
 
     const drawDetailRow = (label: string, value: string, x: number, y: number) => {
       doc.setFont("helvetica", "bold");
@@ -330,32 +330,32 @@ export async function POST(request: NextRequest) {
 
     // Column 1
     drawDetailRow("VERIFIED ACREAGE", `${parcelData.acreage.toFixed(2)} acres`, col1X, detailY);
-    drawDetailRow("COUNTY", `${parcelData.county} County, ${parcelData.state}`, col1X, detailY + 15);
-    drawDetailRow("PARCEL ID", parcelData.parcelId, col1X, detailY + 30);
+    drawDetailRow("COUNTY", `${parcelData.county} County, ${parcelData.state}`, col1X, detailY + 17);
+    drawDetailRow("PARCEL ID", parcelData.parcelId, col1X, detailY + 34);
 
     // Column 2
     drawDetailRow("ZONING", parcelData.zoning, col2X, detailY);
-    drawDetailRow("USE TYPE", parcelData.useDescription, col2X, detailY + 15);
+    drawDetailRow("USE TYPE", parcelData.useDescription, col2X, detailY + 17);
     const schoolDistrict = parcelData.elementarySchoolDistrict || "Contact county for info";
-    drawDetailRow("SCHOOL DISTRICT", schoolDistrict.length > 30 ? schoolDistrict.substring(0, 30) + "..." : schoolDistrict, col2X, detailY + 30);
+    drawDetailRow("SCHOOL DISTRICT", schoolDistrict.length > 30 ? schoolDistrict.substring(0, 30) + "..." : schoolDistrict, col2X, detailY + 34);
 
     yPos += detailsBoxHeight + 6;
 
     // Legal Description Box
-    const legalBoxHeight = 24;
+    const legalBoxHeight = 28;
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(180, 180, 180);
     doc.rect(22, yPos, pageWidth - 44, legalBoxHeight, "FD");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text("LEGAL DESCRIPTION", 28, yPos + 7);
+    doc.text("LEGAL DESCRIPTION", 28, yPos + 9);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
     const legalDesc = parcelData.legalDescription || "Contact county assessor for full legal description";
     const legalLines = doc.splitTextToSize(legalDesc, pageWidth - 56);
-    doc.text(legalLines.slice(0, 2), 28, yPos + 14);
+    doc.text(legalLines.slice(0, 2), 28, yPos + 17);
 
     // Footer
     doc.setFontSize(7);
