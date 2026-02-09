@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MapPin, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText, Mail, Send } from "lucide-react";
+import { Search, MapPin, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText, Mail, Send, Layers, Lock, Unlock, Sparkles, TreePine, Target, Compass, Droplets, Zap, Crown, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -102,6 +102,23 @@ export default function InteractiveMap({
   const [emailSent, setEmailSent] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [isMobile, setIsMobile] = useState(false);
+  const [showLayerPanel, setShowLayerPanel] = useState(false);
+  
+  // Premium Layer definitions
+  const premiumLayers = [
+    { id: 'lidar_terrain', name: 'LiDAR Terrain', icon: Mountain, price: 8, description: 'High-res elevation hillshade', status: 'coming_soon' as const },
+    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, price: 8, description: 'Tree height analysis', status: 'coming_soon' as const },
+    { id: 'deer_movement', name: 'Deer Movement', icon: Target, price: 15, description: 'AI-predicted travel corridors', status: 'coming_soon' as const },
+    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, price: 10, description: 'Likely bedding locations', status: 'coming_soon' as const },
+    { id: 'water_sources', name: 'Water Sources', icon: Droplets, price: 5, description: 'Streams, ponds & wet areas', status: 'coming_soon' as const },
+    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, price: 12, description: 'Optimal stand locations', status: 'coming_soon' as const },
+  ];
+  
+  const freeLayers = [
+    { id: 'parcel_boundaries', name: 'Parcel Boundaries', active: true },
+    { id: 'satellite', name: 'Satellite Imagery', active: true },
+    { id: 'roads', name: 'Roads & Access', active: true },
+  ];
   
   // Detect mobile/tablet
   useEffect(() => {
@@ -852,7 +869,166 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Layer Panel */}
+      {/* Layer Panel Toggle Button */}
+      <div className={`absolute top-28 z-10 ${isMobile ? 'right-2' : 'right-4'}`}>
+        <Button
+          onClick={() => setShowLayerPanel(!showLayerPanel)}
+          variant="outline"
+          size={isMobile ? "sm" : "default"}
+          className={`bg-white/95 backdrop-blur-sm shadow-md ${showLayerPanel ? 'bg-amber-50 border-amber-400' : ''}`}
+        >
+          <Layers className="w-4 h-4" />
+          {!isMobile && <span className="ml-2">Layers</span>}
+          {!isMobile && <span className="ml-1 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">NEW</span>}
+        </Button>
+      </div>
+
+      {/* Layer Buffet Panel */}
+      {showLayerPanel && (
+        <div className={`absolute z-10 bg-white/98 backdrop-blur-sm shadow-2xl border border-stone-200 flex flex-col
+          ${isMobile 
+            ? 'top-40 right-2 left-2 rounded-xl max-h-[60vh]' 
+            : 'top-40 right-4 w-80 rounded-xl max-h-[70vh]'
+          }`}>
+          {/* Panel Header */}
+          <div className="p-4 border-b border-stone-200 bg-gradient-to-r from-amber-50 to-white rounded-t-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-amber-600" />
+                <h3 className="font-bold text-stone-800">Map Layers</h3>
+                <span className="bg-amber-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">BETA</span>
+              </div>
+              <button onClick={() => setShowLayerPanel(false)} className="text-stone-400 hover:text-stone-600 p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-stone-500 mt-1">Premium layers for serious land hunters</p>
+          </div>
+
+          {/* Scrollable Content */}
+          <div className="p-4 space-y-4 overflow-y-auto flex-1">
+            
+            {/* Free Layers Section */}
+            <div>
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <Unlock className="w-3 h-3" /> Included Free
+              </p>
+              <div className="space-y-1">
+                {freeLayers.map((layer) => (
+                  <div key={layer.id} className="flex items-center justify-between py-2 px-3 bg-emerald-50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 bg-emerald-500 rounded-full" />
+                      <span className="text-sm text-stone-700">{layer.name}</span>
+                    </div>
+                    <span className="text-xs text-emerald-600 font-medium">Active</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Premium Layers Section */}
+            <div>
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <Crown className="w-3 h-3 text-amber-500" /> Premium Layers
+              </p>
+              <div className="space-y-2">
+                {premiumLayers.map((layer) => {
+                  const IconComponent = layer.icon;
+                  return (
+                    <div key={layer.id} className="flex items-center justify-between py-2.5 px-3 bg-stone-50 rounded-lg border border-stone-200 hover:border-amber-300 transition-colors group">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center group-hover:bg-amber-200 transition-colors">
+                          <IconComponent className="w-4 h-4 text-amber-700" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-stone-800">{layer.name}</p>
+                          <p className="text-[10px] text-stone-500">{layer.description}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        {layer.status === 'coming_soon' ? (
+                          <span className="text-[10px] bg-stone-200 text-stone-600 px-2 py-1 rounded-full font-medium">
+                            Coming Soon
+                          </span>
+                        ) : (
+                          <div className="flex flex-col items-end">
+                            <span className="text-sm font-bold text-amber-600">${layer.price}</span>
+                            <span className="text-[9px] text-stone-400">per parcel</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Hunter's Edge Bundle */}
+            <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-4 text-white relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
+              <div className="relative">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-5 h-5" />
+                  <span className="font-bold text-lg">Hunter's Edge Bundle</span>
+                </div>
+                <p className="text-amber-100 text-xs mb-3">All 6 premium layers for one property</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-2xl font-bold">$29</span>
+                    <span className="text-amber-200 text-sm ml-1">/ property</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-amber-200 line-through">$58 value</p>
+                    <p className="text-xs font-semibold text-white">Save 50%</p>
+                  </div>
+                </div>
+                <button 
+                  className="w-full mt-3 bg-white text-amber-600 hover:bg-amber-50 py-2 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+                  onClick={() => alert('Coming soon! Sign up for early access.')}
+                >
+                  <Lock className="w-4 h-4" />
+                  Coming Soon
+                </button>
+              </div>
+            </div>
+
+            {/* Seasonal Pass */}
+            <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-xl p-4 text-white">
+              <div className="flex items-center gap-2 mb-2">
+                <Calendar className="w-5 h-5" />
+                <span className="font-bold">Seasonal Pass</span>
+                <span className="bg-white/20 text-[10px] px-2 py-0.5 rounded-full">Sept - Jan</span>
+              </div>
+              <p className="text-emerald-100 text-xs mb-3">Unlimited premium layers on any Missouri property</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-2xl font-bold">$49</span>
+                  <span className="text-emerald-200 text-sm ml-1">/ season</span>
+                </div>
+                <span className="text-xs bg-white/20 px-2 py-1 rounded-full">Best Value</span>
+              </div>
+              <button 
+                className="w-full mt-3 bg-white text-emerald-700 hover:bg-emerald-50 py-2 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+                onClick={() => alert('Coming soon! Sign up for early access.')}
+              >
+                <Lock className="w-4 h-4" />
+                Join Waitlist
+              </button>
+            </div>
+
+            {/* Early Access CTA */}
+            <div className="bg-stone-100 rounded-lg p-3 text-center">
+              <p className="text-xs text-stone-600 mb-2">🦌 Be first to hunt with LiDAR</p>
+              <a 
+                href="mailto:clark@terrafirma.partners?subject=Layer%20Buffet%20Early%20Access&body=I'm%20interested%20in%20early%20access%20to%20premium%20map%20layers!"
+                className="text-xs font-semibold text-amber-600 hover:text-amber-700 underline"
+              >
+                Get Early Access →
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Google Map Container */}
       <div className="absolute inset-0 pt-10">
