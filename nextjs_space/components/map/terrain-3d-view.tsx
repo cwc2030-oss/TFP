@@ -65,6 +65,7 @@ export default function Terrain3DView({
   const [showWind, setShowWind] = useState(true);
   const [showMethodology, setShowMethodology] = useState(false);
   const [expandedMethod, setExpandedMethod] = useState<string | null>(null);
+  const [loadPhase, setLoadPhase] = useState<"terrain" | "corridors" | "done">("terrain");
 
   const checkWebGLSupport = (): boolean => {
     try {
@@ -294,13 +295,14 @@ export default function Terrain3DView({
     return corridors;
   }, [parcelCenter, acreage]);
 
-  // Initialize map
+  // Initialize map — PHASED LOADING for speed
   useEffect(() => {
     if (!isOpen || !mapContainerRef.current) return;
 
     setLoadError(null);
     setIsMapLoaded(false);
     setIsSpinning(false);
+    setLoadPhase("terrain");
 
     if (!checkWebGLSupport()) {
       setLoadError("Your browser doesn't support WebGL, which is required for 3D terrain viewing. Try Chrome, Firefox, or Safari.");
@@ -338,25 +340,27 @@ export default function Terrain3DView({
 
     map.on("error", (e: any) => {
       console.error("Mapbox error:", e);
-      if (!isMapLoaded) {
-        setLoadError("Failed to load map tiles. Check your internet connection.");
-      }
     });
 
+    // Faster timeout — show whatever we have after 3s
     let hasLoaded = false;
     const loadTimeout = setTimeout(() => {
       if (!hasLoaded) {
         console.log("Terrain load timeout - showing map anyway");
         hasLoaded = true;
         setIsMapLoaded(true);
+        setLoadPhase("done");
       }
-    }, 5000);
+    }, 3000);
 
     map.on("load", () => {
       clearTimeout(loadTimeout);
+      if (hasLoaded) return;
       hasLoaded = true;
+
+      // ═══ PHASE 1: Terrain + Parcel Boundary (show map FAST) ═══
       
-      // Add terrain
+      // Single DEM source — reused for terrain AND hillshade
       try {
         map.addSource("mapbox-dem", {
           type: "raster-dem",
@@ -365,8 +369,21 @@ export default function Terrain3DView({
           maxzoom: 14,
         });
         map.setTerrain({ source: "mapbox-dem", exaggeration: 1.5 });
+
+        // Hillshade uses same source — no duplicate tile fetch
+        map.addLayer({
+          id: "hillshade",
+          type: "hillshade",
+          source: "mapbox-dem",
+          paint: {
+            "hillshade-exaggeration": 0.5,
+            "hillshade-shadow-color": "#000000",
+            "hillshade-highlight-color": "#ffffff",
+            "hillshade-accent-color": "#4a6741",
+          },
+        }, "waterway-label");
       } catch (err) {
-        console.log("Terrain failed, continuing without 3D elevation:", err);
+        console.log("Terrain/hillshade setup failed, continuing:", err);
       }
 
       // Sky layer
@@ -384,29 +401,7 @@ export default function Terrain3DView({
         console.log("Sky layer failed:", err);
       }
 
-      // Add hillshade for terrain emphasis
-      try {
-        map.addSource("hillshade-dem", {
-          type: "raster-dem",
-          url: "mapbox://mapbox.mapbox-terrain-dem-v1",
-          tileSize: 512,
-        });
-        map.addLayer({
-          id: "hillshade",
-          type: "hillshade",
-          source: "hillshade-dem",
-          paint: {
-            "hillshade-exaggeration": 0.5,
-            "hillshade-shadow-color": "#000000",
-            "hillshade-highlight-color": "#ffffff",
-            "hillshade-accent-color": "#4a6741",
-          },
-        }, "waterway-label");
-      } catch (err) {
-        console.log("Hillshade failed:", err);
-      }
-
-      // Draw parcel boundary — the big fix
+      // Parcel boundary
       if (parcelBounds && parcelBounds.length > 0) {
         const coordinates = parcelBounds.map((p) => [p.lng, p.lat]);
         if (coordinates.length > 0 && (coordinates[0][0] !== coordinates[coordinates.length-1][0] || coordinates[0][1] !== coordinates[coordinates.length-1][1])) {
@@ -418,82 +413,38 @@ export default function Terrain3DView({
           data: {
             type: "Feature",
             properties: {},
-            geometry: {
-              type: "Polygon",
-              coordinates: [coordinates],
-            },
+            geometry: { type: "Polygon", coordinates: [coordinates] },
           },
         });
 
-        // Glow effect - outer stroke
-        map.addLayer({
-          id: "parcel-glow",
-          type: "line",
-          source: "parcel-boundary",
-          paint: {
-            "line-color": "#f59e0b",
-            "line-width": 8,
-            "line-opacity": 0.3,
-            "line-blur": 4,
-          },
-        });
+        map.addLayer({ id: "parcel-glow", type: "line", source: "parcel-boundary", paint: { "line-color": "#f59e0b", "line-width": 8, "line-opacity": 0.3, "line-blur": 4 } });
+        map.addLayer({ id: "parcel-outline", type: "line", source: "parcel-boundary", paint: { "line-color": "#f59e0b", "line-width": 3, "line-dasharray": [3, 2] } });
+        map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-boundary", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.08 } });
 
-        // Main boundary line
-        map.addLayer({
-          id: "parcel-outline",
-          type: "line",
-          source: "parcel-boundary",
-          paint: {
-            "line-color": "#f59e0b",
-            "line-width": 3,
-            "line-dasharray": [3, 2],
-          },
-        });
-
-        // Subtle fill
-        map.addLayer({
-          id: "parcel-fill",
-          type: "fill",
-          source: "parcel-boundary",
-          paint: {
-            "fill-color": "#f59e0b",
-            "fill-opacity": 0.08,
-          },
-        });
-
-        // Corner markers
         const cornerFeatures = parcelBounds.map((p) => ({
-          type: "Feature" as const,
-          properties: {},
+          type: "Feature" as const, properties: {},
           geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
         }));
-        map.addSource("parcel-corners", {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: cornerFeatures },
-        });
-        map.addLayer({
-          id: "parcel-corner-dots",
-          type: "circle",
-          source: "parcel-corners",
-          paint: {
-            "circle-radius": 4,
-            "circle-color": "#f59e0b",
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 2,
-          },
-        });
+        map.addSource("parcel-corners", { type: "geojson", data: { type: "FeatureCollection", features: cornerFeatures } });
+        map.addLayer({ id: "parcel-corner-dots", type: "circle", source: "parcel-corners", paint: { "circle-radius": 4, "circle-color": "#f59e0b", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
       }
-
-      // Add deer corridors
-      const corridors = generateDeerCorridors();
-      addCorridorsToMap(map, corridors);
 
       // Center marker
       new mapboxgl.Marker({ color: "#f59e0b" })
         .setLngLat([parcelCenter.lng, parcelCenter.lat])
         .addTo(map);
 
+      // ═══ SHOW MAP NOW — terrain is visible ═══
       setIsMapLoaded(true);
+      setLoadPhase("corridors");
+
+      // ═══ PHASE 2: Add deer intel layers AFTER map is painted (200ms delay) ═══
+      setTimeout(() => {
+        if (!mapRef.current) return;
+        const corridors = generateDeerCorridors();
+        addCorridorsToMap(mapRef.current, corridors);
+        setLoadPhase("done");
+      }, 200);
     });
 
     map.on("pitchend", () => {
@@ -516,6 +467,7 @@ export default function Terrain3DView({
         mapRef.current = null;
       }
       setIsMapLoaded(false);
+      setLoadPhase("terrain");
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, parcelCenter, parcelBounds, generateDeerCorridors]);
@@ -841,14 +793,22 @@ export default function Terrain3DView({
         {/* Map Container */}
         <div ref={mapContainerRef} className="w-full h-full" />
 
-        {/* Loading State */}
+        {/* Loading State — Progressive */}
         {!isMapLoaded && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center bg-stone-900">
             <div className="text-center">
               <div className="animate-spin w-12 h-12 border-4 border-amber-500/30 border-t-amber-500 rounded-full mx-auto mb-4" />
-              <p className="text-stone-400">Loading 3D terrain & deer intel...</p>
-              <p className="text-stone-500 text-xs mt-2">Analyzing corridors, water, stands...</p>
+              <p className="text-stone-400">Loading 3D terrain...</p>
+              <p className="text-stone-500 text-xs mt-2">Rendering satellite imagery & elevation</p>
             </div>
+          </div>
+        )}
+
+        {/* Phase 2 overlay — terrain is visible, corridors loading */}
+        {isMapLoaded && loadPhase === "corridors" && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 bg-stone-800/90 backdrop-blur rounded-lg px-4 py-2 shadow-lg border border-amber-500/30 flex items-center gap-3">
+            <div className="animate-spin w-4 h-4 border-2 border-amber-500/30 border-t-amber-500 rounded-full" />
+            <p className="text-xs text-amber-300">Adding deer intel layers...</p>
           </div>
         )}
 
