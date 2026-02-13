@@ -34,10 +34,22 @@ export default function Terrain3DView({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<InstanceType<typeof mapboxgl.Map> | null>(null);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showLegend, setShowLegend] = useState(true);
   const [activeCorridors, setActiveCorridors] = useState<string[]>(["primary", "secondary", "water", "bedding"]);
   const [currentPitch, setCurrentPitch] = useState(60);
   const [currentBearing, setCurrentBearing] = useState(0);
+
+  // Check WebGL support
+  const checkWebGLSupport = (): boolean => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      return !!gl;
+    } catch (e) {
+      return false;
+    }
+  };
 
   // Generate deer corridors based on parcel location and terrain logic
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
@@ -143,25 +155,52 @@ export default function Terrain3DView({
   useEffect(() => {
     if (!isOpen || !mapContainerRef.current) return;
 
+    // Reset states
+    setLoadError(null);
+    setIsMapLoaded(false);
+
+    // Check WebGL support first
+    if (!checkWebGLSupport()) {
+      setLoadError("Your browser doesn't support WebGL, which is required for 3D terrain viewing. Try using Chrome, Firefox, or Safari.");
+      return;
+    }
+
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
+      setLoadError("Map configuration error. Please try again later.");
       console.error("Mapbox token not found");
       return;
     }
 
     mapboxgl.accessToken = token;
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: "mapbox://styles/mapbox/satellite-streets-v12",
-      center: [parcelCenter.lng, parcelCenter.lat],
-      zoom: 15,
-      pitch: 60,
-      bearing: -20,
-      antialias: true,
-    });
+    let map: InstanceType<typeof mapboxgl.Map>;
+    
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: "mapbox://styles/mapbox/satellite-streets-v12",
+        center: [parcelCenter.lng, parcelCenter.lat],
+        zoom: 15,
+        pitch: 60,
+        bearing: -20,
+        antialias: true,
+      });
+    } catch (err) {
+      console.error("Failed to initialize Mapbox:", err);
+      setLoadError("Failed to load 3D map. Please try refreshing the page.");
+      return;
+    }
 
     mapRef.current = map;
+
+    // Handle map errors
+    map.on("error", (e: any) => {
+      console.error("Mapbox error:", e);
+      if (!isMapLoaded) {
+        setLoadError("Failed to load map tiles. Please check your internet connection.");
+      }
+    });
 
     // Set loaded state after a short delay even if terrain fails
     let hasLoaded = false;
@@ -171,7 +210,7 @@ export default function Terrain3DView({
         hasLoaded = true;
         setIsMapLoaded(true);
       }
-    }, 3000);
+    }, 5000);
 
     map.on("load", () => {
       clearTimeout(loadTimeout);
@@ -274,10 +313,13 @@ export default function Terrain3DView({
 
     return () => {
       clearTimeout(loadTimeout);
-      map.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
       setIsMapLoaded(false);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, parcelCenter, parcelBounds, generateDeerCorridors]);
 
   // Add corridor layers to map
@@ -524,11 +566,43 @@ export default function Terrain3DView({
         <div ref={mapContainerRef} className="w-full h-full" />
 
         {/* Loading State */}
-        {!isMapLoaded && (
+        {!isMapLoaded && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center bg-stone-900">
             <div className="text-center">
               <div className="animate-spin w-12 h-12 border-4 border-amber-500/30 border-t-amber-500 rounded-full mx-auto mb-4" />
               <p className="text-stone-400">Loading 3D terrain...</p>
+              <p className="text-stone-500 text-xs mt-2">This may take a few seconds</p>
+            </div>
+          </div>
+        )}
+
+        {/* Error State */}
+        {loadError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-stone-900">
+            <div className="text-center max-w-md px-6">
+              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Mountain className="w-8 h-8 text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Unable to Load 3D View</h3>
+              <p className="text-stone-400 text-sm mb-4">{loadError}</p>
+              <div className="flex gap-3 justify-center">
+                <Button
+                  variant="outline"
+                  onClick={onClose}
+                  className="border-stone-600 text-stone-300 hover:bg-stone-700"
+                >
+                  Close
+                </Button>
+                <Button
+                  onClick={() => {
+                    setLoadError(null);
+                    setIsMapLoaded(false);
+                  }}
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                >
+                  Try Again
+                </Button>
+              </div>
             </div>
           </div>
         )}
