@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
 const PRODUCT_PRICING = {
   full_report: 350,
   quick_look: 49,
+  hunting_intel: 79,
 } as const;
 
 export async function POST(request: NextRequest) {
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate product type
-    if (!["full_report", "quick_look"].includes(productType)) {
+    if (!["full_report", "quick_look", "hunting_intel"].includes(productType)) {
       return NextResponse.json(
         { error: "Invalid product type" },
         { status: 400 }

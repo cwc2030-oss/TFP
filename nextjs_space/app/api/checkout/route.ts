@@ -45,13 +45,16 @@ export async function POST(request: NextRequest) {
     const selectedLayers = JSON.parse(order.selectedLayers || "[]");
 
     // Determine product name based on product type
-    const isQuickLook = order.productType === "quick_look";
-    const productName = isQuickLook 
-      ? "Terra Firma Broker Quick Look" 
-      : "Terra Firma Land Analysis Report";
-    const productDescription = isQuickLook
-      ? `Property: ${order.parcelAddress}\n2-page deal-killer checklist`
-      : `Property: ${order.parcelAddress}\nLayers: ${selectedLayers.join(", ")}`;
+    let productName = "Terra Firma Land Analysis Report";
+    let productDescription = `Property: ${order.parcelAddress}\nLayers: ${selectedLayers.join(", ")}`;
+    
+    if (order.productType === "quick_look") {
+      productName = "Terra Firma Broker Quick Look";
+      productDescription = `Property: ${order.parcelAddress}\n2-page deal-killer checklist`;
+    } else if (order.productType === "hunting_intel") {
+      productName = "Terra Firma Hunting Intelligence Report";
+      productDescription = `Property: ${order.parcelAddress}\n7-layer deer intel with stand sites & methodology`;
+    }
 
     const checkoutSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],

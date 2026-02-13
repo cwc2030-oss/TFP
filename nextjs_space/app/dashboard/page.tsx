@@ -314,7 +314,7 @@ export default function DashboardPage() {
                                   {formatDate(order.createdAt)}
                                 </span>
                                 <span>•</span>
-                                <span>{layers.length} layers</span>
+                                <span className="font-medium">{order.productType === "hunting_intel" ? "Hunting Intel" : order.productType === "quick_look" ? "Quick Look" : "Full Report"}</span>
                                 <span>•</span>
                                 <span>${order.price}</span>
                               </div>

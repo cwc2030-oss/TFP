@@ -467,6 +467,16 @@ export async function POST(request: NextRequest) {
       return quickLookResponse;
     }
 
+    // Route Hunting Intel orders to the dedicated endpoint
+    if (order.productType === "hunting_intel") {
+      const huntingIntelResponse = await fetch(new URL("/api/hunting-intel", request.url).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      });
+      return huntingIntelResponse;
+    }
+
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();

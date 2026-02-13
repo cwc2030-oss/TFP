@@ -43,7 +43,7 @@ interface SelectedParcel {
   bounds?: { lat: number; lng: number }[];
 }
 
-type ProductType = "full_report" | "quick_look";
+type ProductType = "full_report" | "quick_look" | "hunting_intel";
 
 const PRODUCTS = {
   quick_look: {
@@ -51,12 +51,21 @@ const PRODUCTS = {
     price: 49,
     description: "2-page deal-killer checklist",
     features: ["Verified acreage & boundaries", "FEMA flood zone status", "CWD zone check", "Soil buildability", "Road access verification"],
+    color: "amber",
+  },
+  hunting_intel: {
+    name: "Hunting Intelligence",
+    price: 79,
+    description: "5-page deer intel playbook",
+    features: ["7 layers of deer corridors", "Stand site recommendations", "Season playbook (early/rut/late)", "\"How We Know\" methodology", "CWD & harvest pressure data"],
+    color: "red",
   },
   full_report: {
     name: "Full Land Analysis",
     price: 350,
     description: "9-page comprehensive report",
-    features: ["Everything in Quick Look", "Detailed hunting intel", "Harvest pressure data", "Complete soil analysis", "County resources & contacts", "Deer/Turkey season dates"],
+    features: ["Everything in Hunting Intel", "Complete USDA soil analysis", "Property tax snapshot", "County resources & contacts", "Conservation programs"],
+    color: "emerald",
   },
 } as const;
 
@@ -78,7 +87,7 @@ export default function MapPage() {
   // Read product type from URL parameter
   useEffect(() => {
     const productParam = searchParams.get("product");
-    if (productParam === "quick_look" || productParam === "full_report") {
+    if (productParam === "quick_look" || productParam === "full_report" || productParam === "hunting_intel") {
       setSelectedProduct(productParam);
     }
   }, [searchParams]);
@@ -248,13 +257,13 @@ export default function MapPage() {
                 {/* Quick Look Option */}
                 <button
                   onClick={() => setSelectedProduct("quick_look")}
-                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
                     selectedProduct === "quick_look"
                       ? "border-amber-500 bg-amber-50"
                       : "border-stone-200 hover:border-stone-300"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
                         selectedProduct === "quick_look" ? "border-amber-500" : "border-stone-300"
@@ -263,30 +272,67 @@ export default function MapPage() {
                           <div className="w-2 h-2 rounded-full bg-amber-500" />
                         )}
                       </div>
-                      <span className="font-semibold text-stone-800">{PRODUCTS.quick_look.name}</span>
+                      <span className="font-semibold text-stone-800 text-sm">{PRODUCTS.quick_look.name}</span>
                     </div>
                     <span className="text-lg font-bold text-amber-600">${PRODUCTS.quick_look.price}</span>
                   </div>
                   <p className="text-xs text-stone-500 ml-6">{PRODUCTS.quick_look.description}</p>
-                  <ul className="mt-2 ml-6 space-y-1">
-                    {PRODUCTS.quick_look.features.slice(0, 3).map((f, i) => (
-                      <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
-                        <span className="text-amber-500">✓</span> {f}
-                      </li>
-                    ))}
-                  </ul>
+                  {selectedProduct === "quick_look" && (
+                    <ul className="mt-2 ml-6 space-y-1">
+                      {PRODUCTS.quick_look.features.slice(0, 3).map((f, i) => (
+                        <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
+                          <span className="text-amber-500">✓</span> {f}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </button>
+
+                {/* Hunting Intelligence Option */}
+                <button
+                  onClick={() => setSelectedProduct("hunting_intel")}
+                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
+                    selectedProduct === "hunting_intel"
+                      ? "border-red-500 bg-red-50"
+                      : "border-stone-200 hover:border-stone-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        selectedProduct === "hunting_intel" ? "border-red-500" : "border-stone-300"
+                      }`}>
+                        {selectedProduct === "hunting_intel" && (
+                          <div className="w-2 h-2 rounded-full bg-red-500" />
+                        )}
+                      </div>
+                      <span className="font-semibold text-stone-800 text-sm">{PRODUCTS.hunting_intel.name}</span>
+                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">🦌 NEW</span>
+                    </div>
+                    <span className="text-lg font-bold text-red-600">${PRODUCTS.hunting_intel.price}</span>
+                  </div>
+                  <p className="text-xs text-stone-500 ml-6">{PRODUCTS.hunting_intel.description}</p>
+                  {selectedProduct === "hunting_intel" && (
+                    <ul className="mt-2 ml-6 space-y-1">
+                      {PRODUCTS.hunting_intel.features.slice(0, 4).map((f, i) => (
+                        <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
+                          <span className="text-red-500">✓</span> {f}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </button>
 
                 {/* Full Report Option */}
                 <button
                   onClick={() => setSelectedProduct("full_report")}
-                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
                     selectedProduct === "full_report"
                       ? "border-emerald-500 bg-emerald-50"
                       : "border-stone-200 hover:border-stone-300"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
                         selectedProduct === "full_report" ? "border-emerald-500" : "border-stone-300"
@@ -295,19 +341,21 @@ export default function MapPage() {
                           <div className="w-2 h-2 rounded-full bg-emerald-500" />
                         )}
                       </div>
-                      <span className="font-semibold text-stone-800">{PRODUCTS.full_report.name}</span>
-                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">Most Popular</span>
+                      <span className="font-semibold text-stone-800 text-sm">{PRODUCTS.full_report.name}</span>
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">Most Complete</span>
                     </div>
                     <span className="text-lg font-bold text-emerald-600">${PRODUCTS.full_report.price}</span>
                   </div>
                   <p className="text-xs text-stone-500 ml-6">{PRODUCTS.full_report.description}</p>
-                  <ul className="mt-2 ml-6 space-y-1">
-                    {PRODUCTS.full_report.features.slice(0, 4).map((f, i) => (
-                      <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
-                        <span className="text-emerald-500">✓</span> {f}
-                      </li>
-                    ))}
-                  </ul>
+                  {selectedProduct === "full_report" && (
+                    <ul className="mt-2 ml-6 space-y-1">
+                      {PRODUCTS.full_report.features.slice(0, 4).map((f, i) => (
+                        <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
+                          <span className="text-emerald-500">✓</span> {f}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </button>
               </div>
 
@@ -340,7 +388,7 @@ export default function MapPage() {
                     <span className="text-lg text-stone-700">Total</span>
                     <p className="text-xs text-stone-500">{PRODUCTS[selectedProduct].name}</p>
                   </div>
-                  <span className={`text-3xl font-bold ${selectedProduct === "quick_look" ? "text-amber-600" : "text-emerald-700"}`}>
+                  <span className={`text-3xl font-bold ${selectedProduct === "quick_look" ? "text-amber-600" : selectedProduct === "hunting_intel" ? "text-red-600" : "text-emerald-700"}`}>
                     ${PRODUCTS[selectedProduct].price}
                   </span>
                 </div>
