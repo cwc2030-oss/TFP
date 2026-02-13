@@ -163,27 +163,48 @@ export default function Terrain3DView({
 
     mapRef.current = map;
 
-    map.on("load", () => {
-      // Add terrain
-      map.addSource("mapbox-dem", {
-        type: "raster-dem",
-        url: "mapbox://mapbox.mapbox-terrain-dem-v1",
-        tileSize: 512,
-        maxzoom: 14,
-      });
+    // Set loaded state after a short delay even if terrain fails
+    let hasLoaded = false;
+    const loadTimeout = setTimeout(() => {
+      if (!hasLoaded) {
+        console.log("Terrain load timeout - showing map anyway");
+        hasLoaded = true;
+        setIsMapLoaded(true);
+      }
+    }, 3000);
 
-      map.setTerrain({ source: "mapbox-dem", exaggeration: 1.5 });
+    map.on("load", () => {
+      clearTimeout(loadTimeout);
+      hasLoaded = true;
+      
+      // Add terrain with error handling
+      try {
+        map.addSource("mapbox-dem", {
+          type: "raster-dem",
+          url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+          tileSize: 512,
+          maxzoom: 14,
+        });
+
+        map.setTerrain({ source: "mapbox-dem", exaggeration: 1.5 });
+      } catch (err) {
+        console.log("Terrain failed to load, continuing without 3D elevation:", err);
+      }
 
       // Add sky layer for realism
-      map.addLayer({
-        id: "sky",
-        type: "sky",
-        paint: {
-          "sky-type": "atmosphere",
-          "sky-atmosphere-sun": [0.0, 90.0],
-          "sky-atmosphere-sun-intensity": 15,
-        },
-      });
+      try {
+        map.addLayer({
+          id: "sky",
+          type: "sky",
+          paint: {
+            "sky-type": "atmosphere",
+            "sky-atmosphere-sun": [0.0, 90.0],
+            "sky-atmosphere-sun-intensity": 15,
+          },
+        });
+      } catch (err) {
+        console.log("Sky layer failed:", err);
+      }
 
       // Add parcel boundary if available
       if (parcelBounds && parcelBounds.length > 0) {
@@ -252,6 +273,7 @@ export default function Terrain3DView({
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
 
     return () => {
+      clearTimeout(loadTimeout);
       map.remove();
       mapRef.current = null;
       setIsMapLoaded(false);
