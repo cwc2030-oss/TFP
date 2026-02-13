@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, TreePine, Droplets, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Crosshair, Wheat, Camera, Play, Pause } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, TreePine, Droplets, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Crosshair, Wheat, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -33,14 +33,14 @@ const CORRIDOR_COLORS: Record<string, string> = {
   stand: "#ec4899",
 };
 
-const CORRIDOR_LABELS: Record<string, { name: string; desc: string }> = {
-  primary: { name: "Primary Travel", desc: "Main movement paths" },
-  secondary: { name: "Secondary Routes", desc: "Edge transitions & saddles" },
-  water: { name: "Water Sources", desc: "Creeks, ponds & drainage" },
-  bedding: { name: "Bedding Areas", desc: "Likely bedding zones" },
-  funnel: { name: "Terrain Funnels", desc: "Pinch points & bottlenecks" },
-  food_plot: { name: "Food Plot Zones", desc: "Ideal food plot locations" },
-  stand: { name: "Stand Sites", desc: "Optimal stand placements" },
+const CORRIDOR_LABELS: Record<string, { name: string; desc: string; method: string }> = {
+  primary: { name: "Primary Travel", desc: "Main movement paths", method: "We trace the highest ridgelines connecting timber to food sources. Deer prefer ridge tops because they can see, smell, and hear danger from above. Elevation data shows us where those ridges run on your property." },
+  secondary: { name: "Secondary Routes", desc: "Edge transitions & saddles", method: "Where timber meets open field, deer travel the edge — it's cover and food in one step. We map every timber/field boundary and find the low saddle points between ridges where deer cross with minimal exposure." },
+  water: { name: "Water Sources", desc: "Creeks, ponds & drainage", method: "Elevation data reveals every drainage, creek bottom, and low spot that holds water. Deer visit water 1–3 times daily, especially in early season. If there's a crease in the terrain, water collects there." },
+  bedding: { name: "Bedding Areas", desc: "Likely bedding zones", method: "Deer bed on south-facing slopes (warmth) with thick cover and escape routes downhill. We find slopes facing 135°–225° with nearby timber and at least two exit paths. The steeper the better — they watch their backtrail from above." },
+  funnel: { name: "Terrain Funnels", desc: "Pinch points & bottlenecks", method: "Where a creek, ridge, or fence forces deer through a narrow gap — that's a funnel. We measure the distance between terrain obstacles and flag any gap under 80 yards. These are the spots mature bucks can't avoid." },
+  food_plot: { name: "Food Plot Zones", desc: "Ideal food plot locations", method: "We look for small openings (¼–½ acre) in timber that are screened by terrain on 2+ sides, have decent soil drainage, and sit between bedding and travel corridors. If deer can reach it without crossing open ground, it's a kill plot." },
+  stand: { name: "Stand Sites", desc: "Optimal stand placements", method: "Stand sites sit downwind of travel corridors at funnel points, with entry/exit routes that don't spook bedded deer. We factor prevailing wind (SW in Missouri), morning vs. evening thermals, and line-of-sight to shooting lanes." },
 };
 
 export default function Terrain3DView({
@@ -63,6 +63,8 @@ export default function Terrain3DView({
   const [isSpinning, setIsSpinning] = useState(false);
   const [windDirection, setWindDirection] = useState(225); // SW wind default - common in MO
   const [showWind, setShowWind] = useState(true);
+  const [showMethodology, setShowMethodology] = useState(false);
+  const [expandedMethod, setExpandedMethod] = useState<string | null>(null);
 
   const checkWebGLSupport = (): boolean => {
     try {
@@ -956,6 +958,60 @@ export default function Terrain3DView({
                         </button>
                       );
                     })}
+                  </div>
+
+                  {/* How We Know - Methodology Panel */}
+                  <div className="mt-3">
+                    <button
+                      onClick={() => setShowMethodology(!showMethodology)}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-stone-700/60 hover:bg-stone-700 transition-colors group"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="text-xs font-medium text-amber-300">How We Know — The Method Behind Each Layer</span>
+                      {showMethodology ? <ChevronDown className="w-3.5 h-3.5 text-stone-400" /> : <ChevronUp className="w-3.5 h-3.5 text-stone-400" />}
+                    </button>
+                    
+                    {showMethodology && (
+                      <div className="mt-2 space-y-1.5 max-h-[35vh] overflow-y-auto pr-1">
+                        {/* Intro blurb */}
+                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-2">
+                          <p className="text-xs text-amber-200 leading-relaxed">
+                            <span className="font-semibold">Every layer is terrain-derived.</span> We analyze LiDAR elevation data, slope aspect, drainage patterns, and land cover to predict where deer eat, sleep, drink, and travel. No guesswork — just what the ground tells us.
+                          </p>
+                        </div>
+
+                        {legendItems.map((item) => {
+                          const info = CORRIDOR_LABELS[item.type];
+                          const isExpanded = expandedMethod === item.type;
+                          return (
+                            <button
+                              key={`method-${item.type}`}
+                              onClick={() => setExpandedMethod(isExpanded ? null : item.type)}
+                              className="w-full text-left rounded-lg transition-all overflow-hidden"
+                              style={{ backgroundColor: isExpanded ? `${CORRIDOR_COLORS[item.type]}15` : 'transparent' }}
+                            >
+                              <div className="flex items-center gap-2.5 px-3 py-2 hover:bg-stone-700/40 rounded-lg">
+                                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: CORRIDOR_COLORS[item.type] }} />
+                                <span className="text-xs font-medium text-white flex-1">{info.name}</span>
+                                {isExpanded ? <ChevronUp className="w-3 h-3 text-stone-400 flex-shrink-0" /> : <ChevronDown className="w-3 h-3 text-stone-400 flex-shrink-0" />}
+                              </div>
+                              {isExpanded && (
+                                <div className="px-3 pb-3 pt-1">
+                                  <p className="text-[11px] text-stone-300 leading-relaxed pl-5">{info.method}</p>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+
+                        {/* Disclaimer */}
+                        <div className="bg-stone-700/40 rounded-lg p-2.5 mt-2">
+                          <p className="text-[10px] text-stone-500 leading-relaxed text-center">
+                            🧠 AI predictions based on terrain analysis. Always ground-truth with boots on the property. Trail cameras recommended to verify patterns during season.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <p className="text-[10px] text-stone-500 mt-3 text-center">
