@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MapPin, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText, Mail, Send, Layers, Lock, Unlock, Sparkles, TreePine, Target, Compass, Droplets, Zap, Crown, Calendar } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Search, MapPin, X, CheckCircle, Map as MapIcon, Loader2, RotateCcw, Maximize2, Mountain, Eye, User, Home, Ruler, Building2, MapPinned, Settings, ChevronLeft, ChevronRight, FileText, Mail, Send, Layers, Lock, Unlock, Sparkles, TreePine, Target, Compass, Droplets, Zap, Crown, Calendar, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import Terrain3DView from "./terrain-3d-view";
 
 
 declare global {
@@ -98,6 +99,7 @@ export default function InteractiveMap({
   const [showZoomHint, setShowZoomHint] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailInput, setEmailInput] = useState("");
+  const [show3DView, setShow3DView] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [emailError, setEmailError] = useState("");
@@ -105,13 +107,22 @@ export default function InteractiveMap({
   const [showLayerPanel, setShowLayerPanel] = useState(false);
   
   // Premium Layer definitions
-  const premiumLayers = [
-    { id: 'lidar_terrain', name: 'LiDAR Terrain', icon: Mountain, price: 8, description: 'High-res elevation hillshade', status: 'coming_soon' as const },
-    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, price: 8, description: 'Tree height analysis', status: 'coming_soon' as const },
-    { id: 'deer_movement', name: 'Deer Movement', icon: Target, price: 15, description: 'AI-predicted travel corridors', status: 'coming_soon' as const },
-    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, price: 10, description: 'Likely bedding locations', status: 'coming_soon' as const },
-    { id: 'water_sources', name: 'Water Sources', icon: Droplets, price: 5, description: 'Streams, ponds & wet areas', status: 'coming_soon' as const },
-    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, price: 12, description: 'Optimal stand locations', status: 'coming_soon' as const },
+  type PremiumLayerStatus = 'preview' | 'coming_soon' | 'available';
+  interface PremiumLayer {
+    id: string;
+    name: string;
+    icon: React.ComponentType<{ className?: string }>;
+    price: number;
+    description: string;
+    status: PremiumLayerStatus;
+  }
+  const premiumLayers: PremiumLayer[] = [
+    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, price: 8, description: 'Rotatable 3D view with deer corridors', status: 'preview' },
+    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, price: 8, description: 'Tree height analysis', status: 'coming_soon' },
+    { id: 'deer_movement', name: 'Deer Movement', icon: Target, price: 15, description: 'AI-predicted travel corridors', status: 'coming_soon' },
+    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, price: 10, description: 'Likely bedding locations', status: 'coming_soon' },
+    { id: 'water_sources', name: 'Water Sources', icon: Droplets, price: 5, description: 'Streams, ponds & wet areas', status: 'coming_soon' },
+    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, price: 12, description: 'Optimal stand locations', status: 'coming_soon' },
   ];
   
   const freeLayers = [
@@ -946,7 +957,21 @@ export default function InteractiveMap({
                         </div>
                       </div>
                       <div className="text-right">
-                        {layer.status === 'coming_soon' ? (
+                        {layer.status === 'preview' ? (
+                          <button
+                            onClick={() => {
+                              if (parcelData) {
+                                setShow3DView(true);
+                                setShowLayerPanel(false);
+                              } else {
+                                alert('Select a parcel first to preview 3D terrain');
+                              }
+                            }}
+                            className="text-xs bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-full font-medium flex items-center gap-1 transition-colors"
+                          >
+                            <Play className="w-3 h-3" /> Preview
+                          </button>
+                        ) : layer.status === 'coming_soon' ? (
                           <span className="text-[10px] bg-stone-200 text-stone-600 px-2 py-1 rounded-full font-medium">
                             Coming Soon
                           </span>
@@ -1375,6 +1400,16 @@ export default function InteractiveMap({
           </div>
         </div>
       )}
+
+      {/* 3D Terrain View Modal */}
+      <Terrain3DView
+        isOpen={show3DView}
+        onClose={() => setShow3DView(false)}
+        parcelCenter={{ lat: parcelData?.lat || selectedParcel?.lat || 38.5, lng: parcelData?.lng || selectedParcel?.lng || -92.5 }}
+        parcelBounds={selectedParcel?.bounds}
+        parcelAddress={parcelData?.siteAddress || selectedParcel?.address}
+        acreage={parcelData?.acreage}
+      />
     </div>
   );
 }
