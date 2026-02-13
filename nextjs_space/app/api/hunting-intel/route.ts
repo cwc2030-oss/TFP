@@ -111,7 +111,7 @@ async function fetchGoogleMapImage(lat: number, lng: number, mapType: string, zo
   if (!apiKey) return null;
   try {
     const parcelPath = buildParcelPath(parcelCoordinates);
-    const baseUrl = "https://i.ytimg.com/vi/FjhpOT2bdNg/maxresdefault.jpg";
+    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
     const params = new URLSearchParams({ center: `${lat},${lng}`, zoom: zoom.toString(), size: "640x400", maptype: mapType, key: apiKey });
     const mapUrl = `${baseUrl}?${params.toString()}${parcelPath}`;
     const response = await fetch(mapUrl, { signal: AbortSignal.timeout(15000) });
@@ -758,7 +758,13 @@ export async function POST(request: NextRequest) {
       data: { status: "completed" },
     });
 
-    return NextResponse.json({ pdf: pdfBase64 });
+    const safeAddress = order.parcelAddress
+      .replace(/[^a-zA-Z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .substring(0, 50);
+    const filename = `TFP-HuntingIntel-${safeAddress}.pdf`;
+
+    return NextResponse.json({ pdf: pdfBase64, filename });
   } catch (error) {
     console.error("Hunting Intel PDF error:", error);
     return NextResponse.json({ error: "Failed to generate Hunting Intelligence Report" }, { status: 500 });
