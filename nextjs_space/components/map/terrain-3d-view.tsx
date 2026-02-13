@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, TreePine, Droplets, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Crosshair, Wheat, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -32,6 +32,119 @@ const CORRIDOR_COLORS: Record<string, string> = {
   food_plot: "#eab308",
   stand: "#ec4899",
 };
+
+// ═══ Custom Outdoorsy SVG Icons ═══
+
+const DeerTrackIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    {/* Deer hoof print - two teardrop toes */}
+    <path d="M8 4C8 4 6 8 6.5 11C7 14 9 14 9 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="currentColor" fillOpacity="0.3"/>
+    <path d="M16 4C16 4 18 8 17.5 11C17 14 15 14 15 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="currentColor" fillOpacity="0.3"/>
+    {/* Dewclaws */}
+    <circle cx="7.5" cy="16.5" r="1.5" fill="currentColor" opacity="0.6"/>
+    <circle cx="16.5" cy="16.5" r="1.5" fill="currentColor" opacity="0.6"/>
+    {/* Second smaller track behind */}
+    <path d="M10 18C10 18 9.2 20 9.5 21.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.4"/>
+    <path d="M14 18C14 18 14.8 20 14.5 21.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.4"/>
+  </svg>
+);
+
+const CreekIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    {/* Meandering creek with ripples */}
+    <path d="M3 6C5 5 7 7 9 6C11 5 13 7 15 6C17 5 19 7 21 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    <path d="M3 12C5 11 7 13 9 12C11 11 13 13 15 12C17 11 19 13 21 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    <path d="M3 18C5 17 7 19 9 18C11 17 13 19 15 18C17 17 19 19 21 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+  </svg>
+);
+
+const BeddingIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    {/* Deer curled up / bedded down silhouette */}
+    <ellipse cx="12" cy="16" rx="9" ry="5" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.5"/>
+    {/* Deer body curled */}
+    <path d="M8 14C8 12 10 9 12 8C14 9 15 11 15 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    {/* Head/antler hint */}
+    <circle cx="12" cy="7" r="2" fill="currentColor" fillOpacity="0.4" stroke="currentColor" strokeWidth="1.5"/>
+    <path d="M11 5.5L9.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    <path d="M13 5.5L14.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+  </svg>
+);
+
+const FunnelIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    {/* Terrain pinch point — two ridges narrowing */}
+    <path d="M2 4L10 12L2 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="currentColor" fillOpacity="0.1"/>
+    <path d="M22 4L14 12L22 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="currentColor" fillOpacity="0.1"/>
+    {/* Arrow through the pinch */}
+    <path d="M12 6V18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="2 2" opacity="0.6"/>
+    <path d="M10 15L12 18L14 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6"/>
+  </svg>
+);
+
+const FoodPlotIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    {/* Sprouting plant / food plot */}
+    <path d="M12 22V10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    {/* Left leaf */}
+    <path d="M12 14C12 14 7 13 5 9C5 9 9 8 12 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="currentColor" fillOpacity="0.2"/>
+    {/* Right leaf */}
+    <path d="M12 10C12 10 17 9 19 5C19 5 15 4 12 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="currentColor" fillOpacity="0.2"/>
+    {/* Seeds/ground */}
+    <circle cx="8" cy="21" r="1" fill="currentColor" opacity="0.4"/>
+    <circle cx="16" cy="21" r="1" fill="currentColor" opacity="0.4"/>
+    <circle cx="12" cy="22" r="1" fill="currentColor" opacity="0.5"/>
+  </svg>
+);
+
+const TreeStandIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    {/* Tree trunk */}
+    <path d="M12 24V6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.4"/>
+    {/* Branches */}
+    <path d="M12 10L7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.3"/>
+    <path d="M12 8L17 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.3"/>
+    {/* Platform */}
+    <rect x="8" y="11" width="8" height="2" rx="0.5" fill="currentColor" stroke="currentColor" strokeWidth="1"/>
+    {/* Hunter silhouette on stand */}
+    <circle cx="12" cy="8" r="1.8" fill="currentColor"/>
+    <path d="M10 10L10.5 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    <path d="M14 10L13.5 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    {/* Ladder rungs */}
+    <line x1="10.5" y1="15" x2="13.5" y2="15" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+    <line x1="10.5" y1="18" x2="13.5" y2="18" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+    <line x1="10.5" y1="21" x2="13.5" y2="21" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+  </svg>
+);
+
+// ═══ Smooth path interpolation for organic-looking trails ═══
+function smoothTrailPath(points: [number, number][], jitter: number = 0.15): [number, number][] {
+  if (points.length < 3) return points;
+  const result: [number, number][] = [];
+  // Use seeded pseudo-random for deterministic jitter
+  const seed = (points[0][0] * 1000 + points[0][1] * 1000) % 1;
+  let s = seed;
+  const nextRand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const [x0, y0] = points[i];
+    const [x1, y1] = points[i + 1];
+    result.push([x0, y0]);
+    // Add 2 intermediate points with slight organic jitter
+    for (let t = 1; t <= 2; t++) {
+      const frac = t / 3;
+      const midX = x0 + (x1 - x0) * frac;
+      const midY = y0 + (y1 - y0) * frac;
+      const dist = Math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2);
+      const perpX = -(y1 - y0) / (dist || 1);
+      const perpY = (x1 - x0) / (dist || 1);
+      const wobble = (nextRand() - 0.5) * 2 * jitter * dist;
+      result.push([midX + perpX * wobble, midY + perpY * wobble]);
+    }
+  }
+  result.push(points[points.length - 1]);
+  return result;
+}
 
 const CORRIDOR_LABELS: Record<string, { name: string; desc: string; method: string }> = {
   primary: { name: "Primary Travel", desc: "Main movement paths", method: "We trace the highest ridgelines connecting timber to food sources. Deer prefer ridge tops because they can see, smell, and hear danger from above. Elevation data shows us where those ridges run on your property." },
@@ -77,84 +190,91 @@ export default function Terrain3DView({
     }
   };
 
-  // Generate deer corridors with enhanced features
+  // Generate deer corridors with organic, natural-looking paths
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
     const { lat, lng } = parcelCenter;
     const offset = acreage ? Math.sqrt(acreage / 640) * 0.01 : 0.005;
     
     const corridors: DeerCorridor[] = [
-      // PRIMARY TRAVEL CORRIDORS
+      // PRIMARY TRAVEL CORRIDORS — organic ridge-to-feed paths
       {
         id: "primary-1",
         type: "primary",
         label: "Primary Travel Corridor",
         description: "Main deer movement — ridge to feeding area. High traffic dawn & dusk.",
-        coordinates: [
+        coordinates: smoothTrailPath([
           [lng - offset * 1.2, lat + offset * 0.8],
-          [lng - offset * 0.8, lat + offset * 0.55],
+          [lng - offset * 0.95, lat + offset * 0.68],
+          [lng - offset * 0.7, lat + offset * 0.5],
           [lng - offset * 0.4, lat + offset * 0.3],
-          [lng - offset * 0.1, lat + offset * 0.1],
-          [lng + offset * 0.2, lat - offset * 0.15],
-          [lng + offset * 0.5, lat - offset * 0.4],
+          [lng - offset * 0.15, lat + offset * 0.12],
+          [lng + offset * 0.1, lat - offset * 0.08],
+          [lng + offset * 0.35, lat - offset * 0.28],
+          [lng + offset * 0.55, lat - offset * 0.42],
           [lng + offset * 0.8, lat - offset * 0.6],
-        ],
+        ], 0.18),
       },
       {
         id: "primary-2",
         type: "primary",
         label: "Ridge Funnel Corridor",
         description: "Terrain funnel between ridges — mature bucks use this during rut.",
-        coordinates: [
+        coordinates: smoothTrailPath([
           [lng + offset * 0.9, lat + offset * 1.0],
-          [lng + offset * 0.6, lat + offset * 0.6],
+          [lng + offset * 0.72, lat + offset * 0.78],
+          [lng + offset * 0.5, lat + offset * 0.52],
           [lng + offset * 0.3, lat + offset * 0.3],
-          [lng + offset * 0.1, lat + offset * 0.1],
-          [lng - offset * 0.1, lat - offset * 0.2],
+          [lng + offset * 0.12, lat + offset * 0.1],
+          [lng - offset * 0.05, lat - offset * 0.12],
           [lng - offset * 0.2, lat - offset * 0.4],
-        ],
+        ], 0.15),
       },
-      // SECONDARY ROUTES
+      // SECONDARY ROUTES — lighter trails along edges
       {
         id: "secondary-1",
         type: "secondary",
         label: "Field-to-Timber Transition",
         description: "Edge transition zone — does & yearlings travel this frequently.",
-        coordinates: [
+        coordinates: smoothTrailPath([
           [lng - offset * 0.8, lat - offset * 0.5],
-          [lng - offset * 0.5, lat - offset * 0.3],
-          [lng - offset * 0.2, lat - offset * 0.1],
-          [lng + offset * 0.1, lat + offset * 0.05],
+          [lng - offset * 0.6, lat - offset * 0.38],
+          [lng - offset * 0.35, lat - offset * 0.2],
+          [lng - offset * 0.1, lat - offset * 0.05],
+          [lng + offset * 0.15, lat + offset * 0.08],
           [lng + offset * 0.4, lat + offset * 0.2],
           [lng + offset * 0.6, lat + offset * 0.3],
-        ],
+        ], 0.2),
       },
       {
         id: "secondary-2",
         type: "secondary",
         label: "Saddle Crossing",
         description: "Low saddle between terrain features — natural travel corridor.",
-        coordinates: [
+        coordinates: smoothTrailPath([
           [lng - offset * 0.5, lat + offset * 0.6],
-          [lng - offset * 0.2, lat + offset * 0.35],
-          [lng + offset * 0.1, lat + offset * 0.15],
+          [lng - offset * 0.3, lat + offset * 0.45],
+          [lng - offset * 0.08, lat + offset * 0.25],
+          [lng + offset * 0.15, lat + offset * 0.08],
           [lng + offset * 0.4, lat - offset * 0.1],
-        ],
+        ], 0.22),
       },
-      // WATER SOURCES
+      // WATER SOURCES — meandering creek lines
       {
         id: "water-1",
         type: "water",
         label: "Primary Creek Bottom",
         description: "Seasonal drainage — reliable water source. Deer visit daily.",
-        coordinates: [
+        coordinates: smoothTrailPath([
           [lng - offset * 1.1, lat + offset * 0.3],
-          [lng - offset * 0.7, lat + offset * 0.2],
+          [lng - offset * 0.85, lat + offset * 0.28],
+          [lng - offset * 0.6, lat + offset * 0.18],
           [lng - offset * 0.3, lat + offset * 0.08],
-          [lng, lat],
-          [lng + offset * 0.3, lat - offset * 0.1],
-          [lng + offset * 0.6, lat - offset * 0.2],
+          [lng - offset * 0.05, lat + offset * 0.02],
+          [lng + offset * 0.2, lat - offset * 0.06],
+          [lng + offset * 0.45, lat - offset * 0.15],
+          [lng + offset * 0.7, lat - offset * 0.25],
           [lng + offset * 1.0, lat - offset * 0.35],
-        ],
+        ], 0.25),
       },
       {
         id: "water-2",
@@ -163,14 +283,16 @@ export default function Terrain3DView({
         description: "Year-round water — high traffic staging area in early season.",
         coordinates: [
           [lng + offset * 0.55, lat - offset * 0.5],
-          [lng + offset * 0.65, lat - offset * 0.55],
-          [lng + offset * 0.7, lat - offset * 0.48],
-          [lng + offset * 0.65, lat - offset * 0.42],
-          [lng + offset * 0.55, lat - offset * 0.45],
+          [lng + offset * 0.62, lat - offset * 0.56],
+          [lng + offset * 0.7, lat - offset * 0.52],
+          [lng + offset * 0.72, lat - offset * 0.46],
+          [lng + offset * 0.68, lat - offset * 0.4],
+          [lng + offset * 0.6, lat - offset * 0.42],
+          [lng + offset * 0.55, lat - offset * 0.46],
           [lng + offset * 0.55, lat - offset * 0.5],
         ],
       },
-      // BEDDING AREAS
+      // BEDDING AREAS — organic irregular shapes
       {
         id: "bedding-1",
         type: "bedding",
@@ -178,11 +300,14 @@ export default function Terrain3DView({
         description: "South-facing slope with thermal cover. Mature bucks bed here.",
         coordinates: [
           [lng + offset * 0.25, lat + offset * 0.65],
-          [lng + offset * 0.45, lat + offset * 0.75],
-          [lng + offset * 0.6, lat + offset * 0.7],
-          [lng + offset * 0.55, lat + offset * 0.55],
-          [lng + offset * 0.4, lat + offset * 0.5],
-          [lng + offset * 0.25, lat + offset * 0.55],
+          [lng + offset * 0.35, lat + offset * 0.72],
+          [lng + offset * 0.48, lat + offset * 0.76],
+          [lng + offset * 0.58, lat + offset * 0.7],
+          [lng + offset * 0.6, lat + offset * 0.62],
+          [lng + offset * 0.55, lat + offset * 0.53],
+          [lng + offset * 0.42, lat + offset * 0.5],
+          [lng + offset * 0.3, lat + offset * 0.53],
+          [lng + offset * 0.25, lat + offset * 0.58],
           [lng + offset * 0.25, lat + offset * 0.65],
         ],
       },
@@ -193,48 +318,54 @@ export default function Terrain3DView({
         description: "Dense cedar thicket bedding — wind protection, escape cover nearby.",
         coordinates: [
           [lng - offset * 0.75, lat - offset * 0.25],
-          [lng - offset * 0.55, lat - offset * 0.2],
+          [lng - offset * 0.62, lat - offset * 0.2],
+          [lng - offset * 0.52, lat - offset * 0.26],
           [lng - offset * 0.5, lat - offset * 0.35],
-          [lng - offset * 0.6, lat - offset * 0.45],
+          [lng - offset * 0.55, lat - offset * 0.44],
+          [lng - offset * 0.65, lat - offset * 0.46],
           [lng - offset * 0.75, lat - offset * 0.4],
+          [lng - offset * 0.78, lat - offset * 0.32],
           [lng - offset * 0.75, lat - offset * 0.25],
         ],
       },
-      // TERRAIN FUNNELS (NEW!)
+      // TERRAIN FUNNELS — short pinch corridors
       {
         id: "funnel-1",
         type: "funnel",
         label: "Creek-Ridge Pinch Point",
         description: "Terrain bottleneck where creek meets ridge — forces deer through narrow corridor. PRIME stand location.",
-        coordinates: [
-          [lng - offset * 0.15, lat + offset * 0.15],
+        coordinates: smoothTrailPath([
+          [lng - offset * 0.18, lat + offset * 0.18],
           [lng - offset * 0.05, lat + offset * 0.05],
-          [lng + offset * 0.05, lat - offset * 0.05],
-        ],
+          [lng + offset * 0.08, lat - offset * 0.08],
+        ], 0.1),
       },
       {
         id: "funnel-2",
         type: "funnel",
         label: "Field Corner Funnel",
         description: "Where timber meets field corner — natural staging area. Bucks cruise this during rut.",
-        coordinates: [
-          [lng + offset * 0.35, lat + offset * 0.15],
+        coordinates: smoothTrailPath([
+          [lng + offset * 0.32, lat + offset * 0.18],
           [lng + offset * 0.45, lat + offset * 0.05],
-          [lng + offset * 0.55, lat - offset * 0.05],
-        ],
+          [lng + offset * 0.58, lat - offset * 0.08],
+        ], 0.1),
       },
-      // FOOD PLOT ZONES (NEW!)
+      // FOOD PLOT ZONES — organic irregular shapes
       {
         id: "food-1",
         type: "food_plot",
         label: "Kill Plot — Clover/Brassica",
         description: "¼-acre kill plot in timber opening. Plant clover & brassica. Screened by terrain on 3 sides.",
         coordinates: [
-          [lng - offset * 0.3, lat - offset * 0.55],
-          [lng - offset * 0.2, lat - offset * 0.5],
-          [lng - offset * 0.15, lat - offset * 0.6],
-          [lng - offset * 0.25, lat - offset * 0.65],
-          [lng - offset * 0.3, lat - offset * 0.55],
+          [lng - offset * 0.3, lat - offset * 0.54],
+          [lng - offset * 0.22, lat - offset * 0.48],
+          [lng - offset * 0.15, lat - offset * 0.52],
+          [lng - offset * 0.14, lat - offset * 0.6],
+          [lng - offset * 0.18, lat - offset * 0.66],
+          [lng - offset * 0.27, lat - offset * 0.65],
+          [lng - offset * 0.32, lat - offset * 0.6],
+          [lng - offset * 0.3, lat - offset * 0.54],
         ],
       },
       {
@@ -244,13 +375,16 @@ export default function Terrain3DView({
         description: "½-acre destination plot near bedding. Soybeans draw deer out before dark.",
         coordinates: [
           [lng + offset * 0.1, lat + offset * 0.4],
-          [lng + offset * 0.25, lat + offset * 0.45],
-          [lng + offset * 0.3, lat + offset * 0.35],
-          [lng + offset * 0.15, lat + offset * 0.3],
+          [lng + offset * 0.18, lat + offset * 0.44],
+          [lng + offset * 0.27, lat + offset * 0.44],
+          [lng + offset * 0.32, lat + offset * 0.38],
+          [lng + offset * 0.28, lat + offset * 0.3],
+          [lng + offset * 0.18, lat + offset * 0.3],
+          [lng + offset * 0.1, lat + offset * 0.34],
           [lng + offset * 0.1, lat + offset * 0.4],
         ],
       },
-      // OPTIMAL STAND SITES (NEW!)
+      // OPTIMAL STAND SITES
       {
         id: "stand-1",
         type: "stand",
@@ -736,13 +870,13 @@ export default function Terrain3DView({
   if (!isOpen) return null;
 
   const legendItems = [
-    { type: "primary", icon: <div className="w-5 h-1.5 bg-red-500 rounded-full" />, color: "red" },
-    { type: "secondary", icon: <div className="w-5 h-1.5 bg-orange-500 rounded-full" />, color: "orange" },
-    { type: "water", icon: <Droplets className="w-4 h-4 text-blue-400" />, color: "blue" },
-    { type: "bedding", icon: <TreePine className="w-4 h-4 text-green-400" />, color: "green" },
-    { type: "funnel", icon: <div className="w-5 h-1.5 bg-purple-500 rounded-full" />, color: "purple" },
-    { type: "food_plot", icon: <Wheat className="w-4 h-4 text-yellow-400" />, color: "yellow" },
-    { type: "stand", icon: <Crosshair className="w-4 h-4 text-pink-400" />, color: "pink" },
+    { type: "primary", icon: <DeerTrackIcon className="w-5 h-5 text-red-400" />, color: "red" },
+    { type: "secondary", icon: <DeerTrackIcon className="w-4 h-4 text-orange-400 opacity-70" />, color: "orange" },
+    { type: "water", icon: <CreekIcon className="w-5 h-5 text-blue-400" />, color: "blue" },
+    { type: "bedding", icon: <BeddingIcon className="w-5 h-5 text-green-400" />, color: "green" },
+    { type: "funnel", icon: <FunnelIcon className="w-5 h-5 text-purple-400" />, color: "purple" },
+    { type: "food_plot", icon: <FoodPlotIcon className="w-5 h-5 text-yellow-400" />, color: "yellow" },
+    { type: "stand", icon: <TreeStandIcon className="w-5 h-5 text-pink-400" />, color: "pink" },
   ];
 
   return (
