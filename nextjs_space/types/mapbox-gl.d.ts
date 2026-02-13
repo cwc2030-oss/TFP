@@ -5,10 +5,10 @@ declare module 'mapbox-gl' {
   }
 
   export interface MapOptions {
-    container: HTMLElement | string;
+    container: HTMLElement;
     style: string;
-    center?: [number, number];
-    zoom?: number;
+    center: [number, number];
+    zoom: number;
     pitch?: number;
     bearing?: number;
     antialias?: boolean;
@@ -17,43 +17,52 @@ declare module 'mapbox-gl' {
   export interface MapLayerMouseEvent {
     lngLat: LngLatLike;
     features?: Array<{
-      properties?: Record<string, any>;
+      properties: Record<string, any>;
+      geometry: any;
     }>;
   }
 
   export class Map {
     constructor(options: MapOptions);
-    on(type: string, listener: (ev: any) => void): this;
-    on(type: string, layer: string, listener: (ev: MapLayerMouseEvent) => void): this;
-    addSource(id: string, source: any): this;
-    addLayer(layer: any): this;
-    setTerrain(options: any): this;
+    on(event: string, callback: (...args: any[]) => void): void;
+    on(event: string, layer: string, callback: (...args: any[]) => void): void;
+    addSource(id: string, source: any): void;
+    addLayer(layer: any, before?: string): void;
+    getSource(id: string): any;
     getLayer(id: string): any;
-    setLayoutProperty(layer: string, name: string, value: any): this;
-    flyTo(options: any): this;
-    easeTo(options: any): this;
+    setLayoutProperty(layerId: string, name: string, value: any): void;
+    setPaintProperty(layerId: string, name: string, value: any): void;
+    setTerrain(terrain: any): void;
     getBearing(): number;
-    setBearing(bearing: number): this;
+    setBearing(bearing: number): void;
     getPitch(): number;
+    setPitch(pitch: number): void;
+    getZoom(): number;
+    setZoom(zoom: number): void;
+    flyTo(options: any): void;
+    easeTo(options: any): void;
     getCanvas(): HTMLCanvasElement;
-    addControl(control: any, position?: string): this;
+    addControl(control: any, position?: string): void;
     remove(): void;
   }
 
   export class Marker {
-    constructor(options?: { color?: string });
-    setLngLat(lnglat: [number, number]): this;
+    constructor(options?: any);
+    setLngLat(lnglat: [number, number] | LngLatLike): this;
     addTo(map: Map): this;
+    remove(): void;
   }
 
   export class Popup {
-    setLngLat(lnglat: LngLatLike): this;
+    constructor(options?: any);
+    setLngLat(lnglat: [number, number] | LngLatLike): this;
     setHTML(html: string): this;
     addTo(map: Map): this;
+    remove(): void;
   }
 
   export class NavigationControl {
-    constructor(options?: { visualizePitch?: boolean });
+    constructor(options?: { showCompass?: boolean; showZoom?: boolean; visualizePitch?: boolean });
   }
 
   export let accessToken: string;

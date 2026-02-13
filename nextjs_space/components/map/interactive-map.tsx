@@ -1406,7 +1406,22 @@ export default function InteractiveMap({
         isOpen={show3DView}
         onClose={() => setShow3DView(false)}
         parcelCenter={{ lat: parcelData?.lat || selectedParcel?.lat || 38.5, lng: parcelData?.lng || selectedParcel?.lng || -92.5 }}
-        parcelBounds={selectedParcel?.bounds}
+        parcelBounds={(() => {
+          // Extract bounds from parcelData coordinates for the 3D view
+          if (!parcelData?.coordinates || parcelData.coordinates.length === 0) return selectedParcel?.bounds;
+          try {
+            let coords: number[][] = [];
+            if (parcelData.geometryType === "MultiPolygon") {
+              const mc = parcelData.coordinates as number[][][][];
+              mc.forEach(polygon => { if (polygon[0]) coords = coords.concat(polygon[0]); });
+            } else {
+              const pc = parcelData.coordinates as number[][][];
+              if (pc[0]) coords = pc[0];
+            }
+            if (coords.length > 0) return coords.map(c => ({ lat: c[1], lng: c[0] }));
+          } catch (e) { /* fallback */ }
+          return selectedParcel?.bounds;
+        })()}
         parcelAddress={parcelData?.siteAddress || selectedParcel?.address}
         acreage={parcelData?.acreage}
       />
