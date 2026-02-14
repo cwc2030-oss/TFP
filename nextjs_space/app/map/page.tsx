@@ -125,7 +125,10 @@ export default function MapPage() {
     if (product) {
       setSelectedProduct(product as ProductType);
     }
-    if (selectedLayers.length === 0) {
+    // Skip layer check for fixed products (hunting_intel, quick_look)
+    const fixedProducts = ['hunting_intel', 'quick_look'];
+    const productToCheck = product || selectedProduct;
+    if (!fixedProducts.includes(productToCheck) && selectedLayers.length === 0) {
       setError("Please select at least one map layer for your report");
       return;
     }
