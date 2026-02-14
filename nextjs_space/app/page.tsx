@@ -91,19 +91,19 @@ function HeroSection() {
             </div>
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
-              Find your forest.
-              <span className="block text-emerald-400 mt-2">Know your land.</span>
+              Land Intelligence.
+              <span className="block text-emerald-400 mt-2">Your property, decoded.</span>
             </h1>
             
             <p className="text-xl text-stone-300 mb-4 leading-relaxed">
-              Before you put money down on that hunting tract, wouldn't you like to know 
-              what the county records <em>really</em> say?
+              Terrain-derived deer intel, CWD status, flood zones, soil data — 
+              everything the ground tells us about your land, in plain English.
             </p>
             
             <p className="text-lg text-stone-400 mb-8">
-              We pull together the stuff that matters — CWD status, deer harvest numbers, 
-              drought conditions, flood zones, soil quality — and put it all in one 
-              plain-English report. No surprises after closing.
+              Whether you&apos;re buying, selling, or hunting the land you already own — 
+              we pull together the stuff that matters and put it in one report. 
+              No guesswork. No surprises.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4">

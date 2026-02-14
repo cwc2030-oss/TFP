@@ -16,11 +16,11 @@ export default function Footer() {
               </div>
               <div>
                 <span className="font-bold text-lg text-white">Terra Firma™</span>
-                <span className="text-sm text-stone-400 block -mt-1">Partners LLC</span>
+                <span className="text-[11px] text-stone-500 block -mt-0.5 tracking-wide uppercase">Land Intelligence</span>
               </div>
             </div>
             <p className="text-sm text-stone-400 max-w-xs">
-              Professional land parcel analysis and mapping services across the United States.
+              Terrain-derived land intelligence for Missouri hunters, landowners, and brokers.
             </p>
           </div>
 

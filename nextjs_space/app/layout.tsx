@@ -14,15 +14,15 @@ const OG_IMAGE_URL = "https://terrafirmapartners.abacusai.app/og-image.png";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://terrafirmapartners.abacusai.app"),
-  title: "Terra Firma Partners™ | Hunting Land Analysis Reports | Missouri",
+  title: "Terra Firma Partners™ | Land Intelligence | Missouri",
   description:
-    "Find your forest. Know your land. Professional analysis for hunting and recreational property buyers. CWD status, harvest pressure, drought conditions, flood zones, soil data & more. $350 per report.",
+    "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones, soil data & more. Reports from $49.",
   keywords: [
-    "hunting land report", "recreational land analysis", "CWD status Missouri", 
-    "deer hunting property", "land analysis report", "harvest pressure data",
-    "Missouri hunting land", "rural land report", "parcel analysis", 
+    "land intelligence", "hunting land report", "recreational land analysis", "CWD status Missouri", 
+    "deer hunting property", "land analysis report", "harvest pressure data", "deer intel",
+    "Missouri hunting land", "rural land report", "parcel analysis", "LiDAR terrain",
     "flood zone map", "soil report", "hunting acreage", "land buyer report",
-    "trophy deer land", "recreational property Missouri"
+    "trophy deer land", "recreational property Missouri", "hunting intelligence report"
   ],
   authors: [{ name: "Terra Firma Partners LLC" }],
   icons: {
@@ -35,22 +35,22 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: "https://terrafirmapartners.abacusai.app",
     siteName: "Terra Firma Partners™",
-    title: "Terra Firma Partners™ | Hunting Land Analysis Reports",
+    title: "Terra Firma Partners™ | Land Intelligence",
     description:
-      "Find your forest. Know your land. CWD status, harvest pressure, drought, flood zones & soil data for hunting property. $350 per report.",
+      "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones & soil data. Reports from $49.",
     images: [
       {
         url: OG_IMAGE_URL,
         width: 1200,
         height: 630,
-        alt: "Terra Firma Partners - Hunting Land Analysis Reports",
+        alt: "Terra Firma Partners - Land Intelligence",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Terra Firma Partners™ | Find Your Forest",
-    description: "Find your forest. Know your land. CWD status, harvest pressure, drought & flood data for hunting land buyers.",
+    title: "Terra Firma Partners™ | Land Intelligence",
+    description: "Land Intelligence for Missouri hunting and recreational property. Terrain-derived deer intel, CWD status, harvest data & more.",
     images: [OG_IMAGE_URL],
   },
   robots: {

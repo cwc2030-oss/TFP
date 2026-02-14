@@ -48,7 +48,7 @@ export default function Navbar() {
             </div>
             <div className="hidden sm:block">
               <span className="font-bold text-lg text-emerald-800">Terra Firma</span>
-              <span className="text-sm text-stone-500 block -mt-1">Partners LLC</span>
+              <span className="text-[11px] text-stone-400 block -mt-0.5 tracking-wide uppercase">Land Intelligence</span>
             </div>
           </Link>
 
