@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -13,6 +13,8 @@ interface Terrain3DViewProps {
   parcelBounds?: { lat: number; lng: number }[];
   parcelAddress?: string;
   acreage?: number;
+  previewMode?: boolean; // When true, shows locked deer intel layers with upgrade CTA
+  onUnlockIntel?: () => void; // Callback when user wants to buy $79 report
 }
 
 interface DeerCorridor {
@@ -163,6 +165,8 @@ export default function Terrain3DView({
   parcelBounds,
   parcelAddress,
   acreage,
+  previewMode = false,
+  onUnlockIntel,
 }: Terrain3DViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<InstanceType<typeof mapboxgl.Map> | null>(null);
@@ -891,8 +895,12 @@ export default function Terrain3DView({
               </div>
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  3D Terrain + Deer Intel
-                  <span className="text-xs bg-red-500/30 text-red-300 px-2 py-0.5 rounded-full animate-pulse">LIVE</span>
+                  3D Terrain {previewMode ? "Preview" : "+ Deer Intel"}
+                  {previewMode ? (
+                    <span className="text-xs bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full">FREE</span>
+                  ) : (
+                    <span className="text-xs bg-red-500/30 text-red-300 px-2 py-0.5 rounded-full animate-pulse">LIVE</span>
+                  )}
                 </h2>
                 <p className="text-sm text-stone-400">
                   {parcelAddress || "Selected Parcel"}
@@ -1022,32 +1030,76 @@ export default function Terrain3DView({
                 <div className="flex items-center gap-2">
                   <Target className="w-4 h-4 text-amber-400" />
                   <span className="text-sm font-medium text-white">Deer Intel Layers</span>
-                  <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">AI Predicted</span>
-                  <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">{activeCorridors.length}/7 Active</span>
+                  {previewMode ? (
+                    <span className="text-xs bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Lock className="w-3 h-3" /> Preview Mode
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">AI Predicted</span>
+                      <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">{activeCorridors.length}/7 Active</span>
+                    </>
+                  )}
                 </div>
                 <Info className="w-4 h-4 text-stone-400" />
               </button>
               
               {showLegend && (
                 <div className="p-3 pt-0 border-t border-stone-700">
+                  {/* Preview Mode: Unlock CTA */}
+                  {previewMode && (
+                    <div className="bg-gradient-to-r from-red-600/90 to-orange-600/90 rounded-lg p-3 mt-3 mb-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-white font-semibold text-sm flex items-center gap-2">
+                            <Lock className="w-4 h-4" /> Deer Intel is Locked
+                          </p>
+                          <p className="text-red-100 text-xs mt-0.5">
+                            Unlock all 7 layers + stand sites + season playbook
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => onUnlockIntel?.()}
+                          className="bg-white hover:bg-red-50 text-red-600 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors shadow-lg"
+                        >
+                          <Unlock className="w-4 h-4" />
+                          Unlock — $79
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-red-200 mt-2 text-center">
+                        🦌 Full 5-page PDF report with stand recommendations & methodology
+                      </p>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mt-3">
                     {legendItems.map((item) => {
                       const info = CORRIDOR_LABELS[item.type];
                       return (
                         <button
                           key={item.type}
-                          onClick={() => toggleCorridor(item.type)}
-                          className={`flex items-center gap-2 p-2 rounded-lg transition-all ${
-                            activeCorridors.includes(item.type)
-                              ? `bg-${item.color}-500/20 border border-${item.color}-500/50`
-                              : "bg-stone-700/50 border border-transparent opacity-40"
+                          onClick={() => !previewMode && toggleCorridor(item.type)}
+                          disabled={previewMode}
+                          className={`flex items-center gap-2 p-2 rounded-lg transition-all relative ${
+                            previewMode 
+                              ? "bg-stone-700/30 border border-stone-600/50 cursor-not-allowed"
+                              : activeCorridors.includes(item.type)
+                                ? `bg-${item.color}-500/20 border border-${item.color}-500/50`
+                                : "bg-stone-700/50 border border-transparent opacity-40"
                           }`}
-                          style={activeCorridors.includes(item.type) ? { backgroundColor: `${CORRIDOR_COLORS[item.type]}22`, borderColor: `${CORRIDOR_COLORS[item.type]}88` } : {}}
+                          style={!previewMode && activeCorridors.includes(item.type) ? { backgroundColor: `${CORRIDOR_COLORS[item.type]}22`, borderColor: `${CORRIDOR_COLORS[item.type]}88` } : {}}
                         >
-                          {item.icon}
+                          {previewMode && (
+                            <div className="absolute top-1 right-1">
+                              <Lock className="w-2.5 h-2.5 text-stone-500" />
+                            </div>
+                          )}
+                          <div className={previewMode ? "opacity-50" : ""}>
+                            {item.icon}
+                          </div>
                           <div className="text-left">
-                            <p className="text-[11px] font-medium text-white leading-tight">{info.name}</p>
-                            <p className="text-[9px] text-stone-400 leading-tight">{info.desc}</p>
+                            <p className={`text-[11px] font-medium leading-tight ${previewMode ? "text-stone-400" : "text-white"}`}>{info.name}</p>
+                            <p className="text-[9px] text-stone-500 leading-tight">{info.desc}</p>
                           </div>
                         </button>
                       );
@@ -1056,6 +1108,12 @@ export default function Terrain3DView({
 
                   {/* How We Know - Methodology Panel */}
                   <div className="mt-3">
+                    {previewMode ? (
+                      <div className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-stone-700/40 border border-stone-600/50">
+                        <Lock className="w-3.5 h-3.5 text-stone-500" />
+                        <span className="text-xs font-medium text-stone-500">How We Know — Included in $79 Report</span>
+                      </div>
+                    ) : (
                     <button
                       onClick={() => setShowMethodology(!showMethodology)}
                       className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-stone-700/60 hover:bg-stone-700 transition-colors group"
@@ -1064,6 +1122,7 @@ export default function Terrain3DView({
                       <span className="text-xs font-medium text-amber-300">How We Know — The Method Behind Each Layer</span>
                       {showMethodology ? <ChevronDown className="w-3.5 h-3.5 text-stone-400" /> : <ChevronUp className="w-3.5 h-3.5 text-stone-400" />}
                     </button>
+                    )}
                     
                     {showMethodology && (
                       <div className="mt-2 space-y-1.5 max-h-[35vh] overflow-y-auto pr-1">

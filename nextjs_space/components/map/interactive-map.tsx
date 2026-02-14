@@ -1517,6 +1517,15 @@ export default function InteractiveMap({
         })()}
         parcelAddress={parcelData?.siteAddress || selectedParcel?.address}
         acreage={parcelData?.acreage}
+        previewMode={true}
+        onUnlockIntel={() => {
+          // Close 3D view and trigger checkout for hunting intel
+          setShow3DView(false);
+          if (parcelData) {
+            setShowLayerPanel(false);
+            onCheckout?.('hunting_intel');
+          }
+        }}
       />
     </div>
   );
