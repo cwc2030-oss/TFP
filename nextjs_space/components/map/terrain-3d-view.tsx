@@ -173,7 +173,7 @@ export default function Terrain3DView({
   const spinAnimRef = useRef<number | null>(null);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [showLegend, setShowLegend] = useState(true);
+  const [showLegend, setShowLegend] = useState(!previewMode); // Collapsed in preview mode
   const [activeCorridors, setActiveCorridors] = useState<string[]>(["primary", "secondary", "water", "bedding", "funnel", "food_plot", "stand"]);
   const [currentPitch, setCurrentPitch] = useState(60);
   const [currentBearing, setCurrentBearing] = useState(0);
@@ -1074,29 +1074,21 @@ export default function Terrain3DView({
               
               {showLegend && (
                 <div className="p-3 pt-0 border-t border-stone-700">
-                  {/* Preview Mode: Unlock CTA */}
+                  {/* Preview Mode: Compact Unlock CTA Bar */}
                   {previewMode && (
-                    <div className="bg-gradient-to-r from-red-600/90 to-orange-600/90 rounded-lg p-3 mt-3 mb-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-white font-semibold text-sm flex items-center gap-2">
-                            <Lock className="w-4 h-4" /> Deer Intel is Locked
-                          </p>
-                          <p className="text-red-100 text-xs mt-0.5">
-                            Unlock all 7 layers + stand sites + season playbook
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => onUnlockIntel?.()}
-                          className="bg-white hover:bg-red-50 text-red-600 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors shadow-lg"
-                        >
-                          <Unlock className="w-4 h-4" />
-                          Unlock — $79
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-red-200 mt-2 text-center">
-                        🦌 Full 5-page PDF report with stand recommendations & methodology
+                    <div className="bg-gradient-to-r from-red-600 to-orange-500 rounded-lg px-3 py-2 mt-2 mb-2 flex items-center justify-between gap-3">
+                      <p className="text-white text-xs flex items-center gap-1.5">
+                        <Lock className="w-3 h-3" />
+                        <span className="font-medium">7 layers locked</span>
+                        <span className="text-red-100 hidden sm:inline">— stand sites, season playbook & methodology</span>
                       </p>
+                      <button
+                        onClick={() => onUnlockIntel?.()}
+                        className="bg-white hover:bg-red-50 text-red-600 px-3 py-1 rounded font-bold text-xs flex items-center gap-1 transition-colors whitespace-nowrap"
+                      >
+                        <Unlock className="w-3 h-3" />
+                        Unlock $79
+                      </button>
                     </div>
                   )}
 
