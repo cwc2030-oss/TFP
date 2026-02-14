@@ -84,7 +84,8 @@ export default function MapPage() {
   const [error, setError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Read product type from URL parameter
+  // Read product type and demo mode from URL parameters
+  const autoOpen3D = searchParams.get("demo") === "3d";
   useEffect(() => {
     const productParam = searchParams.get("product");
     if (productParam === "quick_look" || productParam === "full_report" || productParam === "hunting_intel") {
@@ -211,6 +212,7 @@ export default function MapPage() {
           <InteractiveMap
             onParcelSelect={handleParcelSelect}
             onCheckout={handleProceedToCheckout}
+            autoOpen3D={autoOpen3D}
           />
 
 {/* Order Summary card removed - checkout button now in parcel panel */}

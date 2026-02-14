@@ -116,12 +116,13 @@ function HeroSection() {
                   Look Up a Property
                 </Button>
               </Link>
-              <Link href="/api/free-look?v=20260205" target="_blank">
+              <Link href="/map?demo=3d">
                 <Button
                   size="lg"
                   className="bg-stone-700 text-white hover:bg-stone-600 border border-stone-500 px-8"
                 >
-                  Take a Free Look
+                  <Mountain className="w-5 h-5 mr-2" />
+                  See 3D Terrain Demo
                 </Button>
               </Link>
             </div>

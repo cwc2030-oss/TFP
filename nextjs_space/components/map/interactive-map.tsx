@@ -27,6 +27,7 @@ interface InteractiveMapProps {
   onLayersChange?: (layers: string[]) => void;
   onCheckout?: (product?: string) => void;
   initialLayers?: string[];
+  autoOpen3D?: boolean;
 }
 
 interface SearchResult {
@@ -52,11 +53,25 @@ interface ParcelData {
   regridPath: string;
 }
 
+// Sample parcel for demo/free-look 3D preview (Pleasant Hill, MO ~117 acres)
+const SAMPLE_PARCEL_3D: SelectedParcel = {
+  address: "2100 S State Route Y, Pleasant Hill, MO 64080",
+  lat: 38.7958,
+  lng: -94.2733,
+  bounds: [
+    { lat: 38.7995, lng: -94.2785 },
+    { lat: 38.7995, lng: -94.2680 },
+    { lat: 38.7920, lng: -94.2680 },
+    { lat: 38.7920, lng: -94.2785 },
+  ],
+};
+
 export default function InteractiveMap({
   onParcelSelect,
   onLayersChange,
   onCheckout,
   initialLayers = [],
+  autoOpen3D = false,
 }: InteractiveMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<google.maps.Map | null>(null);
@@ -140,6 +155,21 @@ export default function InteractiveMap({
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Auto-open 3D LiDAR with sample parcel when demo mode
+  const auto3DTriggered = useRef(false);
+  useEffect(() => {
+    if (autoOpen3D && !auto3DTriggered.current) {
+      auto3DTriggered.current = true;
+      // Small delay to let map initialize, then load sample parcel + open 3D
+      const timer = setTimeout(() => {
+        setSelectedParcel(SAMPLE_PARCEL_3D);
+        onParcelSelect?.(SAMPLE_PARCEL_3D);
+        setShow3DView(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [autoOpen3D, onParcelSelect]);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   

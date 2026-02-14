@@ -44,14 +44,12 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <a 
-                  href="/api/free-look?v=20260205" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
+                <Link 
+                  href="/map?demo=3d"
                   className="text-sm hover:text-emerald-400 transition-colors"
                 >
-                  Free Look
-                </a>
+                  3D Terrain Demo
+                </Link>
               </li>
             </ul>
           </div>
