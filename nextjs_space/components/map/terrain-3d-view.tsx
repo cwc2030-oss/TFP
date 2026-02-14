@@ -379,37 +379,40 @@ export default function Terrain3DView({
           [lng + offset * (waterOffsetX * 0.4), lat + offset * (waterOffsetY - 0.15)],
         ], 0.08),
       },
-      // FOOD PLOTS — on drier ground, between bedding & water
+      // FOOD PLOTS — ALWAYS on high ground, NEVER near water
+      // Rule: Food plots go on the OPPOSITE side from water, on ridges/benches
       {
         id: "food-1",
         type: "food_plot",
         label: "Kill Plot — Clover/Brassica",
-        description: "¼-acre kill plot on well-drained soil. Screened by terrain. Away from wet ground.",
+        description: "¼-acre kill plot on ridge bench. Well-drained upland soil. Screened by timber.",
         coordinates: [
-          [lng + offset * (-waterOffsetX * 0.5), lat - offset * 0.35],
-          [lng + offset * (-waterOffsetX * 0.4), lat - offset * 0.28],
-          [lng + offset * (-waterOffsetX * 0.3), lat - offset * 0.32],
-          [lng + offset * (-waterOffsetX * 0.28), lat - offset * 0.42],
-          [lng + offset * (-waterOffsetX * 0.35), lat - offset * 0.48],
-          [lng + offset * (-waterOffsetX * 0.45), lat - offset * 0.46],
-          [lng + offset * (-waterOffsetX * 0.52), lat - offset * 0.4],
-          [lng + offset * (-waterOffsetX * 0.5), lat - offset * 0.35],
+          // Place on HIGH GROUND side (opposite from water), in UPPER portion of parcel
+          [lng + offset * (highGroundX * 0.6), lat + offset * 0.1],
+          [lng + offset * (highGroundX * 0.7), lat + offset * 0.16],
+          [lng + offset * (highGroundX * 0.82), lat + offset * 0.14],
+          [lng + offset * (highGroundX * 0.85), lat + offset * 0.06],
+          [lng + offset * (highGroundX * 0.78), lat - offset * 0.02],
+          [lng + offset * (highGroundX * 0.65), lat - offset * 0.01],
+          [lng + offset * (highGroundX * 0.58), lat + offset * 0.04],
+          [lng + offset * (highGroundX * 0.6), lat + offset * 0.1],
         ],
       },
       {
         id: "food-2",
         type: "food_plot",
         label: "Staging Plot — Soybeans",
-        description: "½-acre destination plot near bedding on high ground. Deer stage here before dark.",
+        description: "½-acre destination plot between bedding and timber edge. High & dry.",
         coordinates: [
-          [lng + offset * highGroundX * 0.5, lat + offset * 0.35],
-          [lng + offset * highGroundX * 0.6, lat + offset * 0.42],
-          [lng + offset * highGroundX * 0.72, lat + offset * 0.4],
-          [lng + offset * highGroundX * 0.75, lat + offset * 0.32],
-          [lng + offset * highGroundX * 0.68, lat + offset * 0.24],
-          [lng + offset * highGroundX * 0.55, lat + offset * 0.25],
-          [lng + offset * highGroundX * 0.48, lat + offset * 0.3],
-          [lng + offset * highGroundX * 0.5, lat + offset * 0.35],
+          // Place near bedding area on high ground, well above water zone
+          [lng + offset * (highGroundX * 0.4), lat + offset * 0.42],
+          [lng + offset * (highGroundX * 0.5), lat + offset * 0.48],
+          [lng + offset * (highGroundX * 0.62), lat + offset * 0.46],
+          [lng + offset * (highGroundX * 0.65), lat + offset * 0.38],
+          [lng + offset * (highGroundX * 0.58), lat + offset * 0.3],
+          [lng + offset * (highGroundX * 0.45), lat + offset * 0.32],
+          [lng + offset * (highGroundX * 0.38), lat + offset * 0.36],
+          [lng + offset * (highGroundX * 0.4), lat + offset * 0.42],
         ],
       },
       // STAND SITES — positioned for wind & corridor coverage
@@ -442,14 +445,15 @@ export default function Terrain3DView({
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 Stand — Food Plot Edge",
+        label: "#3 Stand — Kill Plot Edge",
         description: "Ground blind on downwind edge of kill plot. S/SE wind. Evening sits.",
         coordinates: [
-          [lng + offset * (-waterOffsetX * 0.55), lat - offset * 0.42],
-          [lng + offset * (-waterOffsetX * 0.51), lat - offset * 0.38],
-          [lng + offset * (-waterOffsetX * 0.47), lat - offset * 0.42],
-          [lng + offset * (-waterOffsetX * 0.51), lat - offset * 0.46],
-          [lng + offset * (-waterOffsetX * 0.55), lat - offset * 0.42],
+          // Position near the kill plot on high ground
+          [lng + offset * (highGroundX * 0.82), lat + offset * 0.02],
+          [lng + offset * (highGroundX * 0.86), lat + offset * 0.06],
+          [lng + offset * (highGroundX * 0.9), lat + offset * 0.02],
+          [lng + offset * (highGroundX * 0.86), lat - offset * 0.02],
+          [lng + offset * (highGroundX * 0.82), lat + offset * 0.02],
         ],
       },
     ];
