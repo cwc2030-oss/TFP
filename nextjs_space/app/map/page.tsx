@@ -116,10 +116,13 @@ export default function MapPage() {
 
 
 
-  const handleProceedToCheckout = () => {
+  const handleProceedToCheckout = (product?: string) => {
     if (!selectedParcel) {
       setError("Please select a property on the map first");
       return;
+    }
+    if (product) {
+      setSelectedProduct(product as ProductType);
     }
     if (selectedLayers.length === 0) {
       setError("Please select at least one map layer for your report");

@@ -25,7 +25,7 @@ interface SelectedParcel {
 interface InteractiveMapProps {
   onParcelSelect?: (parcel: SelectedParcel | null) => void;
   onLayersChange?: (layers: string[]) => void;
-  onCheckout?: () => void;
+  onCheckout?: (product?: string) => void;
   initialLayers?: string[];
 }
 
@@ -112,17 +112,17 @@ export default function InteractiveMap({
     id: string;
     name: string;
     icon: React.ComponentType<{ className?: string }>;
-    price: number;
     description: string;
     status: PremiumLayerStatus;
+    includedIn?: string;
   }
   const premiumLayers: PremiumLayer[] = [
-    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, price: 8, description: 'Rotatable 3D view with deer corridors', status: 'preview' },
-    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, price: 8, description: 'Tree height analysis', status: 'coming_soon' },
-    { id: 'deer_movement', name: 'Deer Movement', icon: Target, price: 15, description: 'AI-predicted travel corridors', status: 'coming_soon' },
-    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, price: 10, description: 'Likely bedding locations', status: 'coming_soon' },
-    { id: 'water_sources', name: 'Water Sources', icon: Droplets, price: 5, description: 'Streams, ponds & wet areas', status: 'coming_soon' },
-    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, price: 12, description: 'Optimal stand locations', status: 'coming_soon' },
+    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'hunting_intel' },
+    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'hunting_intel' },
+    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'hunting_intel' },
+    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'hunting_intel' },
+    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'full_report' },
+    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'hunting_intel' },
   ];
   
   const freeLayers = [
@@ -937,23 +937,23 @@ export default function InteractiveMap({
               </div>
             </div>
 
-            {/* Premium Layers Section */}
+            {/* Premium Layers Preview */}
             <div>
               <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2 flex items-center gap-1">
-                <Crown className="w-3 h-3 text-amber-500" /> Premium Layers
+                <Crown className="w-3 h-3 text-amber-500" /> Deer Intel Layers
               </p>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {premiumLayers.map((layer) => {
                   const IconComponent = layer.icon;
                   return (
-                    <div key={layer.id} className="flex items-center justify-between py-2.5 px-3 bg-stone-50 rounded-lg border border-stone-200 hover:border-amber-300 transition-colors group">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center group-hover:bg-amber-200 transition-colors">
-                          <IconComponent className="w-4 h-4 text-amber-700" />
+                    <div key={layer.id} className="flex items-center justify-between py-2 px-3 bg-stone-50 rounded-lg border border-stone-200 hover:border-amber-300 transition-colors group">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 bg-amber-100 rounded-lg flex items-center justify-center group-hover:bg-amber-200 transition-colors">
+                          <IconComponent className="w-3.5 h-3.5 text-amber-700" />
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-stone-800">{layer.name}</p>
-                          <p className="text-[10px] text-stone-500">{layer.description}</p>
+                          <p className="text-xs font-medium text-stone-800">{layer.name}</p>
+                          <p className="text-[9px] text-stone-500">{layer.description}</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -967,19 +967,14 @@ export default function InteractiveMap({
                                 alert('Select a parcel first to preview 3D terrain');
                               }
                             }}
-                            className="text-xs bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-full font-medium flex items-center gap-1 transition-colors"
+                            className="text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-full font-medium flex items-center gap-1 transition-colors"
                           >
-                            <Play className="w-3 h-3" /> Preview
+                            <Play className="w-2.5 h-2.5" /> Preview
                           </button>
-                        ) : layer.status === 'coming_soon' ? (
-                          <span className="text-[10px] bg-stone-200 text-stone-600 px-2 py-1 rounded-full font-medium">
-                            Coming Soon
-                          </span>
                         ) : (
-                          <div className="flex flex-col items-end">
-                            <span className="text-sm font-bold text-amber-600">${layer.price}</span>
-                            <span className="text-[9px] text-stone-400">per parcel</span>
-                          </div>
+                          <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
+                            {layer.includedIn === 'hunting_intel' ? 'in $79 report' : 'in $350 report'}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -988,67 +983,135 @@ export default function InteractiveMap({
               </div>
             </div>
 
-            {/* Hunter's Edge Bundle */}
-            <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-4 text-white relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
+            {/* Divider */}
+            <div className="border-t border-stone-200 pt-1">
+              <p className="text-[10px] font-semibold text-stone-400 uppercase tracking-wide mb-3">Get Your Report</p>
+            </div>
+
+            {/* $79 Hunting Intelligence — Primary CTA */}
+            <div className="bg-gradient-to-br from-red-600 to-orange-600 rounded-xl p-4 text-white relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
               <div className="relative">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5" />
-                  <span className="font-bold text-lg">Hunter's Edge Bundle</span>
+                <div className="flex items-center gap-2 mb-1">
+                  <Target className="w-4 h-4" />
+                  <span className="font-bold text-sm">Hunting Intelligence Report</span>
+                  <span className="bg-white/25 text-[9px] px-1.5 py-0.5 rounded-full font-bold">NEW</span>
                 </div>
-                <p className="text-amber-100 text-xs mb-3">All 6 premium layers for one property</p>
-                <div className="flex items-center justify-between">
+                <p className="text-red-100 text-[11px] mb-3">7-layer deer intel playbook for your property</p>
+                <div className="space-y-1 mb-3">
+                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> All 6 deer intel layers analyzed</p>
+                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> Stand site recommendations</p>
+                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> Season playbook (AM vs PM setups)</p>
+                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> &quot;How We Know&quot; methodology</p>
+                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> 5-page PDF — print & take to the stand</p>
+                </div>
+                <div className="flex items-center justify-between mb-3">
                   <div>
-                    <span className="text-2xl font-bold">$29</span>
-                    <span className="text-amber-200 text-sm ml-1">/ property</span>
+                    <span className="text-2xl font-bold">$79</span>
+                    <span className="text-red-200 text-xs ml-1">/ property</span>
                   </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-amber-200 line-through">$58 value</p>
-                    <p className="text-xs font-semibold text-white">Save 50%</p>
-                  </div>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">🦌 Most Popular</span>
                 </div>
                 <button 
-                  className="w-full mt-3 bg-white text-amber-600 hover:bg-amber-50 py-2 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2"
-                  onClick={() => alert('Coming soon! Sign up for early access.')}
+                  className="w-full bg-white text-red-600 hover:bg-red-50 py-2 rounded-lg font-semibold text-sm transition-colors"
+                  onClick={() => {
+                    if (parcelData) {
+                      setShowLayerPanel(false);
+                      onCheckout?.('hunting_intel');
+                    } else {
+                      alert('Search for a property first, then order your report.');
+                    }
+                  }}
                 >
-                  <Lock className="w-4 h-4" />
-                  Coming Soon
+                  Order Hunting Intel — $79
                 </button>
               </div>
             </div>
 
-            {/* Seasonal Pass */}
-            <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-xl p-4 text-white">
-              <div className="flex items-center gap-2 mb-2">
-                <Calendar className="w-5 h-5" />
-                <span className="font-bold">Seasonal Pass</span>
-                <span className="bg-white/20 text-[10px] px-2 py-0.5 rounded-full">Sept - Jan</span>
-              </div>
-              <p className="text-emerald-100 text-xs mb-3">Unlimited premium layers on any Missouri property</p>
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-2xl font-bold">$49</span>
-                  <span className="text-emerald-200 text-sm ml-1">/ season</span>
+            {/* $49 Quick Look */}
+            <div className="bg-stone-50 rounded-xl p-3.5 border border-stone-200">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-600" />
+                  <span className="font-bold text-sm text-stone-800">Broker Quick Look</span>
                 </div>
-                <span className="text-xs bg-white/20 px-2 py-1 rounded-full">Best Value</span>
+                <span className="text-lg font-bold text-amber-600">$49</span>
               </div>
+              <p className="text-[10px] text-stone-500 mb-2">2-page deal-killer checklist — flood, CWD, soil, access, zoning</p>
               <button 
-                className="w-full mt-3 bg-white text-emerald-700 hover:bg-emerald-50 py-2 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2"
-                onClick={() => alert('Coming soon! Sign up for early access.')}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-1.5 rounded-lg font-semibold text-xs transition-colors"
+                onClick={() => {
+                  if (parcelData) {
+                    setShowLayerPanel(false);
+                    onCheckout?.('quick_look');
+                  } else {
+                    alert('Search for a property first, then order your report.');
+                  }
+                }}
               >
-                <Lock className="w-4 h-4" />
-                Join Waitlist
+                Order Quick Look — $49
               </button>
             </div>
 
-            {/* Early Access CTA */}
+            {/* $350 Full Analysis */}
+            <div className="bg-stone-50 rounded-xl p-3.5 border border-emerald-200">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span className="font-bold text-sm text-stone-800">Full Land Analysis</span>
+                </div>
+                <span className="text-lg font-bold text-emerald-600">$350</span>
+              </div>
+              <p className="text-[10px] text-stone-500 mb-2">12-page report — everything above plus soil, timber, ag value, comps & more</p>
+              <button 
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded-lg font-semibold text-xs transition-colors"
+                onClick={() => {
+                  if (parcelData) {
+                    setShowLayerPanel(false);
+                    onCheckout?.('full_report');
+                  } else {
+                    alert('Search for a property first, then order your report.');
+                  }
+                }}
+              >
+                Order Full Report — $350
+              </button>
+            </div>
+
+            {/* Season Pass Teaser */}
+            <div className="bg-gradient-to-br from-emerald-700 to-emerald-800 rounded-xl p-3.5 text-white">
+              <div className="flex items-center gap-2 mb-1">
+                <Calendar className="w-4 h-4" />
+                <span className="font-bold text-sm">Season Pass</span>
+                <span className="bg-white/20 text-[9px] px-1.5 py-0.5 rounded-full">Sept – Jan</span>
+              </div>
+              <p className="text-emerald-100 text-[10px] mb-2">Unlimited Hunting Intel reports on any Missouri property, all season long.</p>
+              <div className="flex items-center justify-between mb-2.5">
+                <div>
+                  <span className="text-xl font-bold">$199</span>
+                  <span className="text-emerald-200 text-xs ml-1">/ season</span>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] text-emerald-300">3+ properties = saves you money</p>
+                </div>
+              </div>
+              <button 
+                className="w-full bg-white/15 hover:bg-white/25 text-white py-1.5 rounded-lg font-semibold text-xs transition-colors border border-white/20 flex items-center justify-center gap-1.5"
+                onClick={() => alert('Season Pass coming Fall 2026! We\'ll email you when it drops.')}
+              >
+                <Lock className="w-3 h-3" />
+                Coming Fall 2026
+              </button>
+            </div>
+
+            {/* Questions CTA */}
             <div className="bg-stone-100 rounded-lg p-3 text-center">
-              <p className="text-xs text-stone-600 mb-2">🦌 Be first to hunt with LiDAR</p>
+              <p className="text-[10px] text-stone-600 mb-1">🦌 Questions? We speak hunter.</p>
               <a 
-                href="mailto:clark@terrafirma.partners?subject=Layer%20Buffet%20Early%20Access&body=I'm%20interested%20in%20early%20access%20to%20premium%20map%20layers!"
+                href="mailto:clark@terrafirma.partners?subject=Hunting%20Intel%20Question&body=Hey%20Clark%2C%20I%20have%20a%20question%20about..."
                 className="text-xs font-semibold text-amber-600 hover:text-amber-700 underline"
               >
-                Get Early Access →
+                Email Clark →
               </a>
             </div>
           </div>
@@ -1188,11 +1251,11 @@ export default function InteractiveMap({
             {/* Action Buttons - Always Visible */}
             <div className="space-y-2">
               <button
-                onClick={onCheckout}
+                onClick={() => onCheckout?.()}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
               >
                 <FileText className="w-4 h-4" />
-                Order Report – $350
+                Order Land Analysis – $350
               </button>
               <div className="flex gap-2">
                 <a
