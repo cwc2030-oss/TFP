@@ -194,238 +194,262 @@ export default function Terrain3DView({
     }
   };
 
-  // Generate deer corridors with organic, natural-looking paths
+  // ═══ TERRAIN-AWARE CORRIDOR GENERATION ═══
+  // Uses parcel geometry to place water features realistically and routes corridors AROUND water
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
     const { lat, lng } = parcelCenter;
     const offset = acreage ? Math.sqrt(acreage / 640) * 0.01 : 0.005;
     
+    // Seeded random for consistent but parcel-unique placement
+    let seed = (Math.abs(lat * 10000) + Math.abs(lng * 10000)) % 1000;
+    const seededRandom = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    
+    // ═══ TERRAIN LOGIC ═══
+    // Water flows downhill. In Missouri, creeks typically run SE/S direction.
+    // We place water in the "low" quadrant and route corridors to avoid crossing it.
+    
+    // Determine water zone quadrant based on parcel coordinates (deterministic per-parcel)
+    const waterQuadrant = seededRandom() > 0.5 ? 'SE' : 'SW'; // Creek typically runs through SE or SW
+    const waterOffsetX = waterQuadrant === 'SE' ? 0.4 : -0.4;
+    const waterOffsetY = -0.35; // Water is in the "southern" (lower) part
+    
+    // High ground (bedding) is OPPOSITE water
+    const highGroundX = -waterOffsetX * 0.8;
+    const highGroundY = 0.5; // Northern ridge
+    
+    // ═══ WATER FEATURES — placed in low terrain ═══
+    // Creek runs along the low ground, NOT through travel corridors
+    const creekStart: [number, number] = [lng + offset * (waterOffsetX - 0.6), lat + offset * (waterOffsetY + 0.4)];
+    const creekEnd: [number, number] = [lng + offset * (waterOffsetX + 0.6), lat + offset * (waterOffsetY - 0.3)];
+    
+    // Pond sits in a low depression near creek
+    const pondCenter: [number, number] = [lng + offset * waterOffsetX * 0.8, lat + offset * (waterOffsetY - 0.15)];
+    
+    // ═══ CORRIDORS — route AROUND water, not through it ═══
+    // Primary corridors connect bedding (high ground) to food sources, skirting water
+    
     const corridors: DeerCorridor[] = [
-      // PRIMARY TRAVEL CORRIDORS — organic ridge-to-feed paths
+      // PRIMARY TRAVEL — Ridge to feed, AROUND water
       {
         id: "primary-1",
         type: "primary",
         label: "Primary Travel Corridor",
-        description: "Main deer movement — ridge to feeding area. High traffic dawn & dusk.",
+        description: "Main deer movement — ridge to feeding area. Routes around water. High traffic dawn & dusk.",
         coordinates: smoothTrailPath([
-          [lng - offset * 1.2, lat + offset * 0.8],
-          [lng - offset * 0.95, lat + offset * 0.68],
-          [lng - offset * 0.7, lat + offset * 0.5],
-          [lng - offset * 0.4, lat + offset * 0.3],
-          [lng - offset * 0.15, lat + offset * 0.12],
-          [lng + offset * 0.1, lat - offset * 0.08],
-          [lng + offset * 0.35, lat - offset * 0.28],
-          [lng + offset * 0.55, lat - offset * 0.42],
-          [lng + offset * 0.8, lat - offset * 0.6],
+          // Start from high ground (bedding area)
+          [lng + offset * highGroundX * 1.1, lat + offset * 0.75],
+          [lng + offset * highGroundX * 0.9, lat + offset * 0.55],
+          [lng + offset * highGroundX * 0.6, lat + offset * 0.35],
+          // Curve AWAY from water zone
+          [lng + offset * (highGroundX > 0 ? 0.1 : -0.1), lat + offset * 0.15],
+          [lng + offset * (highGroundX > 0 ? -0.15 : 0.15), lat - offset * 0.05],
+          // End at food source on opposite side from water
+          [lng + offset * (-waterOffsetX * 0.6), lat - offset * 0.45],
+          [lng + offset * (-waterOffsetX * 0.8), lat - offset * 0.65],
         ], 0.18),
       },
       {
         id: "primary-2",
         type: "primary",
-        label: "Ridge Funnel Corridor",
-        description: "Terrain funnel between ridges — mature bucks use this during rut.",
+        label: "Ridge Connector",
+        description: "Secondary travel along ridge spine — avoids low ground. Mature bucks during rut.",
         coordinates: smoothTrailPath([
-          [lng + offset * 0.9, lat + offset * 1.0],
-          [lng + offset * 0.72, lat + offset * 0.78],
-          [lng + offset * 0.5, lat + offset * 0.52],
-          [lng + offset * 0.3, lat + offset * 0.3],
-          [lng + offset * 0.12, lat + offset * 0.1],
-          [lng - offset * 0.05, lat - offset * 0.12],
-          [lng - offset * 0.2, lat - offset * 0.4],
+          [lng + offset * 0.85, lat + offset * 0.7],
+          [lng + offset * 0.6, lat + offset * 0.55],
+          [lng + offset * 0.3, lat + offset * 0.4],
+          [lng, lat + offset * 0.25],
+          [lng - offset * 0.3, lat + offset * 0.3],
+          [lng - offset * 0.6, lat + offset * 0.45],
+          [lng - offset * 0.85, lat + offset * 0.55],
         ], 0.15),
       },
-      // SECONDARY ROUTES — lighter trails along edges
+      // SECONDARY — Field edges, staying on high ground
       {
         id: "secondary-1",
         type: "secondary",
-        label: "Field-to-Timber Transition",
-        description: "Edge transition zone — does & yearlings travel this frequently.",
+        label: "Timber Edge Trail",
+        description: "Edge transition — does & yearlings travel this frequently. Stays above creek bottom.",
         coordinates: smoothTrailPath([
-          [lng - offset * 0.8, lat - offset * 0.5],
-          [lng - offset * 0.6, lat - offset * 0.38],
-          [lng - offset * 0.35, lat - offset * 0.2],
-          [lng - offset * 0.1, lat - offset * 0.05],
-          [lng + offset * 0.15, lat + offset * 0.08],
-          [lng + offset * 0.4, lat + offset * 0.2],
-          [lng + offset * 0.6, lat + offset * 0.3],
+          [lng + offset * (-waterOffsetX * 0.9), lat + offset * 0.6],
+          [lng + offset * (-waterOffsetX * 0.7), lat + offset * 0.4],
+          [lng + offset * (-waterOffsetX * 0.5), lat + offset * 0.2],
+          [lng + offset * (-waterOffsetX * 0.3), lat],
+          [lng + offset * (-waterOffsetX * 0.2), lat - offset * 0.25],
         ], 0.2),
       },
       {
         id: "secondary-2",
         type: "secondary",
-        label: "Saddle Crossing",
-        description: "Low saddle between terrain features — natural travel corridor.",
+        label: "Water Approach Trail",
+        description: "Approach to water source — deer travel TO creek, not across it.",
         coordinates: smoothTrailPath([
-          [lng - offset * 0.5, lat + offset * 0.6],
-          [lng - offset * 0.3, lat + offset * 0.45],
-          [lng - offset * 0.08, lat + offset * 0.25],
-          [lng + offset * 0.15, lat + offset * 0.08],
-          [lng + offset * 0.4, lat - offset * 0.1],
-        ], 0.22),
+          // Start from higher ground
+          [lng + offset * (waterOffsetX * 0.3), lat + offset * 0.35],
+          [lng + offset * (waterOffsetX * 0.4), lat + offset * 0.15],
+          [lng + offset * (waterOffsetX * 0.5), lat - offset * 0.05],
+          // TERMINATE at water — don't cross
+          [lng + offset * (waterOffsetX * 0.55), lat + offset * waterOffsetY * 0.8],
+        ], 0.18),
       },
-      // WATER SOURCES — meandering creek lines
+      // WATER — Creek follows low terrain
       {
         id: "water-1",
         type: "water",
         label: "Primary Creek Bottom",
-        description: "Seasonal drainage — reliable water source. Deer visit daily.",
+        description: "Seasonal drainage follows terrain low point. Deer visit for water, don't cross here.",
         coordinates: smoothTrailPath([
-          [lng - offset * 1.1, lat + offset * 0.3],
-          [lng - offset * 0.85, lat + offset * 0.28],
-          [lng - offset * 0.6, lat + offset * 0.18],
-          [lng - offset * 0.3, lat + offset * 0.08],
-          [lng - offset * 0.05, lat + offset * 0.02],
-          [lng + offset * 0.2, lat - offset * 0.06],
-          [lng + offset * 0.45, lat - offset * 0.15],
-          [lng + offset * 0.7, lat - offset * 0.25],
-          [lng + offset * 1.0, lat - offset * 0.35],
+          creekStart,
+          [creekStart[0] + (creekEnd[0] - creekStart[0]) * 0.25, creekStart[1] + (creekEnd[1] - creekStart[1]) * 0.2 + offset * 0.08],
+          [creekStart[0] + (creekEnd[0] - creekStart[0]) * 0.5, creekStart[1] + (creekEnd[1] - creekStart[1]) * 0.45],
+          [creekStart[0] + (creekEnd[0] - creekStart[0]) * 0.75, creekStart[1] + (creekEnd[1] - creekStart[1]) * 0.7 - offset * 0.05],
+          creekEnd,
         ], 0.25),
       },
       {
         id: "water-2",
         type: "water",
-        label: "Spring-fed Pond",
-        description: "Year-round water — high traffic staging area in early season.",
+        label: "Stock Pond",
+        description: "Year-round water — high traffic staging area. Deer approach from uphill side.",
         coordinates: [
-          [lng + offset * 0.55, lat - offset * 0.5],
-          [lng + offset * 0.62, lat - offset * 0.56],
-          [lng + offset * 0.7, lat - offset * 0.52],
-          [lng + offset * 0.72, lat - offset * 0.46],
-          [lng + offset * 0.68, lat - offset * 0.4],
-          [lng + offset * 0.6, lat - offset * 0.42],
-          [lng + offset * 0.55, lat - offset * 0.46],
-          [lng + offset * 0.55, lat - offset * 0.5],
+          [pondCenter[0] - offset * 0.08, pondCenter[1] + offset * 0.05],
+          [pondCenter[0] - offset * 0.02, pondCenter[1] + offset * 0.09],
+          [pondCenter[0] + offset * 0.06, pondCenter[1] + offset * 0.08],
+          [pondCenter[0] + offset * 0.1, pondCenter[1] + offset * 0.03],
+          [pondCenter[0] + offset * 0.09, pondCenter[1] - offset * 0.04],
+          [pondCenter[0] + offset * 0.03, pondCenter[1] - offset * 0.07],
+          [pondCenter[0] - offset * 0.05, pondCenter[1] - offset * 0.05],
+          [pondCenter[0] - offset * 0.08, pondCenter[1]],
+          [pondCenter[0] - offset * 0.08, pondCenter[1] + offset * 0.05],
         ],
       },
-      // BEDDING AREAS — organic irregular shapes
+      // BEDDING — on high ground, opposite water
       {
         id: "bedding-1",
         type: "bedding",
-        label: "Primary Bedding — South Slope",
-        description: "South-facing slope with thermal cover. Mature bucks bed here.",
+        label: "Primary Bedding — Ridge Top",
+        description: "High ground with 270° visibility. Mature bucks bed here — escape routes downhill.",
         coordinates: [
-          [lng + offset * 0.25, lat + offset * 0.65],
-          [lng + offset * 0.35, lat + offset * 0.72],
-          [lng + offset * 0.48, lat + offset * 0.76],
-          [lng + offset * 0.58, lat + offset * 0.7],
-          [lng + offset * 0.6, lat + offset * 0.62],
-          [lng + offset * 0.55, lat + offset * 0.53],
-          [lng + offset * 0.42, lat + offset * 0.5],
-          [lng + offset * 0.3, lat + offset * 0.53],
-          [lng + offset * 0.25, lat + offset * 0.58],
-          [lng + offset * 0.25, lat + offset * 0.65],
+          [lng + offset * highGroundX * 0.7, lat + offset * 0.6],
+          [lng + offset * highGroundX * 0.85, lat + offset * 0.68],
+          [lng + offset * highGroundX * 1.0, lat + offset * 0.72],
+          [lng + offset * highGroundX * 1.1, lat + offset * 0.68],
+          [lng + offset * highGroundX * 1.15, lat + offset * 0.58],
+          [lng + offset * highGroundX * 1.05, lat + offset * 0.5],
+          [lng + offset * highGroundX * 0.9, lat + offset * 0.5],
+          [lng + offset * highGroundX * 0.75, lat + offset * 0.54],
+          [lng + offset * highGroundX * 0.7, lat + offset * 0.6],
         ],
       },
       {
         id: "bedding-2",
         type: "bedding",
-        label: "Secondary Bedding — Thick Cover",
-        description: "Dense cedar thicket bedding — wind protection, escape cover nearby.",
+        label: "Secondary Bedding — Thermal Cover",
+        description: "Dense cedar thicket on north-facing slope. Wind protection, close to water.",
         coordinates: [
-          [lng - offset * 0.75, lat - offset * 0.25],
-          [lng - offset * 0.62, lat - offset * 0.2],
-          [lng - offset * 0.52, lat - offset * 0.26],
-          [lng - offset * 0.5, lat - offset * 0.35],
-          [lng - offset * 0.55, lat - offset * 0.44],
-          [lng - offset * 0.65, lat - offset * 0.46],
-          [lng - offset * 0.75, lat - offset * 0.4],
-          [lng - offset * 0.78, lat - offset * 0.32],
-          [lng - offset * 0.75, lat - offset * 0.25],
+          [lng + offset * (waterOffsetX * 0.2), lat + offset * 0.15],
+          [lng + offset * (waterOffsetX * 0.35), lat + offset * 0.22],
+          [lng + offset * (waterOffsetX * 0.5), lat + offset * 0.2],
+          [lng + offset * (waterOffsetX * 0.55), lat + offset * 0.1],
+          [lng + offset * (waterOffsetX * 0.48), lat + offset * 0.02],
+          [lng + offset * (waterOffsetX * 0.32), lat + offset * 0.02],
+          [lng + offset * (waterOffsetX * 0.2), lat + offset * 0.08],
+          [lng + offset * (waterOffsetX * 0.2), lat + offset * 0.15],
         ],
       },
-      // TERRAIN FUNNELS — short pinch corridors
+      // FUNNELS — at terrain pinch points AWAY from water
       {
         id: "funnel-1",
         type: "funnel",
-        label: "Creek-Ridge Pinch Point",
-        description: "Terrain bottleneck where creek meets ridge — forces deer through narrow corridor. PRIME stand location.",
+        label: "Ridge Pinch Point",
+        description: "Terrain bottleneck on high ground — forces deer through narrow gap. PRIME stand location.",
         coordinates: smoothTrailPath([
-          [lng - offset * 0.18, lat + offset * 0.18],
-          [lng - offset * 0.05, lat + offset * 0.05],
-          [lng + offset * 0.08, lat - offset * 0.08],
+          [lng + offset * (highGroundX * 0.4), lat + offset * 0.3],
+          [lng + offset * (highGroundX * 0.2), lat + offset * 0.15],
+          [lng, lat],
         ], 0.1),
       },
       {
         id: "funnel-2",
         type: "funnel",
-        label: "Field Corner Funnel",
-        description: "Where timber meets field corner — natural staging area. Bucks cruise this during rut.",
+        label: "Creek Crossing Funnel",
+        description: "Only safe crossing point — deer funnel here to avoid deep water.",
         coordinates: smoothTrailPath([
-          [lng + offset * 0.32, lat + offset * 0.18],
-          [lng + offset * 0.45, lat + offset * 0.05],
-          [lng + offset * 0.58, lat - offset * 0.08],
-        ], 0.1),
+          [lng + offset * (waterOffsetX * 0.3), lat + offset * (waterOffsetY + 0.2)],
+          [lng + offset * (waterOffsetX * 0.35), lat + offset * waterOffsetY],
+          [lng + offset * (waterOffsetX * 0.4), lat + offset * (waterOffsetY - 0.15)],
+        ], 0.08),
       },
-      // FOOD PLOT ZONES — organic irregular shapes
+      // FOOD PLOTS — on drier ground, between bedding & water
       {
         id: "food-1",
         type: "food_plot",
         label: "Kill Plot — Clover/Brassica",
-        description: "¼-acre kill plot in timber opening. Plant clover & brassica. Screened by terrain on 3 sides.",
+        description: "¼-acre kill plot on well-drained soil. Screened by terrain. Away from wet ground.",
         coordinates: [
-          [lng - offset * 0.3, lat - offset * 0.54],
-          [lng - offset * 0.22, lat - offset * 0.48],
-          [lng - offset * 0.15, lat - offset * 0.52],
-          [lng - offset * 0.14, lat - offset * 0.6],
-          [lng - offset * 0.18, lat - offset * 0.66],
-          [lng - offset * 0.27, lat - offset * 0.65],
-          [lng - offset * 0.32, lat - offset * 0.6],
-          [lng - offset * 0.3, lat - offset * 0.54],
+          [lng + offset * (-waterOffsetX * 0.5), lat - offset * 0.35],
+          [lng + offset * (-waterOffsetX * 0.4), lat - offset * 0.28],
+          [lng + offset * (-waterOffsetX * 0.3), lat - offset * 0.32],
+          [lng + offset * (-waterOffsetX * 0.28), lat - offset * 0.42],
+          [lng + offset * (-waterOffsetX * 0.35), lat - offset * 0.48],
+          [lng + offset * (-waterOffsetX * 0.45), lat - offset * 0.46],
+          [lng + offset * (-waterOffsetX * 0.52), lat - offset * 0.4],
+          [lng + offset * (-waterOffsetX * 0.5), lat - offset * 0.35],
         ],
       },
       {
         id: "food-2",
         type: "food_plot",
         label: "Staging Plot — Soybeans",
-        description: "½-acre destination plot near bedding. Soybeans draw deer out before dark.",
+        description: "½-acre destination plot near bedding on high ground. Deer stage here before dark.",
         coordinates: [
-          [lng + offset * 0.1, lat + offset * 0.4],
-          [lng + offset * 0.18, lat + offset * 0.44],
-          [lng + offset * 0.27, lat + offset * 0.44],
-          [lng + offset * 0.32, lat + offset * 0.38],
-          [lng + offset * 0.28, lat + offset * 0.3],
-          [lng + offset * 0.18, lat + offset * 0.3],
-          [lng + offset * 0.1, lat + offset * 0.34],
-          [lng + offset * 0.1, lat + offset * 0.4],
+          [lng + offset * highGroundX * 0.5, lat + offset * 0.35],
+          [lng + offset * highGroundX * 0.6, lat + offset * 0.42],
+          [lng + offset * highGroundX * 0.72, lat + offset * 0.4],
+          [lng + offset * highGroundX * 0.75, lat + offset * 0.32],
+          [lng + offset * highGroundX * 0.68, lat + offset * 0.24],
+          [lng + offset * highGroundX * 0.55, lat + offset * 0.25],
+          [lng + offset * highGroundX * 0.48, lat + offset * 0.3],
+          [lng + offset * highGroundX * 0.5, lat + offset * 0.35],
         ],
       },
-      // OPTIMAL STAND SITES
+      // STAND SITES — positioned for wind & corridor coverage
       {
         id: "stand-1",
         type: "stand",
-        label: "#1 Stand — Funnel Ambush",
-        description: "20ft hang-on at pinch point. SW wind only. All-day sit during rut. 150\" potential.",
+        label: "#1 Stand — Ridge Funnel",
+        description: "20ft hang-on at pinch point on high ground. SW wind. All-day rut sit.",
         coordinates: [
-          [lng - offset * 0.08, lat + offset * 0.08],
-          [lng - offset * 0.04, lat + offset * 0.12],
-          [lng + offset * 0.0, lat + offset * 0.08],
-          [lng - offset * 0.04, lat + offset * 0.04],
-          [lng - offset * 0.08, lat + offset * 0.08],
+          [lng + offset * 0.02, lat + offset * 0.04],
+          [lng + offset * 0.06, lat + offset * 0.08],
+          [lng + offset * 0.1, lat + offset * 0.04],
+          [lng + offset * 0.06, lat],
+          [lng + offset * 0.02, lat + offset * 0.04],
         ],
       },
       {
         id: "stand-2",
         type: "stand",
-        label: "#2 Stand — Creek Crossing",
-        description: "Ladder stand overlooking creek crossing. N/NW wind. Morning hunts, Oct-Nov.",
+        label: "#2 Stand — Water Approach",
+        description: "Ladder stand watching trail TO water (not crossing). NW wind. Evening hunts.",
         coordinates: [
-          [lng + offset * 0.28, lat - offset * 0.12],
-          [lng + offset * 0.32, lat - offset * 0.08],
-          [lng + offset * 0.36, lat - offset * 0.12],
-          [lng + offset * 0.32, lat - offset * 0.16],
-          [lng + offset * 0.28, lat - offset * 0.12],
+          [lng + offset * (waterOffsetX * 0.45), lat + offset * (waterOffsetY + 0.25)],
+          [lng + offset * (waterOffsetX * 0.49), lat + offset * (waterOffsetY + 0.29)],
+          [lng + offset * (waterOffsetX * 0.53), lat + offset * (waterOffsetY + 0.25)],
+          [lng + offset * (waterOffsetX * 0.49), lat + offset * (waterOffsetY + 0.21)],
+          [lng + offset * (waterOffsetX * 0.45), lat + offset * (waterOffsetY + 0.25)],
         ],
       },
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 Stand — Kill Plot Watch",
-        description: "Ground blind on downwind edge of kill plot. S/SE wind. Evening hunts.",
+        label: "#3 Stand — Food Plot Edge",
+        description: "Ground blind on downwind edge of kill plot. S/SE wind. Evening sits.",
         coordinates: [
-          [lng - offset * 0.28, lat - offset * 0.52],
-          [lng - offset * 0.24, lat - offset * 0.48],
-          [lng - offset * 0.2, lat - offset * 0.52],
-          [lng - offset * 0.24, lat - offset * 0.56],
-          [lng - offset * 0.28, lat - offset * 0.52],
+          [lng + offset * (-waterOffsetX * 0.55), lat - offset * 0.42],
+          [lng + offset * (-waterOffsetX * 0.51), lat - offset * 0.38],
+          [lng + offset * (-waterOffsetX * 0.47), lat - offset * 0.42],
+          [lng + offset * (-waterOffsetX * 0.51), lat - offset * 0.46],
+          [lng + offset * (-waterOffsetX * 0.55), lat - offset * 0.42],
         ],
       },
     ];
