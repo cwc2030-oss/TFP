@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Lock, Mountain, ArrowRight, ChevronDown, Loader2 } from "lucide-react";
+import { Lock, Mountain, ArrowRight, ChevronDown, Loader2, MapPin, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import Image from "next/image";
-
-declare const mapboxgl: any;
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 
 function PreviewContent() {
   const searchParams = useSearchParams();
@@ -18,6 +18,7 @@ function PreviewContent() {
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [webGLSupported, setWebGLSupported] = useState(true);
   const [parcelInfo, setParcelInfo] = useState<{
     address: string;
     county: string;
@@ -74,10 +75,29 @@ function PreviewContent() {
     fetchParcel();
   }, [lat, lng, address]);
   
+  // Check WebGL support
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) {
+          setWebGLSupported(false);
+        }
+      } catch (e) {
+        setWebGLSupported(false);
+      }
+    }
+  }, []);
+
   // Initialize cinematic 3D map
   useEffect(() => {
     if (!parcelInfo || !mapContainerRef.current) return;
     if (mapRef.current) return;
+    if (!webGLSupported) {
+      setIsLoading(false);
+      return;
+    }
     
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
@@ -87,109 +107,71 @@ function PreviewContent() {
       return;
     }
     
-    // Check if mapboxgl is already loaded
-    if (typeof window !== 'undefined' && (window as any).mapboxgl) {
-      initMap((window as any).mapboxgl);
-      return;
-    }
-    
-    // Load Mapbox script
-    const existingScript = document.querySelector('script[src*="mapbox-gl"]');
-    if (existingScript) {
-      // Script already exists, wait for it
-      const checkMapbox = setInterval(() => {
-        if ((window as any).mapboxgl) {
-          clearInterval(checkMapbox);
-          initMap((window as any).mapboxgl);
-        }
-      }, 100);
-      return;
-    }
-    
-    const script = document.createElement('script');
-    script.src = 'https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js';
-    script.async = true;
-    script.onload = () => {
-      const link = document.createElement('link');
-      link.href = 'https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css';
-      link.rel = 'stylesheet';
-      document.head.appendChild(link);
+    try {
+      mapboxgl.accessToken = token;
       
-      // Wait for mapboxgl to be available
-      const checkMapbox = setInterval(() => {
-        if ((window as any).mapboxgl) {
-          clearInterval(checkMapbox);
-          initMap((window as any).mapboxgl);
-        }
-      }, 50);
+      const map: any = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: 'mapbox://styles/mapbox/satellite-streets-v12',
+        center: [parcelInfo.lng, parcelInfo.lat],
+        zoom: 15,
+        pitch: 60,
+        bearing: 0,
+      } as any);
       
-      // Timeout fallback
-      setTimeout(() => {
-        if (!mapRef.current) {
-          setError('Failed to load map');
+      // Disable all interactions for cinematic mode
+      if (map.scrollZoom) map.scrollZoom.disable();
+      if (map.boxZoom) map.boxZoom.disable();
+      if (map.dragRotate) map.dragRotate.disable();
+      if (map.dragPan) map.dragPan.disable();
+      if (map.keyboard) map.keyboard.disable();
+      if (map.doubleClickZoom) map.doubleClickZoom.disable();
+      if (map.touchZoomRotate) map.touchZoomRotate.disable();
+      
+      mapRef.current = map;
+      
+      map.on('load', () => {
+        try {
+          // Add terrain
+          map.addSource('mapbox-dem', {
+            type: 'raster-dem',
+            url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+            tileSize: 512,
+            maxzoom: 14
+          });
+          
+          map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+          
+          // Start cinematic rotation
+          let bearing = 0;
+          const rotate = () => {
+            if (!mapRef.current) return;
+            bearing = (bearing + 0.3) % 360;
+            map.setBearing(bearing);
+            requestAnimationFrame(rotate);
+          };
+          rotate();
+          
+          setIsLoading(false);
+        } catch (e) {
+          console.error('Terrain setup error:', e);
           setIsLoading(false);
         }
-      }, 10000);
-    };
-    script.onerror = () => {
-      setError('Failed to load map library');
-      setIsLoading(false);
-    };
-    document.head.appendChild(script);
-    
-    function initMap(mapboxgl: any) {
-      if (!mapContainerRef.current || mapRef.current) return;
+      });
       
-      try {
-        mapboxgl.accessToken = token;
-        
-        const map = new mapboxgl.Map({
-          container: mapContainerRef.current,
-          style: 'mapbox://styles/mapbox/satellite-streets-v12',
-          center: [parcelInfo!.lng, parcelInfo!.lat],
-          zoom: 15,
-          pitch: 60,
-          bearing: 0,
-          interactive: false,
-        });
-        
-        mapRef.current = map;
-        
-        map.on('load', () => {
-          try {
-            // Add terrain
-            map.addSource('mapbox-dem', {
-              type: 'raster-dem',
-              url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-              tileSize: 512,
-              maxzoom: 14
-            });
-            
-            map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-            
-            // Start cinematic rotation
-            let bearing = 0;
-            const rotate = () => {
-              if (!mapRef.current) return;
-              bearing = (bearing + 0.3) % 360;
-              map.setBearing(bearing);
-              requestAnimationFrame(rotate);
-            };
-            rotate();
-            
-            setIsLoading(false);
-          } catch (e) {
-            console.error('Terrain setup error:', e);
-            setIsLoading(false);
-          }
-        });
-        
-        map.on('error', (e: any) => {
-          console.error('Map error:', e);
-          setIsLoading(false);
-        });
-      } catch (e) {
-        console.error('Map init error:', e);
+      map.on('error', (e: any) => {
+        console.error('Map error:', e);
+        if (e?.error?.message?.includes('WebGL')) {
+          setWebGLSupported(false);
+        }
+        setIsLoading(false);
+      });
+    } catch (e: any) {
+      console.error('Map init error:', e);
+      if (e?.message?.includes('WebGL')) {
+        setWebGLSupported(false);
+        setIsLoading(false);
+      } else {
         setError('Failed to initialize map');
         setIsLoading(false);
       }
@@ -201,7 +183,7 @@ function PreviewContent() {
         mapRef.current = null;
       }
     };
-  }, [parcelInfo]);
+  }, [parcelInfo, webGLSupported]);
   
   const handleUnlock = () => {
     // Go to map page with parcel pre-selected and checkout ready
@@ -221,10 +203,53 @@ function PreviewContent() {
     );
   }
   
+  // Build static map URL for fallback (Google Static Maps API)
+  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+  const getStaticMapUrl = () => {
+    if (!parcelInfo || !googleApiKey) return '';
+    const baseUrl = 'https://maps.googleapis.com/maps/api/staticmap';
+    const params = new URLSearchParams({
+      center: `${parcelInfo.lat},${parcelInfo.lng}`,
+      zoom: '15',
+      size: '800x600',
+      maptype: 'satellite',
+      key: googleApiKey
+    });
+    return `${baseUrl}?${params.toString()}`;
+  };
+  const staticMapUrl = getStaticMapUrl();
+
   return (
     <div className="min-h-screen bg-stone-900 relative overflow-hidden">
-      {/* 3D Map Background */}
-      <div ref={mapContainerRef} className="absolute inset-0" />
+      {/* 3D Map Background (or static fallback) */}
+      {webGLSupported ? (
+        <div ref={mapContainerRef} className="absolute inset-0" />
+      ) : (
+        <div className="absolute inset-0">
+          {/* Static satellite image fallback */}
+          {parcelInfo && (
+            <>
+              <div 
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ 
+                  backgroundImage: `url(${staticMapUrl})`,
+                  filter: 'brightness(0.8)'
+                }}
+              />
+              {/* Animated gradient overlay for visual interest */}
+              <div className="absolute inset-0 bg-gradient-to-br from-stone-900/50 via-transparent to-emerald-900/30" />
+              
+              {/* WebGL notice */}
+              <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30">
+                <div className="bg-amber-500/20 border border-amber-500/30 text-amber-200 px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>3D view requires WebGL • Showing satellite preview</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       
       {/* Loading overlay */}
       <AnimatePresence>
