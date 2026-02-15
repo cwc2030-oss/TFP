@@ -44,7 +44,10 @@ function PreviewContent() {
         const res = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
         const data = await res.json();
         
-        if (data.error) {
+        // API returns {parcels: [...]} array
+        const parcel = data.parcels?.[0];
+        
+        if (data.error || !parcel) {
           setParcelInfo({
             address: address || 'Property Location',
             county: 'Unknown',
@@ -53,10 +56,15 @@ function PreviewContent() {
             lng
           });
         } else {
+          // Capitalize county name
+          const countyName = parcel.county 
+            ? parcel.county.charAt(0).toUpperCase() + parcel.county.slice(1).toLowerCase()
+            : 'Unknown';
+          
           setParcelInfo({
-            address: data.siteAddress || address || 'Property Location',
-            county: data.county || 'Unknown',
-            acreage: data.acreage || 0,
+            address: parcel.siteAddress || address || 'Property Location',
+            county: countyName,
+            acreage: parcel.acreage || 0,
             lat,
             lng
           });
@@ -106,6 +114,15 @@ function PreviewContent() {
       setIsLoading(false);
       return;
     }
+    
+    // Timeout fallback - if map doesn't load in 8 seconds, show static fallback
+    const timeoutId = setTimeout(() => {
+      if (isLoading && !mapRef.current) {
+        console.log('Map load timeout - falling back to static view');
+        setWebGLSupported(false);
+        setIsLoading(false);
+      }
+    }, 8000);
     
     try {
       mapboxgl.accessToken = token;
@@ -161,23 +178,36 @@ function PreviewContent() {
       
       map.on('error', (e: any) => {
         console.error('Map error:', e);
-        if (e?.error?.message?.includes('WebGL')) {
+        const errorMsg = e?.error?.message || e?.message || e?.toString() || '';
+        // Any map error should fall back to static view
+        if (errorMsg.toLowerCase().includes('webgl') || 
+            errorMsg.toLowerCase().includes('failed') ||
+            errorMsg.toLowerCase().includes('context')) {
+          setWebGLSupported(false);
+        } else {
+          // For any other map errors, also show fallback
           setWebGLSupported(false);
         }
         setIsLoading(false);
       });
     } catch (e: any) {
       console.error('Map init error:', e);
-      if (e?.message?.includes('WebGL')) {
+      const errorMsg = e?.message || e?.toString() || '';
+      // Catch any WebGL-related errors and fall back to static map
+      if (errorMsg.toLowerCase().includes('webgl') || 
+          errorMsg.toLowerCase().includes('failed to initialize') ||
+          errorMsg.toLowerCase().includes('context')) {
         setWebGLSupported(false);
         setIsLoading(false);
       } else {
-        setError('Failed to initialize map');
+        // For other errors, also try fallback instead of showing error
+        setWebGLSupported(false);
         setIsLoading(false);
       }
     }
     
     return () => {
+      clearTimeout(timeoutId);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
