@@ -187,9 +187,16 @@ export default function Terrain3DView({
   const checkWebGLSupport = (): boolean => {
     try {
       const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      return !!gl;
+      // Try WebGL2 first (better iOS support), then WebGL1, then experimental
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return false;
+      // Also check if WebGL context is not lost
+      if (gl instanceof WebGLRenderingContext || gl instanceof WebGL2RenderingContext) {
+        return !gl.isContextLost();
+      }
+      return true;
     } catch (e) {
+      console.error("WebGL check failed:", e);
       return false;
     }
   };
@@ -497,13 +504,22 @@ export default function Terrain3DView({
     }
 
     mapRef.current = map;
+    let hasLoaded = false;
 
     map.on("error", (e: any) => {
       console.error("Mapbox error:", e);
+      // If there's a critical error before load, show error state
+      if (!hasLoaded && e.error && e.error.status === 401) {
+        setLoadError("Map authentication failed. Please try again.");
+      }
     });
 
-    // Faster timeout — show whatever we have after 3s
-    let hasLoaded = false;
+    // If map style fails to load, catch it
+    (map as any).once?.("styleimagemissing", () => {
+      console.log("Style image missing - continuing anyway");
+    });
+
+    // Timeout — show whatever we have after 5s (increased for iOS)
     const loadTimeout = setTimeout(() => {
       if (!hasLoaded) {
         console.log("Terrain load timeout - showing map anyway");
@@ -511,7 +527,7 @@ export default function Terrain3DView({
         setIsMapLoaded(true);
         setLoadPhase("done");
       }
-    }, 3000);
+    }, 5000);
 
     map.on("load", () => {
       clearTimeout(loadTimeout);
