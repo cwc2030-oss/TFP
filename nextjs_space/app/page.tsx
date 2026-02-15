@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, useInView } from "framer-motion";
@@ -68,6 +69,41 @@ export default function HomePage() {
 
 function HeroSection() {
   const seasonal = getSeasonalGreeting();
+  const [address, setAddress] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const router = useRouter();
+  
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!address.trim()) return;
+    
+    setIsSearching(true);
+    setSearchError('');
+    
+    try {
+      // Geocode the address using Google Maps API
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+      
+      const res = await fetch(geocodeUrl);
+      const data = await res.json();
+      
+      if (data.status === 'OK' && data.results.length > 0) {
+        const location = data.results[0].geometry.location;
+        const formattedAddress = data.results[0].formatted_address;
+        
+        // Redirect to cinematic preview
+        router.push(`/preview?lat=${location.lat}&lng=${location.lng}&address=${encodeURIComponent(formattedAddress)}`);
+      } else {
+        setSearchError('Address not found. Try including city and state.');
+        setIsSearching(false);
+      }
+    } catch (err) {
+      setSearchError('Search failed. Please try again.');
+      setIsSearching(false);
+    }
+  };
   
   return (
     <section className="relative min-h-[85vh] flex items-center overflow-hidden">
@@ -78,7 +114,7 @@ function HeroSection() {
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
-          {/* Left side - Copy */}
+          {/* Left side - Copy + Address Input */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -91,40 +127,71 @@ function HeroSection() {
             </div>
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
-              Land Intelligence.
-              <span className="block text-emerald-400 mt-2">Your property, decoded.</span>
+              See your land
+              <span className="block text-emerald-400 mt-2">in 3D. Free.</span>
             </h1>
             
-            <p className="text-xl text-stone-300 mb-4 leading-relaxed">
-              Terrain-derived deer intel, CWD status, flood zones, soil data — 
-              everything the ground tells us about your land, in plain English.
-            </p>
-            
-            <p className="text-lg text-stone-400 mb-8">
-              Whether you&apos;re buying, selling, or hunting the land you already own — 
-              we pull together the stuff that matters and put it in one report. 
-              No guesswork. No surprises.
+            <p className="text-xl text-stone-300 mb-8 leading-relaxed">
+              Enter any address. We&apos;ll show you the terrain — ridges, valleys, 
+              creek bottoms — in a spinning 3D flyover. Takes 10 seconds.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Link href="/map">
+            {/* Address Search Form */}
+            <form onSubmit={handleSearch} className="mb-6">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 relative">
+                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Enter property address..."
+                    className="w-full pl-12 pr-4 py-4 bg-stone-800/80 border border-stone-600 rounded-xl text-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-lg"
+                  />
+                </div>
                 <Button
+                  type="submit"
+                  disabled={isSearching || !address.trim()}
                   size="lg"
-                  className="bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg px-8 text-lg"
+                  className="bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg px-8 text-lg whitespace-nowrap disabled:opacity-50"
                 >
-                  <MapPin className="w-5 h-5 mr-2" />
-                  Look Up a Property
+                  {isSearching ? (
+                    <>
+                      <span className="animate-spin mr-2">⏳</span>
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <Mountain className="w-5 h-5 mr-2" />
+                      View in 3D
+                    </>
+                  )}
                 </Button>
-              </Link>
-              <Link href="/map?demo=3d">
-                <Button
-                  size="lg"
-                  className="bg-stone-700 text-white hover:bg-stone-600 border border-stone-500 px-8"
-                >
-                  <Mountain className="w-5 h-5 mr-2" />
-                  See 3D Terrain Demo
-                </Button>
-              </Link>
+              </div>
+              {searchError && (
+                <p className="text-red-400 text-sm mt-2">{searchError}</p>
+              )}
+            </form>
+            
+            <p className="text-stone-400 text-sm mb-6">
+              Try: <button type="button" onClick={() => setAddress('439 SE State Hwy PP, Leeton, MO')} className="text-emerald-400 hover:underline">439 SE State Hwy PP, Leeton, MO</button>
+              {' '} or {' '}
+              <button type="button" onClick={() => setAddress('County Road 311, Osceola, MO')} className="text-emerald-400 hover:underline">County Road 311, Osceola, MO</button>
+            </p>
+
+            <div className="flex flex-wrap gap-4 text-stone-400 text-sm">
+              <span className="flex items-center gap-1">
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                No signup required
+              </span>
+              <span className="flex items-center gap-1">
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                Works for any US address
+              </span>
+              <span className="flex items-center gap-1">
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                Instant results
+              </span>
             </div>
           </motion.div>
 
@@ -146,7 +213,7 @@ function HeroSection() {
                 unoptimized
               />
               <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-stone-800 px-4 py-2 rounded-full border border-stone-600">
-                <p className="text-stone-300 text-sm font-medium">Missouri's Land Intel Folks</p>
+                <p className="text-stone-300 text-sm font-medium">Missouri&apos;s Land Intel Folks</p>
               </div>
             </div>
           </motion.div>
