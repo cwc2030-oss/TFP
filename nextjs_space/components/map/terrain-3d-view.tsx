@@ -195,38 +195,53 @@ export default function Terrain3DView({
   };
 
   // ═══ TERRAIN-AWARE CORRIDOR GENERATION ═══
-  // Uses parcel geometry to place water features realistically and routes corridors AROUND water
+  // Uses ACTUAL parcel bounds to place features INSIDE the property
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
-    const { lat, lng } = parcelCenter;
-    const offset = acreage ? Math.sqrt(acreage / 640) * 0.01 : 0.005;
+    const { lat: centerLat, lng: centerLng } = parcelCenter;
+    
+    // Calculate ACTUAL bounds from parcel geometry
+    let minLng = centerLng, maxLng = centerLng, minLat = centerLat, maxLat = centerLat;
+    if (parcelBounds && parcelBounds.length > 2) {
+      minLng = Math.min(...parcelBounds.map(p => p.lng));
+      maxLng = Math.max(...parcelBounds.map(p => p.lng));
+      minLat = Math.min(...parcelBounds.map(p => p.lat));
+      maxLat = Math.max(...parcelBounds.map(p => p.lat));
+    } else {
+      // Fallback to acreage-based estimate
+      const fallbackOffset = acreage ? Math.sqrt(acreage / 640) * 0.01 : 0.005;
+      minLng = centerLng - fallbackOffset;
+      maxLng = centerLng + fallbackOffset;
+      minLat = centerLat - fallbackOffset;
+      maxLat = centerLat + fallbackOffset;
+    }
+    
+    // Shrink bounds by 10% to keep features INSIDE parcel edges
+    const padX = (maxLng - minLng) * 0.10;
+    const padY = (maxLat - minLat) * 0.10;
+    const safeMinLng = minLng + padX;
+    const safeMaxLng = maxLng - padX;
+    const safeMinLat = minLat + padY;
+    const safeMaxLat = maxLat - padY;
+    
+    // Helper: convert normalized coordinates (0-1) to actual coords within safe bounds
+    const toCoord = (normX: number, normY: number): [number, number] => [
+      safeMinLng + normX * (safeMaxLng - safeMinLng),
+      safeMinLat + normY * (safeMaxLat - safeMinLat)
+    ];
     
     // Seeded random for consistent but parcel-unique placement
-    let seed = (Math.abs(lat * 10000) + Math.abs(lng * 10000)) % 1000;
+    let seed = (Math.abs(centerLat * 10000) + Math.abs(centerLng * 10000)) % 1000;
     const seededRandom = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
     
-    // ═══ TERRAIN LOGIC ═══
-    // Water flows downhill. In Missouri, creeks typically run SE/S direction.
-    // We place water in the "low" quadrant and route corridors to avoid crossing it.
+    // ═══ TERRAIN LOGIC using NORMALIZED coordinates (0-1 range) ═══
+    // All features will be placed INSIDE the parcel using toCoord()
+    // x=0 is west edge, x=1 is east edge
+    // y=0 is south edge, y=1 is north edge
     
-    // Determine water zone quadrant based on parcel coordinates (deterministic per-parcel)
-    const waterQuadrant = seededRandom() > 0.5 ? 'SE' : 'SW'; // Creek typically runs through SE or SW
-    const waterOffsetX = waterQuadrant === 'SE' ? 0.4 : -0.4;
-    const waterOffsetY = -0.35; // Water is in the "southern" (lower) part
-    
-    // High ground (bedding) is OPPOSITE water
-    const highGroundX = -waterOffsetX * 0.8;
-    const highGroundY = 0.5; // Northern ridge
-    
-    // ═══ WATER FEATURES — placed in low terrain ═══
-    // Creek runs along the low ground, NOT through travel corridors
-    const creekStart: [number, number] = [lng + offset * (waterOffsetX - 0.6), lat + offset * (waterOffsetY + 0.4)];
-    const creekEnd: [number, number] = [lng + offset * (waterOffsetX + 0.6), lat + offset * (waterOffsetY - 0.3)];
-    
-    // Pond sits in a low depression near creek
-    const pondCenter: [number, number] = [lng + offset * waterOffsetX * 0.8, lat + offset * (waterOffsetY - 0.15)];
-    
-    // ═══ CORRIDORS — route AROUND water, not through it ═══
-    // Primary corridors connect bedding (high ground) to food sources, skirting water
+    // Determine water location based on parcel seed (deterministic)
+    const waterOnEast = seededRandom() > 0.5;
+    const waterX = waterOnEast ? 0.75 : 0.25; // Water on one side
+    const highGroundX = waterOnEast ? 0.25 : 0.75; // Bedding on opposite side
     
     const corridors: DeerCorridor[] = [
       // PRIMARY TRAVEL — Ridge to feed, AROUND water
@@ -236,17 +251,12 @@ export default function Terrain3DView({
         label: "Primary Travel Corridor",
         description: "Main deer movement — ridge to feeding area. Routes around water. High traffic dawn & dusk.",
         coordinates: smoothTrailPath([
-          // Start from high ground (bedding area)
-          [lng + offset * highGroundX * 1.1, lat + offset * 0.75],
-          [lng + offset * highGroundX * 0.9, lat + offset * 0.55],
-          [lng + offset * highGroundX * 0.6, lat + offset * 0.35],
-          // Curve AWAY from water zone
-          [lng + offset * (highGroundX > 0 ? 0.1 : -0.1), lat + offset * 0.15],
-          [lng + offset * (highGroundX > 0 ? -0.15 : 0.15), lat - offset * 0.05],
-          // End at food source on opposite side from water
-          [lng + offset * (-waterOffsetX * 0.6), lat - offset * 0.45],
-          [lng + offset * (-waterOffsetX * 0.8), lat - offset * 0.65],
-        ], 0.18),
+          toCoord(highGroundX, 0.85), // Start from bedding (high ground, north)
+          toCoord(highGroundX * 0.9, 0.70),
+          toCoord(0.5, 0.55), // Cross through center
+          toCoord(1 - highGroundX * 0.8, 0.40),
+          toCoord(1 - highGroundX * 0.7, 0.25), // End at food area
+        ], 0.12),
       },
       {
         id: "primary-2",
@@ -254,28 +264,25 @@ export default function Terrain3DView({
         label: "Ridge Connector",
         description: "Secondary travel along ridge spine — avoids low ground. Mature bucks during rut.",
         coordinates: smoothTrailPath([
-          [lng + offset * 0.85, lat + offset * 0.7],
-          [lng + offset * 0.6, lat + offset * 0.55],
-          [lng + offset * 0.3, lat + offset * 0.4],
-          [lng, lat + offset * 0.25],
-          [lng - offset * 0.3, lat + offset * 0.3],
-          [lng - offset * 0.6, lat + offset * 0.45],
-          [lng - offset * 0.85, lat + offset * 0.55],
-        ], 0.15),
+          toCoord(0.15, 0.75),
+          toCoord(0.30, 0.70),
+          toCoord(0.50, 0.65),
+          toCoord(0.70, 0.70),
+          toCoord(0.85, 0.75),
+        ], 0.10),
       },
-      // SECONDARY — Field edges, staying on high ground
+      // SECONDARY — Field edges
       {
         id: "secondary-1",
         type: "secondary",
         label: "Timber Edge Trail",
         description: "Edge transition — does & yearlings travel this frequently. Stays above creek bottom.",
         coordinates: smoothTrailPath([
-          [lng + offset * (-waterOffsetX * 0.9), lat + offset * 0.6],
-          [lng + offset * (-waterOffsetX * 0.7), lat + offset * 0.4],
-          [lng + offset * (-waterOffsetX * 0.5), lat + offset * 0.2],
-          [lng + offset * (-waterOffsetX * 0.3), lat],
-          [lng + offset * (-waterOffsetX * 0.2), lat - offset * 0.25],
-        ], 0.2),
+          toCoord(1 - waterX, 0.75),
+          toCoord(1 - waterX, 0.55),
+          toCoord(1 - waterX * 0.9, 0.35),
+          toCoord(1 - waterX * 0.85, 0.20),
+        ], 0.15),
       },
       {
         id: "secondary-2",
@@ -283,27 +290,23 @@ export default function Terrain3DView({
         label: "Water Approach Trail",
         description: "Approach to water source — deer travel TO creek, not across it.",
         coordinates: smoothTrailPath([
-          // Start from higher ground
-          [lng + offset * (waterOffsetX * 0.3), lat + offset * 0.35],
-          [lng + offset * (waterOffsetX * 0.4), lat + offset * 0.15],
-          [lng + offset * (waterOffsetX * 0.5), lat - offset * 0.05],
-          // TERMINATE at water — don't cross
-          [lng + offset * (waterOffsetX * 0.55), lat + offset * waterOffsetY * 0.8],
-        ], 0.18),
+          toCoord(0.5, 0.55), // Start from center-ish
+          toCoord(waterX * 0.9, 0.45),
+          toCoord(waterX, 0.35), // End at water
+        ], 0.12),
       },
-      // WATER — Creek follows low terrain
+      // WATER — Creek in low area
       {
         id: "water-1",
         type: "water",
         label: "Primary Creek Bottom",
         description: "Seasonal drainage follows terrain low point. Deer visit for water, don't cross here.",
         coordinates: smoothTrailPath([
-          creekStart,
-          [creekStart[0] + (creekEnd[0] - creekStart[0]) * 0.25, creekStart[1] + (creekEnd[1] - creekStart[1]) * 0.2 + offset * 0.08],
-          [creekStart[0] + (creekEnd[0] - creekStart[0]) * 0.5, creekStart[1] + (creekEnd[1] - creekStart[1]) * 0.45],
-          [creekStart[0] + (creekEnd[0] - creekStart[0]) * 0.75, creekStart[1] + (creekEnd[1] - creekStart[1]) * 0.7 - offset * 0.05],
-          creekEnd,
-        ], 0.25),
+          toCoord(waterX - 0.1, 0.60),
+          toCoord(waterX, 0.45),
+          toCoord(waterX + 0.05, 0.30),
+          toCoord(waterX, 0.15),
+        ], 0.18),
       },
       {
         id: "water-2",
@@ -311,15 +314,14 @@ export default function Terrain3DView({
         label: "Stock Pond",
         description: "Year-round water — high traffic staging area. Deer approach from uphill side.",
         coordinates: [
-          [pondCenter[0] - offset * 0.08, pondCenter[1] + offset * 0.05],
-          [pondCenter[0] - offset * 0.02, pondCenter[1] + offset * 0.09],
-          [pondCenter[0] + offset * 0.06, pondCenter[1] + offset * 0.08],
-          [pondCenter[0] + offset * 0.1, pondCenter[1] + offset * 0.03],
-          [pondCenter[0] + offset * 0.09, pondCenter[1] - offset * 0.04],
-          [pondCenter[0] + offset * 0.03, pondCenter[1] - offset * 0.07],
-          [pondCenter[0] - offset * 0.05, pondCenter[1] - offset * 0.05],
-          [pondCenter[0] - offset * 0.08, pondCenter[1]],
-          [pondCenter[0] - offset * 0.08, pondCenter[1] + offset * 0.05],
+          toCoord(waterX - 0.06, 0.28),
+          toCoord(waterX - 0.02, 0.32),
+          toCoord(waterX + 0.04, 0.31),
+          toCoord(waterX + 0.06, 0.27),
+          toCoord(waterX + 0.04, 0.23),
+          toCoord(waterX - 0.02, 0.22),
+          toCoord(waterX - 0.06, 0.25),
+          toCoord(waterX - 0.06, 0.28),
         ],
       },
       // BEDDING — on high ground, opposite water
@@ -329,15 +331,14 @@ export default function Terrain3DView({
         label: "Primary Bedding — Ridge Top",
         description: "High ground with 270° visibility. Mature bucks bed here — escape routes downhill.",
         coordinates: [
-          [lng + offset * highGroundX * 0.7, lat + offset * 0.6],
-          [lng + offset * highGroundX * 0.85, lat + offset * 0.68],
-          [lng + offset * highGroundX * 1.0, lat + offset * 0.72],
-          [lng + offset * highGroundX * 1.1, lat + offset * 0.68],
-          [lng + offset * highGroundX * 1.15, lat + offset * 0.58],
-          [lng + offset * highGroundX * 1.05, lat + offset * 0.5],
-          [lng + offset * highGroundX * 0.9, lat + offset * 0.5],
-          [lng + offset * highGroundX * 0.75, lat + offset * 0.54],
-          [lng + offset * highGroundX * 0.7, lat + offset * 0.6],
+          toCoord(highGroundX - 0.08, 0.80),
+          toCoord(highGroundX, 0.85),
+          toCoord(highGroundX + 0.08, 0.83),
+          toCoord(highGroundX + 0.10, 0.77),
+          toCoord(highGroundX + 0.05, 0.72),
+          toCoord(highGroundX - 0.05, 0.73),
+          toCoord(highGroundX - 0.08, 0.77),
+          toCoord(highGroundX - 0.08, 0.80),
         ],
       },
       {
@@ -346,27 +347,26 @@ export default function Terrain3DView({
         label: "Secondary Bedding — Thermal Cover",
         description: "Dense cedar thicket on north-facing slope. Wind protection, close to water.",
         coordinates: [
-          [lng + offset * (waterOffsetX * 0.2), lat + offset * 0.15],
-          [lng + offset * (waterOffsetX * 0.35), lat + offset * 0.22],
-          [lng + offset * (waterOffsetX * 0.5), lat + offset * 0.2],
-          [lng + offset * (waterOffsetX * 0.55), lat + offset * 0.1],
-          [lng + offset * (waterOffsetX * 0.48), lat + offset * 0.02],
-          [lng + offset * (waterOffsetX * 0.32), lat + offset * 0.02],
-          [lng + offset * (waterOffsetX * 0.2), lat + offset * 0.08],
-          [lng + offset * (waterOffsetX * 0.2), lat + offset * 0.15],
+          toCoord(0.45, 0.55),
+          toCoord(0.50, 0.60),
+          toCoord(0.58, 0.58),
+          toCoord(0.60, 0.52),
+          toCoord(0.55, 0.48),
+          toCoord(0.47, 0.50),
+          toCoord(0.45, 0.55),
         ],
       },
-      // FUNNELS — at terrain pinch points AWAY from water
+      // FUNNELS — at terrain pinch points
       {
         id: "funnel-1",
         type: "funnel",
         label: "Ridge Pinch Point",
         description: "Terrain bottleneck on high ground — forces deer through narrow gap. PRIME stand location.",
         coordinates: smoothTrailPath([
-          [lng + offset * (highGroundX * 0.4), lat + offset * 0.3],
-          [lng + offset * (highGroundX * 0.2), lat + offset * 0.15],
-          [lng, lat],
-        ], 0.1),
+          toCoord(0.40, 0.60),
+          toCoord(0.50, 0.55),
+          toCoord(0.60, 0.60),
+        ], 0.08),
       },
       {
         id: "funnel-2",
@@ -374,28 +374,25 @@ export default function Terrain3DView({
         label: "Creek Crossing Funnel",
         description: "Only safe crossing point — deer funnel here to avoid deep water.",
         coordinates: smoothTrailPath([
-          [lng + offset * (waterOffsetX * 0.3), lat + offset * (waterOffsetY + 0.2)],
-          [lng + offset * (waterOffsetX * 0.35), lat + offset * waterOffsetY],
-          [lng + offset * (waterOffsetX * 0.4), lat + offset * (waterOffsetY - 0.15)],
-        ], 0.08),
+          toCoord(waterX - 0.15, 0.40),
+          toCoord(waterX, 0.38),
+          toCoord(waterX + 0.10, 0.42),
+        ], 0.06),
       },
-      // FOOD PLOTS — ALWAYS on high ground, NEVER near water
-      // Rule: Food plots go on the OPPOSITE side from water, on ridges/benches
+      // FOOD PLOTS — on high ground opposite water
       {
         id: "food-1",
         type: "food_plot",
         label: "Kill Plot — Clover/Brassica",
         description: "¼-acre kill plot on ridge bench. Well-drained upland soil. Screened by timber.",
         coordinates: [
-          // Place on HIGH GROUND side (opposite from water), in UPPER portion of parcel
-          [lng + offset * (highGroundX * 0.6), lat + offset * 0.1],
-          [lng + offset * (highGroundX * 0.7), lat + offset * 0.16],
-          [lng + offset * (highGroundX * 0.82), lat + offset * 0.14],
-          [lng + offset * (highGroundX * 0.85), lat + offset * 0.06],
-          [lng + offset * (highGroundX * 0.78), lat - offset * 0.02],
-          [lng + offset * (highGroundX * 0.65), lat - offset * 0.01],
-          [lng + offset * (highGroundX * 0.58), lat + offset * 0.04],
-          [lng + offset * (highGroundX * 0.6), lat + offset * 0.1],
+          toCoord(highGroundX - 0.06, 0.50),
+          toCoord(highGroundX, 0.55),
+          toCoord(highGroundX + 0.08, 0.52),
+          toCoord(highGroundX + 0.08, 0.45),
+          toCoord(highGroundX, 0.42),
+          toCoord(highGroundX - 0.06, 0.45),
+          toCoord(highGroundX - 0.06, 0.50),
         ],
       },
       {
@@ -404,15 +401,13 @@ export default function Terrain3DView({
         label: "Staging Plot — Soybeans",
         description: "½-acre destination plot between bedding and timber edge. High & dry.",
         coordinates: [
-          // Place near bedding area on high ground, well above water zone
-          [lng + offset * (highGroundX * 0.4), lat + offset * 0.42],
-          [lng + offset * (highGroundX * 0.5), lat + offset * 0.48],
-          [lng + offset * (highGroundX * 0.62), lat + offset * 0.46],
-          [lng + offset * (highGroundX * 0.65), lat + offset * 0.38],
-          [lng + offset * (highGroundX * 0.58), lat + offset * 0.3],
-          [lng + offset * (highGroundX * 0.45), lat + offset * 0.32],
-          [lng + offset * (highGroundX * 0.38), lat + offset * 0.36],
-          [lng + offset * (highGroundX * 0.4), lat + offset * 0.42],
+          toCoord(highGroundX - 0.05, 0.30),
+          toCoord(highGroundX + 0.02, 0.35),
+          toCoord(highGroundX + 0.10, 0.33),
+          toCoord(highGroundX + 0.10, 0.25),
+          toCoord(highGroundX + 0.02, 0.22),
+          toCoord(highGroundX - 0.05, 0.25),
+          toCoord(highGroundX - 0.05, 0.30),
         ],
       },
       // STAND SITES — positioned for wind & corridor coverage
@@ -422,11 +417,11 @@ export default function Terrain3DView({
         label: "#1 Stand — Ridge Funnel",
         description: "20ft hang-on at pinch point on high ground. SW wind. All-day rut sit.",
         coordinates: [
-          [lng + offset * 0.02, lat + offset * 0.04],
-          [lng + offset * 0.06, lat + offset * 0.08],
-          [lng + offset * 0.1, lat + offset * 0.04],
-          [lng + offset * 0.06, lat],
-          [lng + offset * 0.02, lat + offset * 0.04],
+          toCoord(0.48, 0.57),
+          toCoord(0.50, 0.60),
+          toCoord(0.54, 0.58),
+          toCoord(0.52, 0.54),
+          toCoord(0.48, 0.57),
         ],
       },
       {
@@ -435,11 +430,11 @@ export default function Terrain3DView({
         label: "#2 Stand — Water Approach",
         description: "Ladder stand watching trail TO water (not crossing). NW wind. Evening hunts.",
         coordinates: [
-          [lng + offset * (waterOffsetX * 0.45), lat + offset * (waterOffsetY + 0.25)],
-          [lng + offset * (waterOffsetX * 0.49), lat + offset * (waterOffsetY + 0.29)],
-          [lng + offset * (waterOffsetX * 0.53), lat + offset * (waterOffsetY + 0.25)],
-          [lng + offset * (waterOffsetX * 0.49), lat + offset * (waterOffsetY + 0.21)],
-          [lng + offset * (waterOffsetX * 0.45), lat + offset * (waterOffsetY + 0.25)],
+          toCoord(waterX - 0.08, 0.50),
+          toCoord(waterX - 0.05, 0.53),
+          toCoord(waterX - 0.02, 0.50),
+          toCoord(waterX - 0.05, 0.47),
+          toCoord(waterX - 0.08, 0.50),
         ],
       },
       {
@@ -448,18 +443,17 @@ export default function Terrain3DView({
         label: "#3 Stand — Kill Plot Edge",
         description: "Ground blind on downwind edge of kill plot. S/SE wind. Evening sits.",
         coordinates: [
-          // Position near the kill plot on high ground
-          [lng + offset * (highGroundX * 0.82), lat + offset * 0.02],
-          [lng + offset * (highGroundX * 0.86), lat + offset * 0.06],
-          [lng + offset * (highGroundX * 0.9), lat + offset * 0.02],
-          [lng + offset * (highGroundX * 0.86), lat - offset * 0.02],
-          [lng + offset * (highGroundX * 0.82), lat + offset * 0.02],
+          toCoord(highGroundX + 0.05, 0.40),
+          toCoord(highGroundX + 0.08, 0.43),
+          toCoord(highGroundX + 0.11, 0.40),
+          toCoord(highGroundX + 0.08, 0.37),
+          toCoord(highGroundX + 0.05, 0.40),
         ],
       },
     ];
 
     return corridors;
-  }, [parcelCenter, acreage]);
+  }, [parcelCenter, parcelBounds, acreage]);
 
   // Initialize map — PHASED LOADING for speed
   useEffect(() => {
