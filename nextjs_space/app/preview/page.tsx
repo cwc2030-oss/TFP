@@ -78,16 +78,16 @@ function PreviewContent() {
             displayAddress = address || 'Rural Property';
           }
           
-          // Extract parcel bounds from coordinates
+          // Extract parcel bounds from coordinates - format is [[[lng,lat], [lng,lat], ...]]
           let bounds: { lat: number; lng: number }[] | undefined;
-          if (parcel.coordinates) {
+          if (parcel.coordinates && Array.isArray(parcel.coordinates)) {
             try {
-              const coords = parcel.coordinates[0] || parcel.coordinates;
-              if (Array.isArray(coords)) {
-                bounds = coords.flat(2).filter((c: any) => Array.isArray(c) && c.length === 2).map((c: any) => ({
-                  lng: c[0],
-                  lat: c[1]
-                }));
+              // Get the first polygon ring (outer boundary)
+              const ring = parcel.coordinates[0];
+              if (Array.isArray(ring) && ring.length > 0) {
+                bounds = ring
+                  .filter((coord: any) => Array.isArray(coord) && coord.length >= 2)
+                  .map((coord: any) => ({ lng: coord[0], lat: coord[1] }));
               }
             } catch (e) {
               console.error('Error parsing bounds:', e);
