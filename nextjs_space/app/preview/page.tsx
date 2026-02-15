@@ -81,68 +81,118 @@ function PreviewContent() {
     
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
+      console.error('No Mapbox token found');
       setError('Map configuration error');
       setIsLoading(false);
       return;
     }
     
+    // Check if mapboxgl is already loaded
+    if (typeof window !== 'undefined' && (window as any).mapboxgl) {
+      initMap((window as any).mapboxgl);
+      return;
+    }
+    
     // Load Mapbox script
+    const existingScript = document.querySelector('script[src*="mapbox-gl"]');
+    if (existingScript) {
+      // Script already exists, wait for it
+      const checkMapbox = setInterval(() => {
+        if ((window as any).mapboxgl) {
+          clearInterval(checkMapbox);
+          initMap((window as any).mapboxgl);
+        }
+      }, 100);
+      return;
+    }
+    
     const script = document.createElement('script');
     script.src = 'https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js';
+    script.async = true;
     script.onload = () => {
       const link = document.createElement('link');
       link.href = 'https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css';
       link.rel = 'stylesheet';
       document.head.appendChild(link);
       
-      setTimeout(() => initMap(), 100);
+      // Wait for mapboxgl to be available
+      const checkMapbox = setInterval(() => {
+        if ((window as any).mapboxgl) {
+          clearInterval(checkMapbox);
+          initMap((window as any).mapboxgl);
+        }
+      }, 50);
+      
+      // Timeout fallback
+      setTimeout(() => {
+        if (!mapRef.current) {
+          setError('Failed to load map');
+          setIsLoading(false);
+        }
+      }, 10000);
+    };
+    script.onerror = () => {
+      setError('Failed to load map library');
+      setIsLoading(false);
     };
     document.head.appendChild(script);
     
-    function initMap() {
-      if (!mapContainerRef.current) return;
+    function initMap(mapboxgl: any) {
+      if (!mapContainerRef.current || mapRef.current) return;
       
-      mapboxgl.accessToken = token;
-      
-      const map = new mapboxgl.Map({
-        container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/satellite-streets-v12',
-        center: [parcelInfo!.lng, parcelInfo!.lat],
-        zoom: 15,
-        pitch: 60,
-        bearing: 0,
-        interactive: false, // No user controls
-      });
-      
-      mapRef.current = map;
-      
-      map.on('load', () => {
-        // Add terrain
-        map.addSource('mapbox-dem', {
-          type: 'raster-dem',
-          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-          tileSize: 512,
-          maxzoom: 14
+      try {
+        mapboxgl.accessToken = token;
+        
+        const map = new mapboxgl.Map({
+          container: mapContainerRef.current,
+          style: 'mapbox://styles/mapbox/satellite-streets-v12',
+          center: [parcelInfo!.lng, parcelInfo!.lat],
+          zoom: 15,
+          pitch: 60,
+          bearing: 0,
+          interactive: false,
         });
         
-        map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+        mapRef.current = map;
         
-        // Start cinematic rotation
-        let bearing = 0;
-        const rotate = () => {
-          if (!mapRef.current) return;
-          bearing = (bearing + 0.3) % 360;
-          map.setBearing(bearing);
-          requestAnimationFrame(rotate);
-        };
-        rotate();
+        map.on('load', () => {
+          try {
+            // Add terrain
+            map.addSource('mapbox-dem', {
+              type: 'raster-dem',
+              url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+              tileSize: 512,
+              maxzoom: 14
+            });
+            
+            map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+            
+            // Start cinematic rotation
+            let bearing = 0;
+            const rotate = () => {
+              if (!mapRef.current) return;
+              bearing = (bearing + 0.3) % 360;
+              map.setBearing(bearing);
+              requestAnimationFrame(rotate);
+            };
+            rotate();
+            
+            setIsLoading(false);
+          } catch (e) {
+            console.error('Terrain setup error:', e);
+            setIsLoading(false);
+          }
+        });
         
+        map.on('error', (e: any) => {
+          console.error('Map error:', e);
+          setIsLoading(false);
+        });
+      } catch (e) {
+        console.error('Map init error:', e);
+        setError('Failed to initialize map');
         setIsLoading(false);
-      });
-      
-      map.on('error', () => {
-        setIsLoading(false);
-      });
+      }
     }
     
     return () => {

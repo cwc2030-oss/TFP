@@ -72,7 +72,77 @@ function HeroSection() {
   const [address, setAddress] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [suggestions, setSuggestions] = useState<Array<{description: string, place_id: string}>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const router = useRouter();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+  
+  // Google Places Autocomplete
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node) &&
+          inputRef.current && !inputRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+  
+  const fetchSuggestions = async (input: string) => {
+    if (input.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      // Use Places Autocomplete API via proxy to avoid CORS
+      const res = await fetch(`/api/places-autocomplete?input=${encodeURIComponent(input)}`);
+      const data = await res.json();
+      
+      if (data.predictions) {
+        setSuggestions(data.predictions.slice(0, 5));
+        setShowSuggestions(true);
+      }
+    } catch (err) {
+      console.error('Autocomplete error:', err);
+    }
+  };
+  
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setAddress(value);
+    fetchSuggestions(value);
+  };
+  
+  const handleSuggestionClick = async (suggestion: {description: string, place_id: string}) => {
+    setAddress(suggestion.description);
+    setShowSuggestions(false);
+    setIsSearching(true);
+    setSearchError('');
+    
+    try {
+      // Get place details for coordinates
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(suggestion.description)}&key=${apiKey}`;
+      
+      const res = await fetch(geocodeUrl);
+      const data = await res.json();
+      
+      if (data.status === 'OK' && data.results.length > 0) {
+        const location = data.results[0].geometry.location;
+        router.push(`/preview?lat=${location.lat}&lng=${location.lng}&address=${encodeURIComponent(suggestion.description)}`);
+      } else {
+        setSearchError('Could not locate address.');
+        setIsSearching(false);
+      }
+    } catch (err) {
+      setSearchError('Search failed. Please try again.');
+      setIsSearching(false);
+    }
+  };
   
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +150,7 @@ function HeroSection() {
     
     setIsSearching(true);
     setSearchError('');
+    setShowSuggestions(false);
     
     try {
       // Geocode the address using Google Maps API
@@ -140,14 +211,36 @@ function HeroSection() {
             <form onSubmit={handleSearch} className="mb-6">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 relative">
-                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400 z-10" />
                   <input
+                    ref={inputRef}
                     type="text"
                     value={address}
-                    onChange={(e) => setAddress(e.target.value)}
+                    onChange={handleInputChange}
+                    onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                     placeholder="Enter property address..."
                     className="w-full pl-12 pr-4 py-4 bg-stone-800/80 border border-stone-600 rounded-xl text-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-lg"
+                    autoComplete="off"
                   />
+                  {/* Autocomplete Suggestions */}
+                  {showSuggestions && suggestions.length > 0 && (
+                    <div 
+                      ref={suggestionsRef}
+                      className="absolute top-full left-0 right-0 mt-1 bg-stone-800 border border-stone-600 rounded-xl overflow-hidden z-50 shadow-xl"
+                    >
+                      {suggestions.map((suggestion, i) => (
+                        <button
+                          key={suggestion.place_id}
+                          type="button"
+                          onClick={() => handleSuggestionClick(suggestion)}
+                          className="w-full px-4 py-3 text-left text-white hover:bg-stone-700 flex items-center gap-3 border-b border-stone-700 last:border-0"
+                        >
+                          <MapPin className="w-4 h-4 text-stone-400 flex-shrink-0" />
+                          <span className="truncate">{suggestion.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <Button
                   type="submit"
