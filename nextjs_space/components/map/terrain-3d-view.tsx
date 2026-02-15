@@ -249,168 +249,137 @@ export default function Terrain3DView({
     const waterOnEast = seededRandom() > 0.5;
     
     const corridors: DeerCorridor[] = [
-      // ═══ PRIMARY TRAVEL CORRIDORS — spanning full property ═══
+      // ═══ PRIMARY TRAVEL — diagonal movement connecting features ═══
       {
         id: "primary-1",
         type: "primary",
-        label: "North-South Spine",
-        description: "Main travel corridor running through property center. High traffic dawn & dusk.",
+        label: "Main Travel Corridor",
+        description: "Primary deer highway — bedding to food. High traffic dawn & dusk.",
         coordinates: smoothTrailPath([
-          toCoord(0.45, 0.95), // North edge
-          toCoord(0.50, 0.80),
-          toCoord(0.48, 0.60),
-          toCoord(0.52, 0.40),
-          toCoord(0.50, 0.20),
-          toCoord(0.55, 0.05), // South edge
-        ], 0.08),
+          toCoord(0.08, 0.92), // NW bedding
+          toCoord(0.25, 0.75),
+          toCoord(0.45, 0.55),
+          toCoord(0.65, 0.35),
+          toCoord(0.92, 0.08), // SE food
+        ], 0.06),
       },
       {
         id: "primary-2",
         type: "primary",
-        label: "East Ridge Trail",
-        description: "Ridge connector along eastern high ground. Mature bucks during rut.",
+        label: "Ridge Runner",
+        description: "Secondary travel along high ground. Mature bucks during rut.",
         coordinates: smoothTrailPath([
-          toCoord(0.85, 0.90),
-          toCoord(0.80, 0.70),
-          toCoord(0.82, 0.50),
-          toCoord(0.78, 0.30),
-          toCoord(0.85, 0.10),
-        ], 0.08),
+          toCoord(0.92, 0.88), // NE corner
+          toCoord(0.70, 0.65),
+          toCoord(0.50, 0.50),
+          toCoord(0.30, 0.35),
+          toCoord(0.08, 0.12), // SW corner
+        ], 0.06),
       },
-      {
-        id: "primary-3",
-        type: "primary",
-        label: "West Timber Edge",
-        description: "Western boundary trail — does frequent this edge at dawn.",
-        coordinates: smoothTrailPath([
-          toCoord(0.15, 0.88),
-          toCoord(0.18, 0.65),
-          toCoord(0.12, 0.45),
-          toCoord(0.18, 0.25),
-          toCoord(0.15, 0.08),
-        ], 0.08),
-      },
-      // ═══ SECONDARY TRAILS — connecting features ═══
+      // ═══ SECONDARY — connecting bedding to water & food ═══
       {
         id: "secondary-1",
         type: "secondary",
-        label: "Cross Trail — North",
-        description: "East-west connector through northern third. Links bedding areas.",
+        label: "North Edge Trail",
+        description: "Timber edge — does travel this at first light.",
         coordinates: smoothTrailPath([
-          toCoord(0.10, 0.78),
-          toCoord(0.35, 0.75),
-          toCoord(0.65, 0.77),
-          toCoord(0.90, 0.75),
-        ], 0.10),
+          toCoord(0.05, 0.85),
+          toCoord(0.30, 0.90),
+          toCoord(0.60, 0.88),
+          toCoord(0.95, 0.82),
+        ], 0.08),
       },
       {
         id: "secondary-2",
         type: "secondary",
-        label: "Cross Trail — South",
-        description: "East-west connector through southern third. Does & yearlings.",
+        label: "South Field Edge",
+        description: "Field edge trail — evening movement to food.",
         coordinates: smoothTrailPath([
-          toCoord(0.12, 0.25),
-          toCoord(0.40, 0.28),
-          toCoord(0.60, 0.25),
-          toCoord(0.88, 0.28),
-        ], 0.10),
+          toCoord(0.05, 0.15),
+          toCoord(0.35, 0.10),
+          toCoord(0.65, 0.12),
+          toCoord(0.95, 0.18),
+        ], 0.08),
       },
       {
         id: "secondary-3",
         type: "secondary",
-        label: "Central Crossover",
-        description: "Mid-property trail connecting east and west features.",
+        label: "Water Approach",
+        description: "Trail to water — deer travel TO creek, not across.",
         coordinates: smoothTrailPath([
-          toCoord(0.15, 0.52),
-          toCoord(0.40, 0.48),
-          toCoord(0.60, 0.52),
-          toCoord(0.85, 0.50),
-        ], 0.10),
+          toCoord(0.50, 0.70),
+          toCoord(waterOnEast ? 0.65 : 0.35, 0.55),
+          toCoord(waterOnEast ? 0.72 : 0.28, 0.40),
+        ], 0.08),
       },
-      // ═══ WATER FEATURES — distributed across property ═══
+      // ═══ WATER — creek runs corner to corner ═══
       {
         id: "water-1",
         type: "water",
         label: "Primary Creek",
-        description: "Seasonal drainage through center. Year-round water source.",
+        description: "Year-round water source. Deer stage here before feeding.",
         coordinates: smoothTrailPath([
-          toCoord(waterOnEast ? 0.70 : 0.30, 0.85),
-          toCoord(waterOnEast ? 0.65 : 0.35, 0.65),
-          toCoord(waterOnEast ? 0.68 : 0.32, 0.45),
-          toCoord(waterOnEast ? 0.62 : 0.38, 0.25),
-          toCoord(waterOnEast ? 0.65 : 0.35, 0.10),
-        ], 0.12),
+          toCoord(waterOnEast ? 0.75 : 0.25, 0.92),
+          toCoord(waterOnEast ? 0.70 : 0.30, 0.70),
+          toCoord(waterOnEast ? 0.68 : 0.32, 0.50),
+          toCoord(waterOnEast ? 0.72 : 0.28, 0.30),
+          toCoord(waterOnEast ? 0.78 : 0.22, 0.08),
+        ], 0.10),
       },
       {
         id: "water-2",
         type: "water",
-        label: "North Pond",
-        description: "Stock pond in north section. Staging area before dawn movement.",
+        label: "Stock Pond",
+        description: "Year-round water — high traffic staging area.",
         coordinates: [
-          toCoord(0.35, 0.82), toCoord(0.40, 0.86), toCoord(0.46, 0.84),
-          toCoord(0.48, 0.79), toCoord(0.44, 0.76), toCoord(0.38, 0.77), toCoord(0.35, 0.82),
+          toCoord(waterOnEast ? 0.82 : 0.18, 0.62),
+          toCoord(waterOnEast ? 0.88 : 0.12, 0.68),
+          toCoord(waterOnEast ? 0.92 : 0.08, 0.65),
+          toCoord(waterOnEast ? 0.90 : 0.10, 0.58),
+          toCoord(waterOnEast ? 0.85 : 0.15, 0.56),
+          toCoord(waterOnEast ? 0.82 : 0.18, 0.62),
         ],
       },
-      {
-        id: "water-3",
-        type: "water",
-        label: "South Draw",
-        description: "Seasonal seep in southern low ground. Late-season water.",
-        coordinates: [
-          toCoord(0.58, 0.18), toCoord(0.64, 0.22), toCoord(0.70, 0.20),
-          toCoord(0.68, 0.14), toCoord(0.62, 0.12), toCoord(0.58, 0.15), toCoord(0.58, 0.18),
-        ],
-      },
-      // ═══ BEDDING AREAS — spread across property ═══
+      // ═══ BEDDING — corners of property ═══
       {
         id: "bedding-1",
         type: "bedding",
-        label: "NW Bedding — Ridge Top",
-        description: "Primary bedding on NW high ground. Mature bucks, 270° visibility.",
+        label: "NW Bedding — Buck Sanctuary",
+        description: "Primary bedding. Mature bucks, 270° visibility, thermal cover.",
         coordinates: [
-          toCoord(0.12, 0.88), toCoord(0.20, 0.92), toCoord(0.28, 0.90),
-          toCoord(0.30, 0.84), toCoord(0.25, 0.80), toCoord(0.15, 0.82), toCoord(0.12, 0.88),
+          toCoord(0.05, 0.88), toCoord(0.12, 0.95), toCoord(0.22, 0.92),
+          toCoord(0.25, 0.85), toCoord(0.20, 0.78), toCoord(0.10, 0.80), toCoord(0.05, 0.88),
         ],
       },
       {
         id: "bedding-2",
         type: "bedding",
-        label: "NE Bedding — Thermal Cover",
-        description: "Dense cover on NE slope. Wind protection, close to water.",
+        label: "SE Bedding — Doe Family Group",
+        description: "Secondary bedding near south food. Does & yearlings.",
         coordinates: [
-          toCoord(0.72, 0.90), toCoord(0.80, 0.94), toCoord(0.88, 0.91),
-          toCoord(0.90, 0.85), toCoord(0.85, 0.82), toCoord(0.75, 0.84), toCoord(0.72, 0.90),
+          toCoord(0.78, 0.22), toCoord(0.88, 0.28), toCoord(0.95, 0.25),
+          toCoord(0.93, 0.15), toCoord(0.85, 0.10), toCoord(0.78, 0.15), toCoord(0.78, 0.22),
         ],
       },
       {
         id: "bedding-3",
         type: "bedding",
         label: "Central Thicket",
-        description: "Mid-property bedding in dense cover. Does and yearlings.",
+        description: "Mid-property bedding. Heavy rut activity staging area.",
         coordinates: [
-          toCoord(0.42, 0.58), toCoord(0.50, 0.62), toCoord(0.58, 0.60),
-          toCoord(0.60, 0.54), toCoord(0.55, 0.50), toCoord(0.45, 0.52), toCoord(0.42, 0.58),
+          toCoord(0.42, 0.52), toCoord(0.50, 0.58), toCoord(0.58, 0.55),
+          toCoord(0.58, 0.48), toCoord(0.50, 0.45), toCoord(0.42, 0.48), toCoord(0.42, 0.52),
         ],
       },
-      {
-        id: "bedding-4",
-        type: "bedding",
-        label: "South Bedding",
-        description: "Secondary bedding near south food plots. Early season use.",
-        coordinates: [
-          toCoord(0.20, 0.18), toCoord(0.28, 0.22), toCoord(0.35, 0.20),
-          toCoord(0.34, 0.14), toCoord(0.28, 0.11), toCoord(0.22, 0.13), toCoord(0.20, 0.18),
-        ],
-      },
-      // ═══ FUNNELS — terrain pinch points ═══
+      // ═══ FUNNELS — where terrain forces movement ═══
       {
         id: "funnel-1",
         type: "funnel",
-        label: "North Pinch Point",
-        description: "Terrain bottleneck in northern third. Forces deer through gap.",
+        label: "Primary Pinch Point",
+        description: "Terrain bottleneck — PRIME stand location. All deer use this.",
         coordinates: smoothTrailPath([
-          toCoord(0.35, 0.72), toCoord(0.50, 0.68), toCoord(0.65, 0.72),
-        ], 0.06),
+          toCoord(0.35, 0.62), toCoord(0.50, 0.55), toCoord(0.65, 0.62),
+        ], 0.05),
       },
       {
         id: "funnel-2",
@@ -418,60 +387,41 @@ export default function Terrain3DView({
         label: "Creek Crossing",
         description: "Only safe crossing — deer funnel here to avoid deep water.",
         coordinates: smoothTrailPath([
-          toCoord(waterOnEast ? 0.55 : 0.20, 0.48),
-          toCoord(waterOnEast ? 0.68 : 0.32, 0.45),
-          toCoord(waterOnEast ? 0.75 : 0.45, 0.48),
-        ], 0.06),
+          toCoord(waterOnEast ? 0.55 : 0.45, 0.42),
+          toCoord(waterOnEast ? 0.70 : 0.30, 0.38),
+          toCoord(waterOnEast ? 0.80 : 0.20, 0.42),
+        ], 0.05),
       },
-      {
-        id: "funnel-3",
-        type: "funnel",
-        label: "South Saddle",
-        description: "Ridge saddle in south — natural pinch point.",
-        coordinates: smoothTrailPath([
-          toCoord(0.40, 0.30), toCoord(0.50, 0.25), toCoord(0.60, 0.30),
-        ], 0.06),
-      },
-      // ═══ FOOD PLOTS — distributed on high ground ═══
+      // ═══ FOOD PLOTS — opposite corners from bedding ═══
       {
         id: "food-1",
         type: "food_plot",
-        label: "North Kill Plot",
-        description: "¼-acre kill plot on north ridge. Clover/brassica mix.",
+        label: "Kill Plot — Clover/Brassica",
+        description: "¼-acre kill plot. Screened approach from bedding.",
         coordinates: [
-          toCoord(0.55, 0.88), toCoord(0.62, 0.92), toCoord(0.70, 0.90),
-          toCoord(0.72, 0.84), toCoord(0.65, 0.80), toCoord(0.57, 0.83), toCoord(0.55, 0.88),
+          toCoord(0.78, 0.78), toCoord(0.85, 0.85), toCoord(0.93, 0.82),
+          toCoord(0.92, 0.72), toCoord(0.85, 0.70), toCoord(0.78, 0.73), toCoord(0.78, 0.78),
         ],
       },
       {
         id: "food-2",
         type: "food_plot",
-        label: "Central Food Plot",
-        description: "½-acre destination plot. Well-drained upland soil.",
+        label: "Staging Plot — Soybeans",
+        description: "½-acre destination. Evening staging before main feed.",
         coordinates: [
-          toCoord(0.25, 0.55), toCoord(0.32, 0.60), toCoord(0.40, 0.58),
-          toCoord(0.42, 0.50), toCoord(0.35, 0.46), toCoord(0.27, 0.48), toCoord(0.25, 0.55),
+          toCoord(0.08, 0.28), toCoord(0.18, 0.35), toCoord(0.28, 0.32),
+          toCoord(0.28, 0.22), toCoord(0.18, 0.18), toCoord(0.08, 0.22), toCoord(0.08, 0.28),
         ],
       },
-      {
-        id: "food-3",
-        type: "food_plot",
-        label: "South Staging Plot",
-        description: "½-acre soybeans near south bedding. Evening staging area.",
-        coordinates: [
-          toCoord(0.70, 0.35), toCoord(0.78, 0.38), toCoord(0.85, 0.35),
-          toCoord(0.85, 0.28), toCoord(0.78, 0.25), toCoord(0.72, 0.28), toCoord(0.70, 0.35),
-        ],
-      },
-      // ═══ STAND SITES — positioned for corridor coverage ═══
+      // ═══ STAND SITES — positioned on corridors at funnels ═══
       {
         id: "stand-1",
         type: "stand",
-        label: "#1 — North Funnel",
-        description: "20ft hang-on at north pinch point. SW wind. All-day rut sit.",
+        label: "#1 — Primary Funnel",
+        description: "20ft hang-on at main pinch point. SW wind. All-day rut sit.",
         coordinates: [
-          toCoord(0.48, 0.70), toCoord(0.52, 0.73), toCoord(0.56, 0.70),
-          toCoord(0.52, 0.67), toCoord(0.48, 0.70),
+          toCoord(0.48, 0.58), toCoord(0.52, 0.62), toCoord(0.56, 0.58),
+          toCoord(0.52, 0.54), toCoord(0.48, 0.58),
         ],
       },
       {
@@ -480,41 +430,31 @@ export default function Terrain3DView({
         label: "#2 — Creek Crossing",
         description: "Ladder stand at creek crossing. NW wind. Evening hunts.",
         coordinates: [
-          toCoord(waterOnEast ? 0.62 : 0.28, 0.50),
-          toCoord(waterOnEast ? 0.66 : 0.32, 0.53),
-          toCoord(waterOnEast ? 0.70 : 0.36, 0.50),
-          toCoord(waterOnEast ? 0.66 : 0.32, 0.47),
-          toCoord(waterOnEast ? 0.62 : 0.28, 0.50),
+          toCoord(waterOnEast ? 0.65 : 0.35, 0.45),
+          toCoord(waterOnEast ? 0.70 : 0.30, 0.48),
+          toCoord(waterOnEast ? 0.75 : 0.25, 0.45),
+          toCoord(waterOnEast ? 0.70 : 0.30, 0.42),
+          toCoord(waterOnEast ? 0.65 : 0.35, 0.45),
         ],
       },
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 — Central Plot",
-        description: "Ground blind on central food plot. S/SE wind.",
+        label: "#3 — Kill Plot",
+        description: "Ground blind downwind of kill plot. S wind. Evening sits.",
         coordinates: [
-          toCoord(0.38, 0.52), toCoord(0.42, 0.55), toCoord(0.46, 0.52),
-          toCoord(0.42, 0.49), toCoord(0.38, 0.52),
+          toCoord(0.72, 0.72), toCoord(0.76, 0.75), toCoord(0.80, 0.72),
+          toCoord(0.76, 0.69), toCoord(0.72, 0.72),
         ],
       },
       {
         id: "stand-4",
         type: "stand",
-        label: "#4 — South Saddle",
-        description: "Mobile setup at south saddle. Variable winds.",
+        label: "#4 — South Staging",
+        description: "Observation stand near south plot. E wind. Scouting.",
         coordinates: [
-          toCoord(0.48, 0.28), toCoord(0.52, 0.31), toCoord(0.56, 0.28),
-          toCoord(0.52, 0.25), toCoord(0.48, 0.28),
-        ],
-      },
-      {
-        id: "stand-5",
-        type: "stand",
-        label: "#5 — East Ridge",
-        description: "Observation stand on east ridge. W wind. Scouting.",
-        coordinates: [
-          toCoord(0.80, 0.58), toCoord(0.84, 0.61), toCoord(0.88, 0.58),
-          toCoord(0.84, 0.55), toCoord(0.80, 0.58),
+          toCoord(0.25, 0.22), toCoord(0.29, 0.25), toCoord(0.33, 0.22),
+          toCoord(0.29, 0.19), toCoord(0.25, 0.22),
         ],
       },
     ];
