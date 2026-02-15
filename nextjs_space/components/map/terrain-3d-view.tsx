@@ -577,16 +577,26 @@ export default function Terrain3DView({
           },
         });
 
-        map.addLayer({ id: "parcel-glow", type: "line", source: "parcel-boundary", paint: { "line-color": "#f59e0b", "line-width": 8, "line-opacity": 0.3, "line-blur": 4 } });
-        map.addLayer({ id: "parcel-outline", type: "line", source: "parcel-boundary", paint: { "line-color": "#f59e0b", "line-width": 3, "line-dasharray": [3, 2] } });
-        map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-boundary", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.08 } });
+        // PARCEL BOUNDARY — Bold, prominent lines so user knows EXACTLY what they're buying
+        // Layer 1: Wide outer glow (dark for contrast)
+        map.addLayer({ id: "parcel-glow-outer", type: "line", source: "parcel-boundary", paint: { "line-color": "#000000", "line-width": 12, "line-opacity": 0.4, "line-blur": 3 } });
+        // Layer 2: Bright amber glow
+        map.addLayer({ id: "parcel-glow", type: "line", source: "parcel-boundary", paint: { "line-color": "#fbbf24", "line-width": 8, "line-opacity": 0.6, "line-blur": 2 } });
+        // Layer 3: Solid bright outline (NOT dashed — more visible)
+        map.addLayer({ id: "parcel-outline", type: "line", source: "parcel-boundary", paint: { "line-color": "#fbbf24", "line-width": 4 } });
+        // Layer 4: Subtle fill
+        map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-boundary", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.05 } });
 
+        // Corner markers — larger and more prominent
         const cornerFeatures = parcelBounds.map((p) => ({
           type: "Feature" as const, properties: {},
           geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
         }));
         map.addSource("parcel-corners", { type: "geojson", data: { type: "FeatureCollection", features: cornerFeatures } });
-        map.addLayer({ id: "parcel-corner-dots", type: "circle", source: "parcel-corners", paint: { "circle-radius": 4, "circle-color": "#f59e0b", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+        // Corner outer ring
+        map.addLayer({ id: "parcel-corner-ring", type: "circle", source: "parcel-corners", paint: { "circle-radius": 8, "circle-color": "transparent", "circle-stroke-color": "#fbbf24", "circle-stroke-width": 3 } });
+        // Corner inner dot
+        map.addLayer({ id: "parcel-corner-dots", type: "circle", source: "parcel-corners", paint: { "circle-radius": 5, "circle-color": "#fbbf24", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
       }
 
       // Center marker
