@@ -6,6 +6,8 @@ import { prisma } from "@/lib/db";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { fetchSoilData, SoilData, getDrainageRating } from "@/lib/usda-soil";
 import { getCWDStatus } from "@/lib/missouri-hunting";
+import { getStateConfig, isDataSourceAvailable } from "@/lib/state-config";
+import { getCWDStatusSafe } from "@/lib/hunting-data";
 
 export const dynamic = 'force-dynamic';
 
@@ -237,7 +239,16 @@ export async function POST(request: NextRequest) {
       fetchGoogleMapImage(order.parcelLat, order.parcelLng, "satellite", 16, parcelData.coordinates),
     ]);
 
-    const cwdStatusResult = getCWDStatus(parcelData.county);
+    // State-aware CWD lookup
+    const stateCode = parcelData.state || 'MO';
+    const stateConfig = getStateConfig(stateCode);
+    const hasCWDData = isDataSourceAvailable(stateCode, 'cwd_zones');
+    
+    // Use Missouri-specific lookup if available, otherwise graceful fallback
+    const cwdStatusResult = hasCWDData 
+      ? getCWDStatus(parcelData.county)
+      : { inZone: false, status: 'unknown', message: `Check ${stateConfig.resources.dnr_name}` };
+    
     const reportNumber = generateReportNumber();
     const reportDate = formatDate(new Date());
 
@@ -422,15 +433,32 @@ export async function POST(request: NextRequest) {
       yPos
     );
 
-    // 2. CWD Status
+    // 2. CWD Status (state-aware)
     const isCWDZone = cwdStatusResult.inZone;
+    let cwdStatus: string;
+    let cwdColor: [number, number, number];
+    let cwdDetails: string;
+    
+    if (!hasCWDData) {
+      // State doesn't have CWD data - show verify message
+      cwdStatus = "VERIFY WITH DNR";
+      cwdColor = [108, 117, 125]; // Gray - neutral
+      cwdDetails = `CWD status not available for ${stateConfig.name}. Contact ${stateConfig.resources.dnr_name} for current CWD zones and hunting regulations.`;
+    } else if (isCWDZone) {
+      cwdStatus = "IN CWD ZONE";
+      cwdColor = [255, 193, 7]; // Yellow - caution
+      cwdDetails = `County is in a Chronic Wasting Disease management area. Special deer hunting regulations apply. Carcass transport restrictions in effect.`;
+    } else {
+      cwdStatus = "NOT IN ZONE";
+      cwdColor = [40, 167, 69]; // Green - good
+      cwdDetails = `${parcelData.county} County is not currently in a CWD management zone. Standard deer hunting regulations apply.`;
+    }
+    
     yPos = drawChecklistItem(
       "CWD Management Zone",
-      isCWDZone ? "IN CWD ZONE" : "NOT IN ZONE",
-      isCWDZone ? [255, 193, 7] : [40, 167, 69],
-      isCWDZone 
-        ? `County is in a Chronic Wasting Disease management area. Special deer hunting regulations apply. Carcass transport restrictions in effect.`
-        : `${parcelData.county} County is not currently in a CWD management zone. Standard deer hunting regulations apply.`,
+      cwdStatus,
+      cwdColor,
+      cwdDetails,
       yPos
     );
 
@@ -484,12 +512,13 @@ export async function POST(request: NextRequest) {
     ];
     doc.text(nextSteps, 28, yPos + 15);
 
-    // Disclaimer
+    // Disclaimer (state-aware)
     yPos += 38;
     doc.setTextColor(120, 120, 120);
     doc.setFontSize(7);
     doc.setFont("helvetica", "italic");
-    const disclaimer = "This Broker Quick Look is for informational purposes only and does not constitute a survey, appraisal, or legal opinion. Data sourced from Regrid, USDA, FEMA, and Missouri Department of Conservation. Verify all information independently before making purchasing decisions. Terra Firma Partners LLC is not liable for decisions made based on this report.";
+    const dnrSource = hasCWDData ? stateConfig.resources.dnr_name : "state wildlife agencies";
+    const disclaimer = `This Broker Quick Look is for informational purposes only and does not constitute a survey, appraisal, or legal opinion. Data sourced from Regrid, USDA, FEMA, and ${dnrSource}. Verify all information independently before making purchasing decisions. Terra Firma Partners LLC is not liable for decisions made based on this report.`;
     const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 50);
     doc.text(disclaimerLines, 25, yPos);
 
