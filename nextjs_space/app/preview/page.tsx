@@ -61,8 +61,14 @@ function PreviewContent() {
             ? parcel.county.charAt(0).toUpperCase() + parcel.county.slice(1).toLowerCase()
             : 'Unknown';
           
+          // Use user-entered address if Regrid returns "No Situs Address" (common for rural parcels)
+          let displayAddress = parcel.siteAddress || address || 'Property Location';
+          if (displayAddress.toLowerCase().includes('no situs')) {
+            displayAddress = address || 'Rural Property';
+          }
+          
           setParcelInfo({
-            address: parcel.siteAddress || address || 'Property Location',
+            address: displayAddress,
             county: countyName,
             acreage: parcel.acreage || 0,
             lat,
