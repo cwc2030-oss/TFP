@@ -346,72 +346,74 @@ export default function Terrain3DView({
       }
     };
     
+    // ═══ ALL TRAILS USE CENTER-RELATIVE COORDINATES ═══
+    // No more edge/corner references — everything stays well inside
     const corridors: DeerCorridor[] = [
-      // ═══ MAIN DIAGONAL — NW corner to SE corner ═══
+      // ═══ MAIN DIAGONAL — NW quadrant to SE quadrant ═══
       {
         id: "primary-1",
         type: "primary",
         label: "Ridgeline Corridor (Probable)",
         description: "Follows terrain high point. Check contours — deer travel ridges. Verify with trail camera.",
         coordinates: smoothTrailPath([
-          inset(nwCorner, 0.12),
-          lerp(nwCorner, seCorner, 0.25),
-          lerp(nwCorner, seCorner, 0.5),
-          lerp(nwCorner, seCorner, 0.75),
-          inset(seCorner, 0.12),
-        ], avgRange * 0.025),
+          [centerLng - lngRange * 0.25, centerLat + latRange * 0.25],  // NW interior
+          [centerLng - lngRange * 0.10, centerLat + latRange * 0.12],
+          [centerLng + lngRange * 0.05, centerLat - latRange * 0.05],
+          [centerLng + lngRange * 0.15, centerLat - latRange * 0.18],
+          [centerLng + lngRange * 0.22, centerLat - latRange * 0.25],  // SE interior
+        ], avgRange * 0.02),
       },
-      // ═══ EAST EDGE — NE to SE ═══
+      // ═══ EAST SIDE — NE quadrant to SE quadrant ═══
       {
         id: "primary-2",
         type: "primary",
         label: "East Ridge Route (Probable)",
         description: "Eastern high ground. Cross-reference amber ridgeline layer for verification.",
         coordinates: smoothTrailPath([
-          inset(neCorner, 0.12),
-          lerp(neCorner, seCorner, 0.33),
-          lerp(neCorner, seCorner, 0.66),
-          inset(seCorner, 0.15),
-        ], avgRange * 0.025),
+          [centerLng + lngRange * 0.22, centerLat + latRange * 0.22],  // NE interior
+          [centerLng + lngRange * 0.20, centerLat + latRange * 0.08],
+          [centerLng + lngRange * 0.18, centerLat - latRange * 0.10],
+          [centerLng + lngRange * 0.20, centerLat - latRange * 0.22],  // SE interior
+        ], avgRange * 0.02),
       },
-      // ═══ WEST EDGE — NW to SW ═══
+      // ═══ WEST SIDE — NW quadrant to SW quadrant ═══
       {
         id: "secondary-1",
         type: "secondary",
         label: "West Edge Transition", 
         description: "Timber edge travel. Where contours meet cover change.",
         coordinates: smoothTrailPath([
-          inset(nwCorner, 0.15),
-          lerp(nwCorner, swCorner, 0.33),
-          lerp(nwCorner, swCorner, 0.66),
-          inset(swCorner, 0.12),
-        ], avgRange * 0.03),
+          [centerLng - lngRange * 0.22, centerLat + latRange * 0.20],  // NW interior
+          [centerLng - lngRange * 0.20, centerLat + latRange * 0.05],
+          [centerLng - lngRange * 0.18, centerLat - latRange * 0.12],
+          [centerLng - lngRange * 0.20, centerLat - latRange * 0.22],  // SW interior
+        ], avgRange * 0.025),
       },
-      // ═══ NORTH EDGE — NW to NE ═══
+      // ═══ NORTH CROSS — connects NW to NE ═══
       {
         id: "secondary-2",
         type: "secondary",
         label: "North Saddle Crossing",
         description: "Low point between ridges. Check contour elevations — saddles funnel movement.",
         coordinates: smoothTrailPath([
-          inset(nwCorner, 0.12),
-          lerp(nwCorner, neCorner, 0.33),
-          lerp(nwCorner, neCorner, 0.66),
-          inset(neCorner, 0.12),
-        ], avgRange * 0.03),
+          [centerLng - lngRange * 0.20, centerLat + latRange * 0.18],
+          [centerLng - lngRange * 0.05, centerLat + latRange * 0.22],
+          [centerLng + lngRange * 0.08, centerLat + latRange * 0.20],
+          [centerLng + lngRange * 0.18, centerLat + latRange * 0.18],
+        ], avgRange * 0.025),
       },
-      // ═══ SOUTH EDGE — SW to SE ═══
+      // ═══ SOUTH CROSS — connects SW to SE ═══
       {
         id: "secondary-3",
         type: "secondary",
         label: "South Bench Route",
         description: "Contour-following travel between food sources. Check elevation labels.",
         coordinates: smoothTrailPath([
-          inset(swCorner, 0.12),
-          lerp(swCorner, seCorner, 0.33),
-          lerp(swCorner, seCorner, 0.66),
-          inset(seCorner, 0.12),
-        ], avgRange * 0.03),
+          [centerLng - lngRange * 0.18, centerLat - latRange * 0.20],  // SW interior
+          [centerLng - lngRange * 0.05, centerLat - latRange * 0.18],
+          [centerLng + lngRange * 0.10, centerLat - latRange * 0.20],
+          [centerLng + lngRange * 0.20, centerLat - latRange * 0.22],  // SE interior
+        ], avgRange * 0.025),
       },
       // ═══ WATER — Drainage draws follow terrain low points ═══
       {
@@ -452,17 +454,17 @@ export default function Terrain3DView({
         description: "Central location away from edges — if thick cover exists, mature bucks bed here mid-day.",
         coordinates: makePolygon(findBeddingArea("central"), polySize * 1.1),
       },
-      // ═══ FUNNEL — Where terrain forces deer through gaps ═══
+      // ═══ FUNNEL — Center-relative pinch points ═══
       {
         id: "funnel-1",
         type: "funnel",
         label: "North Saddle Funnel",
         description: "Low point between ridges — deer cross here. Check contour labels for elevation dip.",
         coordinates: smoothTrailPath([
-          lerp(nwCorner, neCorner, 0.3),
+          [centerLng - lngRange * 0.15, centerLat + latRange * 0.18],
           [centerLng, centerLat + latRange * 0.15],
-          lerp(nwCorner, neCorner, 0.7),
-        ], avgRange * 0.025),
+          [centerLng + lngRange * 0.15, centerLat + latRange * 0.18],
+        ], avgRange * 0.02),
       },
       {
         id: "funnel-2",
@@ -470,10 +472,10 @@ export default function Terrain3DView({
         label: "Drainage Crossing",
         description: "Where trails cross the draw — terrain pinches movement. Prime ambush point.",
         coordinates: smoothTrailPath([
-          lerp(swCorner, seCorner, 0.3),
+          [centerLng - lngRange * 0.15, centerLat - latRange * 0.18],
           [centerLng, centerLat - latRange * 0.15],
-          lerp(swCorner, seCorner, 0.7),
-        ], avgRange * 0.025),
+          [centerLng + lngRange * 0.15, centerLat - latRange * 0.18],
+        ], avgRange * 0.02),
       },
       // ═══ FOOD PLOTS — Centered in parcel interior ═══
       // Positioned near center for maximum deer approach angles
