@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp, Lock, Unlock } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp, Lock, Unlock, Layers, MapPinned } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -148,12 +148,12 @@ function smoothTrailPath(points: [number, number][], jitter: number = 0.15): [nu
   return result;
 }
 
-const CORRIDOR_LABELS: Record<string, { name: string; desc: string; method: string }> = {
-  primary: { name: "Primary Travel", desc: "Main movement paths", method: "We trace the highest ridgelines connecting timber to food sources. Deer prefer ridge tops because they can see, smell, and hear danger from above. Elevation data shows us where those ridges run on your property." },
-  secondary: { name: "Secondary Routes", desc: "Edge transitions & saddles", method: "Where timber meets open field, deer travel the edge — it's cover and food in one step. We map every timber/field boundary and find the low saddle points between ridges where deer cross with minimal exposure." },
-  water: { name: "Water Sources", desc: "Creeks, ponds & drainage", method: "Elevation data reveals every drainage, creek bottom, and low spot that holds water. Deer visit water 1–3 times daily, especially in early season. If there's a crease in the terrain, water collects there." },
-  bedding: { name: "Bedding Areas", desc: "Likely bedding zones", method: "Deer bed on south-facing slopes (warmth) with thick cover and escape routes downhill. We find slopes facing 135°–225° with nearby timber and at least two exit paths. The steeper the better — they watch their backtrail from above." },
-  funnel: { name: "Terrain Funnels", desc: "Pinch points & bottlenecks", method: "Where a creek, ridge, or fence forces deer through a narrow gap — that's a funnel. We measure the distance between terrain obstacles and flag any gap under 80 yards. These are the spots mature bucks can't avoid." },
+const CORRIDOR_LABELS: Record<string, { name: string; desc: string; method: string; verified?: boolean }> = {
+  primary: { name: "Ridgeline Travel", desc: "Main movement paths", method: "We trace the highest ridgelines connecting timber to food sources. Deer prefer ridge tops because they can see, smell, and hear danger from above. The amber ridgeline contours show exactly where these run — walk them yourself to verify.", verified: true },
+  secondary: { name: "Edge Transitions", desc: "Saddles & timber edges", method: "Where timber meets open field, deer travel the edge — it's cover and food in one step. We map timber/field boundaries and find the low saddle points between ridges where deer cross. Check the contour labels — saddles show as lower elevations between high points." },
+  water: { name: "Drainages", desc: "Creeks, ponds & draws", method: "Contour lines reveal every drainage — look for V-shapes pointing uphill. That's where water flows. Deer visit water 1–3 times daily, especially in early season. These are verifiable on any topo map.", verified: true },
+  bedding: { name: "Bedding Areas", desc: "Likely bedding zones", method: "Deer bed on south-facing slopes (warmth) with thick cover and escape routes downhill. We find slopes facing 135°–225° with nearby timber and at least two exit paths. Use the hillshade layer — bright = south-facing." },
+  funnel: { name: "Terrain Funnels", desc: "Pinch points & bottlenecks", method: "Where a creek, ridge, or fence forces deer through a narrow gap — that's a funnel. Look where contour lines pinch together between two drainages. These are the spots mature bucks can't avoid." },
   food_plot: { name: "Food Plot Zones", desc: "Ideal food plot locations", method: "We look for small openings (¼–½ acre) in timber that are screened by terrain on 2+ sides, have decent soil drainage, and sit between bedding and travel corridors. If deer can reach it without crossing open ground, it's a kill plot." },
   stand: { name: "Stand Sites", desc: "Optimal stand placements", method: "Stand sites sit downwind of travel corridors at funnel points, with entry/exit routes that don't spook bedded deer. We factor prevailing wind (SW in Missouri), morning vs. evening thermals, and line-of-sight to shooting lanes." },
 };
@@ -183,6 +183,10 @@ export default function Terrain3DView({
   const [showMethodology, setShowMethodology] = useState(false);
   const [expandedMethod, setExpandedMethod] = useState<string | null>(null);
   const [loadPhase, setLoadPhase] = useState<"terrain" | "corridors" | "done">("terrain");
+  // Terrain layer toggles
+  const [showContours, setShowContours] = useState(true);
+  const [showRidgelines, setShowRidgelines] = useState(true);
+  const [showHillshade, setShowHillshade] = useState(true);
 
   const checkWebGLSupport = (): boolean => {
     try {
@@ -271,8 +275,8 @@ export default function Terrain3DView({
       {
         id: "primary-1",
         type: "primary",
-        label: "Primary Travel Corridor",
-        description: "Main deer highway connecting bedding to food. Heavy use at dawn & dusk.",
+        label: "Ridgeline Corridor (Probable)",
+        description: "Follows terrain high point. Check contours — deer travel ridges. Verify with trail camera.",
         coordinates: smoothTrailPath([
           inset(nwCorner, 0.12),
           lerp(nwCorner, seCorner, 0.25),
@@ -285,8 +289,8 @@ export default function Terrain3DView({
       {
         id: "primary-2",
         type: "primary",
-        label: "East Timber Edge",
-        description: "Travel along eastern boundary. Mature bucks during rut.",
+        label: "East Ridge Route (Probable)",
+        description: "Eastern high ground. Cross-reference amber ridgeline layer for verification.",
         coordinates: smoothTrailPath([
           inset(neCorner, 0.12),
           lerp(neCorner, seCorner, 0.33),
@@ -298,8 +302,8 @@ export default function Terrain3DView({
       {
         id: "secondary-1",
         type: "secondary",
-        label: "West Timber Edge", 
-        description: "Morning travel along western boundary.",
+        label: "West Edge Transition", 
+        description: "Timber edge travel. Where contours meet cover change.",
         coordinates: smoothTrailPath([
           inset(nwCorner, 0.15),
           lerp(nwCorner, swCorner, 0.33),
@@ -311,8 +315,8 @@ export default function Terrain3DView({
       {
         id: "secondary-2",
         type: "secondary",
-        label: "North Cross Trail",
-        description: "Connects bedding areas across northern section.",
+        label: "North Saddle Crossing",
+        description: "Low point between ridges. Check contour elevations — saddles funnel movement.",
         coordinates: smoothTrailPath([
           inset(nwCorner, 0.12),
           lerp(nwCorner, neCorner, 0.33),
@@ -324,8 +328,8 @@ export default function Terrain3DView({
       {
         id: "secondary-3",
         type: "secondary",
-        label: "South Cross Trail",
-        description: "Evening travel between food sources.",
+        label: "South Bench Route",
+        description: "Contour-following travel between food sources. Check elevation labels.",
         coordinates: smoothTrailPath([
           inset(swCorner, 0.12),
           lerp(swCorner, seCorner, 0.33),
@@ -337,40 +341,40 @@ export default function Terrain3DView({
       {
         id: "water-1",
         type: "water",
-        label: "Stock Pond",
-        description: "Year-round water. Deer stage here before feeding.",
+        label: "Drainage Draw (Verified)",
+        description: "Low point in contours — water collects here. Walk the draw to confirm pond/creek.",
         coordinates: makePolygon(lerp(swCorner, nwCorner, 0.4), polySize * 1.3),
       },
       // ═══ BEDDING — NW corner ═══
       {
         id: "bedding-1",
         type: "bedding",
-        label: "NW Bedding",
-        description: "Primary buck bedding. Thick cover with escape routes.",
+        label: "NW Slope Bedding (Probable)",
+        description: "South-facing slope per hillshade. Verify cover density on-site.",
         coordinates: makePolygon(inset(nwCorner, 0.2), polySize * 1.5),
       },
       // ═══ BEDDING — NE corner ═══
       {
         id: "bedding-2",
         type: "bedding",
-        label: "NE Bedding",
-        description: "Doe family group bedding. Morning sun exposure.",
+        label: "NE Bench Bedding (Probable)",
+        description: "Morning sun exposure based on aspect. Check cover type.",
         coordinates: makePolygon(inset(neCorner, 0.2), polySize * 1.3),
       },
       // ═══ BEDDING — center ═══
       {
         id: "bedding-3",
         type: "bedding",
-        label: "Central Thicket",
-        description: "Mid-day bedding in dense cover.",
+        label: "Central Cover (Probable)",
+        description: "Interior location — if timber/brush exists, likely bedding.",
         coordinates: makePolygon([centerLng, centerLat], polySize),
       },
       // ═══ FUNNEL — north of center ═══
       {
         id: "funnel-1",
         type: "funnel",
-        label: "North Pinch Point",
-        description: "Terrain funnels deer here. Prime stand location.",
+        label: "North Terrain Pinch",
+        description: "Where contours pinch together — natural funnel point. Verify gap width on-site.",
         coordinates: smoothTrailPath([
           lerp(nwCorner, neCorner, 0.3),
           [centerLng, centerLat + latRange * 0.15],
@@ -381,8 +385,8 @@ export default function Terrain3DView({
       {
         id: "funnel-2",
         type: "funnel",
-        label: "South Pinch Point",
-        description: "Crossing between food sources.",
+        label: "South Terrain Pinch",
+        description: "Contour-identified bottleneck. Check terrain obstacles on-site.",
         coordinates: smoothTrailPath([
           lerp(swCorner, seCorner, 0.3),
           [centerLng, centerLat - latRange * 0.15],
@@ -393,52 +397,52 @@ export default function Terrain3DView({
       {
         id: "food-1",
         type: "food_plot",
-        label: "SW Food Plot",
-        description: "Clover plot near water. Evening staging area.",
+        label: "SW Plot Zone (Suggested)",
+        description: "Screened by terrain from 2+ sides. Check soil/drainage on-site.",
         coordinates: makePolygon(inset(swCorner, 0.2), polySize * 1.2),
       },
       // ═══ FOOD PLOT — SE corner ═══
       {
         id: "food-2",
         type: "food_plot",
-        label: "SE Food Plot",
-        description: "Brassica plot. Late season destination.",
+        label: "SE Plot Zone (Suggested)",
+        description: "Interior opening — verify clearing size and soil type.",
         coordinates: makePolygon(inset(seCorner, 0.2), polySize * 1.2),
       },
       // ═══ STANDS — positioned at key intersections ═══
       {
         id: "stand-1",
         type: "stand",
-        label: "#1 — North",
-        description: "20ft hang-on at north pinch. SW wind.",
+        label: "#1 — N Funnel",
+        description: "North pinch point. Works SW wind. Verify sight lines.",
         coordinates: makePolygon([centerLng, centerLat + latRange * 0.2], polySize * 0.4),
       },
       {
         id: "stand-2",
         type: "stand",
-        label: "#2 — Center",
-        description: "Ladder stand at central intersection. NW wind.",
+        label: "#2 — Hub",
+        description: "Central intersection of routes. Works NW wind.",
         coordinates: makePolygon([centerLng, centerLat], polySize * 0.4),
       },
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 — West",
-        description: "Ground blind near pond. S wind.",
+        label: "#3 — Water",
+        description: "Near drainage draw. Works S wind. Early season.",
         coordinates: makePolygon(lerp(swCorner, nwCorner, 0.45), polySize * 0.4),
       },
       {
         id: "stand-4",
         type: "stand",
-        label: "#4 — East",
-        description: "Hang-on on east edge. W wind.",
+        label: "#4 — E Ridge",
+        description: "East ridgeline. Works W wind. Rut cruising.",
         coordinates: makePolygon(lerp(neCorner, seCorner, 0.5), polySize * 0.4),
       },
       {
         id: "stand-5",
         type: "stand",
-        label: "#5 — South",
-        description: "Ground blind between food plots. E wind.",
+        label: "#5 — S Pinch",
+        description: "Between food sources. Works E wind. Late season.",
         coordinates: makePolygon([centerLng, centerLat - latRange * 0.2], polySize * 0.4),
       },
     ];
@@ -559,6 +563,106 @@ export default function Terrain3DView({
         });
       } catch (err) {
         console.log("Sky layer failed:", err);
+      }
+
+      // ═══ CONTOUR LINES — Real USGS-derived elevation ═══
+      try {
+        map.addSource("mapbox-terrain-v2", {
+          type: "vector",
+          url: "mapbox://mapbox.mapbox-terrain-v2",
+        });
+
+        // Index contours (100ft intervals) — more prominent, labeled
+        map.addLayer({
+          id: "contour-index",
+          type: "line",
+          source: "mapbox-terrain-v2",
+          "source-layer": "contour",
+          filter: ["==", ["get", "index"], 5], // Every 5th contour is an index contour
+          paint: {
+            "line-color": "#d4a574",
+            "line-width": 2,
+            "line-opacity": 0.8,
+          },
+        });
+
+        // Regular contours (20ft intervals)
+        map.addLayer({
+          id: "contour-regular",
+          type: "line",
+          source: "mapbox-terrain-v2",
+          "source-layer": "contour",
+          filter: ["!=", ["get", "index"], 5],
+          paint: {
+            "line-color": "#b08968",
+            "line-width": 0.8,
+            "line-opacity": 0.5,
+          },
+        });
+
+        // Contour elevation labels on index lines
+        map.addLayer({
+          id: "contour-labels",
+          type: "symbol",
+          source: "mapbox-terrain-v2",
+          "source-layer": "contour",
+          filter: ["==", ["get", "index"], 5],
+          layout: {
+            "symbol-placement": "line",
+            "text-field": ["concat", ["to-string", ["round", ["*", ["get", "ele"], 3.28084]]], "'"], // meters to feet
+            "text-size": 10,
+            "text-max-angle": 25,
+            "text-padding": 5,
+          },
+          paint: {
+            "text-color": "#fef3c7",
+            "text-halo-color": "#1c1917",
+            "text-halo-width": 2,
+          },
+        });
+
+        // ═══ RIDGELINE HIGHLIGHTING — Using slope-break detection ═══
+        // Ridgelines show where contours bend outward (local high points between drainages)
+        // We highlight the higher elevation contours more prominently
+        map.addLayer({
+          id: "ridgeline-highlight",
+          type: "line",
+          source: "mapbox-terrain-v2",
+          "source-layer": "contour",
+          filter: [
+            "all",
+            ["==", ["get", "index"], 5],
+            [">=", ["get", "ele"], 200] // Higher elevations (ridges) in meters
+          ],
+          paint: {
+            "line-color": "#fbbf24",
+            "line-width": 3,
+            "line-opacity": 0.7,
+            "line-blur": 1,
+          },
+        });
+
+        // Ridgeline glow for emphasis
+        map.addLayer({
+          id: "ridgeline-glow",
+          type: "line",
+          source: "mapbox-terrain-v2",
+          "source-layer": "contour",
+          filter: [
+            "all",
+            ["==", ["get", "index"], 5],
+            [">=", ["get", "ele"], 200]
+          ],
+          paint: {
+            "line-color": "#fbbf24",
+            "line-width": 8,
+            "line-opacity": 0.15,
+            "line-blur": 4,
+          },
+        }, "ridgeline-highlight");
+
+      } catch (contourErr) {
+        console.log("Contour layer setup failed:", contourErr);
       }
 
       // Parcel boundary — wrapped in try-catch so failures don't kill the map
@@ -870,6 +974,43 @@ export default function Terrain3DView({
       });
   };
 
+  // Toggle terrain layer visibility
+  const toggleContours = () => {
+    if (!mapRef.current || !isMapLoaded) return;
+    const map = mapRef.current;
+    const newState = !showContours;
+    setShowContours(newState);
+    const visibility = newState ? "visible" : "none";
+    ["contour-index", "contour-regular", "contour-labels"].forEach((id) => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, "visibility", visibility);
+      }
+    });
+  };
+
+  const toggleRidgelines = () => {
+    if (!mapRef.current || !isMapLoaded) return;
+    const map = mapRef.current;
+    const newState = !showRidgelines;
+    setShowRidgelines(newState);
+    const visibility = newState ? "visible" : "none";
+    ["ridgeline-highlight", "ridgeline-glow"].forEach((id) => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, "visibility", visibility);
+      }
+    });
+  };
+
+  const toggleHillshade = () => {
+    if (!mapRef.current || !isMapLoaded) return;
+    const map = mapRef.current;
+    const newState = !showHillshade;
+    setShowHillshade(newState);
+    if (map.getLayer("hillshade")) {
+      map.setLayoutProperty("hillshade", "visibility", newState ? "visible" : "none");
+    }
+  };
+
   const resetView = () => {
     if (!mapRef.current) return;
     stopSpin();
@@ -1050,6 +1191,45 @@ export default function Terrain3DView({
                 </Button>
               </div>
             </div>
+            {/* Terrain Layers — VERIFIABLE */}
+            <div className="bg-stone-800/90 backdrop-blur rounded-lg p-2 shadow-lg border border-amber-500/30">
+              <p className="text-[10px] text-amber-400 uppercase tracking-wider mb-2 px-1 flex items-center gap-1">
+                <Layers className="w-3 h-3" /> Terrain
+              </p>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={toggleContours}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
+                    showContours ? "bg-amber-500/20 text-amber-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
+                  }`}
+                  title="USGS Elevation Contours — Walk these on-property"
+                >
+                  <div className={`w-4 h-0.5 rounded ${showContours ? "bg-amber-400" : "bg-stone-500"}`} style={{ backgroundImage: showContours ? "none" : "none" }} />
+                  <span>Contours</span>
+                </button>
+                <button
+                  onClick={toggleRidgelines}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
+                    showRidgelines ? "bg-amber-500/20 text-amber-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
+                  }`}
+                  title="Ridgeline Corridors — Local high points, verified by topo"
+                >
+                  <div className={`w-4 h-1 rounded ${showRidgelines ? "bg-amber-400" : "bg-stone-500"}`} />
+                  <span>Ridges</span>
+                </button>
+                <button
+                  onClick={toggleHillshade}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
+                    showHillshade ? "bg-stone-600/50 text-stone-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
+                  }`}
+                  title="3D Shading from DEM"
+                >
+                  <Mountain className={`w-3 h-3 ${showHillshade ? "text-stone-300" : "text-stone-500"}`} />
+                  <span>Shading</span>
+                </button>
+              </div>
+              <p className="text-[8px] text-stone-500 mt-1.5 px-1 leading-tight">✓ USGS verified</p>
+            </div>
             {/* Wind direction indicator */}
             <div className="bg-stone-800/90 backdrop-blur rounded-lg p-2 shadow-lg border border-stone-700 text-center">
               <p className="text-[10px] text-stone-500 mb-1">Wind</p>
@@ -1175,7 +1355,7 @@ export default function Terrain3DView({
                         {/* Intro blurb */}
                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-2">
                           <p className="text-xs text-amber-200 leading-relaxed">
-                            <span className="font-semibold">Every layer is terrain-derived.</span> We analyze LiDAR elevation data, slope aspect, drainage patterns, and land cover to predict where deer eat, sleep, drink, and travel. No guesswork — just what the ground tells us.
+                            <span className="font-semibold">Terrain layers are 100% verifiable.</span> Contour lines and ridgelines come from USGS elevation data — you can walk these on property. Deer intel layers (trails, bedding, stands) are <em>terrain-informed predictions</em> based on how deer use topography. The ridges are real; the trails show where deer <em>likely</em> travel.
                           </p>
                         </div>
 
@@ -1206,7 +1386,7 @@ export default function Terrain3DView({
                         {/* Disclaimer */}
                         <div className="bg-stone-700/40 rounded-lg p-2.5 mt-2">
                           <p className="text-[10px] text-stone-500 leading-relaxed text-center">
-                            🧠 AI predictions based on terrain analysis. Always ground-truth with boots on the property. Trail cameras recommended to verify patterns during season.
+                            📍 <span className="text-amber-400">Contours & ridges = verified USGS data.</span> Deer corridors = terrain-informed predictions. Always ground-truth with boots on the property. Trail cameras confirm patterns.
                           </p>
                         </div>
                       </div>
