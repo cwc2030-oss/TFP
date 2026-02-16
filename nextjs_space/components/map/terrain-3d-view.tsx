@@ -241,7 +241,7 @@ export default function Terrain3DView({
     const lngRange = eastPoint.lng - westPoint.lng;
     const latRange = northPoint.lat - southPoint.lat;
     const avgRange = (lngRange + latRange) / 2;
-    const polySize = avgRange * 0.06; // Feature size relative to parcel
+    const polySize = avgRange * 0.035; // Smaller features — was 0.06, now 0.035
     
     // Helper: interpolate between two points
     const lerp = (p1: {lng: number, lat: number}, p2: {lng: number, lat: number}, t: number): [number, number] => [
@@ -255,9 +255,23 @@ export default function Terrain3DView({
       p.lat + (centerLat - p.lat) * amount
     ];
     
+    // Helper: clamp a point to stay inside parcel boundary with padding
+    const clampToBounds = (point: [number, number], padding: number = 0.12): [number, number] => {
+      const minLng = westPoint.lng + lngRange * padding;
+      const maxLng = eastPoint.lng - lngRange * padding;
+      const minLat = southPoint.lat + latRange * padding;
+      const maxLat = northPoint.lat - latRange * padding;
+      return [
+        Math.max(minLng, Math.min(maxLng, point[0])),
+        Math.max(minLat, Math.min(maxLat, point[1]))
+      ];
+    };
+    
     // Helper: create irregular polygon around a point (organic shape)
+    // Now clamps center to boundary before drawing
     const makePolygon = (center: [number, number], size: number): [number, number][] => {
-      const [lng, lat] = center;
+      const clamped = clampToBounds(center, 0.15); // 15% padding from edges
+      const [lng, lat] = clamped;
       const s = size;
       return [
         [lng - s, lat + s * 0.7],
@@ -272,67 +286,62 @@ export default function Terrain3DView({
 
     // ═══ TERRAIN-BASED PLACEMENT HELPERS ═══
     // All features must stay WELL INSIDE the parcel boundary
+    // Using center-relative positioning to guarantee no spillover
     
-    // Find bedding on south-facing slope (below ridgeline, facing south for warmth)
-    // Uses 40% inset from edges to ensure features don't spill over boundary
+    // Find bedding areas — positioned relative to center, not edges
     const findBeddingArea = (position: "nw" | "ne" | "central"): [number, number] => {
-      const safeInset = 0.40; // 40% in from edges — keeps polygons inside boundary
       switch(position) {
         case "nw": 
-          // NW bedding: south-facing slope below north ridge, west side
+          // West bedding: northwest quadrant, but well inside
           return [
-            westPoint.lng + lngRange * safeInset,
-            northPoint.lat - latRange * safeInset
+            centerLng - lngRange * 0.20, // 20% west of center
+            centerLat + latRange * 0.15  // 15% north of center
           ];
         case "ne":
-          // NE bedding: SE-facing bench, east side
+          // East bedding: northeast quadrant, but well inside
           return [
-            eastPoint.lng - lngRange * safeInset,
-            northPoint.lat - latRange * safeInset
+            centerLng + lngRange * 0.20, // 20% east of center
+            centerLat + latRange * 0.18  // 18% north of center
           ];
         case "central":
-          // Interior thicket: offset from dead center toward SE
+          // Interior thicket: slightly SE of center
           return [
-            centerLng + lngRange * 0.12,
-            centerLat - latRange * 0.08
+            centerLng + lngRange * 0.05,
+            centerLat - latRange * 0.05
           ];
       }
     };
     
-    // Find interior food plot locations — CENTERED, not at quadrant edges
-    // Uses 38% inset to place plots closer to true center
+    // Find interior food plot locations — TRUE CENTER positioning
     const findFoodPlot = (position: "north" | "south"): [number, number] => {
-      const centerInset = 0.38; // Closer to center than bedding
       if (position === "north") {
-        // North plot: upper-middle of parcel
+        // North plot: upper-center
         return [
-          centerLng - lngRange * 0.08, // Slightly west of center
-          northPoint.lat - latRange * centerInset
+          centerLng - lngRange * 0.05, // Slightly west of center
+          centerLat + latRange * 0.25  // 25% north of center
         ];
       } else {
-        // South plot (kill plot): lower-middle of parcel  
+        // South plot (kill plot): lower-center  
         return [
-          centerLng + lngRange * 0.05, // Slightly east of center
-          southPoint.lat + latRange * centerInset
+          centerLng + lngRange * 0.08, // Slightly east of center
+          centerLat - latRange * 0.22  // 22% south of center
         ];
       }
     };
     
-    // Find drainage low points (water features)
-    // Keep 25% in from edges
+    // Find drainage low points (water features) — keep well inside
     const findDrainagePoint = (position: "upper" | "lower"): [number, number] => {
-      const drainageInset = 0.25;
       if (position === "upper") {
-        // Upper drainage - west side, mid-latitude
+        // Upper drainage - west-center
         return [
-          westPoint.lng + lngRange * drainageInset,
-          centerLat + latRange * 0.1
+          centerLng - lngRange * 0.22,
+          centerLat + latRange * 0.05
         ];
       } else {
-        // Lower drainage - east side, flows downslope
+        // Lower drainage - east-center
         return [
-          eastPoint.lng - lngRange * drainageInset,
-          centerLat - latRange * 0.15
+          centerLng + lngRange * 0.18,
+          centerLat - latRange * 0.12
         ];
       }
     };
@@ -482,42 +491,42 @@ export default function Terrain3DView({
         description: "Central-south location between bedding areas. Deer approach from all sides at dusk.",
         coordinates: makePolygon(findFoodPlot("south"), polySize * 1.0),
       },
-      // ═══ STANDS — positioned relative to terrain features ═══
-      // Stand placement considers: wind, bedding approach, funnel proximity
+      // ═══ STANDS — center-relative positioning ═══
+      // All stands use center-relative coords to stay inside boundary
       {
         id: "stand-1",
         type: "stand",
         label: "#1 — Saddle",
         description: "North funnel overlooking saddle crossing. SW wind. Morning sit — catch deer leaving bedding.",
-        coordinates: makePolygon([centerLng - lngRange * 0.12, centerLat + latRange * 0.15], polySize * 0.4),
+        coordinates: makePolygon([centerLng - lngRange * 0.08, centerLat + latRange * 0.12], polySize * 0.5),
       },
       {
         id: "stand-2",
         type: "stand",
         label: "#2 — Hub",
         description: "Central intersection where trails converge. NW wind. All-day sit during rut.",
-        coordinates: makePolygon([centerLng + lngRange * 0.15, centerLat + latRange * 0.08], polySize * 0.4),
+        coordinates: makePolygon([centerLng + lngRange * 0.10, centerLat + latRange * 0.05], polySize * 0.5),
       },
       {
         id: "stand-3",
         type: "stand",
         label: "#3 — Draw",
         description: "Overlooking drainage crossing. S wind. Early season — deer hit water before feeding.",
-        coordinates: makePolygon([findDrainagePoint("upper")[0] + lngRange * 0.12, findDrainagePoint("upper")[1] - latRange * 0.05], polySize * 0.4),
+        coordinates: makePolygon([centerLng - lngRange * 0.12, centerLat - latRange * 0.08], polySize * 0.5),
       },
       {
         id: "stand-4",
         type: "stand",
         label: "#4 — Ridge",
         description: "East ridgeline travel. W wind. Rut cruising bucks follow ridge checking bedding.",
-        coordinates: makePolygon([eastPoint.lng - lngRange * 0.25, centerLat], polySize * 0.4),
+        coordinates: makePolygon([centerLng + lngRange * 0.18, centerLat], polySize * 0.5),
       },
       {
         id: "stand-5",
         type: "stand",
         label: "#5 — Plot",
         description: "South kill plot edge. E wind. Late season — ambush deer entering food at last light.",
-        coordinates: makePolygon([findFoodPlot("south")[0] - lngRange * 0.12, findFoodPlot("south")[1] + latRange * 0.08], polySize * 0.4),
+        coordinates: makePolygon([centerLng, centerLat - latRange * 0.18], polySize * 0.5),
       },
     ];
 
