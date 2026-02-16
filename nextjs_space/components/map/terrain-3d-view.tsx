@@ -281,34 +281,6 @@ export default function Terrain3DView({
           map.addLayer({ id: "parcel-glow", type: "line", source: "parcel-boundary", paint: { "line-color": "#fbbf24", "line-width": 8, "line-opacity": 0.6, "line-blur": 2 } });
           map.addLayer({ id: "parcel-outline", type: "line", source: "parcel-boundary", paint: { "line-color": "#fbbf24", "line-width": 4 } });
           map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-boundary", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.05 } });
-
-          // Corner markers
-          const findTrueCorners = (points: typeof parcelBounds) => {
-            if (points.length < 4) return points;
-            const corners: typeof parcelBounds = [];
-            const angleThreshold = 25;
-            
-            for (let i = 0; i < points.length; i++) {
-              const prev = points[(i - 1 + points.length) % points.length];
-              const curr = points[i];
-              const next = points[(i + 1) % points.length];
-              const angle1 = Math.atan2(curr.lat - prev.lat, curr.lng - prev.lng);
-              const angle2 = Math.atan2(next.lat - curr.lat, next.lng - curr.lng);
-              let angleDiff = Math.abs((angle2 - angle1) * 180 / Math.PI);
-              if (angleDiff > 180) angleDiff = 360 - angleDiff;
-              if (angleDiff > angleThreshold) corners.push(curr);
-            }
-            return corners.length > 0 ? corners : [points[0]];
-          };
-          
-          const trueCorners = findTrueCorners(parcelBounds);
-          const cornerFeatures = trueCorners.map((p) => ({
-            type: "Feature" as const, properties: {},
-            geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-          }));
-          map.addSource("parcel-corners", { type: "geojson", data: { type: "FeatureCollection", features: cornerFeatures } });
-          map.addLayer({ id: "parcel-corner-ring", type: "circle", source: "parcel-corners", paint: { "circle-radius": 10, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#fbbf24", "circle-stroke-width": 3 } });
-          map.addLayer({ id: "parcel-corner-dots", type: "circle", source: "parcel-corners", paint: { "circle-radius": 6, "circle-color": "#fbbf24", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
         }
       } catch (boundaryErr) {
         console.error("Parcel boundary layer error:", boundaryErr);
