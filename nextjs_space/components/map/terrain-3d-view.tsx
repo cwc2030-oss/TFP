@@ -205,12 +205,45 @@ export default function Terrain3DView({
     }
   };
 
-  // ═══ SIMPLE DEER INTEL GENERATION ═══
-  // ALL features stay within 30% of center — GUARANTEED inside boundary
+  // ═══ DEER INTEL GENERATION — POLYGON CENTROID BASED ═══
+  // Uses TRUE polygon centroid, not bounding box center
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
     if (!parcelBounds || parcelBounds.length < 3) return [];
     
-    const { lat: cLat, lng: cLng } = parcelCenter;
+    // Calculate TRUE polygon centroid (not bounding box center!)
+    // This ensures center is INSIDE the actual parcel shape
+    const calcCentroid = (pts: {lat: number, lng: number}[]): {lat: number, lng: number} => {
+      let area = 0;
+      let cx = 0;
+      let cy = 0;
+      const n = pts.length;
+      
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const cross = pts[i].lng * pts[j].lat - pts[j].lng * pts[i].lat;
+        area += cross;
+        cx += (pts[i].lng + pts[j].lng) * cross;
+        cy += (pts[i].lat + pts[j].lat) * cross;
+      }
+      
+      area = area / 2;
+      if (Math.abs(area) < 1e-10) {
+        // Fallback to simple average if area is too small
+        return {
+          lng: pts.reduce((s, p) => s + p.lng, 0) / n,
+          lat: pts.reduce((s, p) => s + p.lat, 0) / n
+        };
+      }
+      
+      return {
+        lng: cx / (6 * area),
+        lat: cy / (6 * area)
+      };
+    };
+    
+    const centroid = calcCentroid(parcelBounds);
+    const cLng = centroid.lng;
+    const cLat = centroid.lat;
     
     // Get parcel dimensions from bounds
     const lats = parcelBounds.map(p => p.lat);
@@ -220,14 +253,18 @@ export default function Terrain3DView({
     const h = maxLat - minLat;  // height (lat range)
     const w = maxLng - minLng;  // width (lng range)
     
-    // TINY polygon size — 2% of parcel dimension
-    const ps = Math.min(w, h) * 0.02;
+    // Use SMALLER of width/height for scaling (handles narrow parcels)
+    const shortSide = Math.min(w, h);
     
-    // Simple point maker: offset from center as % of dimensions
-    // Max offset = 0.30 means feature centers stay within middle 60% of parcel
+    // TINY polygon size — 1.5% of short side
+    const ps = shortSide * 0.015;
+    
+    // Point maker: offset from TRUE centroid
+    // Use shortSide for BOTH dimensions to prevent spillover on narrow parcels
+    // Max offset = 15% of short side in any direction
     const pt = (xPct: number, yPct: number): [number, number] => [
-      cLng + w * Math.max(-0.30, Math.min(0.30, xPct)),
-      cLat + h * Math.max(-0.30, Math.min(0.30, yPct))
+      cLng + shortSide * Math.max(-0.15, Math.min(0.15, xPct)),
+      cLat + shortSide * Math.max(-0.15, Math.min(0.15, yPct))
     ];
     
     // Simple irregular polygon (smaller, tighter)
