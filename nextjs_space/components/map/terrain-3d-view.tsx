@@ -249,212 +249,137 @@ export default function Terrain3DView({
     const waterOnEast = seededRandom() > 0.5;
     
     // ═══════════════════════════════════════════════════════════════════
-    // TERRAIN-BASED DEER INTEL LAYOUT
-    // Missouri terrain: ridges run roughly E-W, drain to creeks in valleys
-    // North side = higher ground (ridges), South side = lower (draws/water)
-    // Deer travel ALONG ridges, drop DOWN to water, bed on ridge POINTS
+    // SIMPLE BELIEVABLE DEER INTEL LAYOUT
+    // Classic pattern: bedding in thick cover, trails connect to water & food
+    // Works visually regardless of actual terrain orientation
     // ═══════════════════════════════════════════════════════════════════
     
     const corridors: DeerCorridor[] = [
-      // ═══ PRIMARY RIDGE TRAIL — deer travel along high ground ═══
+      // ═══ MAIN TRAVEL CORRIDOR — connects bedding to food ═══
       {
         id: "primary-1",
         type: "primary",
-        label: "Main Ridge Trail",
-        description: "Primary travel along ridge spine. Bucks use this for scent advantage — wind carries uphill.",
+        label: "Primary Travel Corridor",
+        description: "Main deer highway connecting bedding to food plots. Heavy use at dawn & dusk.",
         coordinates: smoothTrailPath([
-          toCoord(0.05, 0.85), // West ridge point
-          toCoord(0.25, 0.82),
-          toCoord(0.50, 0.78), // Ridge saddle (low point)
-          toCoord(0.75, 0.82),
-          toCoord(0.95, 0.85), // East ridge point
-        ], 0.04),
+          toCoord(0.12, 0.85), // From NW bedding
+          toCoord(0.30, 0.70),
+          toCoord(0.50, 0.55), // Through center
+          toCoord(0.70, 0.40),
+          toCoord(0.85, 0.25), // To SE food
+        ], 0.05),
       },
-      // ═══ SECONDARY RIDGE — parallel ridge to south ═══
-      {
-        id: "primary-2",
-        type: "primary",
-        label: "South Ridge Connector",
-        description: "Secondary ridge travel. Does use this to reach south food sources.",
-        coordinates: smoothTrailPath([
-          toCoord(0.08, 0.45),
-          toCoord(0.30, 0.42),
-          toCoord(0.55, 0.40),
-          toCoord(0.80, 0.43),
-          toCoord(0.95, 0.45),
-        ], 0.04),
-      },
-      // ═══ RIDGE-TO-WATER TRAILS — deer drop downhill to drink ═══
+      // ═══ SECONDARY TRAIL — timber edge ═══
       {
         id: "secondary-1",
         type: "secondary",
-        label: "West Draw Trail",
-        description: "Travel from ridge down to water. Deer descend at dusk, climb at dawn.",
+        label: "Timber Edge Trail",
+        description: "Does travel this edge at first light. Connects to water.",
         coordinates: smoothTrailPath([
-          toCoord(0.15, 0.82), // From ridge
-          toCoord(0.12, 0.65),
-          toCoord(0.10, 0.45),
-          toCoord(0.08, 0.25), // To creek bottom
+          toCoord(0.08, 0.60),
+          toCoord(0.15, 0.45),
+          toCoord(0.25, 0.30), // To water
         ], 0.06),
       },
+      // ═══ SECONDARY TRAIL — field edge ═══
       {
         id: "secondary-2",
         type: "secondary",
-        label: "East Draw Trail",
-        description: "Downhill travel to creek. Morning return route to bedding.",
+        label: "Field Edge Trail",
+        description: "Evening movement along field edge toward food.",
         coordinates: smoothTrailPath([
-          toCoord(0.85, 0.80), // From ridge
-          toCoord(0.88, 0.60),
-          toCoord(0.90, 0.40),
-          toCoord(0.92, 0.22), // To creek
+          toCoord(0.75, 0.80),
+          toCoord(0.82, 0.60),
+          toCoord(0.88, 0.40),
         ], 0.06),
       },
-      {
-        id: "secondary-3",
-        type: "secondary",
-        label: "Central Draw",
-        description: "Primary water access from ridge saddle. High traffic funnel point.",
-        coordinates: smoothTrailPath([
-          toCoord(0.50, 0.75), // From saddle
-          toCoord(0.48, 0.55),
-          toCoord(0.50, 0.35),
-          toCoord(0.52, 0.18), // To creek
-        ], 0.06),
-      },
-      // ═══ WATER — creek in valley bottom (low ground, south) ═══
+      // ═══ WATER — pond/creek in one location ═══
       {
         id: "water-1",
         type: "water",
-        label: "Valley Creek",
-        description: "Year-round water in valley bottom. Deer stage here before climbing to feed.",
-        coordinates: smoothTrailPath([
-          toCoord(0.05, 0.15), // West end of valley
-          toCoord(0.25, 0.18),
-          toCoord(0.50, 0.15),
-          toCoord(0.75, 0.18),
-          toCoord(0.95, 0.15), // East end
-        ], 0.08),
-      },
-      {
-        id: "water-2",
-        type: "water",
-        label: "Ridge Seep",
-        description: "Seasonal spring on north slope. Isolated water source — bucks use in October heat.",
+        label: "Stock Pond",
+        description: "Year-round water source. Deer stage here morning & evening.",
         coordinates: [
-          toCoord(0.70, 0.70), toCoord(0.76, 0.73), toCoord(0.80, 0.70),
-          toCoord(0.78, 0.65), toCoord(0.72, 0.65), toCoord(0.70, 0.70),
+          toCoord(0.20, 0.25), toCoord(0.28, 0.32), toCoord(0.38, 0.30),
+          toCoord(0.40, 0.22), toCoord(0.35, 0.15), toCoord(0.25, 0.15),
+          toCoord(0.20, 0.20), toCoord(0.20, 0.25),
         ],
       },
-      // ═══ BEDDING — ridge points with 270° visibility ═══
+      // ═══ BEDDING — thick cover, northwest corner ═══
       {
         id: "bedding-1",
         type: "bedding",
-        label: "West Ridge Point",
-        description: "Buck bedding on ridge nose. Wind at back, 270° view of approaches. Mature bucks only.",
+        label: "Primary Bedding",
+        description: "Thick cover bedding area. Mature bucks use the interior; does bed on edges.",
         coordinates: [
-          toCoord(0.05, 0.90), toCoord(0.12, 0.95), toCoord(0.20, 0.92),
-          toCoord(0.22, 0.85), toCoord(0.15, 0.80), toCoord(0.08, 0.82), toCoord(0.05, 0.90),
+          toCoord(0.08, 0.80), toCoord(0.15, 0.92), toCoord(0.28, 0.90),
+          toCoord(0.32, 0.82), toCoord(0.28, 0.72), toCoord(0.15, 0.70),
+          toCoord(0.08, 0.75), toCoord(0.08, 0.80),
         ],
       },
+      // ═══ SECONDARY BEDDING — east side thicket ═══
       {
         id: "bedding-2",
         type: "bedding",
-        label: "East Ridge Point",
-        description: "Secondary ridge bedding. Does bed here — close to south ridge food access.",
+        label: "Secondary Bedding",
+        description: "Doe family group bedding. Close to east food source.",
         coordinates: [
-          toCoord(0.80, 0.90), toCoord(0.88, 0.95), toCoord(0.95, 0.92),
-          toCoord(0.95, 0.85), toCoord(0.90, 0.82), toCoord(0.82, 0.84), toCoord(0.80, 0.90),
+          toCoord(0.72, 0.75), toCoord(0.80, 0.82), toCoord(0.90, 0.78),
+          toCoord(0.88, 0.68), toCoord(0.78, 0.65), toCoord(0.72, 0.70),
+          toCoord(0.72, 0.75),
         ],
       },
-      {
-        id: "bedding-3",
-        type: "bedding",
-        label: "South Slope Thicket",
-        description: "Thermal bedding on south-facing slope. Deer use in cold weather — sun exposure.",
-        coordinates: [
-          toCoord(0.35, 0.32), toCoord(0.42, 0.38), toCoord(0.50, 0.35),
-          toCoord(0.48, 0.28), toCoord(0.40, 0.25), toCoord(0.35, 0.28), toCoord(0.35, 0.32),
-        ],
-      },
-      // ═══ FUNNELS — saddles and terrain pinch points ═══
+      // ═══ FUNNEL — where trails converge ═══
       {
         id: "funnel-1",
         type: "funnel",
-        label: "Ridge Saddle",
-        description: "Low point in main ridge — ALL deer cross here. Prime rut stand location.",
+        label: "Pinch Point",
+        description: "Terrain funnels deer through this gap. Prime stand location.",
         coordinates: smoothTrailPath([
-          toCoord(0.40, 0.80), toCoord(0.50, 0.75), toCoord(0.60, 0.80),
+          toCoord(0.42, 0.58), toCoord(0.52, 0.52), toCoord(0.62, 0.58),
         ], 0.04),
       },
-      {
-        id: "funnel-2",
-        type: "funnel",
-        label: "Creek Crossing",
-        description: "Only shallow crossing in valley. Deer funnel here to avoid deep water.",
-        coordinates: smoothTrailPath([
-          toCoord(0.45, 0.22), toCoord(0.50, 0.15), toCoord(0.55, 0.22),
-        ], 0.04),
-      },
-      // ═══ FOOD PLOTS — flat benches on ridge, not in valley ═══
+      // ═══ FOOD PLOT — southeast destination ═══
       {
         id: "food-1",
         type: "food_plot",
-        label: "Ridge Bench Plot",
-        description: "¼-acre kill plot on ridge bench. Well-drained, screened from below. Clover/brassica.",
+        label: "Food Plot — Clover/Beans",
+        description: "½-acre destination plot. Evening staging area before deer feed into ag fields.",
         coordinates: [
-          toCoord(0.25, 0.75), toCoord(0.32, 0.80), toCoord(0.40, 0.77),
-          toCoord(0.38, 0.70), toCoord(0.30, 0.68), toCoord(0.25, 0.72), toCoord(0.25, 0.75),
+          toCoord(0.75, 0.20), toCoord(0.85, 0.28), toCoord(0.92, 0.22),
+          toCoord(0.90, 0.12), toCoord(0.80, 0.08), toCoord(0.72, 0.12),
+          toCoord(0.75, 0.20),
         ],
       },
-      {
-        id: "food-2",
-        type: "food_plot",
-        label: "South Ridge Plot",
-        description: "½-acre staging plot on south ridge. Evening destination — deer feed before dark.",
-        coordinates: [
-          toCoord(0.60, 0.48), toCoord(0.70, 0.52), toCoord(0.78, 0.48),
-          toCoord(0.76, 0.40), toCoord(0.68, 0.38), toCoord(0.62, 0.42), toCoord(0.60, 0.48),
-        ],
-      },
-      // ═══ STAND SITES — positioned for ridge travel & funnels ═══
+      // ═══ STAND SITES — at key intersections ═══
       {
         id: "stand-1",
         type: "stand",
-        label: "#1 — Ridge Saddle",
-        description: "20ft hang-on at saddle. SW wind. All-day rut sit — intercepts ALL ridge travel.",
+        label: "#1 — Pinch Point",
+        description: "20ft hang-on at funnel. SW wind. All-day rut sit.",
         coordinates: [
-          toCoord(0.48, 0.78), toCoord(0.52, 0.81), toCoord(0.56, 0.78),
-          toCoord(0.52, 0.75), toCoord(0.48, 0.78),
+          toCoord(0.50, 0.55), toCoord(0.54, 0.58), toCoord(0.58, 0.55),
+          toCoord(0.54, 0.52), toCoord(0.50, 0.55),
         ],
       },
       {
         id: "stand-2",
         type: "stand",
-        label: "#2 — Central Draw",
-        description: "Ladder stand where draw meets ridge. NW wind. Dawn sit — catch deer returning to bed.",
+        label: "#2 — Water's Edge",
+        description: "Ladder stand overlooking water. NW wind. Evening sits.",
         coordinates: [
-          toCoord(0.46, 0.58), toCoord(0.50, 0.61), toCoord(0.54, 0.58),
-          toCoord(0.50, 0.55), toCoord(0.46, 0.58),
+          toCoord(0.42, 0.28), toCoord(0.46, 0.31), toCoord(0.50, 0.28),
+          toCoord(0.46, 0.25), toCoord(0.42, 0.28),
         ],
       },
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 — Creek Crossing",
-        description: "Ground blind at valley crossing. S wind. Evening sits — catch deer heading to water.",
+        label: "#3 — Food Plot Edge",
+        description: "Ground blind downwind of food plot. S wind.",
         coordinates: [
-          toCoord(0.48, 0.20), toCoord(0.52, 0.23), toCoord(0.56, 0.20),
-          toCoord(0.52, 0.17), toCoord(0.48, 0.20),
-        ],
-      },
-      {
-        id: "stand-4",
-        type: "stand",
-        label: "#4 — South Plot",
-        description: "Observation stand downwind of south plot. E wind. Pre-rut scouting & evening hunts.",
-        coordinates: [
-          toCoord(0.55, 0.45), toCoord(0.59, 0.48), toCoord(0.63, 0.45),
-          toCoord(0.59, 0.42), toCoord(0.55, 0.45),
+          toCoord(0.68, 0.18), toCoord(0.72, 0.21), toCoord(0.76, 0.18),
+          toCoord(0.72, 0.15), toCoord(0.68, 0.18),
         ],
       },
     ];
