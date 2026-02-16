@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, Target, Info, Maximize2, Camera, Pause, Layers, MapPin } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, Target, Info, Maximize2, Camera, Pause, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -17,36 +17,6 @@ interface Terrain3DViewProps {
   onUnlockIntel?: () => void;
 }
 
-// Intel marker — simple pin with label (just 2-3 defensible points)
-interface IntelMarker {
-  id: string;
-  type: "observation" | "water" | "edge";
-  label: string;
-  description: string;
-  coordinates: [number, number]; // [lng, lat]
-}
-
-const MARKER_CONFIG: Record<string, { color: string; emoji: string; label: string; desc: string }> = {
-  observation: { 
-    color: "#ef4444", 
-    emoji: "🎯", 
-    label: "Observation Point",
-    desc: "Ridge saddle or bench with clear sightlines. Based on terrain contours indicating local high point."
-  },
-  water: { 
-    color: "#3b82f6", 
-    emoji: "💧", 
-    label: "Water Access",
-    desc: "Drainage or low point visible in contours (V-shapes pointing uphill). Verify on-site."
-  },
-  edge: { 
-    color: "#22c55e", 
-    emoji: "🌲", 
-    label: "Transition Edge",
-    desc: "Terrain change zone — typically field-to-timber edge or slope break. Walk the contour to verify."
-  },
-};
-
 export default function Terrain3DView({
   isOpen,
   onClose,
@@ -59,7 +29,6 @@ export default function Terrain3DView({
 }: Terrain3DViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<InstanceType<typeof mapboxgl.Map> | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
   const spinAnimRef = useRef<number | null>(null);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -68,14 +37,11 @@ export default function Terrain3DView({
   const [currentBearing, setCurrentBearing] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [windDirection] = useState(225); // SW wind default
-  const [loadPhase, setLoadPhase] = useState<"terrain" | "markers" | "done">("terrain");
   
   // Layer toggles
   const [showContours, setShowContours] = useState(true);
   const [showRidgelines, setShowRidgelines] = useState(true);
   const [showHillshade, setShowHillshade] = useState(true);
-  const [showMarkers, setShowMarkers] = useState(true);
-  const [intelMarkers, setIntelMarkers] = useState<IntelMarker[]>([]);
 
   const checkWebGLSupport = (): boolean => {
     try {
@@ -92,66 +58,6 @@ export default function Terrain3DView({
     }
   };
 
-  // ═══ GENERATE 2-3 SIMPLE INTEL MARKERS ═══
-  // Placed relative to true polygon centroid, defensible terrain-based language
-  const generateIntelMarkers = useCallback((): IntelMarker[] => {
-    if (!parcelBounds || parcelBounds.length < 3) return [];
-    
-    // Calculate true polygon centroid (shoelace formula)
-    let area = 0;
-    let cx = 0;
-    let cy = 0;
-    const n = parcelBounds.length;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      const xi = parcelBounds[i].lng, yi = parcelBounds[i].lat;
-      const xj = parcelBounds[j].lng, yj = parcelBounds[j].lat;
-      const cross = xi * yj - xj * yi;
-      area += cross;
-      cx += (xi + xj) * cross;
-      cy += (yi + yj) * cross;
-    }
-    area = Math.abs(area) / 2;
-    if (area === 0) return [];
-    cx /= (6 * (area * (area > 0 ? 1 : -1)));
-    cy /= (6 * (area * (area > 0 ? 1 : -1)));
-    
-    // Bounding box for offset scaling
-    const lats = parcelBounds.map(p => p.lat);
-    const lngs = parcelBounds.map(p => p.lng);
-    const w = Math.max(...lngs) - Math.min(...lngs);
-    const h = Math.max(...lats) - Math.min(...lats);
-    const shortSide = Math.min(w, h);
-    const offset = shortSide * 0.12; // 12% offset from center
-    
-    // 3 markers, defensibly placed
-    const markers: IntelMarker[] = [
-      {
-        id: "obs-1",
-        type: "observation",
-        label: "Primary Observation",
-        description: "Suggested glassing point based on terrain. Check elevation contours — this sits on a local high.",
-        coordinates: [cx + offset * 0.3, cy + offset * 0.8], // NE-ish of center
-      },
-      {
-        id: "water-1",
-        type: "water",
-        label: "Drainage Zone",
-        description: "Contour V-shapes indicate water collects here. Walk the yellow topo lines to verify.",
-        coordinates: [cx - offset * 0.5, cy - offset * 0.6], // SW-ish (lower elevation)
-      },
-      {
-        id: "edge-1",
-        type: "edge",
-        label: "Edge Transition",
-        description: "Terrain break visible in hillshade. Likely timber-field edge or slope change.",
-        coordinates: [cx + offset * 0.6, cy - offset * 0.3], // SE-ish
-      },
-    ];
-    
-    return markers;
-  }, [parcelBounds]);
-
   // Initialize map
   useEffect(() => {
     if (!isOpen || !mapContainerRef.current) return;
@@ -159,7 +65,6 @@ export default function Terrain3DView({
     setLoadError(null);
     setIsMapLoaded(false);
     setIsSpinning(false);
-    setLoadPhase("terrain");
 
     if (!checkWebGLSupport()) {
       setLoadError("Your browser doesn't support WebGL, which is required for 3D terrain viewing.");
@@ -206,7 +111,6 @@ export default function Terrain3DView({
       if (!hasLoaded) {
         hasLoaded = true;
         setIsMapLoaded(true);
-        setLoadPhase("done");
       }
     }, 5000);
 
@@ -416,16 +320,6 @@ export default function Terrain3DView({
         .addTo(map);
 
       setIsMapLoaded(true);
-      setLoadPhase("markers");
-
-      // ═══ ADD INTEL MARKERS AFTER MAP RENDERS ═══
-      setTimeout(() => {
-        if (!mapRef.current) return;
-        const markers = generateIntelMarkers();
-        setIntelMarkers(markers);
-        addMarkersToMap(mapRef.current, markers);
-        setLoadPhase("done");
-      }, 200);
     });
 
     map.on("pitchend", () => setCurrentPitch(Math.round(map.getPitch())));
@@ -438,78 +332,14 @@ export default function Terrain3DView({
         cancelAnimationFrame(spinAnimRef.current);
         spinAnimRef.current = null;
       }
-      // Clean up markers
-      markersRef.current.forEach(m => m.remove());
-      markersRef.current = [];
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
       setIsMapLoaded(false);
-      setLoadPhase("terrain");
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, parcelCenter, parcelBounds, generateIntelMarkers]);
-
-  // ═══ ADD MARKERS TO MAP ═══
-  const addMarkersToMap = (map: InstanceType<typeof mapboxgl.Map>, markers: IntelMarker[]) => {
-    // Clear existing
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
-    
-    markers.forEach(marker => {
-      const config = MARKER_CONFIG[marker.type];
-      
-      // Create custom marker element
-      const el = document.createElement('div');
-      el.className = 'intel-marker';
-      el.innerHTML = `
-        <div style="
-          background: ${config.color};
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          border: 3px solid white;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 18px;
-          cursor: pointer;
-          transition: transform 0.2s;
-        ">${config.emoji}</div>
-      `;
-      el.style.cursor = 'pointer';
-      
-      // Hover effect
-      el.addEventListener('mouseenter', () => {
-        (el.firstElementChild as HTMLElement).style.transform = 'scale(1.15)';
-      });
-      el.addEventListener('mouseleave', () => {
-        (el.firstElementChild as HTMLElement).style.transform = 'scale(1)';
-      });
-      
-      // Create popup
-      const popup = new mapboxgl.Popup({ offset: 25, closeButton: false })
-        .setHTML(`
-          <div style="max-width: 220px; padding: 8px;">
-            <div style="font-weight: 600; color: ${config.color}; margin-bottom: 4px;">
-              ${config.emoji} ${config.label}
-            </div>
-            <div style="font-size: 12px; color: #666; line-height: 1.4;">
-              ${config.desc}
-            </div>
-          </div>
-        `);
-      
-      const mapboxMarker = new mapboxgl.Marker(el)
-        .setLngLat(marker.coordinates)
-        .setPopup(popup)
-        .addTo(map);
-      
-      markersRef.current.push(mapboxMarker);
-    });
-  };
+  }, [isOpen, parcelCenter, parcelBounds]);
 
   // ═══ TOGGLE FUNCTIONS ═══
   const toggleContours = () => {
@@ -542,15 +372,6 @@ export default function Terrain3DView({
     if (map.getLayer("hillshade")) {
       map.setLayoutProperty("hillshade", "visibility", newState ? "visible" : "none");
     }
-  };
-
-  const toggleMarkers = () => {
-    const newState = !showMarkers;
-    setShowMarkers(newState);
-    markersRef.current.forEach(m => {
-      const el = m.getElement();
-      el.style.display = newState ? 'block' : 'none';
-    });
   };
 
   const resetView = () => {
@@ -668,14 +489,6 @@ export default function Terrain3DView({
           </div>
         )}
 
-        {/* Phase 2 overlay */}
-        {isMapLoaded && loadPhase === "markers" && (
-          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 bg-stone-800/90 backdrop-blur rounded-lg px-4 py-2 shadow-lg border border-amber-500/30 flex items-center gap-3">
-            <div className="animate-spin w-4 h-4 border-2 border-amber-500/30 border-t-amber-500 rounded-full" />
-            <p className="text-xs text-amber-300">Placing intel markers...</p>
-          </div>
-        )}
-
         {/* Error State */}
         {loadError && (
           <div className="absolute inset-0 flex items-center justify-center bg-stone-900">
@@ -755,16 +568,6 @@ export default function Terrain3DView({
                   <div className={`w-4 h-1 rounded ${showRidgelines ? "bg-orange-400" : "bg-stone-500"}`} />
                   <span>Ridges</span>
                 </button>
-                <button
-                  onClick={toggleMarkers}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                    showMarkers ? "bg-red-500/20 text-red-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
-                  }`}
-                  title="Intel markers"
-                >
-                  <MapPin className={`w-3 h-3 ${showMarkers ? "text-red-400" : "text-stone-500"}`} />
-                  <span>Intel Pins</span>
-                </button>
               </div>
               <p className="text-[8px] text-stone-500 mt-1.5 px-1 leading-tight">✓ USGS elevation data</p>
             </div>
@@ -812,27 +615,11 @@ export default function Terrain3DView({
               {showLegend && (
                 <div className="p-3 pt-0 border-t border-stone-700">
                   
-                  {/* Intel Markers Legend */}
-                  <div className="flex flex-wrap items-center gap-4 mt-3">
-                    {Object.entries(MARKER_CONFIG).map(([type, config]) => (
-                      <div key={type} className="flex items-center gap-2">
-                        <div 
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-sm border-2 border-white shadow"
-                          style={{ background: config.color }}
-                        >
-                          {config.emoji}
-                        </div>
-                        <span className="text-xs text-stone-300">{config.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                  
                   {/* Explainer */}
                   <div className="bg-stone-700/40 rounded-lg p-2.5 mt-3">
                     <p className="text-[10px] text-stone-400 leading-relaxed">
                       <span className="text-amber-400 font-medium">🏔️ High-contrast hillshade</span> mimics LiDAR bare-earth imagery — ridges and draws pop visually. 
-                      <span className="text-amber-400 font-medium"> Yellow topo lines</span> are USGS-verified elevation contours you can walk on-site. 
-                      <span className="text-red-400 font-medium">Intel pins</span> mark terrain-based points of interest — click for details.
+                      <span className="text-amber-400 font-medium"> Yellow topo lines</span> are USGS-verified elevation contours you can walk on-site.
                     </p>
                   </div>
 
