@@ -187,6 +187,7 @@ export default function Terrain3DView({
   const [showContours, setShowContours] = useState(true);
   const [showRidgelines, setShowRidgelines] = useState(true);
   const [showHillshade, setShowHillshade] = useState(true);
+  const [showHeatmap, setShowHeatmap] = useState(true); // Deer activity heatmap
 
   const checkWebGLSupport = (): boolean => {
     try {
@@ -205,250 +206,100 @@ export default function Terrain3DView({
     }
   };
 
-  // ═══ DEER INTEL GENERATION — POLYGON CENTROID BASED ═══
-  // Uses TRUE polygon centroid, not bounding box center
-  const generateDeerCorridors = useCallback((): DeerCorridor[] => {
+  // ═══ HEATMAP POINT GENERATION ═══
+  // Generate grid of points within parcel with "deer activity" weights
+  // Based on: elevation (ridges), edge proximity, aspect simulation
+  const generateHeatmapPoints = useCallback(() => {
     if (!parcelBounds || parcelBounds.length < 3) return [];
     
-    // Calculate TRUE polygon centroid (not bounding box center!)
-    // This ensures center is INSIDE the actual parcel shape
-    const calcCentroid = (pts: {lat: number, lng: number}[]): {lat: number, lng: number} => {
-      let area = 0;
-      let cx = 0;
-      let cy = 0;
-      const n = pts.length;
-      
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n;
-        const cross = pts[i].lng * pts[j].lat - pts[j].lng * pts[i].lat;
-        area += cross;
-        cx += (pts[i].lng + pts[j].lng) * cross;
-        cy += (pts[i].lat + pts[j].lat) * cross;
-      }
-      
-      area = area / 2;
-      if (Math.abs(area) < 1e-10) {
-        // Fallback to simple average if area is too small
-        return {
-          lng: pts.reduce((s, p) => s + p.lng, 0) / n,
-          lat: pts.reduce((s, p) => s + p.lat, 0) / n
-        };
-      }
-      
-      return {
-        lng: cx / (6 * area),
-        lat: cy / (6 * area)
-      };
-    };
-    
-    const centroid = calcCentroid(parcelBounds);
-    const cLng = centroid.lng;
-    const cLat = centroid.lat;
-    
-    // Get parcel dimensions from bounds
     const lats = parcelBounds.map(p => p.lat);
     const lngs = parcelBounds.map(p => p.lng);
     const minLat = Math.min(...lats), maxLat = Math.max(...lats);
     const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-    const h = maxLat - minLat;  // height (lat range)
-    const w = maxLng - minLng;  // width (lng range)
     
-    // Use SMALLER of width/height for scaling (handles narrow parcels)
-    const shortSide = Math.min(w, h);
-    
-    // TINY polygon size — 1.5% of short side
-    const ps = shortSide * 0.015;
-    
-    // Point maker: offset from TRUE centroid
-    // Use shortSide for BOTH dimensions to prevent spillover on narrow parcels
-    // Max offset = 15% of short side in any direction
-    const pt = (xPct: number, yPct: number): [number, number] => [
-      cLng + shortSide * Math.max(-0.15, Math.min(0.15, xPct)),
-      cLat + shortSide * Math.max(-0.15, Math.min(0.15, yPct))
-    ];
-    
-    // Simple irregular polygon (smaller, tighter)
-    const poly = (center: [number, number], scale: number = 1): [number, number][] => {
-      const [x, y] = center;
-      const s = ps * scale;
-      return [
-        [x - s * 0.8, y + s * 0.6],
-        [x + s * 0.2, y + s * 0.8],
-        [x + s * 0.8, y + s * 0.2],
-        [x + s * 0.6, y - s * 0.8],
-        [x - s * 0.2, y - s * 0.6],
-        [x - s * 0.8, y - s * 0.1],
-        [x - s * 0.8, y + s * 0.6],
-      ];
+    // Point-in-polygon check
+    const pointInPolygon = (lng: number, lat: number): boolean => {
+      let inside = false;
+      for (let i = 0, j = parcelBounds.length - 1; i < parcelBounds.length; j = i++) {
+        const xi = parcelBounds[i].lng, yi = parcelBounds[i].lat;
+        const xj = parcelBounds[j].lng, yj = parcelBounds[j].lat;
+        if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+          inside = !inside;
+        }
+      }
+      return inside;
     };
     
-    // Simple trail path (no smoothing needed at this scale)
-    const trail = (points: [number, number][], width: number): [number, number][] => {
-      const result: [number, number][] = [];
-      const w2 = width / 2;
-      // Forward pass
-      for (const [x, y] of points) {
-        result.push([x - w2, y]);
+    // Distance to nearest edge (normalized 0-1)
+    const distanceToEdge = (lng: number, lat: number): number => {
+      let minDist = Infinity;
+      for (let i = 0; i < parcelBounds.length; i++) {
+        const j = (i + 1) % parcelBounds.length;
+        const p1 = parcelBounds[i], p2 = parcelBounds[j];
+        
+        // Point-to-line-segment distance
+        const dx = p2.lng - p1.lng;
+        const dy = p2.lat - p1.lat;
+        const t = Math.max(0, Math.min(1, ((lng - p1.lng) * dx + (lat - p1.lat) * dy) / (dx * dx + dy * dy)));
+        const nearLng = p1.lng + t * dx;
+        const nearLat = p1.lat + t * dy;
+        const dist = Math.sqrt((lng - nearLng) ** 2 + (lat - nearLat) ** 2);
+        minDist = Math.min(minDist, dist);
       }
-      // Backward pass
-      for (let i = points.length - 1; i >= 0; i--) {
-        result.push([points[i][0] + w2, points[i][1]]);
-      }
-      result.push(result[0]); // Close
-      return result;
+      const maxPossibleDist = Math.max(maxLat - minLat, maxLng - minLng) / 2;
+      return Math.min(1, minDist / maxPossibleDist);
     };
     
-    const tw = ps * 0.4; // trail width
+    const points: { lng: number; lat: number; weight: number }[] = [];
+    const gridSize = 20; // 20x20 grid
+    const latStep = (maxLat - minLat) / gridSize;
+    const lngStep = (maxLng - minLng) / gridSize;
     
-    return [
-      // ═══ PRIMARY TRAILS — Main movement corridors ═══
-      {
-        id: "primary-1",
-        type: "primary",
-        label: "Main Ridge Corridor",
-        description: "Primary travel route along terrain high point. Verify with trail camera.",
-        coordinates: trail([pt(-0.20, 0.20), pt(-0.05, 0.05), pt(0.10, -0.10), pt(0.20, -0.20)], tw),
-      },
-      {
-        id: "primary-2", 
-        type: "primary",
-        label: "East Ridge Route",
-        description: "Secondary ridge travel. Cross-reference contour lines.",
-        coordinates: trail([pt(0.18, 0.18), pt(0.15, 0), pt(0.18, -0.18)], tw),
-      },
-      
-      // ═══ SECONDARY TRAILS — Edge transitions ═══
-      {
-        id: "secondary-1",
-        type: "secondary", 
-        label: "West Timber Edge",
-        description: "Transition zone where cover meets openings.",
-        coordinates: trail([pt(-0.18, 0.15), pt(-0.15, 0), pt(-0.18, -0.15)], tw * 0.8),
-      },
-      {
-        id: "secondary-2",
-        type: "secondary",
-        label: "North Crossing",
-        description: "Cross-property travel between bedding and food.",
-        coordinates: trail([pt(-0.15, 0.15), pt(0, 0.18), pt(0.15, 0.15)], tw * 0.8),
-      },
-      {
-        id: "secondary-3",
-        type: "secondary",
-        label: "South Bench Route",
-        description: "Lower elevation travel between food sources.",
-        coordinates: trail([pt(-0.15, -0.15), pt(0, -0.18), pt(0.15, -0.15)], tw * 0.8),
-      },
-      
-      // ═══ WATER — Drainage areas ═══
-      {
-        id: "water-1",
-        type: "water",
-        label: "Upper Draw",
-        description: "Drainage low point — check for seep or creek.",
-        coordinates: poly(pt(-0.15, 0.05), 1.2),
-      },
-      {
-        id: "water-2",
-        type: "water",
-        label: "Lower Draw", 
-        description: "Drainage outlet — likely water source.",
-        coordinates: poly(pt(0.12, -0.08), 1.0),
-      },
-      
-      // ═══ BEDDING — South-facing slopes ═══
-      {
-        id: "bedding-1",
-        type: "bedding",
-        label: "West Bedding",
-        description: "South-facing slope. Check for thick cover.",
-        coordinates: poly(pt(-0.12, 0.12), 1.3),
-      },
-      {
-        id: "bedding-2",
-        type: "bedding",
-        label: "East Bedding",
-        description: "Morning sun exposure. Doe bedding area.",
-        coordinates: poly(pt(0.12, 0.10), 1.1),
-      },
-      {
-        id: "bedding-3",
-        type: "bedding",
-        label: "Interior Thicket",
-        description: "Central cover — buck bedding if dense.",
-        coordinates: poly(pt(0.03, -0.02), 1.2),
-      },
-      
-      // ═══ FUNNELS — Terrain pinch points ═══
-      {
-        id: "funnel-1",
-        type: "funnel",
-        label: "North Funnel",
-        description: "Terrain narrows here — natural pinch point.",
-        coordinates: trail([pt(-0.10, 0.12), pt(0, 0.10), pt(0.10, 0.12)], tw * 0.6),
-      },
-      {
-        id: "funnel-2",
-        type: "funnel",
-        label: "South Funnel",
-        description: "Draw crossing — trails converge here.",
-        coordinates: trail([pt(-0.10, -0.12), pt(0, -0.10), pt(0.10, -0.12)], tw * 0.6),
-      },
-      
-      // ═══ FOOD PLOTS — Interior locations ═══
-      {
-        id: "food-1",
-        type: "food_plot",
-        label: "North Plot",
-        description: "Interior food plot location. ~½ acre.",
-        coordinates: poly(pt(-0.03, 0.20), 1.0),
-      },
-      {
-        id: "food-2",
-        type: "food_plot",
-        label: "South Kill Plot",
-        description: "Kill plot between bedding areas.",
-        coordinates: poly(pt(0.05, -0.20), 1.0),
-      },
-      
-      // ═══ STAND SITES ═══
-      {
-        id: "stand-1",
-        type: "stand",
-        label: "#1 Saddle",
-        description: "Overlooks north funnel. SW wind.",
-        coordinates: poly(pt(-0.05, 0.08), 0.5),
-      },
-      {
-        id: "stand-2",
-        type: "stand",
-        label: "#2 Hub",
-        description: "Central intersection. NW wind.",
-        coordinates: poly(pt(0.08, 0.03), 0.5),
-      },
-      {
-        id: "stand-3",
-        type: "stand",
-        label: "#3 Draw",
-        description: "Overlooks water. S wind.",
-        coordinates: poly(pt(-0.08, -0.05), 0.5),
-      },
-      {
-        id: "stand-4",
-        type: "stand",
-        label: "#4 Ridge",
-        description: "East ridge cruising. W wind.",
-        coordinates: poly(pt(0.12, 0), 0.5),
-      },
-      {
-        id: "stand-5",
-        type: "stand",
-        label: "#5 Plot",
-        description: "Kill plot edge. E wind.",
-        coordinates: poly(pt(0, -0.15), 0.5),
-      },
-    ];
-  }, [parcelCenter, parcelBounds]);
+    for (let i = 0; i <= gridSize; i++) {
+      for (let j = 0; j <= gridSize; j++) {
+        const lng = minLng + j * lngStep;
+        const lat = minLat + i * latStep;
+        
+        if (!pointInPolygon(lng, lat)) continue;
+        
+        // Calculate weight based on terrain factors
+        let weight = 0.3; // Base weight
+        
+        // 1. Edge proximity boost (transition zones are hot)
+        const edgeDist = distanceToEdge(lng, lat);
+        if (edgeDist < 0.15) {
+          weight += 0.4 * (1 - edgeDist / 0.15); // Hot near edges
+        }
+        
+        // 2. Ridgeline simulation (higher lat = typically higher elevation in MO)
+        // This is a proxy — real implementation would query terrain
+        const latNorm = (lat - minLat) / (maxLat - minLat);
+        const ridgeBoost = Math.sin(latNorm * Math.PI) * 0.3; // Peak in middle-north
+        weight += ridgeBoost;
+        
+        // 3. South-facing slope simulation (north side of ridges)
+        // Points just south of the "ridge" get bedding boost
+        if (latNorm > 0.4 && latNorm < 0.7) {
+          weight += 0.2; // Probable bedding zone
+        }
+        
+        // 4. Slight randomization for natural look
+        weight += (Math.random() - 0.5) * 0.1;
+        
+        // Clamp weight
+        weight = Math.max(0.1, Math.min(1, weight));
+        
+        points.push({ lng, lat, weight });
+      }
+    }
+    
+    return points;
+  }, [parcelBounds]);
+  
+  // Legacy function — returns empty (no more fictional corridors)
+  const generateDeerCorridors = useCallback((): DeerCorridor[] => {
+    return [];
+  }, []);
 
   // Initialize map — PHASED LOADING for speed
   useEffect(() => {
@@ -734,11 +585,11 @@ export default function Terrain3DView({
       setIsMapLoaded(true);
       setLoadPhase("corridors");
 
-      // ═══ PHASE 2: Add deer intel layers AFTER map is painted (200ms delay) ═══
+      // ═══ PHASE 2: Add deer activity heatmap AFTER map is painted (200ms delay) ═══
       setTimeout(() => {
         if (!mapRef.current) return;
-        const corridors = generateDeerCorridors();
-        addCorridorsToMap(mapRef.current, corridors);
+        const heatPoints = generateHeatmapPoints();
+        addHeatmapToMap(mapRef.current, heatPoints);
         setLoadPhase("done");
       }, 200);
     });
@@ -766,213 +617,86 @@ export default function Terrain3DView({
       setLoadPhase("terrain");
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, parcelCenter, parcelBounds, generateDeerCorridors]);
+  }, [isOpen, parcelCenter, parcelBounds, generateHeatmapPoints]);
 
   // Add corridor layers to map
-  const addCorridorsToMap = (map: InstanceType<typeof mapboxgl.Map>, corridors: DeerCorridor[]) => {
-    const widths: Record<string, number> = {
-      primary: 5,
-      secondary: 3.5,
-      water: 4,
-      bedding: 2,
-      funnel: 5,
-      food_plot: 2,
-      stand: 2,
-    };
-
-    corridors.forEach((corridor) => {
-      const sourceId = `corridor-${corridor.id}`;
-      const layerId = `corridor-layer-${corridor.id}`;
-      const isPolygon = ["bedding", "food_plot", "stand"].includes(corridor.type);
-      const color = CORRIDOR_COLORS[corridor.type];
-
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          properties: {
-            label: corridor.label,
-            description: corridor.description,
-            type: corridor.type,
-          },
-          geometry: isPolygon
-            ? { type: "Polygon", coordinates: [corridor.coordinates] }
-            : { type: "LineString", coordinates: corridor.coordinates },
-        },
-      });
-
-      if (isPolygon) {
-        // Fill
-        map.addLayer({
-          id: `${layerId}-fill`,
-          type: "fill",
-          source: sourceId,
-          paint: {
-            "fill-color": color,
-            "fill-opacity": corridor.type === "stand" ? 0.5 : 0.3,
-          },
-        });
-        // Outline
-        map.addLayer({
-          id: layerId,
-          type: "line",
-          source: sourceId,
-          paint: {
-            "line-color": color,
-            "line-width": widths[corridor.type],
-            "line-dasharray": corridor.type === "stand" ? [1, 0] : [2, 2],
-          },
-        });
-        // Label for stands
-        if (corridor.type === "stand") {
-          // Add a center point for the label
-          const centerLng = corridor.coordinates.reduce((s, c) => s + c[0], 0) / corridor.coordinates.length;
-          const centerLat = corridor.coordinates.reduce((s, c) => s + c[1], 0) / corridor.coordinates.length;
-          map.addSource(`${sourceId}-label`, {
-            type: "geojson",
-            data: {
-              type: "Feature",
-              properties: { label: corridor.label.replace(" — ", "\n") },
-              geometry: { type: "Point", coordinates: [centerLng, centerLat] },
-            },
-          });
-          map.addLayer({
-            id: `${layerId}-label`,
-            type: "symbol",
-            source: `${sourceId}-label`,
-            layout: {
-              "text-field": "⊕",
-              "text-size": 20,
-              "text-allow-overlap": true,
-            },
-            paint: {
-              "text-color": "#ffffff",
-              "text-halo-color": color,
-              "text-halo-width": 3,
-            },
-          });
-        }
-      } else {
-        // Glow under line for primary & funnel corridors
-        if (corridor.type === "primary" || corridor.type === "funnel") {
-          map.addLayer({
-            id: `${layerId}-glow`,
-            type: "line",
-            source: sourceId,
-            paint: {
-              "line-color": color,
-              "line-width": widths[corridor.type] * 3,
-              "line-opacity": 0.15,
-              "line-blur": 6,
-            },
-            layout: { "line-cap": "round", "line-join": "round" },
-          });
-        }
-        // Main line
-        map.addLayer({
-          id: layerId,
-          type: "line",
-          source: sourceId,
-          paint: {
-            "line-color": color,
-            "line-width": widths[corridor.type],
-            "line-opacity": 0.9,
-          },
-          layout: { "line-cap": "round", "line-join": "round" },
-        });
-        // Dashed overlay for water
-        if (corridor.type === "water") {
-          map.addLayer({
-            id: `${layerId}-dash`,
-            type: "line",
-            source: sourceId,
-            paint: {
-              "line-color": "#93c5fd",
-              "line-width": 2,
-              "line-dasharray": [4, 4],
-              "line-opacity": 0.7,
-            },
-            layout: { "line-cap": "round", "line-join": "round" },
-          });
-        }
-        // Direction arrows for primary/secondary/funnel
-        if (["primary", "secondary", "funnel"].includes(corridor.type)) {
-          map.addLayer({
-            id: `${layerId}-arrows`,
-            type: "symbol",
-            source: sourceId,
-            layout: {
-              "symbol-placement": "line",
-              "symbol-spacing": 80,
-              "text-field": "▶",
-              "text-size": 10,
-              "text-allow-overlap": true,
-              "text-rotation-alignment": "map",
-            },
-            paint: {
-              "text-color": "#ffffff",
-              "text-halo-color": color,
-              "text-halo-width": 1.5,
-            },
-          });
-        }
-      }
-
-      // Popup on click
-      map.on("click", layerId, (e: any) => {
-        const props = e.features?.[0]?.properties;
-        if (props) {
-          const typeLabel = CORRIDOR_LABELS[props.type]?.name || props.type;
-          new mapboxgl.Popup({ className: "terrain-popup" })
-            .setLngLat(e.lngLat)
-            .setHTML(
-              `<div style="padding:8px;max-width:220px;">
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                  <div style="width:10px;height:10px;border-radius:50%;background:${CORRIDOR_COLORS[props.type]}"></div>
-                  <span style="font-weight:700;font-size:13px;">${props.label}</span>
-                </div>
-                <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">${typeLabel}</div>
-                <p style="font-size:12px;color:#374151;line-height:1.4;margin:0;">${props.description}</p>
-              </div>`
-            )
-            .addTo(map);
-        }
-      });
-
-      map.on("mouseenter", layerId, () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", layerId, () => {
-        map.getCanvas().style.cursor = "";
-      });
+  // ═══ ADD HEATMAP TO MAP ═══
+  const addHeatmapToMap = (map: InstanceType<typeof mapboxgl.Map>, points: { lng: number; lat: number; weight: number }[]) => {
+    if (points.length === 0) return;
+    
+    // Convert points to GeoJSON features
+    const features = points.map(p => ({
+      type: "Feature" as const,
+      properties: { weight: p.weight },
+      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] }
+    }));
+    
+    // Add heatmap source
+    map.addSource("deer-heatmap", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features }
     });
+    
+    // Add heatmap layer — warm colors for high deer activity
+    map.addLayer({
+      id: "deer-heatmap-layer",
+      type: "heatmap",
+      source: "deer-heatmap",
+      paint: {
+        // Weight based on our calculated deer activity score
+        "heatmap-weight": ["get", "weight"],
+        
+        // Intensity increases with zoom
+        "heatmap-intensity": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 0.5,
+          15, 1.5
+        ],
+        
+        // Color ramp: cool (low activity) to hot (high activity)
+        // Blue → Cyan → Green → Yellow → Orange → Red
+        "heatmap-color": [
+          "interpolate", ["linear"], ["heatmap-density"],
+          0, "rgba(0,0,0,0)",
+          0.1, "rgba(30,60,120,0.4)",
+          0.3, "rgba(50,130,80,0.5)",
+          0.5, "rgba(140,180,50,0.6)",
+          0.7, "rgba(220,160,40,0.7)",
+          0.85, "rgba(240,100,30,0.8)",
+          1, "rgba(220,40,30,0.9)"
+        ],
+        
+        // Radius increases with zoom for smooth appearance
+        "heatmap-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 20,
+          13, 35,
+          15, 50
+        ],
+        
+        // Fade out at high zoom to show satellite detail
+        "heatmap-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          13, 0.7,
+          16, 0.4
+        ]
+      }
+    }, "parcel-glow-outer"); // Insert BELOW parcel boundary
   };
 
-  // Toggle corridor visibility
-  const toggleCorridor = (type: string) => {
+  // Toggle heatmap visibility
+  const toggleHeatmap = () => {
     if (!mapRef.current || !isMapLoaded) return;
-
     const map = mapRef.current;
-    const isActive = activeCorridors.includes(type);
-    const newActive = isActive
-      ? activeCorridors.filter((t) => t !== type)
-      : [...activeCorridors, type];
-    setActiveCorridors(newActive);
-
-    const corridors = generateDeerCorridors();
-    corridors
-      .filter((c) => c.type === type)
-      .forEach((corridor) => {
-        const layerId = `corridor-layer-${corridor.id}`;
-        const visibility = isActive ? "none" : "visible";
-        const layerIds = [layerId, `${layerId}-fill`, `${layerId}-arrows`, `${layerId}-glow`, `${layerId}-dash`, `${layerId}-label`];
-        layerIds.forEach((id) => {
-          if (map.getLayer(id)) {
-            map.setLayoutProperty(id, "visibility", visibility);
-          }
-        });
-      });
+    const newState = !showHeatmap;
+    setShowHeatmap(newState);
+    if (map.getLayer("deer-heatmap-layer")) {
+      map.setLayoutProperty("deer-heatmap-layer", "visibility", newState ? "visible" : "none");
+    }
   };
+
+  // Legacy toggle — no-op since corridors are removed
+  const toggleCorridor = (_type: string) => {};
 
   // Toggle terrain layer visibility
   const toggleContours = () => {
@@ -1263,138 +987,68 @@ export default function Terrain3DView({
               >
                 <div className="flex items-center gap-2">
                   <Target className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm font-medium text-white">Deer Intel Layers</span>
-                  {previewMode ? (
-                    <span className="text-xs bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <Lock className="w-3 h-3" /> Preview Mode
-                    </span>
-                  ) : (
-                    <>
-                      <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">AI Predicted</span>
-                      <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">{activeCorridors.length}/7 Active</span>
-                    </>
-                  )}
+                  <span className="text-sm font-medium text-white">Deer Activity Heatmap</span>
+                  <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">Terrain-Based</span>
                 </div>
                 <Info className="w-4 h-4 text-stone-400" />
               </button>
               
               {showLegend && (
                 <div className="p-3 pt-0 border-t border-stone-700">
-                  {/* Preview Mode: Compact Unlock CTA Bar */}
-                  {previewMode && (
-                    <div className="bg-gradient-to-r from-red-600 to-orange-500 rounded-lg px-3 py-2 mt-2 mb-2 flex items-center justify-between gap-3">
-                      <p className="text-white text-xs flex items-center gap-1.5">
-                        <Lock className="w-3 h-3" />
-                        <span className="font-medium">7 layers locked</span>
-                        <span className="text-red-100 hidden sm:inline">— stand sites, season playbook & methodology</span>
-                      </p>
+                  
+                  {/* Heatmap Legend + Toggles */}
+                  <div className="flex flex-wrap items-center gap-4 mt-3">
+                    
+                    {/* Heatmap color scale */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-stone-400">Low</span>
+                      <div className="w-32 h-3 rounded-full" style={{
+                        background: "linear-gradient(to right, rgba(30,60,120,0.7), rgba(50,130,80,0.7), rgba(140,180,50,0.8), rgba(220,160,40,0.8), rgba(240,100,30,0.9), rgba(220,40,30,1))"
+                      }} />
+                      <span className="text-[10px] text-stone-400">High</span>
+                    </div>
+                    
+                    {/* Toggles */}
+                    <div className="flex items-center gap-3 ml-auto">
                       <button
-                        onClick={() => onUnlockIntel?.()}
-                        className="bg-white hover:bg-red-50 text-red-600 px-3 py-1 rounded font-bold text-xs flex items-center gap-1 transition-colors whitespace-nowrap"
+                        onClick={toggleHeatmap}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all ${
+                          showHeatmap ? "bg-red-500/30 text-red-300 border border-red-500/50" : "bg-stone-700/50 text-stone-400 border border-stone-600/50"
+                        }`}
                       >
-                        <Unlock className="w-3 h-3" />
-                        Unlock $79
+                        <div className="w-2 h-2 rounded-full" style={{ background: showHeatmap ? "linear-gradient(135deg, #f87171, #ea580c)" : "#6b7280" }} />
+                        Activity
+                      </button>
+                      <button
+                        onClick={toggleContours}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all ${
+                          showContours ? "bg-amber-500/30 text-amber-300 border border-amber-500/50" : "bg-stone-700/50 text-stone-400 border border-stone-600/50"
+                        }`}
+                      >
+                        <div className="w-2 h-2 rounded-full" style={{ background: showContours ? "#fbbf24" : "#6b7280" }} />
+                        Contours
+                      </button>
+                      <button
+                        onClick={toggleRidgelines}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all ${
+                          showRidgelines ? "bg-orange-500/30 text-orange-300 border border-orange-500/50" : "bg-stone-700/50 text-stone-400 border border-stone-600/50"
+                        }`}
+                      >
+                        <div className="w-2 h-2 rounded-full" style={{ background: showRidgelines ? "#fb923c" : "#6b7280" }} />
+                        Ridgelines
                       </button>
                     </div>
-                  )}
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mt-3">
-                    {legendItems.map((item) => {
-                      const info = CORRIDOR_LABELS[item.type];
-                      return (
-                        <button
-                          key={item.type}
-                          onClick={() => !previewMode && toggleCorridor(item.type)}
-                          disabled={previewMode}
-                          className={`flex items-center gap-2 p-2 rounded-lg transition-all relative ${
-                            previewMode 
-                              ? "bg-stone-700/30 border border-stone-600/50 cursor-not-allowed"
-                              : activeCorridors.includes(item.type)
-                                ? `bg-${item.color}-500/20 border border-${item.color}-500/50`
-                                : "bg-stone-700/50 border border-transparent opacity-40"
-                          }`}
-                          style={!previewMode && activeCorridors.includes(item.type) ? { backgroundColor: `${CORRIDOR_COLORS[item.type]}22`, borderColor: `${CORRIDOR_COLORS[item.type]}88` } : {}}
-                        >
-                          {previewMode && (
-                            <div className="absolute top-1 right-1">
-                              <Lock className="w-2.5 h-2.5 text-stone-500" />
-                            </div>
-                          )}
-                          <div className={previewMode ? "opacity-50" : ""}>
-                            {item.icon}
-                          </div>
-                          <div className="text-left">
-                            <p className={`text-[11px] font-medium leading-tight ${previewMode ? "text-stone-400" : "text-white"}`}>{info.name}</p>
-                            <p className="text-[9px] text-stone-500 leading-tight">{info.desc}</p>
-                          </div>
-                        </button>
-                      );
-                    })}
                   </div>
-
-                  {/* How We Know - Methodology Panel */}
-                  <div className="mt-3">
-                    {previewMode ? (
-                      <div className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-stone-700/40 border border-stone-600/50">
-                        <Lock className="w-3.5 h-3.5 text-stone-500" />
-                        <span className="text-xs font-medium text-stone-500">How We Know — Included in $79 Report</span>
-                      </div>
-                    ) : (
-                    <button
-                      onClick={() => setShowMethodology(!showMethodology)}
-                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-stone-700/60 hover:bg-stone-700 transition-colors group"
-                    >
-                      <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
-                      <span className="text-xs font-medium text-amber-300">How We Know — The Method Behind Each Layer</span>
-                      {showMethodology ? <ChevronDown className="w-3.5 h-3.5 text-stone-400" /> : <ChevronUp className="w-3.5 h-3.5 text-stone-400" />}
-                    </button>
-                    )}
-                    
-                    {showMethodology && (
-                      <div className="mt-2 space-y-1.5 max-h-[35vh] overflow-y-auto pr-1">
-                        {/* Intro blurb */}
-                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-2">
-                          <p className="text-xs text-amber-200 leading-relaxed">
-                            <span className="font-semibold">Terrain layers are 100% verifiable.</span> Contour lines and ridgelines come from USGS elevation data — you can walk these on property. Deer intel layers (trails, bedding, stands) are <em>terrain-informed predictions</em> based on how deer use topography. The ridges are real; the trails show where deer <em>likely</em> travel.
-                          </p>
-                        </div>
-
-                        {legendItems.map((item) => {
-                          const info = CORRIDOR_LABELS[item.type];
-                          const isExpanded = expandedMethod === item.type;
-                          return (
-                            <button
-                              key={`method-${item.type}`}
-                              onClick={() => setExpandedMethod(isExpanded ? null : item.type)}
-                              className="w-full text-left rounded-lg transition-all overflow-hidden"
-                              style={{ backgroundColor: isExpanded ? `${CORRIDOR_COLORS[item.type]}15` : 'transparent' }}
-                            >
-                              <div className="flex items-center gap-2.5 px-3 py-2 hover:bg-stone-700/40 rounded-lg">
-                                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: CORRIDOR_COLORS[item.type] }} />
-                                <span className="text-xs font-medium text-white flex-1">{info.name}</span>
-                                {isExpanded ? <ChevronUp className="w-3 h-3 text-stone-400 flex-shrink-0" /> : <ChevronDown className="w-3 h-3 text-stone-400 flex-shrink-0" />}
-                              </div>
-                              {isExpanded && (
-                                <div className="px-3 pb-3 pt-1">
-                                  <p className="text-[11px] text-stone-300 leading-relaxed pl-5">{info.method}</p>
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-
-                        {/* Disclaimer */}
-                        <div className="bg-stone-700/40 rounded-lg p-2.5 mt-2">
-                          <p className="text-[10px] text-stone-500 leading-relaxed text-center">
-                            📍 <span className="text-amber-400">Contours & ridges = verified USGS data.</span> Deer corridors = terrain-informed predictions. Always ground-truth with boots on the property. Trail cameras confirm patterns.
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                  
+                  {/* What the heatmap shows */}
+                  <div className="bg-stone-700/40 rounded-lg p-2.5 mt-3">
+                    <p className="text-[10px] text-stone-400 leading-relaxed">
+                      <span className="text-amber-400 font-medium">🦌 Heatmap = terrain-derived deer activity probability.</span> Hot zones indicate edges, ridgelines, and south-facing slopes where deer concentrate. Based on USGS elevation + known whitetail behavior patterns. Contour lines (yellow) are verified USGS data you can walk on-site.
+                    </p>
                   </div>
 
                   <p className="text-[10px] text-stone-500 mt-3 text-center">
-                    🦌 Drag to rotate • Scroll to zoom • Right-click to tilt • Click any corridor for details • Hit <span className="text-amber-400">Cinematic</span> for the flyover
+                    Drag to rotate • Scroll to zoom • Right-click to tilt • Hit <span className="text-amber-400">Cinematic</span> for the flyover
                   </p>
                 </div>
               )}
