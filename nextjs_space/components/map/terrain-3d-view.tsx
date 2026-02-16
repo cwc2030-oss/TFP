@@ -201,264 +201,250 @@ export default function Terrain3DView({
     }
   };
 
-  // ═══ TERRAIN-AWARE CORRIDOR GENERATION ═══
-  // Uses ACTUAL parcel bounds to place features across the ENTIRE property
+  // ═══ GEOMETRY-ANCHORED CORRIDOR GENERATION ═══
+  // Uses ACTUAL parcel boundary points to anchor features - not a grid!
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
+    if (!parcelBounds || parcelBounds.length < 3) return [];
+    
     const { lat: centerLat, lng: centerLng } = parcelCenter;
+    const bounds = parcelBounds;
     
-    // Calculate ACTUAL bounds from parcel geometry
-    let minLng = centerLng, maxLng = centerLng, minLat = centerLat, maxLat = centerLat;
-    if (parcelBounds && parcelBounds.length > 2) {
-      minLng = Math.min(...parcelBounds.map(p => p.lng));
-      maxLng = Math.max(...parcelBounds.map(p => p.lng));
-      minLat = Math.min(...parcelBounds.map(p => p.lat));
-      maxLat = Math.max(...parcelBounds.map(p => p.lat));
-    } else {
-      // Fallback to acreage-based estimate
-      const fallbackOffset = acreage ? Math.sqrt(acreage / 640) * 0.01 : 0.005;
-      minLng = centerLng - fallbackOffset;
-      maxLng = centerLng + fallbackOffset;
-      minLat = centerLat - fallbackOffset;
-      maxLat = centerLat + fallbackOffset;
-    }
+    // Find the actual corner points of the parcel polygon
+    const sortedByLat = [...bounds].sort((a, b) => b.lat - a.lat);
+    const sortedByLng = [...bounds].sort((a, b) => a.lng - b.lng);
     
-    // 5% padding to keep features INSIDE parcel edges (reduced from 10%)
-    const padX = (maxLng - minLng) * 0.05;
-    const padY = (maxLat - minLat) * 0.05;
-    const safeMinLng = minLng + padX;
-    const safeMaxLng = maxLng - padX;
-    const safeMinLat = minLat + padY;
-    const safeMaxLat = maxLat - padY;
+    // Get extreme points
+    const northPoint = sortedByLat[0];
+    const southPoint = sortedByLat[sortedByLat.length - 1];
+    const westPoint = sortedByLng[0];
+    const eastPoint = sortedByLng[sortedByLng.length - 1];
     
-    // Helper: convert normalized coordinates (0-1) to actual coords within safe bounds
-    const toCoord = (normX: number, normY: number): [number, number] => [
-      safeMinLng + normX * (safeMaxLng - safeMinLng),
-      safeMinLat + normY * (safeMaxLat - safeMinLat)
+    // Find corner-ish points (combining lat/lng extremes)
+    const findCorner = (latHigh: boolean, lngHigh: boolean) => {
+      return bounds.reduce((best, p) => {
+        const score = (latHigh ? p.lat : -p.lat) + (lngHigh ? p.lng : -p.lng);
+        const bestScore = (latHigh ? best.lat : -best.lat) + (lngHigh ? best.lng : -best.lng);
+        return score > bestScore ? p : best;
+      }, bounds[0]);
+    };
+    
+    const nwCorner = findCorner(true, false);  // high lat, low lng
+    const neCorner = findCorner(true, true);   // high lat, high lng  
+    const swCorner = findCorner(false, false); // low lat, low lng
+    const seCorner = findCorner(false, true);  // low lat, high lng
+    
+    // Calculate dimensions for sizing features
+    const lngRange = eastPoint.lng - westPoint.lng;
+    const latRange = northPoint.lat - southPoint.lat;
+    const avgRange = (lngRange + latRange) / 2;
+    const polySize = avgRange * 0.06; // Feature size relative to parcel
+    
+    // Helper: interpolate between two points
+    const lerp = (p1: {lng: number, lat: number}, p2: {lng: number, lat: number}, t: number): [number, number] => [
+      p1.lng + (p2.lng - p1.lng) * t,
+      p1.lat + (p2.lat - p1.lat) * t
     ];
     
-    // Seeded random for consistent but parcel-unique placement
-    let seed = (Math.abs(centerLat * 10000) + Math.abs(centerLng * 10000)) % 1000;
-    const seededRandom = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    // Helper: offset a point toward center (for padding)
+    const inset = (p: {lng: number, lat: number}, amount: number = 0.15): [number, number] => [
+      p.lng + (centerLng - p.lng) * amount,
+      p.lat + (centerLat - p.lat) * amount
+    ];
     
-    // ═══ TERRAIN LOGIC using NORMALIZED coordinates (0-1 range) ═══
-    // x=0 is west edge, x=1 is east edge
-    // y=0 is south edge, y=1 is north edge
-    // SPREAD features across FULL extent of property
-    
-    // Determine water location based on parcel seed (deterministic)
-    const waterOnEast = seededRandom() > 0.5;
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // FULL PROPERTY COVERAGE - Features spread across entire parcel
-    // ═══════════════════════════════════════════════════════════════════
+    // Helper: create irregular polygon around a point
+    const makePolygon = (center: [number, number], size: number): [number, number][] => {
+      const [lng, lat] = center;
+      const s = size;
+      return [
+        [lng - s, lat + s * 0.7],
+        [lng + s * 0.3, lat + s],
+        [lng + s, lat + s * 0.3],
+        [lng + s * 0.7, lat - s],
+        [lng - s * 0.3, lat - s * 0.7],
+        [lng - s, lat],
+        [lng - s, lat + s * 0.7],
+      ];
+    };
     
     const corridors: DeerCorridor[] = [
-      // ═══ MAIN CORRIDOR — runs full length of property ═══
+      // ═══ MAIN DIAGONAL — NW corner to SE corner ═══
       {
         id: "primary-1",
         type: "primary",
         label: "Primary Travel Corridor",
-        description: "Main deer highway running through property. Heavy use at dawn & dusk.",
+        description: "Main deer highway connecting bedding to food. Heavy use at dawn & dusk.",
         coordinates: smoothTrailPath([
-          toCoord(0.20, 0.95), // Starts at north
-          toCoord(0.25, 0.75),
-          toCoord(0.35, 0.55),
-          toCoord(0.45, 0.35),
-          toCoord(0.55, 0.15),
-          toCoord(0.60, 0.05), // Ends at south
-        ], 0.04),
+          inset(nwCorner, 0.12),
+          lerp(nwCorner, seCorner, 0.25),
+          lerp(nwCorner, seCorner, 0.5),
+          lerp(nwCorner, seCorner, 0.75),
+          inset(seCorner, 0.12),
+        ], avgRange * 0.025),
       },
-      // ═══ EAST SIDE TRAIL — covers right half ═══
+      // ═══ EAST EDGE — NE to SE ═══
       {
         id: "primary-2",
         type: "primary",
-        label: "East Timber Trail",
-        description: "Secondary travel along east timber edge. Mature bucks use during rut.",
+        label: "East Timber Edge",
+        description: "Travel along eastern boundary. Mature bucks during rut.",
         coordinates: smoothTrailPath([
-          toCoord(0.80, 0.92),
-          toCoord(0.85, 0.70),
-          toCoord(0.82, 0.50),
-          toCoord(0.78, 0.30),
-          toCoord(0.75, 0.08),
-        ], 0.04),
+          inset(neCorner, 0.12),
+          lerp(neCorner, seCorner, 0.33),
+          lerp(neCorner, seCorner, 0.66),
+          inset(seCorner, 0.15),
+        ], avgRange * 0.025),
       },
-      // ═══ CROSS TRAIL NORTH — connects east-west in upper third ═══
+      // ═══ WEST EDGE — NW to SW ═══
       {
         id: "secondary-1",
+        type: "secondary",
+        label: "West Timber Edge", 
+        description: "Morning travel along western boundary.",
+        coordinates: smoothTrailPath([
+          inset(nwCorner, 0.15),
+          lerp(nwCorner, swCorner, 0.33),
+          lerp(nwCorner, swCorner, 0.66),
+          inset(swCorner, 0.12),
+        ], avgRange * 0.03),
+      },
+      // ═══ NORTH EDGE — NW to NE ═══
+      {
+        id: "secondary-2",
         type: "secondary",
         label: "North Cross Trail",
         description: "Connects bedding areas across northern section.",
         coordinates: smoothTrailPath([
-          toCoord(0.08, 0.82),
-          toCoord(0.35, 0.78),
-          toCoord(0.65, 0.80),
-          toCoord(0.92, 0.85),
-        ], 0.05),
+          inset(nwCorner, 0.12),
+          lerp(nwCorner, neCorner, 0.33),
+          lerp(nwCorner, neCorner, 0.66),
+          inset(neCorner, 0.12),
+        ], avgRange * 0.03),
       },
-      // ═══ CROSS TRAIL SOUTH — connects east-west in lower third ═══
+      // ═══ SOUTH EDGE — SW to SE ═══
       {
-        id: "secondary-2",
+        id: "secondary-3",
         type: "secondary",
         label: "South Cross Trail",
         description: "Evening travel between food sources.",
         coordinates: smoothTrailPath([
-          toCoord(0.10, 0.20),
-          toCoord(0.40, 0.18),
-          toCoord(0.70, 0.22),
-          toCoord(0.92, 0.18),
-        ], 0.05),
+          inset(swCorner, 0.12),
+          lerp(swCorner, seCorner, 0.33),
+          lerp(swCorner, seCorner, 0.66),
+          inset(seCorner, 0.12),
+        ], avgRange * 0.03),
       },
-      // ═══ WATER — southwest corner ═══
+      // ═══ WATER — west side, between corners ═══
       {
         id: "water-1",
         type: "water",
         label: "Stock Pond",
         description: "Year-round water. Deer stage here before feeding.",
-        coordinates: [
-          toCoord(0.08, 0.35), toCoord(0.15, 0.42), toCoord(0.25, 0.40),
-          toCoord(0.28, 0.32), toCoord(0.22, 0.25), toCoord(0.12, 0.25),
-          toCoord(0.08, 0.30), toCoord(0.08, 0.35),
-        ],
+        coordinates: makePolygon(lerp(swCorner, nwCorner, 0.4), polySize * 1.3),
       },
-      // ═══ BEDDING — northwest corner (upper left) ═══
+      // ═══ BEDDING — NW corner ═══
       {
         id: "bedding-1",
         type: "bedding",
         label: "NW Bedding",
         description: "Primary buck bedding. Thick cover with escape routes.",
-        coordinates: [
-          toCoord(0.05, 0.88), toCoord(0.12, 0.96), toCoord(0.25, 0.94),
-          toCoord(0.28, 0.85), toCoord(0.22, 0.78), toCoord(0.10, 0.80),
-          toCoord(0.05, 0.85), toCoord(0.05, 0.88),
-        ],
+        coordinates: makePolygon(inset(nwCorner, 0.2), polySize * 1.5),
       },
-      // ═══ BEDDING — northeast corner (upper right) ═══
+      // ═══ BEDDING — NE corner ═══
       {
         id: "bedding-2",
         type: "bedding",
         label: "NE Bedding",
         description: "Doe family group bedding. Morning sun exposure.",
-        coordinates: [
-          toCoord(0.75, 0.92), toCoord(0.85, 0.96), toCoord(0.95, 0.94),
-          toCoord(0.95, 0.85), toCoord(0.88, 0.80), toCoord(0.78, 0.82),
-          toCoord(0.75, 0.88), toCoord(0.75, 0.92),
-        ],
+        coordinates: makePolygon(inset(neCorner, 0.2), polySize * 1.3),
       },
-      // ═══ BEDDING — center thicket ═══
+      // ═══ BEDDING — center ═══
       {
         id: "bedding-3",
         type: "bedding",
         label: "Central Thicket",
         description: "Mid-day bedding in dense cover.",
-        coordinates: [
-          toCoord(0.40, 0.55), toCoord(0.48, 0.62), toCoord(0.58, 0.58),
-          toCoord(0.55, 0.48), toCoord(0.45, 0.45), toCoord(0.40, 0.50),
-          toCoord(0.40, 0.55),
-        ],
+        coordinates: makePolygon([centerLng, centerLat], polySize),
       },
-      // ═══ FUNNEL — where trails converge mid-property ═══
+      // ═══ FUNNEL — north of center ═══
       {
         id: "funnel-1",
         type: "funnel",
-        label: "Central Pinch Point",
+        label: "North Pinch Point",
         description: "Terrain funnels deer here. Prime stand location.",
         coordinates: smoothTrailPath([
-          toCoord(0.30, 0.65), toCoord(0.45, 0.58), toCoord(0.60, 0.65),
-        ], 0.04),
+          lerp(nwCorner, neCorner, 0.3),
+          [centerLng, centerLat + latRange * 0.15],
+          lerp(nwCorner, neCorner, 0.7),
+        ], avgRange * 0.025),
       },
-      // ═══ FUNNEL — south crossing ═══
+      // ═══ FUNNEL — south of center ═══
       {
         id: "funnel-2",
         type: "funnel",
-        label: "South Funnel",
+        label: "South Pinch Point",
         description: "Crossing between food sources.",
         coordinates: smoothTrailPath([
-          toCoord(0.35, 0.25), toCoord(0.50, 0.20), toCoord(0.65, 0.25),
-        ], 0.04),
+          lerp(swCorner, seCorner, 0.3),
+          [centerLng, centerLat - latRange * 0.15],
+          lerp(swCorner, seCorner, 0.7),
+        ], avgRange * 0.025),
       },
-      // ═══ FOOD PLOT — southwest (lower left) ═══
+      // ═══ FOOD PLOT — SW corner ═══
       {
         id: "food-1",
         type: "food_plot",
         label: "SW Food Plot",
         description: "Clover plot near water. Evening staging area.",
-        coordinates: [
-          toCoord(0.05, 0.15), toCoord(0.12, 0.22), toCoord(0.22, 0.18),
-          toCoord(0.20, 0.08), toCoord(0.10, 0.05), toCoord(0.05, 0.10),
-          toCoord(0.05, 0.15),
-        ],
+        coordinates: makePolygon(inset(swCorner, 0.2), polySize * 1.2),
       },
-      // ═══ FOOD PLOT — southeast (lower right) ═══
+      // ═══ FOOD PLOT — SE corner ═══
       {
         id: "food-2",
         type: "food_plot",
         label: "SE Food Plot",
         description: "Brassica plot. Late season destination.",
-        coordinates: [
-          toCoord(0.78, 0.15), toCoord(0.88, 0.20), toCoord(0.95, 0.15),
-          toCoord(0.92, 0.05), toCoord(0.82, 0.05), toCoord(0.78, 0.10),
-          toCoord(0.78, 0.15),
-        ],
+        coordinates: makePolygon(inset(seCorner, 0.2), polySize * 1.2),
       },
-      // ═══ STAND — north funnel ═══
+      // ═══ STANDS — positioned at key intersections ═══
       {
         id: "stand-1",
         type: "stand",
-        label: "#1 — North Funnel",
-        description: "20ft hang-on. SW wind. All-day rut sit.",
-        coordinates: [
-          toCoord(0.43, 0.72), toCoord(0.47, 0.75), toCoord(0.51, 0.72),
-          toCoord(0.47, 0.69), toCoord(0.43, 0.72),
-        ],
+        label: "#1 — North",
+        description: "20ft hang-on at north pinch. SW wind.",
+        coordinates: makePolygon([centerLng, centerLat + latRange * 0.2], polySize * 0.4),
       },
-      // ═══ STAND — central pinch point ═══
       {
         id: "stand-2",
         type: "stand",
-        label: "#2 — Central Funnel",
-        description: "Ladder stand at pinch point. NW wind.",
-        coordinates: [
-          toCoord(0.43, 0.58), toCoord(0.47, 0.61), toCoord(0.51, 0.58),
-          toCoord(0.47, 0.55), toCoord(0.43, 0.58),
-        ],
+        label: "#2 — Center",
+        description: "Ladder stand at central intersection. NW wind.",
+        coordinates: makePolygon([centerLng, centerLat], polySize * 0.4),
       },
-      // ═══ STAND — water overlook ═══
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 — Water Edge",
-        description: "Ground blind near pond. S wind. Evening sits.",
-        coordinates: [
-          toCoord(0.28, 0.38), toCoord(0.32, 0.41), toCoord(0.36, 0.38),
-          toCoord(0.32, 0.35), toCoord(0.28, 0.38),
-        ],
+        label: "#3 — West",
+        description: "Ground blind near pond. S wind.",
+        coordinates: makePolygon(lerp(swCorner, nwCorner, 0.45), polySize * 0.4),
       },
-      // ═══ STAND — east trail ═══
       {
         id: "stand-4",
         type: "stand",
-        label: "#4 — East Trail",
-        description: "Hang-on on east timber edge. W wind.",
-        coordinates: [
-          toCoord(0.80, 0.55), toCoord(0.84, 0.58), toCoord(0.88, 0.55),
-          toCoord(0.84, 0.52), toCoord(0.80, 0.55),
-        ],
+        label: "#4 — East",
+        description: "Hang-on on east edge. W wind.",
+        coordinates: makePolygon(lerp(neCorner, seCorner, 0.5), polySize * 0.4),
       },
-      // ═══ STAND — south food plot ═══
       {
         id: "stand-5",
         type: "stand",
-        label: "#5 — SE Plot",
-        description: "Ground blind at south food plot. E wind.",
-        coordinates: [
-          toCoord(0.72, 0.15), toCoord(0.76, 0.18), toCoord(0.80, 0.15),
-          toCoord(0.76, 0.12), toCoord(0.72, 0.15),
-        ],
+        label: "#5 — South",
+        description: "Ground blind between food plots. E wind.",
+        coordinates: makePolygon([centerLng, centerLat - latRange * 0.2], polySize * 0.4),
       },
     ];
 
     return corridors;
-  }, [parcelCenter, parcelBounds, acreage]);
+  }, [parcelCenter, parcelBounds]);
 
   // Initialize map — PHASED LOADING for speed
   useEffect(() => {
