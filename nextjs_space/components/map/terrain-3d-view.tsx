@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, Target, Info, ZoomIn, ZoomOut, Maximize2, Wind, Camera, Play, Pause, HelpCircle, ChevronDown, ChevronUp, Lock, Unlock, Layers, MapPinned } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, Target, Info, Maximize2, Camera, Pause, Layers, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -13,149 +13,38 @@ interface Terrain3DViewProps {
   parcelBounds?: { lat: number; lng: number }[];
   parcelAddress?: string;
   acreage?: number;
-  previewMode?: boolean; // When true, shows locked deer intel layers with upgrade CTA
-  onUnlockIntel?: () => void; // Callback when user wants to buy $79 report
+  previewMode?: boolean;
+  onUnlockIntel?: () => void;
 }
 
-interface DeerCorridor {
+// Intel marker — simple pin with label (just 2-3 defensible points)
+interface IntelMarker {
   id: string;
-  type: "primary" | "secondary" | "water" | "bedding" | "funnel" | "food_plot" | "stand";
+  type: "observation" | "water" | "edge";
   label: string;
-  coordinates: [number, number][];
   description: string;
+  coordinates: [number, number]; // [lng, lat]
 }
 
-const CORRIDOR_COLORS: Record<string, string> = {
-  primary: "#ef4444",
-  secondary: "#f97316",
-  water: "#3b82f6",
-  bedding: "#22c55e",
-  funnel: "#a855f7",
-  food_plot: "#eab308",
-  stand: "#ec4899",
-};
-
-// ═══ Custom Outdoorsy SVG Icons ═══
-
-const DeerTrackIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
-    {/* Deer hoof print - two teardrop toes */}
-    <path d="M8 4C8 4 6 8 6.5 11C7 14 9 14 9 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="currentColor" fillOpacity="0.3"/>
-    <path d="M16 4C16 4 18 8 17.5 11C17 14 15 14 15 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="currentColor" fillOpacity="0.3"/>
-    {/* Dewclaws */}
-    <circle cx="7.5" cy="16.5" r="1.5" fill="currentColor" opacity="0.6"/>
-    <circle cx="16.5" cy="16.5" r="1.5" fill="currentColor" opacity="0.6"/>
-    {/* Second smaller track behind */}
-    <path d="M10 18C10 18 9.2 20 9.5 21.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.4"/>
-    <path d="M14 18C14 18 14.8 20 14.5 21.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.4"/>
-  </svg>
-);
-
-const CreekIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
-    {/* Meandering creek with ripples */}
-    <path d="M3 6C5 5 7 7 9 6C11 5 13 7 15 6C17 5 19 7 21 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-    <path d="M3 12C5 11 7 13 9 12C11 11 13 13 15 12C17 11 19 13 21 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-    <path d="M3 18C5 17 7 19 9 18C11 17 13 19 15 18C17 17 19 19 21 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
-  </svg>
-);
-
-const BeddingIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
-    {/* Deer curled up / bedded down silhouette */}
-    <ellipse cx="12" cy="16" rx="9" ry="5" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.5"/>
-    {/* Deer body curled */}
-    <path d="M8 14C8 12 10 9 12 8C14 9 15 11 15 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-    {/* Head/antler hint */}
-    <circle cx="12" cy="7" r="2" fill="currentColor" fillOpacity="0.4" stroke="currentColor" strokeWidth="1.5"/>
-    <path d="M11 5.5L9.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-    <path d="M13 5.5L14.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-  </svg>
-);
-
-const FunnelIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
-    {/* Terrain pinch point — two ridges narrowing */}
-    <path d="M2 4L10 12L2 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="currentColor" fillOpacity="0.1"/>
-    <path d="M22 4L14 12L22 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="currentColor" fillOpacity="0.1"/>
-    {/* Arrow through the pinch */}
-    <path d="M12 6V18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="2 2" opacity="0.6"/>
-    <path d="M10 15L12 18L14 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6"/>
-  </svg>
-);
-
-const FoodPlotIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
-    {/* Sprouting plant / food plot */}
-    <path d="M12 22V10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-    {/* Left leaf */}
-    <path d="M12 14C12 14 7 13 5 9C5 9 9 8 12 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="currentColor" fillOpacity="0.2"/>
-    {/* Right leaf */}
-    <path d="M12 10C12 10 17 9 19 5C19 5 15 4 12 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="currentColor" fillOpacity="0.2"/>
-    {/* Seeds/ground */}
-    <circle cx="8" cy="21" r="1" fill="currentColor" opacity="0.4"/>
-    <circle cx="16" cy="21" r="1" fill="currentColor" opacity="0.4"/>
-    <circle cx="12" cy="22" r="1" fill="currentColor" opacity="0.5"/>
-  </svg>
-);
-
-const TreeStandIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
-    {/* Tree trunk */}
-    <path d="M12 24V6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.4"/>
-    {/* Branches */}
-    <path d="M12 10L7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.3"/>
-    <path d="M12 8L17 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.3"/>
-    {/* Platform */}
-    <rect x="8" y="11" width="8" height="2" rx="0.5" fill="currentColor" stroke="currentColor" strokeWidth="1"/>
-    {/* Hunter silhouette on stand */}
-    <circle cx="12" cy="8" r="1.8" fill="currentColor"/>
-    <path d="M10 10L10.5 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-    <path d="M14 10L13.5 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-    {/* Ladder rungs */}
-    <line x1="10.5" y1="15" x2="13.5" y2="15" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
-    <line x1="10.5" y1="18" x2="13.5" y2="18" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
-    <line x1="10.5" y1="21" x2="13.5" y2="21" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
-  </svg>
-);
-
-// ═══ Smooth path interpolation for organic-looking trails ═══
-function smoothTrailPath(points: [number, number][], jitter: number = 0.15): [number, number][] {
-  if (points.length < 3) return points;
-  const result: [number, number][] = [];
-  // Use seeded pseudo-random for deterministic jitter
-  const seed = (points[0][0] * 1000 + points[0][1] * 1000) % 1;
-  let s = seed;
-  const nextRand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const [x0, y0] = points[i];
-    const [x1, y1] = points[i + 1];
-    result.push([x0, y0]);
-    // Add 2 intermediate points with slight organic jitter
-    for (let t = 1; t <= 2; t++) {
-      const frac = t / 3;
-      const midX = x0 + (x1 - x0) * frac;
-      const midY = y0 + (y1 - y0) * frac;
-      const dist = Math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2);
-      const perpX = -(y1 - y0) / (dist || 1);
-      const perpY = (x1 - x0) / (dist || 1);
-      const wobble = (nextRand() - 0.5) * 2 * jitter * dist;
-      result.push([midX + perpX * wobble, midY + perpY * wobble]);
-    }
-  }
-  result.push(points[points.length - 1]);
-  return result;
-}
-
-const CORRIDOR_LABELS: Record<string, { name: string; desc: string; method: string; verified?: boolean }> = {
-  primary: { name: "Ridgeline Travel", desc: "Main movement paths", method: "We trace the highest ridgelines connecting timber to food sources. Deer prefer ridge tops because they can see, smell, and hear danger from above. The amber ridgeline contours show exactly where these run — walk them yourself to verify.", verified: true },
-  secondary: { name: "Edge Transitions", desc: "Saddles & timber edges", method: "Where timber meets open field, deer travel the edge — it's cover and food in one step. We map timber/field boundaries and find the low saddle points between ridges where deer cross. Check the contour labels — saddles show as lower elevations between high points." },
-  water: { name: "Drainages", desc: "Creeks, ponds & draws", method: "Contour lines reveal every drainage — look for V-shapes pointing uphill. That's where water flows. Deer visit water 1–3 times daily, especially in early season. These are verifiable on any topo map.", verified: true },
-  bedding: { name: "Bedding Areas", desc: "Likely bedding zones", method: "Deer bed on south-facing slopes (warmth) with thick cover and escape routes downhill. We find slopes facing 135°–225° with nearby timber and at least two exit paths. Use the hillshade layer — bright = south-facing." },
-  funnel: { name: "Terrain Funnels", desc: "Pinch points & bottlenecks", method: "Where a creek, ridge, or fence forces deer through a narrow gap — that's a funnel. Look where contour lines pinch together between two drainages. These are the spots mature bucks can't avoid." },
-  food_plot: { name: "Food Plot Zones", desc: "Ideal food plot locations", method: "We look for small openings (¼–½ acre) in timber that are screened by terrain on 2+ sides, have decent soil drainage, and sit between bedding and travel corridors. If deer can reach it without crossing open ground, it's a kill plot." },
-  stand: { name: "Stand Sites", desc: "Optimal stand placements", method: "Stand sites sit downwind of travel corridors at funnel points, with entry/exit routes that don't spook bedded deer. We factor prevailing wind (SW in Missouri), morning vs. evening thermals, and line-of-sight to shooting lanes." },
+const MARKER_CONFIG: Record<string, { color: string; emoji: string; label: string; desc: string }> = {
+  observation: { 
+    color: "#ef4444", 
+    emoji: "🎯", 
+    label: "Observation Point",
+    desc: "Ridge saddle or bench with clear sightlines. Based on terrain contours indicating local high point."
+  },
+  water: { 
+    color: "#3b82f6", 
+    emoji: "💧", 
+    label: "Water Access",
+    desc: "Drainage or low point visible in contours (V-shapes pointing uphill). Verify on-site."
+  },
+  edge: { 
+    color: "#22c55e", 
+    emoji: "🌲", 
+    label: "Transition Edge",
+    desc: "Terrain change zone — typically field-to-timber edge or slope break. Walk the contour to verify."
+  },
 };
 
 export default function Terrain3DView({
@@ -170,32 +59,29 @@ export default function Terrain3DView({
 }: Terrain3DViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<InstanceType<typeof mapboxgl.Map> | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
   const spinAnimRef = useRef<number | null>(null);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [showLegend, setShowLegend] = useState(!previewMode); // Collapsed in preview mode
-  const [activeCorridors, setActiveCorridors] = useState<string[]>(["primary", "secondary", "water", "bedding", "funnel", "food_plot", "stand"]);
+  const [showLegend, setShowLegend] = useState(!previewMode);
   const [currentPitch, setCurrentPitch] = useState(60);
   const [currentBearing, setCurrentBearing] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [windDirection, setWindDirection] = useState(225); // SW wind default - common in MO
-  const [showWind, setShowWind] = useState(true);
-  const [showMethodology, setShowMethodology] = useState(false);
-  const [expandedMethod, setExpandedMethod] = useState<string | null>(null);
-  const [loadPhase, setLoadPhase] = useState<"terrain" | "corridors" | "done">("terrain");
-  // Terrain layer toggles
+  const [windDirection] = useState(225); // SW wind default
+  const [loadPhase, setLoadPhase] = useState<"terrain" | "markers" | "done">("terrain");
+  
+  // Layer toggles
   const [showContours, setShowContours] = useState(true);
   const [showRidgelines, setShowRidgelines] = useState(true);
   const [showHillshade, setShowHillshade] = useState(true);
-  const [showHeatmap, setShowHeatmap] = useState(true); // Deer activity heatmap
+  const [showMarkers, setShowMarkers] = useState(true);
+  const [intelMarkers, setIntelMarkers] = useState<IntelMarker[]>([]);
 
   const checkWebGLSupport = (): boolean => {
     try {
       const canvas = document.createElement('canvas');
-      // Try WebGL2 first (better iOS support), then WebGL1, then experimental
       const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (!gl) return false;
-      // Also check if WebGL context is not lost
       if (gl instanceof WebGLRenderingContext || gl instanceof WebGL2RenderingContext) {
         return !gl.isContextLost();
       }
@@ -206,102 +92,67 @@ export default function Terrain3DView({
     }
   };
 
-  // ═══ HEATMAP POINT GENERATION ═══
-  // Generate grid of points within parcel with "deer activity" weights
-  // Based on: elevation (ridges), edge proximity, aspect simulation
-  const generateHeatmapPoints = useCallback(() => {
+  // ═══ GENERATE 2-3 SIMPLE INTEL MARKERS ═══
+  // Placed relative to true polygon centroid, defensible terrain-based language
+  const generateIntelMarkers = useCallback((): IntelMarker[] => {
     if (!parcelBounds || parcelBounds.length < 3) return [];
     
+    // Calculate true polygon centroid (shoelace formula)
+    let area = 0;
+    let cx = 0;
+    let cy = 0;
+    const n = parcelBounds.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const xi = parcelBounds[i].lng, yi = parcelBounds[i].lat;
+      const xj = parcelBounds[j].lng, yj = parcelBounds[j].lat;
+      const cross = xi * yj - xj * yi;
+      area += cross;
+      cx += (xi + xj) * cross;
+      cy += (yi + yj) * cross;
+    }
+    area = Math.abs(area) / 2;
+    if (area === 0) return [];
+    cx /= (6 * (area * (area > 0 ? 1 : -1)));
+    cy /= (6 * (area * (area > 0 ? 1 : -1)));
+    
+    // Bounding box for offset scaling
     const lats = parcelBounds.map(p => p.lat);
     const lngs = parcelBounds.map(p => p.lng);
-    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    const w = Math.max(...lngs) - Math.min(...lngs);
+    const h = Math.max(...lats) - Math.min(...lats);
+    const shortSide = Math.min(w, h);
+    const offset = shortSide * 0.12; // 12% offset from center
     
-    // Point-in-polygon check
-    const pointInPolygon = (lng: number, lat: number): boolean => {
-      let inside = false;
-      for (let i = 0, j = parcelBounds.length - 1; i < parcelBounds.length; j = i++) {
-        const xi = parcelBounds[i].lng, yi = parcelBounds[i].lat;
-        const xj = parcelBounds[j].lng, yj = parcelBounds[j].lat;
-        if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
-          inside = !inside;
-        }
-      }
-      return inside;
-    };
+    // 3 markers, defensibly placed
+    const markers: IntelMarker[] = [
+      {
+        id: "obs-1",
+        type: "observation",
+        label: "Primary Observation",
+        description: "Suggested glassing point based on terrain. Check elevation contours — this sits on a local high.",
+        coordinates: [cx + offset * 0.3, cy + offset * 0.8], // NE-ish of center
+      },
+      {
+        id: "water-1",
+        type: "water",
+        label: "Drainage Zone",
+        description: "Contour V-shapes indicate water collects here. Walk the yellow topo lines to verify.",
+        coordinates: [cx - offset * 0.5, cy - offset * 0.6], // SW-ish (lower elevation)
+      },
+      {
+        id: "edge-1",
+        type: "edge",
+        label: "Edge Transition",
+        description: "Terrain break visible in hillshade. Likely timber-field edge or slope change.",
+        coordinates: [cx + offset * 0.6, cy - offset * 0.3], // SE-ish
+      },
+    ];
     
-    // Distance to nearest edge (normalized 0-1)
-    const distanceToEdge = (lng: number, lat: number): number => {
-      let minDist = Infinity;
-      for (let i = 0; i < parcelBounds.length; i++) {
-        const j = (i + 1) % parcelBounds.length;
-        const p1 = parcelBounds[i], p2 = parcelBounds[j];
-        
-        // Point-to-line-segment distance
-        const dx = p2.lng - p1.lng;
-        const dy = p2.lat - p1.lat;
-        const t = Math.max(0, Math.min(1, ((lng - p1.lng) * dx + (lat - p1.lat) * dy) / (dx * dx + dy * dy)));
-        const nearLng = p1.lng + t * dx;
-        const nearLat = p1.lat + t * dy;
-        const dist = Math.sqrt((lng - nearLng) ** 2 + (lat - nearLat) ** 2);
-        minDist = Math.min(minDist, dist);
-      }
-      const maxPossibleDist = Math.max(maxLat - minLat, maxLng - minLng) / 2;
-      return Math.min(1, minDist / maxPossibleDist);
-    };
-    
-    const points: { lng: number; lat: number; weight: number }[] = [];
-    const gridSize = 20; // 20x20 grid
-    const latStep = (maxLat - minLat) / gridSize;
-    const lngStep = (maxLng - minLng) / gridSize;
-    
-    for (let i = 0; i <= gridSize; i++) {
-      for (let j = 0; j <= gridSize; j++) {
-        const lng = minLng + j * lngStep;
-        const lat = minLat + i * latStep;
-        
-        if (!pointInPolygon(lng, lat)) continue;
-        
-        // Calculate weight based on terrain factors
-        let weight = 0.3; // Base weight
-        
-        // 1. Edge proximity boost (transition zones are hot)
-        const edgeDist = distanceToEdge(lng, lat);
-        if (edgeDist < 0.15) {
-          weight += 0.4 * (1 - edgeDist / 0.15); // Hot near edges
-        }
-        
-        // 2. Ridgeline simulation (higher lat = typically higher elevation in MO)
-        // This is a proxy — real implementation would query terrain
-        const latNorm = (lat - minLat) / (maxLat - minLat);
-        const ridgeBoost = Math.sin(latNorm * Math.PI) * 0.3; // Peak in middle-north
-        weight += ridgeBoost;
-        
-        // 3. South-facing slope simulation (north side of ridges)
-        // Points just south of the "ridge" get bedding boost
-        if (latNorm > 0.4 && latNorm < 0.7) {
-          weight += 0.2; // Probable bedding zone
-        }
-        
-        // 4. Slight randomization for natural look
-        weight += (Math.random() - 0.5) * 0.1;
-        
-        // Clamp weight
-        weight = Math.max(0.1, Math.min(1, weight));
-        
-        points.push({ lng, lat, weight });
-      }
-    }
-    
-    return points;
+    return markers;
   }, [parcelBounds]);
-  
-  // Legacy function — returns empty (no more fictional corridors)
-  const generateDeerCorridors = useCallback((): DeerCorridor[] => {
-    return [];
-  }, []);
 
-  // Initialize map — PHASED LOADING for speed
+  // Initialize map
   useEffect(() => {
     if (!isOpen || !mapContainerRef.current) return;
 
@@ -311,14 +162,13 @@ export default function Terrain3DView({
     setLoadPhase("terrain");
 
     if (!checkWebGLSupport()) {
-      setLoadError("Your browser doesn't support WebGL, which is required for 3D terrain viewing. Try Chrome, Firefox, or Safari.");
+      setLoadError("Your browser doesn't support WebGL, which is required for 3D terrain viewing.");
       return;
     }
 
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
       setLoadError("Map configuration error. Please try again later.");
-      console.error("Mapbox token not found");
       return;
     }
 
@@ -347,21 +197,13 @@ export default function Terrain3DView({
 
     map.on("error", (e: any) => {
       console.error("Mapbox error:", e);
-      // If there's a critical error before load, show error state
       if (!hasLoaded && e.error && e.error.status === 401) {
         setLoadError("Map authentication failed. Please try again.");
       }
     });
 
-    // If map style fails to load, catch it
-    (map as any).once?.("styleimagemissing", () => {
-      console.log("Style image missing - continuing anyway");
-    });
-
-    // Timeout — show whatever we have after 5s (increased for iOS)
     const loadTimeout = setTimeout(() => {
       if (!hasLoaded) {
-        console.log("Terrain load timeout - showing map anyway");
         hasLoaded = true;
         setIsMapLoaded(true);
         setLoadPhase("done");
@@ -373,9 +215,7 @@ export default function Terrain3DView({
       if (hasLoaded) return;
       hasLoaded = true;
 
-      // ═══ PHASE 1: Terrain + Parcel Boundary (show map FAST) ═══
-      
-      // Single DEM source — reused for terrain AND hillshade
+      // ═══ TERRAIN DEM + HIGH-CONTRAST HILLSHADE (LiDAR-esque look) ═══
       try {
         map.addSource("mapbox-dem", {
           type: "raster-dem",
@@ -385,20 +225,22 @@ export default function Terrain3DView({
         });
         map.setTerrain({ source: "mapbox-dem", exaggeration: 1.5 });
 
-        // Hillshade uses same source — no duplicate tile fetch
+        // HIGH CONTRAST hillshade for that bare-earth LiDAR look
         map.addLayer({
           id: "hillshade",
           type: "hillshade",
           source: "mapbox-dem",
           paint: {
-            "hillshade-exaggeration": 0.5,
-            "hillshade-shadow-color": "#000000",
+            "hillshade-exaggeration": 0.7,  // Boosted for drama
+            "hillshade-shadow-color": "#0a0a0a",
             "hillshade-highlight-color": "#ffffff",
-            "hillshade-accent-color": "#4a6741",
+            "hillshade-accent-color": "#3d5a3d",
+            "hillshade-illumination-direction": 315,
+            "hillshade-illumination-anchor": "viewport",
           },
         }, "waterway-label");
       } catch (err) {
-        console.log("Terrain/hillshade setup failed, continuing:", err);
+        console.log("Terrain/hillshade setup failed:", err);
       }
 
       // Sky layer
@@ -416,24 +258,24 @@ export default function Terrain3DView({
         console.log("Sky layer failed:", err);
       }
 
-      // ═══ CONTOUR LINES — Real USGS-derived elevation ═══
+      // ═══ CONTOUR LINES — USGS-derived elevation (the yellow topo) ═══
       try {
         map.addSource("mapbox-terrain-v2", {
           type: "vector",
           url: "mapbox://mapbox.mapbox-terrain-v2",
         });
 
-        // Index contours (100ft intervals) — more prominent, labeled
+        // Index contours (100ft intervals) — bold yellow
         map.addLayer({
           id: "contour-index",
           type: "line",
           source: "mapbox-terrain-v2",
           "source-layer": "contour",
-          filter: ["==", ["get", "index"], 5], // Every 5th contour is an index contour
+          filter: ["==", ["get", "index"], 5],
           paint: {
-            "line-color": "#d4a574",
-            "line-width": 2,
-            "line-opacity": 0.8,
+            "line-color": "#fbbf24",
+            "line-width": 2.5,
+            "line-opacity": 0.9,
           },
         });
 
@@ -445,13 +287,13 @@ export default function Terrain3DView({
           "source-layer": "contour",
           filter: ["!=", ["get", "index"], 5],
           paint: {
-            "line-color": "#b08968",
+            "line-color": "#d4a574",
             "line-width": 0.8,
             "line-opacity": 0.5,
           },
         });
 
-        // Contour elevation labels on index lines
+        // Contour elevation labels
         map.addLayer({
           id: "contour-labels",
           type: "symbol",
@@ -460,7 +302,7 @@ export default function Terrain3DView({
           filter: ["==", ["get", "index"], 5],
           layout: {
             "symbol-placement": "line",
-            "text-field": ["concat", ["to-string", ["round", ["*", ["get", "ele"], 3.28084]]], "'"], // meters to feet
+            "text-field": ["concat", ["to-string", ["round", ["*", ["get", "ele"], 3.28084]]], "'"],
             "text-size": 10,
             "text-max-angle": 25,
             "text-padding": 5,
@@ -472,9 +314,7 @@ export default function Terrain3DView({
           },
         });
 
-        // ═══ RIDGELINE HIGHLIGHTING — Using slope-break detection ═══
-        // Ridgelines show where contours bend outward (local high points between drainages)
-        // We highlight the higher elevation contours more prominently
+        // ═══ RIDGELINE HIGHLIGHTING — Higher elevation contours ═══
         map.addLayer({
           id: "ridgeline-highlight",
           type: "line",
@@ -483,17 +323,16 @@ export default function Terrain3DView({
           filter: [
             "all",
             ["==", ["get", "index"], 5],
-            [">=", ["get", "ele"], 200] // Higher elevations (ridges) in meters
+            [">=", ["get", "ele"], 200]
           ],
           paint: {
-            "line-color": "#fbbf24",
-            "line-width": 3,
-            "line-opacity": 0.7,
+            "line-color": "#fb923c",
+            "line-width": 3.5,
+            "line-opacity": 0.8,
             "line-blur": 1,
           },
         });
 
-        // Ridgeline glow for emphasis
         map.addLayer({
           id: "ridgeline-glow",
           type: "line",
@@ -505,9 +344,9 @@ export default function Terrain3DView({
             [">=", ["get", "ele"], 200]
           ],
           paint: {
-            "line-color": "#fbbf24",
-            "line-width": 8,
-            "line-opacity": 0.15,
+            "line-color": "#fb923c",
+            "line-width": 10,
+            "line-opacity": 0.2,
             "line-blur": 4,
           },
         }, "ridgeline-highlight");
@@ -516,7 +355,7 @@ export default function Terrain3DView({
         console.log("Contour layer setup failed:", contourErr);
       }
 
-      // Parcel boundary — wrapped in try-catch so failures don't kill the map
+      // ═══ PARCEL BOUNDARY ═══
       try {
         if (parcelBounds && parcelBounds.length > 0) {
           const coordinates = parcelBounds.map((p) => [p.lng, p.lat]);
@@ -533,34 +372,29 @@ export default function Terrain3DView({
             },
           });
 
-          // PARCEL BOUNDARY — Bold, prominent lines
+          // Bold boundary lines
           map.addLayer({ id: "parcel-glow-outer", type: "line", source: "parcel-boundary", paint: { "line-color": "#000000", "line-width": 12, "line-opacity": 0.4, "line-blur": 3 } });
           map.addLayer({ id: "parcel-glow", type: "line", source: "parcel-boundary", paint: { "line-color": "#fbbf24", "line-width": 8, "line-opacity": 0.6, "line-blur": 2 } });
           map.addLayer({ id: "parcel-outline", type: "line", source: "parcel-boundary", paint: { "line-color": "#fbbf24", "line-width": 4 } });
           map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-boundary", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.05 } });
 
-          // Corner markers — ONLY at true corners (significant angle changes), not every vertex
+          // Corner markers
           const findTrueCorners = (points: typeof parcelBounds) => {
-            if (points.length < 4) return points; // Small parcels: show all
+            if (points.length < 4) return points;
             const corners: typeof parcelBounds = [];
-            const angleThreshold = 25; // degrees — must turn this much to be a "corner"
+            const angleThreshold = 25;
             
             for (let i = 0; i < points.length; i++) {
               const prev = points[(i - 1 + points.length) % points.length];
               const curr = points[i];
               const next = points[(i + 1) % points.length];
-              
-              // Calculate angle change at this point
               const angle1 = Math.atan2(curr.lat - prev.lat, curr.lng - prev.lng);
               const angle2 = Math.atan2(next.lat - curr.lat, next.lng - curr.lng);
               let angleDiff = Math.abs((angle2 - angle1) * 180 / Math.PI);
               if (angleDiff > 180) angleDiff = 360 - angleDiff;
-              
-              if (angleDiff > angleThreshold) {
-                corners.push(curr);
-              }
+              if (angleDiff > angleThreshold) corners.push(curr);
             }
-            return corners.length > 0 ? corners : [points[0]]; // At least show one point
+            return corners.length > 0 ? corners : [points[0]];
           };
           
           const trueCorners = findTrueCorners(parcelBounds);
@@ -581,26 +415,21 @@ export default function Terrain3DView({
         .setLngLat([parcelCenter.lng, parcelCenter.lat])
         .addTo(map);
 
-      // ═══ SHOW MAP NOW — terrain is visible ═══
       setIsMapLoaded(true);
-      setLoadPhase("corridors");
+      setLoadPhase("markers");
 
-      // ═══ PHASE 2: Add deer activity heatmap AFTER map is painted (200ms delay) ═══
+      // ═══ ADD INTEL MARKERS AFTER MAP RENDERS ═══
       setTimeout(() => {
         if (!mapRef.current) return;
-        const heatPoints = generateHeatmapPoints();
-        addHeatmapToMap(mapRef.current, heatPoints);
+        const markers = generateIntelMarkers();
+        setIntelMarkers(markers);
+        addMarkersToMap(mapRef.current, markers);
         setLoadPhase("done");
       }, 200);
     });
 
-    map.on("pitchend", () => {
-      setCurrentPitch(Math.round(map.getPitch()));
-    });
-    map.on("rotateend", () => {
-      setCurrentBearing(Math.round(map.getBearing()));
-    });
-
+    map.on("pitchend", () => setCurrentPitch(Math.round(map.getPitch())));
+    map.on("rotateend", () => setCurrentBearing(Math.round(map.getBearing())));
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
 
     return () => {
@@ -609,6 +438,9 @@ export default function Terrain3DView({
         cancelAnimationFrame(spinAnimRef.current);
         spinAnimRef.current = null;
       }
+      // Clean up markers
+      markersRef.current.forEach(m => m.remove());
+      markersRef.current = [];
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -617,88 +449,69 @@ export default function Terrain3DView({
       setLoadPhase("terrain");
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, parcelCenter, parcelBounds, generateHeatmapPoints]);
+  }, [isOpen, parcelCenter, parcelBounds, generateIntelMarkers]);
 
-  // Add corridor layers to map
-  // ═══ ADD HEATMAP TO MAP ═══
-  const addHeatmapToMap = (map: InstanceType<typeof mapboxgl.Map>, points: { lng: number; lat: number; weight: number }[]) => {
-    if (points.length === 0) return;
+  // ═══ ADD MARKERS TO MAP ═══
+  const addMarkersToMap = (map: InstanceType<typeof mapboxgl.Map>, markers: IntelMarker[]) => {
+    // Clear existing
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
     
-    // Convert points to GeoJSON features
-    const features = points.map(p => ({
-      type: "Feature" as const,
-      properties: { weight: p.weight },
-      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] }
-    }));
-    
-    // Add heatmap source
-    map.addSource("deer-heatmap", {
-      type: "geojson",
-      data: { type: "FeatureCollection", features }
+    markers.forEach(marker => {
+      const config = MARKER_CONFIG[marker.type];
+      
+      // Create custom marker element
+      const el = document.createElement('div');
+      el.className = 'intel-marker';
+      el.innerHTML = `
+        <div style="
+          background: ${config.color};
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+          cursor: pointer;
+          transition: transform 0.2s;
+        ">${config.emoji}</div>
+      `;
+      el.style.cursor = 'pointer';
+      
+      // Hover effect
+      el.addEventListener('mouseenter', () => {
+        (el.firstElementChild as HTMLElement).style.transform = 'scale(1.15)';
+      });
+      el.addEventListener('mouseleave', () => {
+        (el.firstElementChild as HTMLElement).style.transform = 'scale(1)';
+      });
+      
+      // Create popup
+      const popup = new mapboxgl.Popup({ offset: 25, closeButton: false })
+        .setHTML(`
+          <div style="max-width: 220px; padding: 8px;">
+            <div style="font-weight: 600; color: ${config.color}; margin-bottom: 4px;">
+              ${config.emoji} ${config.label}
+            </div>
+            <div style="font-size: 12px; color: #666; line-height: 1.4;">
+              ${config.desc}
+            </div>
+          </div>
+        `);
+      
+      const mapboxMarker = new mapboxgl.Marker(el)
+        .setLngLat(marker.coordinates)
+        .setPopup(popup)
+        .addTo(map);
+      
+      markersRef.current.push(mapboxMarker);
     });
-    
-    // Add heatmap layer — warm colors for high deer activity
-    map.addLayer({
-      id: "deer-heatmap-layer",
-      type: "heatmap",
-      source: "deer-heatmap",
-      paint: {
-        // Weight based on our calculated deer activity score
-        "heatmap-weight": ["get", "weight"],
-        
-        // Intensity increases with zoom
-        "heatmap-intensity": [
-          "interpolate", ["linear"], ["zoom"],
-          10, 0.5,
-          15, 1.5
-        ],
-        
-        // Color ramp: cool (low activity) to hot (high activity)
-        // Blue → Cyan → Green → Yellow → Orange → Red
-        "heatmap-color": [
-          "interpolate", ["linear"], ["heatmap-density"],
-          0, "rgba(0,0,0,0)",
-          0.1, "rgba(30,60,120,0.4)",
-          0.3, "rgba(50,130,80,0.5)",
-          0.5, "rgba(140,180,50,0.6)",
-          0.7, "rgba(220,160,40,0.7)",
-          0.85, "rgba(240,100,30,0.8)",
-          1, "rgba(220,40,30,0.9)"
-        ],
-        
-        // Radius increases with zoom for smooth appearance
-        "heatmap-radius": [
-          "interpolate", ["linear"], ["zoom"],
-          10, 20,
-          13, 35,
-          15, 50
-        ],
-        
-        // Fade out at high zoom to show satellite detail
-        "heatmap-opacity": [
-          "interpolate", ["linear"], ["zoom"],
-          13, 0.7,
-          16, 0.4
-        ]
-      }
-    }, "parcel-glow-outer"); // Insert BELOW parcel boundary
   };
 
-  // Toggle heatmap visibility
-  const toggleHeatmap = () => {
-    if (!mapRef.current || !isMapLoaded) return;
-    const map = mapRef.current;
-    const newState = !showHeatmap;
-    setShowHeatmap(newState);
-    if (map.getLayer("deer-heatmap-layer")) {
-      map.setLayoutProperty("deer-heatmap-layer", "visibility", newState ? "visible" : "none");
-    }
-  };
-
-  // Legacy toggle — no-op since corridors are removed
-  const toggleCorridor = (_type: string) => {};
-
-  // Toggle terrain layer visibility
+  // ═══ TOGGLE FUNCTIONS ═══
   const toggleContours = () => {
     if (!mapRef.current || !isMapLoaded) return;
     const map = mapRef.current;
@@ -706,9 +519,7 @@ export default function Terrain3DView({
     setShowContours(newState);
     const visibility = newState ? "visible" : "none";
     ["contour-index", "contour-regular", "contour-labels"].forEach((id) => {
-      if (map.getLayer(id)) {
-        map.setLayoutProperty(id, "visibility", visibility);
-      }
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visibility);
     });
   };
 
@@ -719,9 +530,7 @@ export default function Terrain3DView({
     setShowRidgelines(newState);
     const visibility = newState ? "visible" : "none";
     ["ridgeline-highlight", "ridgeline-glow"].forEach((id) => {
-      if (map.getLayer(id)) {
-        map.setLayoutProperty(id, "visibility", visibility);
-      }
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visibility);
     });
   };
 
@@ -733,6 +542,15 @@ export default function Terrain3DView({
     if (map.getLayer("hillshade")) {
       map.setLayoutProperty("hillshade", "visibility", newState ? "visible" : "none");
     }
+  };
+
+  const toggleMarkers = () => {
+    const newState = !showMarkers;
+    setShowMarkers(newState);
+    markersRef.current.forEach(m => {
+      const el = m.getElement();
+      el.style.display = newState ? 'block' : 'none';
+    });
   };
 
   const resetView = () => {
@@ -751,10 +569,7 @@ export default function Terrain3DView({
     if (!mapRef.current) return;
     stopSpin();
     const cb = mapRef.current.getBearing();
-    mapRef.current.easeTo({
-      bearing: cb + (direction === "right" ? 45 : -45),
-      duration: 500,
-    });
+    mapRef.current.easeTo({ bearing: cb + (direction === "right" ? 45 : -45), duration: 500 });
   };
 
   const tiltView = (direction: "up" | "down") => {
@@ -764,7 +579,6 @@ export default function Terrain3DView({
     mapRef.current.easeTo({ pitch: newPitch, duration: 500 });
   };
 
-  // Cinematic spin
   const startSpin = () => {
     if (!mapRef.current || isSpinning) return;
     setIsSpinning(true);
@@ -792,16 +606,6 @@ export default function Terrain3DView({
 
   if (!isOpen) return null;
 
-  const legendItems = [
-    { type: "primary", icon: <DeerTrackIcon className="w-5 h-5 text-red-400" />, color: "red" },
-    { type: "secondary", icon: <DeerTrackIcon className="w-4 h-4 text-orange-400 opacity-70" />, color: "orange" },
-    { type: "water", icon: <CreekIcon className="w-5 h-5 text-blue-400" />, color: "blue" },
-    { type: "bedding", icon: <BeddingIcon className="w-5 h-5 text-green-400" />, color: "green" },
-    { type: "funnel", icon: <FunnelIcon className="w-5 h-5 text-purple-400" />, color: "purple" },
-    { type: "food_plot", icon: <FoodPlotIcon className="w-5 h-5 text-yellow-400" />, color: "yellow" },
-    { type: "stand", icon: <TreeStandIcon className="w-5 h-5 text-pink-400" />, color: "pink" },
-  ];
-
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 md:p-4">
       <div className="relative w-full max-w-7xl h-[90vh] bg-stone-900 rounded-xl overflow-hidden shadow-2xl border border-stone-700">
@@ -814,7 +618,7 @@ export default function Terrain3DView({
               </div>
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  3D Terrain {previewMode ? "Preview" : "+ Deer Intel"}
+                  3D Terrain {previewMode ? "Preview" : "+ Intel"}
                   {previewMode ? (
                     <span className="text-xs bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full">FREE</span>
                   ) : (
@@ -828,7 +632,6 @@ export default function Terrain3DView({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Cinematic spin button */}
               <Button
                 variant="ghost"
                 size="sm"
@@ -854,22 +657,22 @@ export default function Terrain3DView({
         {/* Map Container */}
         <div ref={mapContainerRef} className="w-full h-full" />
 
-        {/* Loading State — Progressive */}
+        {/* Loading State */}
         {!isMapLoaded && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center bg-stone-900">
             <div className="text-center">
               <div className="animate-spin w-12 h-12 border-4 border-amber-500/30 border-t-amber-500 rounded-full mx-auto mb-4" />
               <p className="text-stone-400">Loading 3D terrain...</p>
-              <p className="text-stone-500 text-xs mt-2">Rendering satellite imagery & elevation</p>
+              <p className="text-stone-500 text-xs mt-2">Rendering satellite + elevation data</p>
             </div>
           </div>
         )}
 
-        {/* Phase 2 overlay — terrain is visible, corridors loading */}
-        {isMapLoaded && loadPhase === "corridors" && (
+        {/* Phase 2 overlay */}
+        {isMapLoaded && loadPhase === "markers" && (
           <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 bg-stone-800/90 backdrop-blur rounded-lg px-4 py-2 shadow-lg border border-amber-500/30 flex items-center gap-3">
             <div className="animate-spin w-4 h-4 border-2 border-amber-500/30 border-t-amber-500 rounded-full" />
-            <p className="text-xs text-amber-300">Adding deer intel layers...</p>
+            <p className="text-xs text-amber-300">Placing intel markers...</p>
           </div>
         )}
 
@@ -915,46 +718,58 @@ export default function Terrain3DView({
                 </Button>
               </div>
             </div>
-            {/* Terrain Layers — VERIFIABLE */}
+            
+            {/* Terrain Layers */}
             <div className="bg-stone-800/90 backdrop-blur rounded-lg p-2 shadow-lg border border-amber-500/30">
               <p className="text-[10px] text-amber-400 uppercase tracking-wider mb-2 px-1 flex items-center gap-1">
-                <Layers className="w-3 h-3" /> Terrain
+                <Layers className="w-3 h-3" /> Layers
               </p>
               <div className="flex flex-col gap-1">
+                <button
+                  onClick={toggleHillshade}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
+                    showHillshade ? "bg-stone-600/50 text-stone-200" : "text-stone-400 hover:text-white hover:bg-stone-700"
+                  }`}
+                  title="High-contrast shading"
+                >
+                  <Mountain className={`w-3 h-3 ${showHillshade ? "text-stone-200" : "text-stone-500"}`} />
+                  <span>Hillshade</span>
+                </button>
                 <button
                   onClick={toggleContours}
                   className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
                     showContours ? "bg-amber-500/20 text-amber-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
                   }`}
-                  title="USGS Elevation Contours — Walk these on-property"
+                  title="USGS Elevation Contours"
                 >
-                  <div className={`w-4 h-0.5 rounded ${showContours ? "bg-amber-400" : "bg-stone-500"}`} style={{ backgroundImage: showContours ? "none" : "none" }} />
-                  <span>Contours</span>
+                  <div className={`w-4 h-0.5 rounded ${showContours ? "bg-amber-400" : "bg-stone-500"}`} />
+                  <span>Topo Lines</span>
                 </button>
                 <button
                   onClick={toggleRidgelines}
                   className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                    showRidgelines ? "bg-amber-500/20 text-amber-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
+                    showRidgelines ? "bg-orange-500/20 text-orange-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
                   }`}
-                  title="Ridgeline Corridors — Local high points, verified by topo"
+                  title="Ridgeline highlighting"
                 >
-                  <div className={`w-4 h-1 rounded ${showRidgelines ? "bg-amber-400" : "bg-stone-500"}`} />
+                  <div className={`w-4 h-1 rounded ${showRidgelines ? "bg-orange-400" : "bg-stone-500"}`} />
                   <span>Ridges</span>
                 </button>
                 <button
-                  onClick={toggleHillshade}
+                  onClick={toggleMarkers}
                   className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                    showHillshade ? "bg-stone-600/50 text-stone-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
+                    showMarkers ? "bg-red-500/20 text-red-300" : "text-stone-400 hover:text-white hover:bg-stone-700"
                   }`}
-                  title="3D Shading from DEM"
+                  title="Intel markers"
                 >
-                  <Mountain className={`w-3 h-3 ${showHillshade ? "text-stone-300" : "text-stone-500"}`} />
-                  <span>Shading</span>
+                  <MapPin className={`w-3 h-3 ${showMarkers ? "text-red-400" : "text-stone-500"}`} />
+                  <span>Intel Pins</span>
                 </button>
               </div>
-              <p className="text-[8px] text-stone-500 mt-1.5 px-1 leading-tight">✓ USGS verified</p>
+              <p className="text-[8px] text-stone-500 mt-1.5 px-1 leading-tight">✓ USGS elevation data</p>
             </div>
-            {/* Wind direction indicator */}
+            
+            {/* Wind indicator */}
             <div className="bg-stone-800/90 backdrop-blur rounded-lg p-2 shadow-lg border border-stone-700 text-center">
               <p className="text-[10px] text-stone-500 mb-1">Wind</p>
               <div className="relative w-10 h-10 mx-auto">
@@ -970,6 +785,7 @@ export default function Terrain3DView({
               </div>
               <p className="text-[9px] text-cyan-400 mt-1">SW 8mph</p>
             </div>
+            
             <div className="bg-stone-800/90 backdrop-blur rounded-lg p-2 shadow-lg border border-stone-700 text-center">
               <p className="text-[10px] text-stone-500">Pitch {currentPitch}°</p>
               <p className="text-[10px] text-stone-500">Brng {currentBearing}°</p>
@@ -987,8 +803,8 @@ export default function Terrain3DView({
               >
                 <div className="flex items-center gap-2">
                   <Target className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm font-medium text-white">Deer Activity Heatmap</span>
-                  <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">Terrain-Based</span>
+                  <span className="text-sm font-medium text-white">Terrain Intel</span>
+                  <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">LiDAR-Style</span>
                 </div>
                 <Info className="w-4 h-4 text-stone-400" />
               </button>
@@ -996,54 +812,27 @@ export default function Terrain3DView({
               {showLegend && (
                 <div className="p-3 pt-0 border-t border-stone-700">
                   
-                  {/* Heatmap Legend + Toggles */}
+                  {/* Intel Markers Legend */}
                   <div className="flex flex-wrap items-center gap-4 mt-3">
-                    
-                    {/* Heatmap color scale */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-stone-400">Low</span>
-                      <div className="w-32 h-3 rounded-full" style={{
-                        background: "linear-gradient(to right, rgba(30,60,120,0.7), rgba(50,130,80,0.7), rgba(140,180,50,0.8), rgba(220,160,40,0.8), rgba(240,100,30,0.9), rgba(220,40,30,1))"
-                      }} />
-                      <span className="text-[10px] text-stone-400">High</span>
-                    </div>
-                    
-                    {/* Toggles */}
-                    <div className="flex items-center gap-3 ml-auto">
-                      <button
-                        onClick={toggleHeatmap}
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all ${
-                          showHeatmap ? "bg-red-500/30 text-red-300 border border-red-500/50" : "bg-stone-700/50 text-stone-400 border border-stone-600/50"
-                        }`}
-                      >
-                        <div className="w-2 h-2 rounded-full" style={{ background: showHeatmap ? "linear-gradient(135deg, #f87171, #ea580c)" : "#6b7280" }} />
-                        Activity
-                      </button>
-                      <button
-                        onClick={toggleContours}
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all ${
-                          showContours ? "bg-amber-500/30 text-amber-300 border border-amber-500/50" : "bg-stone-700/50 text-stone-400 border border-stone-600/50"
-                        }`}
-                      >
-                        <div className="w-2 h-2 rounded-full" style={{ background: showContours ? "#fbbf24" : "#6b7280" }} />
-                        Contours
-                      </button>
-                      <button
-                        onClick={toggleRidgelines}
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all ${
-                          showRidgelines ? "bg-orange-500/30 text-orange-300 border border-orange-500/50" : "bg-stone-700/50 text-stone-400 border border-stone-600/50"
-                        }`}
-                      >
-                        <div className="w-2 h-2 rounded-full" style={{ background: showRidgelines ? "#fb923c" : "#6b7280" }} />
-                        Ridgelines
-                      </button>
-                    </div>
+                    {Object.entries(MARKER_CONFIG).map(([type, config]) => (
+                      <div key={type} className="flex items-center gap-2">
+                        <div 
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-sm border-2 border-white shadow"
+                          style={{ background: config.color }}
+                        >
+                          {config.emoji}
+                        </div>
+                        <span className="text-xs text-stone-300">{config.label}</span>
+                      </div>
+                    ))}
                   </div>
                   
-                  {/* What the heatmap shows */}
+                  {/* Explainer */}
                   <div className="bg-stone-700/40 rounded-lg p-2.5 mt-3">
                     <p className="text-[10px] text-stone-400 leading-relaxed">
-                      <span className="text-amber-400 font-medium">🦌 Heatmap = terrain-derived deer activity probability.</span> Hot zones indicate edges, ridgelines, and south-facing slopes where deer concentrate. Based on USGS elevation + known whitetail behavior patterns. Contour lines (yellow) are verified USGS data you can walk on-site.
+                      <span className="text-amber-400 font-medium">🏔️ High-contrast hillshade</span> mimics LiDAR bare-earth imagery — ridges and draws pop visually. 
+                      <span className="text-amber-400 font-medium"> Yellow topo lines</span> are USGS-verified elevation contours you can walk on-site. 
+                      <span className="text-red-400 font-medium">Intel pins</span> mark terrain-based points of interest — click for details.
                     </p>
                   </div>
 

@@ -49,6 +49,9 @@ declare module 'mapbox-gl' {
   export class Marker {
     constructor(options?: any);
     setLngLat(lnglat: [number, number] | LngLatLike): this;
+    setPopup(popup: Popup): this;
+    getPopup(): Popup | undefined;
+    getElement(): HTMLElement;
     addTo(map: Map): this;
     remove(): void;
   }
