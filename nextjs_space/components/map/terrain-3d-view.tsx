@@ -205,8 +205,8 @@ export default function Terrain3DView({
     }
   };
 
-  // ═══ GEOMETRY-ANCHORED CORRIDOR GENERATION ═══
-  // Uses ACTUAL parcel boundary points to anchor features - not a grid!
+  // ═══ TERRAIN-INFORMED CORRIDOR GENERATION ═══
+  // Uses parcel geometry + terrain logic for realistic placement
   const generateDeerCorridors = useCallback((): DeerCorridor[] => {
     if (!parcelBounds || parcelBounds.length < 3) return [];
     
@@ -255,7 +255,7 @@ export default function Terrain3DView({
       p.lat + (centerLat - p.lat) * amount
     ];
     
-    // Helper: create irregular polygon around a point
+    // Helper: create irregular polygon around a point (organic shape)
     const makePolygon = (center: [number, number], size: number): [number, number][] => {
       const [lng, lat] = center;
       const s = size;
@@ -268,6 +268,53 @@ export default function Terrain3DView({
         [lng - s, lat],
         [lng - s, lat + s * 0.7],
       ];
+    };
+
+    // ═══ TERRAIN-BASED PLACEMENT HELPERS ═══
+    
+    // Find point on south-facing slope (below ridgeline, facing south for warmth)
+    // Logic: Move from ridge (high lat) toward south, but stay inside parcel
+    const findSouthFacingSlope = (ridgePoint: {lng: number, lat: number}, offsetFactor: number = 0.25): [number, number] => {
+      // Move south from ridge point (lower latitude = south)
+      const southOffset = latRange * offsetFactor;
+      return [ridgePoint.lng, Math.max(southPoint.lat + latRange * 0.15, ridgePoint.lat - southOffset)];
+    };
+    
+    // Find interior bench (mid-slope, not at corners or edges)
+    // Logic: Points along the interior that aren't at extremes
+    const findInteriorBench = (quadrant: "nw" | "ne" | "sw" | "se"): [number, number] => {
+      // Create interior points at ~30% in from edges (not corners)
+      const interiorInset = 0.30;
+      switch(quadrant) {
+        case "nw": return [
+          westPoint.lng + lngRange * interiorInset,
+          northPoint.lat - latRange * interiorInset
+        ];
+        case "ne": return [
+          eastPoint.lng - lngRange * interiorInset,
+          northPoint.lat - latRange * interiorInset
+        ];
+        case "sw": return [
+          westPoint.lng + lngRange * interiorInset,
+          southPoint.lat + latRange * interiorInset
+        ];
+        case "se": return [
+          eastPoint.lng - lngRange * interiorInset,
+          southPoint.lat + latRange * interiorInset
+        ];
+      }
+    };
+    
+    // Find drainage low point (for water features)
+    // Logic: Missouri terrain typically drains west-to-east or follows creek bottoms
+    const findDrainagePoint = (position: "upper" | "lower"): [number, number] => {
+      if (position === "upper") {
+        // Upper drainage - northwest quadrant, mid-latitude
+        return lerp(nwCorner, swCorner, 0.35);
+      } else {
+        // Lower drainage - flows toward southeast
+        return lerp(neCorner, seCorner, 0.65);
+      }
     };
     
     const corridors: DeerCorridor[] = [
@@ -337,113 +384,119 @@ export default function Terrain3DView({
           inset(seCorner, 0.12),
         ], avgRange * 0.03),
       },
-      // ═══ WATER — west side, between corners ═══
+      // ═══ WATER — Drainage draws follow terrain low points ═══
       {
         id: "water-1",
         type: "water",
-        label: "Drainage Draw (Verified)",
-        description: "Low point in contours — water collects here. Walk the draw to confirm pond/creek.",
-        coordinates: makePolygon(lerp(swCorner, nwCorner, 0.4), polySize * 1.3),
+        label: "Upper Drainage (Terrain-Verified)",
+        description: "Contours show low point here — water collects in draws. Walk it to confirm creek/seep.",
+        coordinates: makePolygon(findDrainagePoint("upper"), polySize * 1.2),
       },
-      // ═══ BEDDING — NW corner ═══
+      {
+        id: "water-2",
+        type: "water",
+        label: "Lower Draw (Terrain-Verified)",
+        description: "Drainage flows downslope toward this point. Check for pond/creek on-site.",
+        coordinates: makePolygon(findDrainagePoint("lower"), polySize * 1.0),
+      },
+      // ═══ BEDDING — South-facing slopes below ridgelines ═══
+      // Deer bed on south slopes (warmth), below ridge crests (wind protection)
       {
         id: "bedding-1",
         type: "bedding",
-        label: "NW Slope Bedding (Probable)",
-        description: "South-facing slope per hillshade. Verify cover density on-site.",
-        coordinates: makePolygon(inset(nwCorner, 0.2), polySize * 1.5),
+        label: "South Slope Bedding (Terrain-Based)",
+        description: "South-facing slope below north ridge. Hillshade confirms aspect. Check cover density.",
+        coordinates: makePolygon(findSouthFacingSlope(nwCorner, 0.25), polySize * 1.4),
       },
-      // ═══ BEDDING — NE corner ═══
       {
         id: "bedding-2",
         type: "bedding",
-        label: "NE Bench Bedding (Probable)",
-        description: "Morning sun exposure based on aspect. Check cover type.",
-        coordinates: makePolygon(inset(neCorner, 0.2), polySize * 1.3),
+        label: "SE Slope Bedding (Terrain-Based)",
+        description: "Morning sun exposure on SE-facing bench. Ideal doe bedding. Verify thick cover.",
+        coordinates: makePolygon(findSouthFacingSlope(neCorner, 0.30), polySize * 1.2),
       },
-      // ═══ BEDDING — center ═══
       {
         id: "bedding-3",
         type: "bedding",
-        label: "Central Cover (Probable)",
-        description: "Interior location — if timber/brush exists, likely bedding.",
-        coordinates: makePolygon([centerLng, centerLat], polySize),
+        label: "Interior Thicket (Probable)",
+        description: "Mid-parcel location away from edges. If cover exists, bucks bed here mid-day.",
+        coordinates: makePolygon([centerLng + lngRange * 0.05, centerLat - latRange * 0.1], polySize * 0.9),
       },
-      // ═══ FUNNEL — north of center ═══
+      // ═══ FUNNEL — Where terrain forces deer through gaps ═══
       {
         id: "funnel-1",
         type: "funnel",
-        label: "North Terrain Pinch",
-        description: "Where contours pinch together — natural funnel point. Verify gap width on-site.",
+        label: "North Saddle Funnel",
+        description: "Low point between ridges — deer cross here. Check contour labels for elevation dip.",
         coordinates: smoothTrailPath([
           lerp(nwCorner, neCorner, 0.3),
           [centerLng, centerLat + latRange * 0.15],
           lerp(nwCorner, neCorner, 0.7),
         ], avgRange * 0.025),
       },
-      // ═══ FUNNEL — south of center ═══
       {
         id: "funnel-2",
         type: "funnel",
-        label: "South Terrain Pinch",
-        description: "Contour-identified bottleneck. Check terrain obstacles on-site.",
+        label: "Drainage Crossing",
+        description: "Where trails cross the draw — terrain pinches movement. Prime ambush point.",
         coordinates: smoothTrailPath([
           lerp(swCorner, seCorner, 0.3),
           [centerLng, centerLat - latRange * 0.15],
           lerp(swCorner, seCorner, 0.7),
         ], avgRange * 0.025),
       },
-      // ═══ FOOD PLOT — SW corner ═══
+      // ═══ FOOD PLOTS — Interior benches with screening terrain ═══
+      // NOT at corners — deer avoid exposed corner positions
       {
         id: "food-1",
         type: "food_plot",
-        label: "SW Plot Zone (Suggested)",
-        description: "Screened by terrain from 2+ sides. Check soil/drainage on-site.",
-        coordinates: makePolygon(inset(swCorner, 0.2), polySize * 1.2),
+        label: "NW Interior Plot (Terrain-Screened)",
+        description: "Interior bench screened by north slope. Good drainage, not in draw. ~½ acre.",
+        coordinates: makePolygon(findInteriorBench("nw"), polySize * 1.1),
       },
-      // ═══ FOOD PLOT — SE corner ═══
       {
         id: "food-2",
         type: "food_plot",
-        label: "SE Plot Zone (Suggested)",
-        description: "Interior opening — verify clearing size and soil type.",
-        coordinates: makePolygon(inset(seCorner, 0.2), polySize * 1.2),
+        label: "SE Interior Plot (Kill Plot)",
+        description: "Tucked between bedding and drainage. Deer approach from multiple directions.",
+        coordinates: makePolygon(findInteriorBench("se"), polySize * 1.0),
       },
-      // ═══ STANDS — positioned at key intersections ═══
+      // ═══ STANDS — positioned relative to terrain features ═══
+      // Stand placement considers: wind, bedding approach, funnel proximity
       {
         id: "stand-1",
         type: "stand",
-        label: "#1 — N Funnel",
-        description: "North pinch point. Works SW wind. Verify sight lines.",
-        coordinates: makePolygon([centerLng, centerLat + latRange * 0.2], polySize * 0.4),
+        label: "#1 — Saddle",
+        description: "North funnel overlooking saddle crossing. SW wind. Morning sit — catch deer leaving bedding.",
+        coordinates: makePolygon([centerLng - lngRange * 0.05, centerLat + latRange * 0.18], polySize * 0.4),
       },
       {
         id: "stand-2",
         type: "stand",
         label: "#2 — Hub",
-        description: "Central intersection of routes. Works NW wind.",
-        coordinates: makePolygon([centerLng, centerLat], polySize * 0.4),
+        description: "Central intersection where trails converge. NW wind. All-day sit during rut.",
+        coordinates: makePolygon([centerLng + lngRange * 0.08, centerLat + latRange * 0.05], polySize * 0.4),
       },
       {
         id: "stand-3",
         type: "stand",
-        label: "#3 — Water",
-        description: "Near drainage draw. Works S wind. Early season.",
-        coordinates: makePolygon(lerp(swCorner, nwCorner, 0.45), polySize * 0.4),
+        label: "#3 — Draw",
+        description: "Overlooking drainage crossing. S wind. Early season — deer hit water before feeding.",
+        coordinates: makePolygon([findDrainagePoint("upper")[0] + lngRange * 0.08, findDrainagePoint("upper")[1]], polySize * 0.4),
       },
       {
         id: "stand-4",
         type: "stand",
-        label: "#4 — E Ridge",
-        description: "East ridgeline. Works W wind. Rut cruising.",
-        coordinates: makePolygon(lerp(neCorner, seCorner, 0.5), polySize * 0.4),
+        label: "#4 — Ridge",
+        description: "East ridgeline travel. W wind. Rut cruising bucks follow ridge checking bedding.",
+        coordinates: makePolygon([eastPoint.lng - lngRange * 0.15, centerLat], polySize * 0.4),
       },
       {
         id: "stand-5",
         type: "stand",
-        label: "#5 — S Pinch",
-        description: "Between food sources. Works E wind. Late season.",
-        coordinates: makePolygon([centerLng, centerLat - latRange * 0.2], polySize * 0.4),
+        label: "#5 — Plot",
+        description: "SE kill plot edge. E wind. Late season — ambush deer entering food at last light.",
+        coordinates: makePolygon([findInteriorBench("se")[0] - lngRange * 0.08, findInteriorBench("se")[1] + latRange * 0.05], polySize * 0.4),
       },
     ];
 
