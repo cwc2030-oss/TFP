@@ -22,12 +22,22 @@ declare module 'mapbox-gl' {
     }>;
   }
 
+  // Aliases for compatibility
+  export type MapMouseEvent = MapLayerMouseEvent;
+  export type MapboxGeoJSONFeature = {
+    properties: Record<string, any>;
+    geometry: any;
+  };
+
   export class Map {
     constructor(options: MapOptions);
     on(event: string, callback: (...args: any[]) => void): void;
     on(event: string, layer: string, callback: (...args: any[]) => void): void;
+    once(event: string, callback: (...args: any[]) => void): void;
     addSource(id: string, source: any): void;
     addLayer(layer: any, before?: string): void;
+    removeLayer(id: string): void;
+    removeSource(id: string): void;
     getSource(id: string): any;
     getLayer(id: string): any;
     setLayoutProperty(layerId: string, name: string, value: any): void;
@@ -43,6 +53,7 @@ declare module 'mapbox-gl' {
     easeTo(options: any): void;
     getCanvas(): HTMLCanvasElement;
     addControl(control: any, position?: string): void;
+    isStyleLoaded(): boolean;
     remove(): void;
   }
 
