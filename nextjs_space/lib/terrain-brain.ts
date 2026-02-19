@@ -1,5 +1,6 @@
 // Terra Firma Terrain Brain Client
 // Connects to external geoprocessor or falls back to preview mode
+// NOTE: Real API calls happen server-side only via /api/terrain-analysis
 
 import type {
   TerrainAnalysisRequest,
@@ -15,8 +16,9 @@ import type {
   StandPointProperties,
 } from '@/types/terrain';
 
-const GEOPROCESSOR_URL = process.env.NEXT_PUBLIC_GEOPROCESSOR_URL;
-const API_TIMEOUT_MS = 60000; // 60 seconds
+// Server-side only - not exposed to browser
+const GEOPROCESSOR_URL = process.env.GEOPROCESSOR_API_URL;
+const API_TIMEOUT_MS = 90000; // 90 seconds for real DEM processing
 
 // ============ Main API Client ============
 

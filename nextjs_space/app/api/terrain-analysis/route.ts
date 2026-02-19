@@ -1,12 +1,16 @@
 // Terra Firma Terrain Analysis API Route
-// Proxies to external geoprocessor or returns preview analysis
+// Proxies to external Modal.com geoprocessor or returns preview analysis
+// The external service URL is kept server-side only (not NEXT_PUBLIC_)
 
 import { NextRequest, NextResponse } from 'next/server';
-import { analyzeTerrainWithFallback, checkTerrainBrainHealth } from '@/lib/terrain-brain';
-import type { TerrainAnalysisRequest, TerrainAnalysisError } from '@/types/terrain';
+import { generatePreviewAnalysis, checkTerrainBrainHealth } from '@/lib/terrain-brain';
+import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
 
 const MAX_AOI_ACRES = 5000;
-const REQUEST_TIMEOUT_MS = 90000; // 90 seconds total
+const REQUEST_TIMEOUT_MS = 120000; // 120 seconds for real DEM processing
+
+// Server-side only - Modal.com service URL
+const GEOPROCESSOR_URL = process.env.GEOPROCESSOR_API_URL;
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -40,33 +44,86 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Run analysis with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const options = {
+      bufferMeters: bufferMeters || 800,
+      seasonProfile: seasonProfile || 'rut',
+      prevailingWinds: prevailingWinds || ['NW'],
+    };
 
-    try {
-      const result = await analyzeTerrainWithFallback(parcel, {
-        bufferMeters: bufferMeters || 800,
-        seasonProfile: seasonProfile || 'rut',
-        prevailingWinds: prevailingWinds || ['NW'],
-        forcePreview: forcePreview || false,
-      });
-
-      clearTimeout(timeoutId);
-
-      // Add processing time to provenance
+    // If preview forced or no service URL configured, use preview mode
+    if (forcePreview || !GEOPROCESSOR_URL) {
+      console.log('Using preview mode:', forcePreview ? 'forced' : 'no service URL configured');
+      const result = generatePreviewAnalysis(parcel, options);
       result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
-
+      
       return NextResponse.json(result, {
         headers: {
-          'X-Terrain-Mode': result.mode,
+          'X-Terrain-Mode': 'preview',
           'X-Processing-Time-Ms': String(Date.now() - startTime),
         },
       });
-    } catch (error) {
-      clearTimeout(timeoutId);
-      throw error;
     }
+
+    // Call external Modal.com geoprocessor
+    try {
+      console.log('Calling Terrain Brain at:', GEOPROCESSOR_URL);
+      
+      const response = await fetch(GEOPROCESSOR_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          parcel,
+          bufferMeters: options.bufferMeters,
+          seasonProfile: options.seasonProfile,
+          prevailingWinds: options.prevailingWinds,
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Geoprocessor error:', response.status, errorText);
+        throw new Error(`Geoprocessor returned ${response.status}`);
+      }
+
+      const result = await response.json() as TerrainAnalysisResponse;
+
+      // Check for error in response body
+      if ((result as any).error) {
+        console.error('Geoprocessor returned error:', (result as any).message);
+        throw new Error((result as any).message || 'Geoprocessor error');
+      }
+
+      // Update processing time to include network latency
+      if (result.provenance) {
+        result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
+      }
+
+      return NextResponse.json(result, {
+        headers: {
+          'X-Terrain-Mode': result.mode || 'real',
+          'X-Processing-Time-Ms': String(Date.now() - startTime),
+        },
+      });
+
+    } catch (fetchError) {
+      // Fallback to preview mode on any error
+      console.warn('Geoprocessor unavailable, falling back to preview:', fetchError);
+      
+      const result = generatePreviewAnalysis(parcel, options);
+      result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
+      
+      return NextResponse.json(result, {
+        headers: {
+          'X-Terrain-Mode': 'preview',
+          'X-Terrain-Fallback': 'true',
+          'X-Processing-Time-Ms': String(Date.now() - startTime),
+        },
+      });
+    }
+
   } catch (error) {
     console.error('Terrain analysis error:', error);
     
