@@ -51,8 +51,10 @@ export async function POST(request: NextRequest) {
     };
 
     // If preview forced or no service URL configured, use preview mode
-    if (forcePreview || !GEOPROCESSOR_URL) {
-      console.log('Using preview mode:', forcePreview ? 'forced' : 'no service URL configured');
+    // NOTE: Temporarily forcing preview mode while Modal endpoint is debugged
+    const usePreviewMode = true; // forcePreview || !GEOPROCESSOR_URL
+    if (usePreviewMode) {
+      console.log('Using preview mode (Modal endpoint temporarily disabled)');
       const result = generatePreviewAnalysis(parcel, options);
       result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
       
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest) {
     try {
       console.log('Calling Terrain Brain at:', GEOPROCESSOR_URL);
       
-      const response = await fetch(GEOPROCESSOR_URL, {
+      const response = await fetch(GEOPROCESSOR_URL!, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
