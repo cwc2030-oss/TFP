@@ -203,42 +203,14 @@ function DeerIntelContent() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon> | null>(null);
-  const [isSyntheticParcel, setIsSyntheticParcel] = useState(false); // Warn if using fallback geometry
+  const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
 
   // Check WebGL support
   const checkWebGLSupport = (): boolean => {
-    // Skip check - let Mapbox handle it gracefully
-    // Most modern browsers support WebGL
-    return true;
+    return true; // Let Mapbox handle gracefully
   };
 
-  // Generate fallback parcel polygon from center point (only if Regrid fails)
-  const generateFallbackParcelPolygon = useCallback((centerLat: number, centerLng: number, acres: number = 80): GeoJSON.Feature<GeoJSON.Polygon> => {
-    // Create a rough square parcel as fallback
-    const sqMeters = acres * 4046.86;
-    const sideMeters = Math.sqrt(sqMeters);
-    const latOffset = (sideMeters / 2) / 111000;
-    const lngOffset = (sideMeters / 2) / 85000;
-
-    // Fallback square parcel when Regrid unavailable
-    return {
-      type: 'Feature',
-      properties: { isFallback: true },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [[
-          [centerLng - lngOffset, centerLat - latOffset],
-          [centerLng + lngOffset, centerLat - latOffset],
-          [centerLng + lngOffset, centerLat + latOffset],
-          [centerLng - lngOffset, centerLat + latOffset],
-          [centerLng - lngOffset, centerLat - latOffset],
-        ]],
-      },
-    };
-  }, []);
-
-  // Fetch real parcel geometry from Regrid API
+  // Fetch real parcel geometry from Regrid API - REQUIRED (no fallback)
   const fetchRealParcelGeometry = useCallback(async (centerLat: number, centerLng: number): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> => {
     try {
       const response = await fetch(`/api/parcels?lat=${centerLat}&lng=${centerLng}`);
@@ -265,29 +237,22 @@ function DeerIntelContent() {
     }
   }, []);
 
-  // Fetch terrain analysis
+  // Fetch terrain analysis - requires real parcel geometry
   const runAnalysis = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     setProgress(10);
 
     try {
-      // First, try to get real parcel geometry from Regrid
+      // Get real parcel geometry from Regrid - REQUIRED
       setProgress(15);
-      let parcel = await fetchRealParcelGeometry(lat, lng);
-      let usingSynthetic = false;
+      const parcel = await fetchRealParcelGeometry(lat, lng);
       
-      // Fallback to synthetic square if Regrid fails
       if (!parcel) {
-        const acreage = acreageParam ? parseFloat(acreageParam) : 80;
-        parcel = generateFallbackParcelPolygon(lat, lng, acreage) as GeoJSON.Feature<GeoJSON.Polygon>;
-        usingSynthetic = true;
-        console.warn('[TFP] Using synthetic square parcel - Regrid unavailable');
+        throw new Error('Unable to fetch parcel boundary. Please verify the location has valid parcel data.');
       }
       
-      setIsSyntheticParcel(usingSynthetic);
-      setParcelPolygon(parcel as GeoJSON.Feature<GeoJSON.Polygon>); // Save for map display
-
+      setParcelPolygon(parcel);
       setProgress(30);
 
       const response = await fetch('/api/terrain-analysis', {
@@ -322,7 +287,7 @@ function DeerIntelContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [lat, lng, season, windDirection, acreageParam, fetchRealParcelGeometry, generateFallbackParcelPolygon]);
+  }, [lat, lng, season, windDirection, fetchRealParcelGeometry]);
 
   // ========== SINGLE DECK.GL OVERLAY ==========
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
@@ -1137,18 +1102,6 @@ function DeerIntelContent() {
         <div className="absolute bottom-4 left-4 z-30 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-amber-500/30">
           <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
           <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
-        </div>
-      )}
-
-      {/* Synthetic Parcel Warning - warns user when Regrid lookup failed */}
-      {isSyntheticParcel && !isLoading && (
-        <div className="absolute top-4 right-4 z-30 bg-red-900/90 backdrop-blur-sm rounded-lg px-3 py-2 border border-red-500/50 max-w-xs">
-          <p className="text-red-300 text-xs font-bold flex items-center gap-1">
-            <AlertTriangle className="w-3.5 h-3.5" /> Synthetic Parcel Geometry
-          </p>
-          <p className="text-white/70 text-xs mt-1">
-            Unable to fetch real parcel boundaries. Using estimated square geometry. Intel features may extend beyond actual property lines.
-          </p>
         </div>
       )}
 

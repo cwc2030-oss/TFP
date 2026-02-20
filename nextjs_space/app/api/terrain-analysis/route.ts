@@ -1,23 +1,21 @@
 // Terra Firma Terrain Analysis API Route
-// Proxies to external Modal.com geoprocessor or returns preview analysis
-// The external service URL is kept server-side only (not NEXT_PUBLIC_)
+// Proxies to Python geoprocessor service - NO synthetic/preview fallback
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePreviewAnalysis, checkTerrainBrainHealth } from '@/lib/terrain-brain';
 import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
 
 const MAX_AOI_ACRES = 5000;
-const REQUEST_TIMEOUT_MS = 120000; // 120 seconds for real DEM processing
+const REQUEST_TIMEOUT_MS = 60000; // 60 seconds
 
-// Server-side only - Modal.com service URL
-const GEOPROCESSOR_URL = process.env.GEOPROCESSOR_API_URL;
+// Python geoprocessor service URL
+const GEOPROCESSOR_URL = process.env.GEOPROCESSOR_API_URL || 'http://localhost:8001/v1/terrain-analysis';
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   
   try {
     const body = await request.json();
-    const { parcel, bufferMeters, seasonProfile, prevailingWinds, forcePreview } = body as TerrainAnalysisRequest & { forcePreview?: boolean };
+    const { parcel, bufferMeters, seasonProfile, prevailingWinds } = body as TerrainAnalysisRequest;
 
     // Validate parcel geometry - accept both Polygon and MultiPolygon
     if (!parcel || !parcel.geometry || (parcel.geometry.type !== 'Polygon' && parcel.geometry.type !== 'MultiPolygon')) {
@@ -27,156 +25,119 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Extract coordinates based on geometry type
+    // Extract coordinates for size check
     const coords = (parcel.geometry.type === 'Polygon' 
       ? parcel.geometry.coordinates[0]
-      : parcel.geometry.coordinates[0][0]) as number[][]; // First polygon of MultiPolygon
+      : parcel.geometry.coordinates[0][0]) as number[][];
     const estimatedAcres = estimatePolygonAcres(coords);
-    const bufferAcres = ((bufferMeters || 800) * (bufferMeters || 800) * Math.PI) / 4046.86;
-    const totalAcres = estimatedAcres + bufferAcres;
     
-    if (totalAcres > MAX_AOI_ACRES) {
+    if (estimatedAcres > MAX_AOI_ACRES) {
       return NextResponse.json(
         { 
           code: 'AOI_TOO_LARGE', 
-          message: `Analysis area (${Math.round(totalAcres)} acres) exceeds maximum (${MAX_AOI_ACRES} acres)`,
-          fallbackToPreview: false
+          message: `Parcel (${Math.round(estimatedAcres)} acres) exceeds maximum (${MAX_AOI_ACRES} acres)`,
         },
         { status: 400 }
       );
     }
 
-    const options = {
-      bufferMeters: bufferMeters || 800,
-      seasonProfile: seasonProfile || 'rut',
-      prevailingWinds: prevailingWinds || ['NW'],
-    };
+    // Call Python geoprocessor - NO FALLBACK
+    console.log('[Terrain] Calling geoprocessor:', GEOPROCESSOR_URL);
+    
+    const response = await fetch(GEOPROCESSOR_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parcel,
+        bufferMeters: bufferMeters || 800,
+        seasonProfile: seasonProfile || 'rut',
+        prevailingWinds: prevailingWinds || ['NW'],
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
 
-    // If preview forced or no service URL configured, use preview mode
-    // NOTE: Temporarily forcing preview mode while Modal endpoint is debugged
-    const usePreviewMode = true; // forcePreview || !GEOPROCESSOR_URL
-    if (usePreviewMode) {
-      console.log('Using preview mode (Modal endpoint temporarily disabled)');
-      const result = generatePreviewAnalysis(parcel, options);
-      result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
-      
-      return NextResponse.json(result, {
-        headers: {
-          'X-Terrain-Mode': 'preview',
-          'X-Processing-Time-Ms': String(Date.now() - startTime),
-        },
-      });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Terrain] Geoprocessor error:', response.status, errorText);
+      return NextResponse.json(
+        { code: 'SERVICE_ERROR', message: 'Terrain analysis service error' },
+        { status: 502 }
+      );
     }
 
-    // Call external Modal.com geoprocessor
-    try {
-      console.log('Calling Terrain Brain at:', GEOPROCESSOR_URL);
-      
-      const response = await fetch(GEOPROCESSOR_URL!, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          parcel,
-          bufferMeters: options.bufferMeters,
-          seasonProfile: options.seasonProfile,
-          prevailingWinds: options.prevailingWinds,
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+    const result = await response.json() as TerrainAnalysisResponse;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Geoprocessor error:', response.status, errorText);
-        throw new Error(`Geoprocessor returned ${response.status}`);
-      }
-
-      const result = await response.json() as TerrainAnalysisResponse;
-
-      // Check for error in response body
-      if ((result as any).error) {
-        console.error('Geoprocessor returned error:', (result as any).message);
-        throw new Error((result as any).message || 'Geoprocessor error');
-      }
-
-      // Update processing time to include network latency
-      if (result.provenance) {
-        result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
-      }
-
-      return NextResponse.json(result, {
-        headers: {
-          'X-Terrain-Mode': result.mode || 'real',
-          'X-Processing-Time-Ms': String(Date.now() - startTime),
-        },
-      });
-
-    } catch (fetchError) {
-      // Fallback to preview mode on any error
-      console.warn('Geoprocessor unavailable, falling back to preview:', fetchError);
-      
-      const result = generatePreviewAnalysis(parcel, options);
+    // Update processing time to include network latency
+    if (result.provenance) {
       result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
-      
-      return NextResponse.json(result, {
-        headers: {
-          'X-Terrain-Mode': 'preview',
-          'X-Terrain-Fallback': 'true',
-          'X-Processing-Time-Ms': String(Date.now() - startTime),
-        },
-      });
     }
+
+    return NextResponse.json(result, {
+      headers: {
+        'X-Terrain-Mode': result.mode || 'real',
+        'X-Processing-Time-Ms': String(Date.now() - startTime),
+      },
+    });
 
   } catch (error) {
-    console.error('Terrain analysis error:', error);
+    console.error('[Terrain] Analysis error:', error);
     
     const terrainError = error as TerrainAnalysisError;
     
     if (terrainError.code) {
       return NextResponse.json(
-        { 
-          code: terrainError.code, 
-          message: terrainError.message,
-          fallbackToPreview: terrainError.fallbackToPreview 
-        },
+        { code: terrainError.code, message: terrainError.message },
         { status: getStatusCode(terrainError.code) }
       );
     }
 
+    // Check for timeout
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      return NextResponse.json(
+        { code: 'TIMEOUT', message: 'Terrain analysis timed out' },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
-      { code: 'INTERNAL_ERROR', message: 'Terrain analysis failed unexpectedly' },
-      { status: 500 }
+      { code: 'SERVICE_UNAVAILABLE', message: 'Terrain analysis service unavailable' },
+      { status: 503 }
     );
   }
 }
 
 export async function GET() {
-  // Health check endpoint
+  // Health check - ping the Python service
   try {
-    const health = await checkTerrainBrainHealth();
+    const healthUrl = GEOPROCESSOR_URL.replace('/v1/terrain-analysis', '/health');
+    const response = await fetch(healthUrl, { 
+      signal: AbortSignal.timeout(5000) 
+    });
+    
+    if (response.ok) {
+      const health = await response.json();
+      return NextResponse.json({
+        status: 'healthy',
+        geoprocessor: health,
+        timestamp: new Date().toISOString(),
+      });
+    }
     
     return NextResponse.json({
-      status: health.available ? 'healthy' : 'degraded',
-      realModeAvailable: health.available,
-      previewModeAvailable: true,
-      latencyMs: health.latencyMs,
+      status: 'degraded',
       timestamp: new Date().toISOString(),
     });
   } catch {
     return NextResponse.json({
-      status: 'degraded',
-      realModeAvailable: false,
-      previewModeAvailable: true,
+      status: 'unavailable',
       timestamp: new Date().toISOString(),
-    });
+    }, { status: 503 });
   }
 }
 
 // ============ Helper Functions ============
 
 function estimatePolygonAcres(coords: number[][]): number {
-  // Shoelace formula
   let area = 0;
   const n = coords.length - 1;
   for (let i = 0; i < n; i++) {
@@ -185,7 +146,6 @@ function estimatePolygonAcres(coords: number[][]): number {
     area -= coords[j][0] * coords[i][1];
   }
   area = Math.abs(area) / 2;
-  // Convert degrees² to acres (~40° latitude assumption)
   const metersPerDegLng = 85000;
   const metersPerDegLat = 111000;
   const sqMeters = area * metersPerDegLng * metersPerDegLat;
