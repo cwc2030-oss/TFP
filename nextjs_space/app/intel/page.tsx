@@ -268,12 +268,10 @@ function DeerIntelContent() {
     };
   }, [lat, lng]);
 
-  // Run analysis when map is ready
+  // Run analysis immediately on mount, and when season/wind changes
   useEffect(() => {
-    if (mapReady) {
-      runAnalysis();
-    }
-  }, [mapReady, runAnalysis]);
+    runAnalysis();
+  }, [season, windDirection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Render terrain layers on map
   useEffect(() => {
