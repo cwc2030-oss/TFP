@@ -82,14 +82,15 @@ export async function analyzeTerrainReal(
 // ============ Preview Mode (Client-side Heuristics) ============
 
 export function generatePreviewAnalysis(
-  parcel: GeoJSON.Feature<GeoJSON.Polygon>,
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   options?: {
     bufferMeters?: number;
     seasonProfile?: SeasonProfile;
     prevailingWinds?: WindDirection[];
   }
 ): TerrainAnalysisResponse {
-  const coords = parcel.geometry.coordinates[0];
+  // Handle both Polygon and MultiPolygon - extract the largest ring
+  const coords = extractPrimaryRing(parcel.geometry);
   const center = calculateCentroid(coords);
   const bounds = calculateBounds(coords);
   const acreage = calculateAcreage(coords);
@@ -219,6 +220,44 @@ function calculateAcreage(coords: number[][]): number {
   return sqMeters / 4046.86;
 }
 
+// ============ Geometry Helpers ============
+
+// Extract the primary (largest) ring from Polygon or MultiPolygon
+function extractPrimaryRing(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): number[][] {
+  if (geometry.type === 'Polygon') {
+    // Polygon: coordinates[0] is the outer ring
+    return geometry.coordinates[0] as number[][];
+  } else if (geometry.type === 'MultiPolygon') {
+    // MultiPolygon: find the largest polygon by area
+    let largestRing: number[][] = geometry.coordinates[0][0] as number[][];
+    let largestArea = 0;
+    
+    for (const polygon of geometry.coordinates) {
+      const ring = polygon[0] as number[][];
+      const area = calculateRingArea(ring);
+      if (area > largestArea) {
+        largestArea = area;
+        largestRing = ring;
+      }
+    }
+    return largestRing;
+  }
+  // Fallback - shouldn't happen
+  return [];
+}
+
+// Calculate rough area of a ring (for comparison only)
+function calculateRingArea(ring: number[][]): number {
+  let area = 0;
+  const n = ring.length - 1;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += ring[i][0] * ring[j][1];
+    area -= ring[j][0] * ring[i][1];
+  }
+  return Math.abs(area) / 2;
+}
+
 // ============ Seeded Random for Consistency ============
 
 // Simple seeded random number generator
@@ -238,12 +277,17 @@ function createSeedFromCenter(center: [number, number]): number {
 
 // Ray-casting algorithm for point-in-polygon
 function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
+  if (!polygon || polygon.length < 3) return false;
+  
   const [x, y] = point;
   let inside = false;
   
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const xi = polygon[i][0], yi = polygon[i][1];
     const xj = polygon[j][0], yj = polygon[j][1];
+    
+    // Guard against division by zero
+    if (yj === yi) continue;
     
     const intersect = ((yi > y) !== (yj > y)) &&
       (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
@@ -255,6 +299,9 @@ function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
 }
 
 // Generate a random point INSIDE the parcel polygon
+// Uses rejection sampling with hard maxAttempts limit
+const MAX_POINT_ATTEMPTS = 100; // Hard limit to prevent infinite loops
+
 function generatePointInsideParcel(
   parcelCoords: number[][],
   center: [number, number],
@@ -262,11 +309,24 @@ function generatePointInsideParcel(
   rand: () => number,
   maxAttempts = 50
 ): [number, number] {
+  // Enforce hard limit
+  const attempts = Math.min(maxAttempts, MAX_POINT_ATTEMPTS);
+  
+  // Validate inputs
+  if (!parcelCoords || parcelCoords.length < 3) {
+    return center;
+  }
+  
   const lngSpan = bounds.maxLng - bounds.minLng;
   const latSpan = bounds.maxLat - bounds.minLat;
   
+  // Guard against degenerate bounds
+  if (lngSpan <= 0 || latSpan <= 0) {
+    return center;
+  }
+  
   // Try random points within bounding box, keep if inside polygon
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const point: [number, number] = [
       bounds.minLng + rand() * lngSpan,
       bounds.minLat + rand() * latSpan,
@@ -277,27 +337,39 @@ function generatePointInsideParcel(
     }
   }
   
-  // Fallback: return centroid (always should be inside for convex parcels)
+  // Fallback: return centroid (should be inside for most parcels)
+  // For very weird shapes, centroid might be outside - that's acceptable for preview mode
   return center;
 }
 
 // Shrink a polygon toward its center to ensure it stays inside parcel
+// Hard limit of 10 shrink attempts to prevent infinite loops
+const MAX_SHRINK_ATTEMPTS = 10;
+
 function shrinkPolygonToFit(
   polygonCoords: number[][],
   parcelCoords: number[][],
   center: [number, number],
   shrinkFactor = 0.8
 ): number[][] {
-  // Shrink polygon toward its center until all points are inside parcel
+  // Validate inputs
+  if (!polygonCoords || polygonCoords.length < 3) {
+    return polygonCoords;
+  }
+  if (!parcelCoords || parcelCoords.length < 3) {
+    return polygonCoords;
+  }
+  
+  // Calculate polygon center
   const polygonCenter: [number, number] = [
     polygonCoords.reduce((sum, p) => sum + p[0], 0) / polygonCoords.length,
     polygonCoords.reduce((sum, p) => sum + p[1], 0) / polygonCoords.length,
   ];
   
   let factor = 1.0;
-  let attempts = 0;
   
-  while (attempts < 10) {
+  // Try shrinking with hard attempt limit
+  for (let attempts = 0; attempts < MAX_SHRINK_ATTEMPTS; attempts++) {
     const shrunk = polygonCoords.map(p => [
       polygonCenter[0] + (p[0] - polygonCenter[0]) * factor,
       polygonCenter[1] + (p[1] - polygonCenter[1]) * factor,
@@ -308,14 +380,17 @@ function shrinkPolygonToFit(
     if (allInside) return shrunk;
     
     factor *= shrinkFactor;
-    attempts++;
   }
   
-  // Last resort: tiny polygon at center
-  return polygonCoords.map(p => [
-    center[0] + (p[0] - polygonCenter[0]) * 0.1,
-    center[1] + (p[1] - polygonCenter[1]) * 0.1,
-  ]);
+  // Last resort: tiny polygon at parcel center (guaranteed to be "inside" for display)
+  const tinyRadius = 0.0001; // ~10m
+  return [
+    [center[0] - tinyRadius, center[1] - tinyRadius],
+    [center[0] + tinyRadius, center[1] - tinyRadius],
+    [center[0] + tinyRadius, center[1] + tinyRadius],
+    [center[0] - tinyRadius, center[1] + tinyRadius],
+    [center[0] - tinyRadius, center[1] - tinyRadius], // close ring
+  ];
 }
 
 // ============ Synthetic Data Generators ============
