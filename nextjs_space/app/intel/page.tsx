@@ -256,6 +256,28 @@ function DeerIntelContent() {
         },
       });
 
+      // TEST: Add a simple red circle at the center to verify layers work
+      const testCenter = [lng, lat];
+      map.addSource('test-point', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: testCenter },
+          properties: {}
+        }
+      });
+      map.addLayer({
+        id: 'test-circle',
+        type: 'circle',
+        source: 'test-point',
+        paint: {
+          'circle-radius': 50,
+          'circle-color': '#ff0000',
+          'circle-opacity': 0.8
+        }
+      });
+      console.log('[Intel] TEST: Added red test circle at', testCenter);
+
       setMapReady(true);
       console.log('[Intel] Map ready state set to true');
     });
