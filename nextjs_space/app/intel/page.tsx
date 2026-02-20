@@ -184,10 +184,16 @@ function DeerIntelContent() {
 
   // Initialize map
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    console.log('[Intel] Map init effect running, container:', !!mapContainerRef.current, 'mapRef:', !!mapRef.current);
+    
+    if (!mapContainerRef.current || mapRef.current) {
+      console.log('[Intel] Skipping - container or map already exists');
+      return;
+    }
 
     // Check WebGL support first
     if (!checkWebGLSupport()) {
+      console.log('[Intel] WebGL check failed');
       setMapError("Your browser doesn't support WebGL, which is required for 3D terrain viewing.");
       setIsLoading(false);
       return;
@@ -195,11 +201,13 @@ function DeerIntelContent() {
 
     // Check token
     if (!MAPBOX_TOKEN) {
+      console.log('[Intel] No Mapbox token');
       setMapError("Map configuration error. Please try again later.");
       setIsLoading(false);
       return;
     }
 
+    console.log('[Intel] Creating Mapbox map with token:', MAPBOX_TOKEN.substring(0, 20) + '...');
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
     let map: mapboxgl.Map;
@@ -213,16 +221,19 @@ function DeerIntelContent() {
         pitch: 45,
         bearing: -20,
       });
+      console.log('[Intel] Mapbox Map instance created');
     } catch (err) {
-      console.error("Failed to initialize Mapbox:", err);
+      console.error("[Intel] Failed to initialize Mapbox:", err);
       setMapError("Failed to load 3D map. Please try refreshing the page.");
       setIsLoading(false);
       return;
     }
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    console.log('[Intel] Navigation control added');
 
     map.on('load', () => {
+      console.log('[Intel] Map loaded successfully!');
       // Add terrain
       map.addSource('mapbox-dem', {
         type: 'raster-dem',
@@ -244,6 +255,7 @@ function DeerIntelContent() {
       });
 
       setMapReady(true);
+      console.log('[Intel] Map ready state set to true');
     });
 
     map.on('error', (e: any) => {
@@ -539,8 +551,8 @@ function DeerIntelContent() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
-      {/* Map Container */}
-      <div ref={mapContainerRef} className="absolute inset-0" />
+      {/* Map Container - z-0 ensures it's behind UI but visible */}
+      <div ref={mapContainerRef} className="absolute inset-0 z-0" style={{ minHeight: '100vh', minWidth: '100vw' }} />
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
