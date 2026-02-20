@@ -216,6 +216,21 @@ function calculateAcreage(coords: number[][]): number {
   return sqMeters / 4046.86;
 }
 
+// ============ Seeded Random for Consistency ============
+
+// Simple seeded random number generator
+function seededRandom(seed: number): () => number {
+  return () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+}
+
+// Create seed from center coordinates for consistency
+function createSeedFromCenter(center: [number, number]): number {
+  return Math.abs(Math.floor(center[0] * 10000) + Math.floor(center[1] * 10000));
+}
+
 // ============ Synthetic Data Generators ============
 
 function generateSyntheticBedding(
@@ -227,36 +242,40 @@ function generateSyntheticBedding(
   const lngSpan = bounds.maxLng - bounds.minLng;
   const latSpan = bounds.maxLat - bounds.minLat;
   
+  // Use seeded random for consistency
+  const rand = seededRandom(createSeedFromCenter(center) + 1);
+  
   // Generate 2-4 bedding areas based on property size
   const numBedding = Math.min(4, Math.max(2, Math.floor(acreage / 50)));
   
+  // Keep features INSIDE the parcel - use smaller offsets (max 30% from center)
   for (let i = 0; i < numBedding; i++) {
-    // Place bedding areas on south-facing slopes (southern portions of property)
-    const offsetLng = (Math.random() - 0.5) * lngSpan * 0.6;
-    const offsetLat = -Math.random() * latSpan * 0.3 - latSpan * 0.1; // bias south
+    // Place bedding areas on south-facing slopes (bias toward south portion)
+    const offsetLng = (rand() - 0.5) * lngSpan * 0.3; // max 15% from center
+    const offsetLat = (rand() - 0.6) * latSpan * 0.25; // bias slightly south
     
     const beddingCenter: [number, number] = [
       center[0] + offsetLng,
       center[1] + offsetLat,
     ];
     
-    // Create irregular polygon
-    const radius = 0.001 + Math.random() * 0.002; // ~100-300m radius
-    const polygon = createIrregularPolygon(beddingCenter, radius, 6 + Math.floor(Math.random() * 4));
+    // Create irregular polygon - smaller radius to stay inside parcel
+    const radius = Math.min(0.0008, lngSpan * 0.08) + rand() * Math.min(0.001, lngSpan * 0.05);
+    const polygon = createIrregularPolygon(beddingCenter, radius, 6 + Math.floor(rand() * 4), rand);
     
-    const aspectDegrees = 135 + Math.random() * 90; // 135-225 (south-facing)
+    const aspectDegrees = 135 + rand() * 90; // 135-225 (south-facing)
     const aspectLabels = ['S', 'SW', 'SE'];
     
     features.push({
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [polygon] },
       properties: {
-        type: i === 0 ? 'thermal_bedding' : (Math.random() > 0.5 ? 'transition_bedding' : 'escape_cover'),
-        slopeRange: [8 + Math.random() * 4, 18 + Math.random() * 7],
-        aspect: aspectLabels[Math.floor(Math.random() * aspectLabels.length)],
+        type: i === 0 ? 'thermal_bedding' : (rand() > 0.5 ? 'transition_bedding' : 'escape_cover'),
+        slopeRange: [8 + rand() * 4, 18 + rand() * 7],
+        aspect: aspectLabels[Math.floor(rand() * aspectLabels.length)],
         aspectDegrees,
-        areaAcres: 0.5 + Math.random() * 3,
-        confidence: 0.6 + Math.random() * 0.3,
+        areaAcres: 0.5 + rand() * 3,
+        confidence: 0.6 + rand() * 0.3,
       },
     });
   }
@@ -272,41 +291,48 @@ function generateSyntheticFunnels(
   const lngSpan = bounds.maxLng - bounds.minLng;
   const latSpan = bounds.maxLat - bounds.minLat;
   
-  // Generate 1-2 saddles
-  for (let i = 0; i < 1 + Math.floor(Math.random() * 2); i++) {
+  // Use seeded random for consistency
+  const rand = seededRandom(createSeedFromCenter(center) + 2);
+  
+  // Generate 1-2 saddles - INSIDE the parcel
+  const numSaddles = 1 + Math.floor(rand() * 2);
+  for (let i = 0; i < numSaddles; i++) {
     const saddleCenter: [number, number] = [
-      center[0] + (Math.random() - 0.5) * lngSpan * 0.5,
-      center[1] + (Math.random() - 0.5) * latSpan * 0.5,
+      center[0] + (rand() - 0.5) * lngSpan * 0.25, // max 12.5% offset from center
+      center[1] + (rand() - 0.5) * latSpan * 0.25,
     ];
     
-    const polygon = createIrregularPolygon(saddleCenter, 0.0008, 5);
+    const radius = Math.min(0.0006, lngSpan * 0.06);
+    const polygon = createIrregularPolygon(saddleCenter, radius, 5, rand);
     
     features.push({
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [polygon] },
       properties: {
         funnelType: 'saddle',
-        narrowestWidthMeters: 30 + Math.random() * 50,
-        corridorScore: 0.7 + Math.random() * 0.25,
+        narrowestWidthMeters: 30 + rand() * 50,
+        corridorScore: 0.7 + rand() * 0.25,
       },
     });
   }
   
-  // Generate 1-2 draws (as lines)
-  for (let i = 0; i < 1 + Math.floor(Math.random() * 2); i++) {
+  // Generate 1-2 draws (as lines) - INSIDE the parcel
+  const numDraws = 1 + Math.floor(rand() * 2);
+  for (let i = 0; i < numDraws; i++) {
+    // Start and end points within parcel bounds (use 80% inset)
     const startPoint: [number, number] = [
-      bounds.minLng + Math.random() * lngSpan * 0.3,
-      bounds.maxLat - Math.random() * latSpan * 0.2,
+      bounds.minLng + lngSpan * 0.15 + rand() * lngSpan * 0.15,
+      bounds.maxLat - latSpan * 0.15 - rand() * latSpan * 0.2,
     ];
     const endPoint: [number, number] = [
-      bounds.maxLng - Math.random() * lngSpan * 0.3,
-      bounds.minLat + Math.random() * latSpan * 0.2,
+      bounds.maxLng - lngSpan * 0.15 - rand() * lngSpan * 0.15,
+      bounds.minLat + latSpan * 0.15 + rand() * latSpan * 0.2,
     ];
     
-    // Create slightly curved line
+    // Create slightly curved line through center area
     const midPoint: [number, number] = [
-      (startPoint[0] + endPoint[0]) / 2 + (Math.random() - 0.5) * lngSpan * 0.1,
-      (startPoint[1] + endPoint[1]) / 2 + (Math.random() - 0.5) * latSpan * 0.1,
+      center[0] + (rand() - 0.5) * lngSpan * 0.15,
+      center[1] + (rand() - 0.5) * latSpan * 0.15,
     ];
     
     features.push({
@@ -314,24 +340,24 @@ function generateSyntheticFunnels(
       geometry: { type: 'LineString', coordinates: [startPoint, midPoint, endPoint] },
       properties: {
         funnelType: 'draw',
-        corridorScore: 0.65 + Math.random() * 0.3,
-        flowAccumulation: 500 + Math.random() * 2000,
+        corridorScore: 0.65 + rand() * 0.3,
+        flowAccumulation: 500 + rand() * 2000,
       },
     });
   }
   
-  // Generate 1 corridor (least-cost path)
+  // Generate 1 corridor (least-cost path) - crossing through center
   const corridorStart: [number, number] = [
-    bounds.minLng + lngSpan * 0.1,
-    center[1] + (Math.random() - 0.5) * latSpan * 0.3,
+    bounds.minLng + lngSpan * 0.15,
+    center[1] + (rand() - 0.5) * latSpan * 0.15,
   ];
   const corridorEnd: [number, number] = [
-    bounds.maxLng - lngSpan * 0.1,
-    center[1] + (Math.random() - 0.5) * latSpan * 0.3,
+    bounds.maxLng - lngSpan * 0.15,
+    center[1] + (rand() - 0.5) * latSpan * 0.15,
   ];
   const corridorMid: [number, number] = [
     center[0],
-    center[1] + (Math.random() - 0.5) * latSpan * 0.2,
+    center[1] + (rand() - 0.5) * latSpan * 0.1,
   ];
   
   features.push({
@@ -339,7 +365,7 @@ function generateSyntheticFunnels(
     geometry: { type: 'LineString', coordinates: [corridorStart, corridorMid, corridorEnd] },
     properties: {
       funnelType: 'corridor',
-      corridorScore: 0.8 + Math.random() * 0.15,
+      corridorScore: 0.8 + rand() * 0.15,
       leastCostPath: true,
       connectsBeddingToFood: true,
     },
@@ -359,6 +385,9 @@ function generateSyntheticStands(
   const lngSpan = bounds.maxLng - bounds.minLng;
   const latSpan = bounds.maxLat - bounds.minLat;
   
+  // Use seeded random for consistency
+  const rand = seededRandom(createSeedFromCenter(center) + 3);
+  
   const allWinds: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   const badWinds = allWinds.filter(w => !prevailingWinds.includes(w)).slice(0, 3);
   
@@ -375,19 +404,19 @@ function generateSyntheticStands(
     'Creek crossing with historical rub line nearby',
   ];
   
-  // Generate 10 stand points
+  // Generate 10 stand points - INSIDE the parcel (use tighter bounds)
   for (let i = 0; i < 10; i++) {
     const standPoint: [number, number] = [
-      center[0] + (Math.random() - 0.5) * lngSpan * 0.8,
-      center[1] + (Math.random() - 0.5) * latSpan * 0.8,
+      center[0] + (rand() - 0.5) * lngSpan * 0.5, // max 25% offset from center
+      center[1] + (rand() - 0.5) * latSpan * 0.5,
     ];
     
     // Calculate distances (approximate)
-    const distToCorridor = 20 + Math.random() * 150;
-    const distToBedding = 50 + Math.random() * 300;
+    const distToCorridor = 20 + rand() * 150;
+    const distToBedding = 50 + rand() * 300;
     
     // Score decreases with rank
-    const baseScore = 95 - i * 6 + Math.random() * 5;
+    const baseScore = 95 - i * 6 + rand() * 5;
     
     features.push({
       type: 'Feature',
@@ -400,9 +429,9 @@ function generateSyntheticStands(
         approachRisk: i < 3 ? 'low' : (i < 7 ? 'medium' : 'high'),
         distToCorridorMeters: Math.round(distToCorridor),
         distToBeddingMeters: Math.round(distToBedding),
-        elevation: 250 + Math.random() * 100,
-        tpiLocal: (Math.random() - 0.3) * 2,
-        tpiLandscape: (Math.random() - 0.5) * 2,
+        elevation: 250 + rand() * 100,
+        tpiLocal: (rand() - 0.3) * 2,
+        tpiLandscape: (rand() - 0.5) * 2,
         reasoning: reasonings[i] || 'Strategic position based on terrain analysis',
       },
     });
@@ -419,14 +448,20 @@ function generateSyntheticStands(
   return { type: 'FeatureCollection', features };
 }
 
-function createIrregularPolygon(center: [number, number], radius: number, points: number): number[][] {
+function createIrregularPolygon(
+  center: [number, number], 
+  radius: number, 
+  points: number,
+  rand?: () => number
+): number[][] {
+  const r = rand || Math.random;
   const coords: number[][] = [];
   for (let i = 0; i < points; i++) {
     const angle = (i / points) * 2 * Math.PI;
-    const r = radius * (0.7 + Math.random() * 0.6);
+    const randomRadius = radius * (0.7 + r() * 0.6);
     coords.push([
-      center[0] + r * Math.cos(angle),
-      center[1] + r * Math.sin(angle) * 0.8, // slightly flattened
+      center[0] + randomRadius * Math.cos(angle),
+      center[1] + randomRadius * Math.sin(angle) * 0.8, // slightly flattened
     ]);
   }
   coords.push(coords[0]); // close polygon
