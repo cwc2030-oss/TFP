@@ -104,6 +104,7 @@ function DeerIntelContent() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon> | null>(null);
 
   // Check WebGL support
   const checkWebGLSupport = (): boolean => {
@@ -145,6 +146,7 @@ function DeerIntelContent() {
     try {
       const acreage = acreageParam ? parseFloat(acreageParam) : 80;
       const parcel = generateParcelPolygon(lat, lng, acreage);
+      setParcelPolygon(parcel); // Save for map display
 
       setProgress(30);
 
@@ -285,119 +287,180 @@ function DeerIntelContent() {
   // Render terrain layers on map
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !layers || !mapReady) return;
+    if (!map || !mapReady) return;
+    if (!layers && !parcelPolygon) return;
 
-    const addLayers = () => {
-      console.log('[Intel] Adding terrain layers...');
-      console.log('[Intel] Bedding features:', layers.beddingPolygons.features.length);
-      console.log('[Intel] Funnel features:', layers.funnels.features.length);
-      
-      // Remove existing
-      removeLayers();
+    console.log('[Intel] Layer render effect triggered');
+    console.log('[Intel] parcelPolygon:', parcelPolygon ? 'exists' : 'null');
+    console.log('[Intel] layers:', layers ? 'exists' : 'null');
 
+    const safeAddSource = (id: string, config: any) => {
       try {
-        // Bedding polygons
-        if (layers.beddingPolygons.features.length > 0) {
-          console.log('[Intel] Adding bedding source and layers...');
-          map.addSource('terrain-bedding', {
-            type: 'geojson',
-            data: layers.beddingPolygons as GeoJSON.FeatureCollection,
+        if (map.getSource(id)) {
+          console.log(`[Intel] Removing existing source: ${id}`);
+          // Remove layers that use this source first
+          const layersToRemove = [`${id}-fill`, `${id}-outline`, `${id}-line`, 
+            'terrain-bedding-fill', 'terrain-bedding-outline',
+            'terrain-funnels-saddle-fill', 'terrain-funnels-draw', 'terrain-funnels-corridor',
+            'parcel-boundary-fill', 'parcel-boundary-outline'];
+          layersToRemove.forEach(layerId => {
+            if (map.getLayer(layerId)) {
+              map.removeLayer(layerId);
+            }
           });
-
-          map.addLayer({
-            id: 'terrain-bedding-fill',
-            type: 'fill',
-            source: 'terrain-bedding',
-            paint: {
-              'fill-color': LAYER_COLORS.bedding,
-              'fill-opacity': 0.4,
-            },
-          });
-
-          map.addLayer({
-            id: 'terrain-bedding-outline',
-            type: 'line',
-            source: 'terrain-bedding',
-            paint: {
-              'line-color': LAYER_COLORS.beddingOutline,
-              'line-width': 3,
-              'line-opacity': 1,
-            },
-          });
-          console.log('[Intel] Bedding layers added successfully');
+          map.removeSource(id);
         }
-
-        // Funnels
-        if (layers.funnels.features.length > 0) {
-          console.log('[Intel] Adding funnel source and layers...');
-          map.addSource('terrain-funnels', {
-            type: 'geojson',
-            data: layers.funnels as GeoJSON.FeatureCollection,
-          });
-
-          map.addLayer({
-            id: 'terrain-funnels-saddle-fill',
-            type: 'fill',
-            source: 'terrain-funnels',
-            filter: ['==', ['get', 'funnelType'], 'saddle'],
-            paint: {
-              'fill-color': LAYER_COLORS.funnelSaddle,
-              'fill-opacity': 0.5,
-            },
-          });
-
-          map.addLayer({
-            id: 'terrain-funnels-draw',
-            type: 'line',
-            source: 'terrain-funnels',
-            filter: ['==', ['get', 'funnelType'], 'draw'],
-            paint: {
-              'line-color': LAYER_COLORS.funnelDraw,
-              'line-width': 5,
-              'line-dasharray': [4, 2],
-              'line-opacity': 1,
-            },
-          });
-
-          map.addLayer({
-            id: 'terrain-funnels-corridor',
-            type: 'line',
-            source: 'terrain-funnels',
-            filter: ['==', ['get', 'funnelType'], 'corridor'],
-            paint: {
-              'line-color': LAYER_COLORS.funnelCorridor,
-              'line-width': 6,
-              'line-opacity': 1,
-            },
-          });
-          console.log('[Intel] Funnel layers added successfully');
-        }
+        map.addSource(id, config);
+        console.log(`[Intel] Added source: ${id}`);
+        return true;
       } catch (err) {
-        console.error('[Intel] Error adding terrain layers:', err);
+        console.error(`[Intel] Error adding source ${id}:`, err);
+        return false;
+      }
+    };
+
+    const safeAddLayer = (config: any) => {
+      try {
+        if (map.getLayer(config.id)) {
+          map.removeLayer(config.id);
+        }
+        map.addLayer(config);
+        console.log(`[Intel] Added layer: ${config.id}`);
+        return true;
+      } catch (err) {
+        console.error(`[Intel] Error adding layer ${config.id}:`, err);
+        return false;
+      }
+    };
+
+    const addAllLayers = () => {
+      console.log('[Intel] Adding all layers...');
+
+      // 1. Parcel boundary (yellow outline)
+      if (parcelPolygon) {
+        console.log('[Intel] Adding parcel boundary...');
+        if (safeAddSource('parcel-boundary', {
+          type: 'geojson',
+          data: parcelPolygon,
+        })) {
+          safeAddLayer({
+            id: 'parcel-boundary-fill',
+            type: 'fill',
+            source: 'parcel-boundary',
+            paint: {
+              'fill-color': '#fbbf24',
+              'fill-opacity': 0.1,
+            },
+          });
+          safeAddLayer({
+            id: 'parcel-boundary-outline',
+            type: 'line',
+            source: 'parcel-boundary',
+            paint: {
+              'line-color': '#fbbf24',
+              'line-width': 3,
+              'line-dasharray': [2, 1],
+            },
+          });
+        }
       }
 
-      // Stand markers (these work even without full style)
+      if (layers) {
+        // 2. Bedding polygons (green)
+        if (layers.beddingPolygons?.features?.length > 0) {
+          console.log('[Intel] Adding bedding layers...', layers.beddingPolygons.features.length, 'features');
+          if (safeAddSource('terrain-bedding', {
+            type: 'geojson',
+            data: layers.beddingPolygons,
+          })) {
+            safeAddLayer({
+              id: 'terrain-bedding-fill',
+              type: 'fill',
+              source: 'terrain-bedding',
+              paint: {
+                'fill-color': LAYER_COLORS.bedding,
+                'fill-opacity': visibility.bedding ? 0.4 : 0,
+              },
+            });
+            safeAddLayer({
+              id: 'terrain-bedding-outline',
+              type: 'line',
+              source: 'terrain-bedding',
+              paint: {
+                'line-color': LAYER_COLORS.beddingOutline,
+                'line-width': 3,
+                'line-opacity': visibility.bedding ? 1 : 0,
+              },
+            });
+          }
+        }
+
+        // 3. Funnels (saddles, draws, corridors)
+        if (layers.funnels?.features?.length > 0) {
+          console.log('[Intel] Adding funnel layers...', layers.funnels.features.length, 'features');
+          if (safeAddSource('terrain-funnels', {
+            type: 'geojson',
+            data: layers.funnels,
+          })) {
+            // Saddle fills (orange polygons)
+            safeAddLayer({
+              id: 'terrain-funnels-saddle-fill',
+              type: 'fill',
+              source: 'terrain-funnels',
+              filter: ['==', ['get', 'funnelType'], 'saddle'],
+              paint: {
+                'fill-color': LAYER_COLORS.funnelSaddle,
+                'fill-opacity': visibility.funnels ? 0.5 : 0,
+              },
+            });
+            // Draw lines (orange dashed)
+            safeAddLayer({
+              id: 'terrain-funnels-draw',
+              type: 'line',
+              source: 'terrain-funnels',
+              filter: ['==', ['get', 'funnelType'], 'draw'],
+              paint: {
+                'line-color': LAYER_COLORS.funnelDraw,
+                'line-width': 5,
+                'line-dasharray': [4, 2],
+                'line-opacity': visibility.funnels ? 1 : 0,
+              },
+            });
+            // Corridor lines (purple)
+            safeAddLayer({
+              id: 'terrain-funnels-corridor',
+              type: 'line',
+              source: 'terrain-funnels',
+              filter: ['==', ['get', 'funnelType'], 'corridor'],
+              paint: {
+                'line-color': LAYER_COLORS.funnelCorridor,
+                'line-width': 6,
+                'line-opacity': visibility.corridors ? 1 : 0,
+              },
+            });
+          }
+        }
+      }
+
+      // 4. Stand markers (HTML elements - always work)
       addStandMarkers();
+      
+      console.log('[Intel] All layers added!');
     };
 
-    // Wait for style to be fully ready, then add layers
-    const tryAddLayers = () => {
-      if (map.isStyleLoaded()) {
-        console.log('[Intel] Style loaded, adding layers now...');
-        addLayers();
-      } else {
-        console.log('[Intel] Style not loaded, waiting...');
-        map.once('style.load', () => {
-          console.log('[Intel] Style loaded via event, adding layers...');
-          addLayers();
-        });
-      }
-    };
+    // Ensure style is loaded before adding layers
+    if (map.isStyleLoaded()) {
+      console.log('[Intel] Style already loaded, adding layers...');
+      addAllLayers();
+    } else {
+      console.log('[Intel] Waiting for style to load...');
+      map.once('load', () => {
+        console.log('[Intel] Style loaded, now adding layers...');
+        addAllLayers();
+      });
+    }
 
-    // Small delay to ensure map is fully initialized
-    setTimeout(tryAddLayers, 100);
-
-  }, [layers, mapReady]);
+  }, [layers, mapReady, parcelPolygon]);
 
   // Update visibility
   useEffect(() => {
@@ -432,11 +495,11 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map) return;
 
-    ['terrain-bedding-fill', 'terrain-bedding-outline', 'terrain-funnels-saddle-fill', 'terrain-funnels-draw', 'terrain-funnels-corridor'].forEach(id => {
+    ['terrain-bedding-fill', 'terrain-bedding-outline', 'terrain-funnels-saddle-fill', 'terrain-funnels-draw', 'terrain-funnels-corridor', 'parcel-boundary-fill', 'parcel-boundary-outline'].forEach(id => {
       if (map.getLayer(id)) map.removeLayer(id);
     });
 
-    ['terrain-bedding', 'terrain-funnels'].forEach(id => {
+    ['terrain-bedding', 'terrain-funnels', 'parcel-boundary'].forEach(id => {
       if (map.getSource(id)) map.removeSource(id);
     });
 
