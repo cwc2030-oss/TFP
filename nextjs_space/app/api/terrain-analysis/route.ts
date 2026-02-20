@@ -19,16 +19,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { parcel, bufferMeters, seasonProfile, prevailingWinds, forcePreview } = body as TerrainAnalysisRequest & { forcePreview?: boolean };
 
-    // Validate parcel geometry
-    if (!parcel || !parcel.geometry || parcel.geometry.type !== 'Polygon') {
+    // Validate parcel geometry - accept both Polygon and MultiPolygon
+    if (!parcel || !parcel.geometry || (parcel.geometry.type !== 'Polygon' && parcel.geometry.type !== 'MultiPolygon')) {
       return NextResponse.json(
-        { code: 'INVALID_GEOMETRY', message: 'Valid parcel polygon required' },
+        { code: 'INVALID_GEOMETRY', message: 'Valid parcel polygon or multipolygon required' },
         { status: 400 }
       );
     }
 
-    // Validate AOI size (rough calculation)
-    const coords = parcel.geometry.coordinates[0];
+    // Extract coordinates based on geometry type
+    const coords = (parcel.geometry.type === 'Polygon' 
+      ? parcel.geometry.coordinates[0]
+      : parcel.geometry.coordinates[0][0]) as number[][]; // First polygon of MultiPolygon
     const estimatedAcres = estimatePolygonAcres(coords);
     const bufferAcres = ((bufferMeters || 800) * (bufferMeters || 800) * Math.PI) / 4046.86;
     const totalAcres = estimatedAcres + bufferAcres;

@@ -212,17 +212,18 @@ function DeerIntelContent() {
     return true;
   };
 
-  // Generate parcel polygon from center point
-  const generateParcelPolygon = useCallback((centerLat: number, centerLng: number, acres: number = 80): GeoJSON.Feature<GeoJSON.Polygon> => {
-    // Create a rough square parcel
+  // Generate fallback parcel polygon from center point (only if Regrid fails)
+  const generateFallbackParcelPolygon = useCallback((centerLat: number, centerLng: number, acres: number = 80): GeoJSON.Feature<GeoJSON.Polygon> => {
+    // Create a rough square parcel as fallback
     const sqMeters = acres * 4046.86;
     const sideMeters = Math.sqrt(sqMeters);
     const latOffset = (sideMeters / 2) / 111000;
     const lngOffset = (sideMeters / 2) / 85000;
 
+    console.log('[TFP] Using fallback square parcel (Regrid unavailable)');
     return {
       type: 'Feature',
-      properties: {},
+      properties: { isFallback: true },
       geometry: {
         type: 'Polygon',
         coordinates: [[
@@ -236,6 +237,46 @@ function DeerIntelContent() {
     };
   }, []);
 
+  // Fetch real parcel geometry from Regrid API
+  const fetchRealParcelGeometry = useCallback(async (centerLat: number, centerLng: number): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> => {
+    try {
+      console.log('[TFP] Fetching real parcel geometry from Regrid...');
+      const response = await fetch(`/api/parcels?lat=${centerLat}&lng=${centerLng}`);
+      
+      if (!response.ok) {
+        console.warn('[TFP] Regrid API returned error:', response.status);
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      if (!data.coordinates || !data.geometryType) {
+        console.warn('[TFP] Regrid response missing geometry');
+        return null;
+      }
+      
+      console.log('[TFP] Got real parcel geometry:', data.geometryType, 'with', 
+        data.geometryType === 'Polygon' ? data.coordinates[0]?.length : 'multi', 'vertices');
+      
+      return {
+        type: 'Feature',
+        properties: {
+          parcelId: data.parcelId,
+          owner: data.owner,
+          acreage: data.acreage,
+          address: data.siteAddress,
+        },
+        geometry: {
+          type: data.geometryType as 'Polygon' | 'MultiPolygon',
+          coordinates: data.coordinates,
+        },
+      };
+    } catch (err) {
+      console.warn('[TFP] Failed to fetch Regrid parcel:', err);
+      return null;
+    }
+  }, []);
+
   // Fetch terrain analysis
   const runAnalysis = useCallback(async () => {
     setIsLoading(true);
@@ -243,9 +284,17 @@ function DeerIntelContent() {
     setProgress(10);
 
     try {
-      const acreage = acreageParam ? parseFloat(acreageParam) : 80;
-      const parcel = generateParcelPolygon(lat, lng, acreage);
-      setParcelPolygon(parcel); // Save for map display
+      // First, try to get real parcel geometry from Regrid
+      setProgress(15);
+      let parcel = await fetchRealParcelGeometry(lat, lng);
+      
+      // Fallback to synthetic square if Regrid fails
+      if (!parcel) {
+        const acreage = acreageParam ? parseFloat(acreageParam) : 80;
+        parcel = generateFallbackParcelPolygon(lat, lng, acreage) as GeoJSON.Feature<GeoJSON.Polygon>;
+      }
+      
+      setParcelPolygon(parcel as GeoJSON.Feature<GeoJSON.Polygon>); // Save for map display
 
       setProgress(30);
 
@@ -315,7 +364,7 @@ function DeerIntelContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [lat, lng, season, windDirection, acreageParam, generateParcelPolygon]);
+  }, [lat, lng, season, windDirection, acreageParam, fetchRealParcelGeometry, generateFallbackParcelPolygon]);
 
   // ========== DECK.GL OVERLAY REF ==========
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);

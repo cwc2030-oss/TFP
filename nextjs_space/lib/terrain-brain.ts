@@ -81,6 +81,56 @@ export async function analyzeTerrainReal(
 
 // ============ Preview Mode (Client-side Heuristics) ============
 
+// ============ Final Validation: Ensure all features are inside parcel ============
+
+function validateAndClipFeatures(
+  layers: TerrainLayers,
+  parcelCoords: number[][]
+): TerrainLayers {
+  // Final pass: remove any features that ended up outside the parcel
+  
+  // Validate bedding polygons - ensure at least one vertex is inside
+  const validBedding = layers.beddingPolygons.features.filter(f => {
+    const coords = f.geometry.coordinates[0];
+    return coords.some((c: number[]) => pointInPolygon(c as [number, number], parcelCoords));
+  });
+  
+  // Validate funnels - polygons need at least one vertex inside, lines need at least one point inside
+  const validFunnels = layers.funnels.features.filter(f => {
+    if (f.geometry.type === 'Polygon') {
+      const coords = f.geometry.coordinates[0];
+      return coords.some((c: number[]) => pointInPolygon(c as [number, number], parcelCoords));
+    } else if (f.geometry.type === 'LineString') {
+      const coords = f.geometry.coordinates;
+      return coords.some((c: number[]) => pointInPolygon(c as [number, number], parcelCoords));
+    }
+    return true;
+  });
+  
+  // Validate stand points - must be inside parcel
+  const validStands = layers.standPoints.features.filter(f => {
+    const coords = f.geometry.coordinates as [number, number];
+    return pointInPolygon(coords, parcelCoords);
+  });
+  
+  // Re-rank stands after filtering
+  validStands.forEach((f, idx) => {
+    if (f.properties) {
+      f.properties.rank = idx + 1;
+    }
+  });
+  
+  console.log(`[TFP] Validation: bedding ${layers.beddingPolygons.features.length}→${validBedding.length}, ` +
+    `funnels ${layers.funnels.features.length}→${validFunnels.length}, ` +
+    `stands ${layers.standPoints.features.length}→${validStands.length}`);
+  
+  return {
+    beddingPolygons: { type: 'FeatureCollection', features: validBedding },
+    funnels: { type: 'FeatureCollection', features: validFunnels as any },
+    standPoints: { type: 'FeatureCollection', features: validStands },
+  };
+}
+
 export function generatePreviewAnalysis(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   options?: {
@@ -100,6 +150,8 @@ export function generatePreviewAnalysis(
 
   // Pass parcel coordinates to ensure all features stay INSIDE the parcel
   const parcelCoords = coords as number[][];
+  
+  console.log(`[TFP] Generating preview analysis for ${acreage.toFixed(1)} acre parcel with ${parcelCoords.length} vertices`);
 
   // Generate synthetic bedding areas (south-facing slopes) - constrained to parcel
   const beddingPolygons = generateSyntheticBedding(center, bounds, acreage, parcelCoords);
@@ -110,11 +162,13 @@ export function generatePreviewAnalysis(
   // Generate ranked stand points - constrained to parcel
   const standPoints = generateSyntheticStands(center, bounds, prevailingWinds, beddingPolygons, funnels, parcelCoords);
 
-  const layers: TerrainLayers = {
-    beddingPolygons,
-    funnels,
-    standPoints,
-  };
+  // FINAL VALIDATION: Ensure all features are clipped/filtered to parcel boundary
+  const validatedLayers = validateAndClipFeatures(
+    { beddingPolygons, funnels, standPoints },
+    parcelCoords
+  );
+
+  const layers: TerrainLayers = validatedLayers;
 
   const summary: TerrainSummary = {
     totalBeddingAcres: beddingPolygons.features.reduce((sum, f) => sum + (f.properties?.areaAcres || 0), 0),
@@ -393,6 +447,129 @@ function shrinkPolygonToFit(
   ];
 }
 
+// ============ Polygon Clipping (Sutherland-Hodgman Algorithm) ============
+
+// Clip a polygon to another polygon boundary using Sutherland-Hodgman
+function clipPolygonToParcel(subjectPolygon: number[][], clipPolygon: number[][]): number[][] {
+  if (!subjectPolygon || subjectPolygon.length < 3) return subjectPolygon;
+  if (!clipPolygon || clipPolygon.length < 3) return subjectPolygon;
+  
+  let outputList = [...subjectPolygon];
+  
+  // Remove closing point if present for processing
+  if (outputList.length > 0 && 
+      outputList[0][0] === outputList[outputList.length - 1][0] &&
+      outputList[0][1] === outputList[outputList.length - 1][1]) {
+    outputList = outputList.slice(0, -1);
+  }
+  
+  const clipEdges = clipPolygon.slice(0, -1); // Remove closing point
+  
+  for (let i = 0; i < clipEdges.length; i++) {
+    if (outputList.length === 0) break;
+    
+    const edgeStart = clipEdges[i];
+    const edgeEnd = clipEdges[(i + 1) % clipEdges.length];
+    const inputList = [...outputList];
+    outputList = [];
+    
+    for (let j = 0; j < inputList.length; j++) {
+      const current = inputList[j];
+      const previous = inputList[(j + inputList.length - 1) % inputList.length];
+      
+      const currentInside = isInsideEdge(current, edgeStart, edgeEnd);
+      const previousInside = isInsideEdge(previous, edgeStart, edgeEnd);
+      
+      if (currentInside) {
+        if (!previousInside) {
+          const intersection = lineIntersection(previous, current, edgeStart, edgeEnd);
+          if (intersection) outputList.push(intersection);
+        }
+        outputList.push(current);
+      } else if (previousInside) {
+        const intersection = lineIntersection(previous, current, edgeStart, edgeEnd);
+        if (intersection) outputList.push(intersection);
+      }
+    }
+  }
+  
+  // Close the polygon
+  if (outputList.length > 0) {
+    outputList.push([...outputList[0]]);
+  }
+  
+  return outputList;
+}
+
+// Check if point is inside (left of) an edge
+function isInsideEdge(point: number[], edgeStart: number[], edgeEnd: number[]): boolean {
+  return (edgeEnd[0] - edgeStart[0]) * (point[1] - edgeStart[1]) - 
+         (edgeEnd[1] - edgeStart[1]) * (point[0] - edgeStart[0]) >= 0;
+}
+
+// Find intersection of two line segments
+function lineIntersection(p1: number[], p2: number[], p3: number[], p4: number[]): number[] | null {
+  const d = (p1[0] - p2[0]) * (p3[1] - p4[1]) - (p1[1] - p2[1]) * (p3[0] - p4[0]);
+  if (Math.abs(d) < 1e-10) return null;
+  
+  const t = ((p1[0] - p3[0]) * (p3[1] - p4[1]) - (p1[1] - p3[1]) * (p3[0] - p4[0])) / d;
+  
+  return [
+    p1[0] + t * (p2[0] - p1[0]),
+    p1[1] + t * (p2[1] - p1[1])
+  ];
+}
+
+// Clip a LineString to stay within parcel (keep segments inside)
+function clipLineToParcel(lineCoords: number[][], parcelCoords: number[][]): number[][] {
+  if (!parcelCoords || parcelCoords.length < 3) return lineCoords;
+  
+  const clippedPoints: number[][] = [];
+  
+  for (let i = 0; i < lineCoords.length; i++) {
+    const point = lineCoords[i];
+    
+    if (pointInPolygon(point as [number, number], parcelCoords)) {
+      clippedPoints.push(point);
+    } else if (i > 0) {
+      // Find intersection with parcel boundary
+      const prevPoint = lineCoords[i - 1];
+      if (pointInPolygon(prevPoint as [number, number], parcelCoords)) {
+        const intersection = findParcelBoundaryIntersection(prevPoint, point, parcelCoords);
+        if (intersection) clippedPoints.push(intersection);
+      }
+    }
+  }
+  
+  return clippedPoints.length >= 2 ? clippedPoints : lineCoords;
+}
+
+// Find where a line segment crosses the parcel boundary
+function findParcelBoundaryIntersection(inside: number[], outside: number[], parcelCoords: number[][]): number[] | null {
+  for (let i = 0; i < parcelCoords.length - 1; i++) {
+    const edgeStart = parcelCoords[i];
+    const edgeEnd = parcelCoords[i + 1];
+    const intersection = lineIntersection(inside, outside, edgeStart, edgeEnd);
+    
+    if (intersection) {
+      // Check if intersection is within both line segments
+      const onSegment1 = isPointOnSegment(intersection, inside, outside);
+      const onSegment2 = isPointOnSegment(intersection, edgeStart, edgeEnd);
+      if (onSegment1 && onSegment2) return intersection;
+    }
+  }
+  return null;
+}
+
+// Check if point lies on a line segment
+function isPointOnSegment(point: number[], segStart: number[], segEnd: number[]): boolean {
+  const minX = Math.min(segStart[0], segEnd[0]) - 1e-9;
+  const maxX = Math.max(segStart[0], segEnd[0]) + 1e-9;
+  const minY = Math.min(segStart[1], segEnd[1]) - 1e-9;
+  const maxY = Math.max(segStart[1], segEnd[1]) + 1e-9;
+  return point[0] >= minX && point[0] <= maxX && point[1] >= minY && point[1] <= maxY;
+}
+
 // ============ Synthetic Data Generators ============
 
 function generateSyntheticBedding(
@@ -424,14 +601,17 @@ function generateSyntheticBedding(
       ];
     }
     
-    // Create irregular polygon - size proportional to parcel
-    const baseRadius = Math.min(lngSpan, latSpan) * 0.08;
-    const radius = baseRadius * (0.5 + rand() * 0.5);
-    let polygon = createIrregularPolygon(beddingCenter, radius, 6 + Math.floor(rand() * 4), rand);
+    // Create irregular polygon - size proportional to parcel (slightly larger to ensure coverage)
+    const baseRadius = Math.min(lngSpan, latSpan) * 0.12;
+    const radius = baseRadius * (0.6 + rand() * 0.6);
+    let polygon = createIrregularPolygon(beddingCenter, radius, 8 + Math.floor(rand() * 4), rand);
     
-    // Shrink to fit inside parcel if needed
-    if (parcelCoords) {
-      polygon = shrinkPolygonToFit(polygon, parcelCoords, center);
+    // CLIP polygon to parcel boundary (proper intersection, not shrink)
+    if (parcelCoords && parcelCoords.length >= 3) {
+      polygon = clipPolygonToParcel(polygon, parcelCoords);
+      
+      // Skip if clipped polygon is degenerate
+      if (polygon.length < 4) continue;
     }
     
     const aspectDegrees = 135 + rand() * 90;
@@ -480,13 +660,17 @@ function generateSyntheticFunnels(
       ];
     }
     
-    const baseRadius = Math.min(lngSpan, latSpan) * 0.05;
-    const radius = baseRadius * (0.5 + rand() * 0.5);
-    let polygon = createIrregularPolygon(saddleCenter, radius, 5, rand);
+    // Create slightly larger polygon for better clipping results
+    const baseRadius = Math.min(lngSpan, latSpan) * 0.08;
+    const radius = baseRadius * (0.6 + rand() * 0.6);
+    let polygon = createIrregularPolygon(saddleCenter, radius, 6, rand);
     
-    // Shrink to fit inside parcel if needed
-    if (parcelCoords) {
-      polygon = shrinkPolygonToFit(polygon, parcelCoords, center);
+    // CLIP polygon to parcel boundary (proper intersection)
+    if (parcelCoords && parcelCoords.length >= 3) {
+      polygon = clipPolygonToParcel(polygon, parcelCoords);
+      
+      // Skip if clipped polygon is degenerate
+      if (polygon.length < 4) continue;
     }
     
     features.push({
@@ -500,7 +684,7 @@ function generateSyntheticFunnels(
     });
   }
   
-  // Generate 1-2 draws (as lines) - points must be INSIDE parcel
+  // Generate 1-2 draws (as lines) - CLIPPED to parcel boundary
   const numDraws = 1 + Math.floor(rand() * 2);
   for (let i = 0; i < numDraws; i++) {
     let startPoint: [number, number];
@@ -517,9 +701,16 @@ function generateSyntheticFunnels(
       midPoint = [center[0], center[1]];
     }
     
+    // Clip line to parcel boundary
+    let lineCoords: number[][] = [startPoint, midPoint, endPoint];
+    if (parcelCoords && parcelCoords.length >= 3) {
+      lineCoords = clipLineToParcel(lineCoords, parcelCoords);
+      if (lineCoords.length < 2) continue; // Skip degenerate lines
+    }
+    
     features.push({
       type: 'Feature',
-      geometry: { type: 'LineString', coordinates: [startPoint, midPoint, endPoint] },
+      geometry: { type: 'LineString', coordinates: lineCoords },
       properties: {
         funnelType: 'draw',
         corridorScore: 0.65 + rand() * 0.3,
@@ -528,7 +719,7 @@ function generateSyntheticFunnels(
     });
   }
   
-  // Generate 1 corridor (least-cost path) - all points inside parcel
+  // Generate 1 corridor (least-cost path) - CLIPPED to parcel boundary
   let corridorStart: [number, number];
   let corridorEnd: [number, number];
   let corridorMid: [number, number];
@@ -543,16 +734,24 @@ function generateSyntheticFunnels(
     corridorMid = [center[0], center[1] + latSpan * 0.05];
   }
   
-  features.push({
-    type: 'Feature',
-    geometry: { type: 'LineString', coordinates: [corridorStart, corridorMid, corridorEnd] },
-    properties: {
-      funnelType: 'corridor',
-      corridorScore: 0.8 + rand() * 0.15,
-      leastCostPath: true,
-      connectsBeddingToFood: true,
-    },
-  });
+  // Clip corridor line to parcel
+  let corridorCoords: number[][] = [corridorStart, corridorMid, corridorEnd];
+  if (parcelCoords && parcelCoords.length >= 3) {
+    corridorCoords = clipLineToParcel(corridorCoords, parcelCoords);
+  }
+  
+  if (corridorCoords.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: corridorCoords },
+      properties: {
+        funnelType: 'corridor',
+        corridorScore: 0.8 + rand() * 0.15,
+        leastCostPath: true,
+        connectsBeddingToFood: true,
+      },
+    });
+  }
   
   return { type: 'FeatureCollection', features };
 }
