@@ -221,7 +221,7 @@ function DeerIntelContent() {
     const latOffset = (sideMeters / 2) / 111000;
     const lngOffset = (sideMeters / 2) / 85000;
 
-    console.log('[TFP] Using fallback square parcel (Regrid unavailable)');
+    // Fallback square parcel when Regrid unavailable
     return {
       type: 'Feature',
       properties: { isFallback: true },
@@ -241,23 +241,11 @@ function DeerIntelContent() {
   // Fetch real parcel geometry from Regrid API
   const fetchRealParcelGeometry = useCallback(async (centerLat: number, centerLng: number): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> => {
     try {
-      console.log('[TFP] Fetching real parcel geometry from Regrid...');
       const response = await fetch(`/api/parcels?lat=${centerLat}&lng=${centerLng}`);
-      
-      if (!response.ok) {
-        console.warn('[TFP] Regrid API returned error:', response.status);
-        return null;
-      }
+      if (!response.ok) return null;
       
       const data = await response.json();
-      
-      if (!data.coordinates || !data.geometryType) {
-        console.warn('[TFP] Regrid response missing geometry');
-        return null;
-      }
-      
-      console.log('[TFP] Got real parcel geometry:', data.geometryType, 'with', 
-        data.geometryType === 'Polygon' ? data.coordinates[0]?.length : 'multi', 'vertices');
+      if (!data.coordinates || !data.geometryType) return null;
       
       return {
         type: 'Feature',
@@ -272,8 +260,7 @@ function DeerIntelContent() {
           coordinates: data.coordinates,
         },
       };
-    } catch (err) {
-      console.warn('[TFP] Failed to fetch Regrid parcel:', err);
+    } catch {
       return null;
     }
   }, []);
@@ -323,40 +310,6 @@ function DeerIntelContent() {
 
       const data = await response.json();
       setProgress(90);
-      
-      // === COMPREHENSIVE DEBUG LOGGING ===
-      console.log('[TFP-API] ====== TERRAIN ANALYSIS RESPONSE ======');
-      console.log('[TFP-API] Mode:', data.mode);
-      console.log('[TFP-API] Parcel sent - coords[0][0]:', parcel.geometry.coordinates[0][0], '(should be [lng, lat])');
-      
-      // Bedding areas
-      const beddingCount = data.layers?.beddingPolygons?.features?.length || 0;
-      console.log('[TFP-API] Bedding polygons count:', beddingCount);
-      if (beddingCount > 0) {
-        const firstBedding = data.layers.beddingPolygons.features[0];
-        console.log('[TFP-API] First bedding coords[0][0]:', firstBedding?.geometry?.coordinates?.[0]?.[0]);
-      }
-      
-      // Funnels
-      const funnelCount = data.layers?.funnels?.features?.length || 0;
-      console.log('[TFP-API] Funnels count:', funnelCount);
-      if (funnelCount > 0) {
-        const firstFunnel = data.layers.funnels.features[0];
-        console.log('[TFP-API] First funnel type:', firstFunnel?.geometry?.type, 'props:', firstFunnel?.properties);
-      }
-      
-      // Stand points  
-      const standCount = data.layers?.standPoints?.features?.length || 0;
-      console.log('[TFP-API] Stand points count:', standCount);
-      if (standCount > 0) {
-        const firstStand = data.layers.standPoints.features[0];
-        const coords = firstStand?.geometry?.coordinates;
-        console.log('[TFP-API] First stand coords:', coords, '(should be [lng, lat] ~[-94.x, 38.x])');
-        console.log('[TFP-API] First stand score:', firstStand?.properties?.score);
-      }
-      
-      console.log('[TFP-API] Summary:', data.summary);
-      console.log('[TFP-API] ====================================');
 
       setMode(data.mode);
       setLayers(data.layers);
@@ -371,21 +324,16 @@ function DeerIntelContent() {
     }
   }, [lat, lng, season, windDirection, acreageParam, fetchRealParcelGeometry, generateFallbackParcelPolygon]);
 
-  // ========== DECK.GL OVERLAY REF ==========
+  // ========== SINGLE DECK.GL OVERLAY ==========
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
 
-  // ========== DECK.GL LAYERS (computed from data + visibility) ==========
+  // ========== DECK.GL LAYERS (reactive to data + visibility) ==========
   const deckLayers = useMemo(() => {
     const layersList: any[] = [];
-    
-    console.log('[TFP-Deck] Computing layers, visibility:', visibility);
-    console.log('[TFP-Deck] parcelPolygon:', parcelPolygon ? 'exists' : 'null');
-    console.log('[TFP-Deck] layers:', layers ? 'exists' : 'null');
 
     // 1. PARCEL BOUNDARY (yellow dashed line) - always visible
     if (parcelPolygon) {
       const parcelFC = validateGeoJSON(parcelPolygon);
-      console.log('[TFP-Deck] Parcel boundary FeatureCollection:', JSON.stringify(parcelFC).substring(0, 500));
       layersList.push(
         new GeoJsonLayer({
           id: 'tfp-parcel-boundary',
@@ -401,7 +349,6 @@ function DeerIntelContent() {
           extensions: [new PathStyleExtension({ dash: true })],
         })
       );
-      console.log('[TFP-Deck] Added parcel boundary layer');
     }
 
     // 2. BEDDING AREAS (green filled polygons)
@@ -409,27 +356,21 @@ function DeerIntelContent() {
       const beddingFC = validateGeoJSON(layers.beddingPolygons);
       const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
       
-      console.log('[TFP-Deck] Bedding raw features:', layers.beddingPolygons.features?.length || 0);
-      console.log('[TFP-Deck] Bedding validated polygons:', polygonsOnly.features.length);
       if (polygonsOnly.features.length > 0) {
-        const geom = polygonsOnly.features[0]?.geometry as GeoJSON.Polygon;
-        console.log('[TFP-Deck] First bedding vertex:', JSON.stringify(geom?.coordinates?.[0]?.[0]));
+        layersList.push(
+          new GeoJsonLayer({
+            id: 'tfp-bedding-fill',
+            data: polygonsOnly,
+            stroked: true,
+            filled: true,
+            getFillColor: DECK_COLORS.bedding,
+            getLineColor: DECK_COLORS.beddingOutline,
+            getLineWidth: 2,
+            lineWidthUnits: 'pixels',
+            lineWidthMinPixels: 1,
+          })
+        );
       }
-      
-      layersList.push(
-        new GeoJsonLayer({
-          id: 'tfp-bedding-fill',
-          data: polygonsOnly,
-          stroked: true,
-          filled: true,
-          getFillColor: DECK_COLORS.bedding,
-          getLineColor: DECK_COLORS.beddingOutline,
-          getLineWidth: 2,
-          lineWidthUnits: 'pixels',
-          lineWidthMinPixels: 1,
-        })
-      );
-      console.log('[TFP-Deck] Added bedding layer with', polygonsOnly.features.length, 'features');
     }
 
     // 3. FUNNELS - Saddles (orange filled polygons)
@@ -451,7 +392,6 @@ function DeerIntelContent() {
             lineWidthMinPixels: 1,
           })
         );
-        console.log('[TFP-Deck] Added saddle polygons:', saddlePolygons.features.length);
       }
     }
 
@@ -478,7 +418,6 @@ function DeerIntelContent() {
             lineWidthMinPixels: 3,
           })
         );
-        console.log('[TFP-Deck] Added funnel lines:', lines.features.length);
       }
     }
 
@@ -508,41 +447,25 @@ function DeerIntelContent() {
             lineWidthMinPixels: 2,
           })
         );
-        console.log('[TFP-Deck] Added funnel points:', points.features.length);
       }
     }
 
-    console.log('[TFP-Deck] Total layers created:', layersList.length);
     return layersList;
   }, [parcelPolygon, layers, visibility]);
 
-  // ========== UPDATE DECK OVERLAY WHEN LAYERS CHANGE ==========
+  // ========== SYNC DECK LAYERS TO OVERLAY ==========
   useEffect(() => {
-    console.log('[TFP-Deck] Update effect triggered - mapReady:', mapReady, 'deckOverlayRef:', !!deckOverlayRef.current, 'deckLayers:', deckLayers.length);
-    
     if (deckOverlayRef.current && mapReady) {
-      console.log('[TFP-Deck] ✓ Updating overlay with', deckLayers.length, 'layers');
-      console.log('[TFP-Deck] Layer IDs:', deckLayers.map((l: any) => l.id).join(', '));
       deckOverlayRef.current.setProps({ layers: deckLayers });
-    } else if (!mapReady) {
-      console.log('[TFP-Deck] ✗ Map not ready yet, deferring layer update');
-    } else if (!deckOverlayRef.current) {
-      console.log('[TFP-Deck] ✗ Deck overlay not initialized yet');
     }
   }, [deckLayers, mapReady]);
 
-  // Initialize map
+  // ========== SINGLE MAPBOX MAP INSTANCE ==========
   useEffect(() => {
-    console.log('[TFP] Map init effect running, container:', !!mapContainerRef.current, 'mapRef:', !!mapRef.current);
-    
-    if (!mapContainerRef.current || mapRef.current) {
-      console.log('[TFP] Skipping - container or map already exists');
-      return;
-    }
+    if (!mapContainerRef.current || mapRef.current) return;
 
-    // Check WebGL support first
+    // Check WebGL support
     if (!checkWebGLSupport()) {
-      console.log('[TFP] WebGL check failed');
       setMapError("Your browser doesn't support WebGL, which is required for 3D terrain viewing.");
       setIsLoading(false);
       return;
@@ -550,15 +473,12 @@ function DeerIntelContent() {
 
     // Check token
     if (!MAPBOX_TOKEN) {
-      console.log('[TFP] No Mapbox token');
       setMapError("Map configuration error. Please try again later.");
       setIsLoading(false);
       return;
     }
 
-    console.log('[TFP] Creating Mapbox map with token:', MAPBOX_TOKEN.substring(0, 20) + '...');
     mapboxgl.accessToken = MAPBOX_TOKEN;
-
     let map: mapboxgl.Map;
 
     try {
@@ -570,7 +490,6 @@ function DeerIntelContent() {
         pitch: 45,
         bearing: -20,
       });
-      console.log('[TFP] Mapbox Map instance created');
       
       // Expose for debugging
       if (typeof window !== 'undefined') {
@@ -584,27 +503,18 @@ function DeerIntelContent() {
     }
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-    console.log('[TFP] Navigation control added');
 
-    // Comprehensive error logging
+    // Error handler - only show critical failures
     map.on('error', (e: any) => {
-      console.error("[TFP] ====== MAPBOX ERROR ======");
-      console.error("[TFP] Error event:", e);
-      console.error("[TFP] Error message:", e?.error?.message || e?.message || 'Unknown');
-      
-      // Only set UI error for critical failures
-      if (e?.error?.status === 401) {
+      console.error("[TFP] Mapbox error:", e?.error?.message || e?.message);
+      if (e?.error?.status === 401 || e?.error?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
-      } else if (e?.error?.status === 403) {
-        setMapError("Map access denied. Please contact support.");
       }
     });
 
-    // Style load handler - set up terrain and Deck.gl overlay
+    // Style load handler - set up terrain + Deck.gl overlay
     const handleStyleLoad = () => {
-      console.log('[TFP] style.load event fired');
-      
-      // Add terrain DEM
+      // Add terrain DEM (3D elevation)
       if (!map.getSource('mapbox-dem')) {
         map.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -613,7 +523,6 @@ function DeerIntelContent() {
           maxzoom: 14,
         });
         map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-        console.log('[TFP] Added terrain DEM');
       }
 
       // Add sky atmosphere
@@ -627,14 +536,13 @@ function DeerIntelContent() {
             'sky-atmosphere-sun-intensity': 15,
           },
         });
-        console.log('[TFP] Added sky layer');
       }
       
-      // Create Deck.gl overlay (only once)
+      // Create SINGLE Deck.gl overlay
       if (!deckOverlayRef.current) {
         const overlay = new MapboxOverlay({
           interleaved: true, // Renders with Mapbox layers for proper depth
-          layers: [], // Start empty, will be updated by effect
+          layers: [],
         });
         map.addControl(overlay as any);
         deckOverlayRef.current = overlay;
@@ -642,24 +550,19 @@ function DeerIntelContent() {
         if (typeof window !== 'undefined') {
           window.__TFP_DECK__ = overlay;
         }
-        console.log('[TFP-Deck] MapboxOverlay created and added to map');
       }
       
       setMapReady(true);
-      console.log('[TFP] Map ready state set to true');
     };
 
     // Handle both initial load and style changes
     map.on('load', handleStyleLoad);
     map.on('style.load', () => {
-      console.log('[TFP] style.load event - re-creating Deck overlay');
-      // On style change, we need to re-add the overlay
+      // Re-create overlay on style change
       if (deckOverlayRef.current) {
         try {
           (map as any).removeControl(deckOverlayRef.current);
-        } catch (e) {
-          // Ignore - may already be removed
-        }
+        } catch { /* ignore */ }
         deckOverlayRef.current = null;
       }
       handleStyleLoad();
@@ -668,14 +571,11 @@ function DeerIntelContent() {
     mapRef.current = map;
 
     return () => {
-      console.log('[TFP] Cleaning up map');
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = null;
         window.__TFP_DECK__ = null;
       }
-      if (deckOverlayRef.current) {
-        deckOverlayRef.current = null;
-      }
+      deckOverlayRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -686,48 +586,36 @@ function DeerIntelContent() {
     runAnalysis();
   }, [season, windDirection]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ========== STAND MARKERS EFFECT (HTML markers for interactivity) ==========
+  // ========== HTML STAND MARKERS (top 2 only) ==========
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady || !layers?.standPoints) {
-      return;
-    }
-    
-    console.log('[TFP] Adding stand markers');
+    if (!mapRef.current || !mapReady || !layers?.standPoints) return;
     addStandMarkers();
   }, [layers, mapReady]);
 
-  // ========== VISIBILITY EFFECT (for HTML markers only - Deck.gl handles layer visibility) ==========
+  // Toggle visibility of HTML markers
   useEffect(() => {
-    // Stand markers (HTML elements) - visibility controlled separately from Deck.gl layers
     markersRef.current.forEach(marker => {
       marker.getElement().style.display = visibility.stands ? 'block' : 'none';
     });
   }, [visibility.stands]);
 
-  // Clean up stand markers
   const cleanupMarkers = () => {
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
-
     if (popupRef.current) {
       popupRef.current.remove();
       popupRef.current = null;
     }
-    
-    console.log('[TFP] Markers cleaned up');
   };
 
   const addStandMarkers = () => {
     const map = mapRef.current;
     if (!map || !layers?.standPoints) return;
 
-    // Clear existing markers first
     cleanupMarkers();
 
-    // Only show TOP 2 stands on the map
+    // Only show TOP 2 stands
     const topTwoStands = layers.standPoints.features.slice(0, 2);
-    console.log('[TFP] Adding', topTwoStands.length, 'stand markers (top 2 only)');
 
     topTwoStands.forEach((feature) => {
       const props = feature.properties as StandPointProperties;
