@@ -947,14 +947,11 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* Map Error Overlay - show static satellite fallback */}
+      {/* Map Error Indicator - subtle notice without blocking UI */}
       {mapError && (
-        <div className="absolute inset-0 z-40 bg-gray-800">
-          <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60" />
-          <div className="absolute bottom-4 left-4 bg-black/70 rounded-lg px-3 py-2">
-            <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
-            <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
-          </div>
+        <div className="absolute bottom-4 left-4 z-30 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-amber-500/30">
+          <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
+          <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
         </div>
       )}
 
