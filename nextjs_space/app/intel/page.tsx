@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -26,7 +26,7 @@ import type {
 } from '@/types/terrain';
 
 // Mapbox token
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '';
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 
 const WIND_DIRECTIONS: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: string }[] = [
@@ -46,7 +46,26 @@ const LAYER_COLORS = {
   standLow: '#6b7280',
 };
 
+function LoadingFallback() {
+  return (
+    <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
+      <div className="text-center">
+        <Loader2 className="w-12 h-12 text-amber-500 animate-spin mx-auto mb-4" />
+        <p className="text-white text-lg">Loading Deer Intel...</p>
+      </div>
+    </div>
+  );
+}
+
 export default function DeerIntelPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <DeerIntelContent />
+    </Suspense>
+  );
+}
+
+function DeerIntelContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +103,23 @@ export default function DeerIntelPage() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  // Check WebGL support
+  const checkWebGLSupport = (): boolean => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return false;
+      if (gl instanceof WebGLRenderingContext || gl instanceof WebGL2RenderingContext) {
+        return !gl.isContextLost();
+      }
+      return true;
+    } catch (e) {
+      console.error("WebGL check failed:", e);
+      return false;
+    }
+  };
 
   // Generate parcel polygon from center point
   const generateParcelPolygon = useCallback((centerLat: number, centerLng: number, acres: number = 80): GeoJSON.Feature<GeoJSON.Polygon> => {
@@ -159,16 +195,39 @@ export default function DeerIntelPage() {
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
+    // Check WebGL support first
+    if (!checkWebGLSupport()) {
+      setMapError("Your browser doesn't support WebGL, which is required for 3D terrain viewing.");
+      setIsLoading(false);
+      return;
+    }
+
+    // Check token
+    if (!MAPBOX_TOKEN) {
+      setMapError("Map configuration error. Please try again later.");
+      setIsLoading(false);
+      return;
+    }
+
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/satellite-streets-v12',
-      center: [lng, lat],
-      zoom: 14,
-      pitch: 45,
-      bearing: -20,
-    });
+    let map: mapboxgl.Map;
+
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: 'mapbox://styles/mapbox/satellite-streets-v12',
+        center: [lng, lat],
+        zoom: 14,
+        pitch: 45,
+        bearing: -20,
+      });
+    } catch (err) {
+      console.error("Failed to initialize Mapbox:", err);
+      setMapError("Failed to load 3D map. Please try refreshing the page.");
+      setIsLoading(false);
+      return;
+    }
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
@@ -194,6 +253,11 @@ export default function DeerIntelPage() {
       });
 
       setMapReady(true);
+    });
+
+    map.on('error', (e) => {
+      console.error("Mapbox error:", e);
+      setMapError("Map loading error. Please refresh the page.");
     });
 
     mapRef.current = map;
@@ -873,6 +937,29 @@ export default function DeerIntelPage() {
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
             <X className="h-5 w-5" />
           </button>
+        </div>
+      )}
+
+      {/* Map Error Overlay */}
+      {mapError && (
+        <div className="absolute inset-0 z-40 bg-gray-900/95 flex items-center justify-center">
+          <div className="text-center max-w-md px-6">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Mountain className="w-8 h-8 text-red-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-white mb-2">Unable to Load Map</h3>
+            <p className="text-gray-400 text-sm mb-6">{mapError}</p>
+            <div className="flex gap-3 justify-center">
+              <Link href="/">
+                <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800">
+                  Go Home
+                </Button>
+              </Link>
+              <Button onClick={() => window.location.reload()} className="bg-amber-600 hover:bg-amber-500 text-white">
+                Refresh Page
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
