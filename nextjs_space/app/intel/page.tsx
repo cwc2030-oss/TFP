@@ -288,91 +288,114 @@ function DeerIntelContent() {
     if (!map || !layers || !mapReady) return;
 
     const addLayers = () => {
+      console.log('[Intel] Adding terrain layers...');
+      console.log('[Intel] Bedding features:', layers.beddingPolygons.features.length);
+      console.log('[Intel] Funnel features:', layers.funnels.features.length);
+      
       // Remove existing
       removeLayers();
 
-      // Bedding polygons
-      if (layers.beddingPolygons.features.length > 0) {
-        map.addSource('terrain-bedding', {
-          type: 'geojson',
-          data: layers.beddingPolygons as GeoJSON.FeatureCollection,
-        });
+      try {
+        // Bedding polygons
+        if (layers.beddingPolygons.features.length > 0) {
+          console.log('[Intel] Adding bedding source and layers...');
+          map.addSource('terrain-bedding', {
+            type: 'geojson',
+            data: layers.beddingPolygons as GeoJSON.FeatureCollection,
+          });
 
-        map.addLayer({
-          id: 'terrain-bedding-fill',
-          type: 'fill',
-          source: 'terrain-bedding',
-          paint: {
-            'fill-color': LAYER_COLORS.bedding,
-            'fill-opacity': visibility.bedding ? 0.35 : 0,
-          },
-        });
+          map.addLayer({
+            id: 'terrain-bedding-fill',
+            type: 'fill',
+            source: 'terrain-bedding',
+            paint: {
+              'fill-color': LAYER_COLORS.bedding,
+              'fill-opacity': 0.4,
+            },
+          });
 
-        map.addLayer({
-          id: 'terrain-bedding-outline',
-          type: 'line',
-          source: 'terrain-bedding',
-          paint: {
-            'line-color': LAYER_COLORS.beddingOutline,
-            'line-width': 2,
-            'line-opacity': visibility.bedding ? 1 : 0,
-          },
-        });
+          map.addLayer({
+            id: 'terrain-bedding-outline',
+            type: 'line',
+            source: 'terrain-bedding',
+            paint: {
+              'line-color': LAYER_COLORS.beddingOutline,
+              'line-width': 3,
+              'line-opacity': 1,
+            },
+          });
+          console.log('[Intel] Bedding layers added successfully');
+        }
+
+        // Funnels
+        if (layers.funnels.features.length > 0) {
+          console.log('[Intel] Adding funnel source and layers...');
+          map.addSource('terrain-funnels', {
+            type: 'geojson',
+            data: layers.funnels as GeoJSON.FeatureCollection,
+          });
+
+          map.addLayer({
+            id: 'terrain-funnels-saddle-fill',
+            type: 'fill',
+            source: 'terrain-funnels',
+            filter: ['==', ['get', 'funnelType'], 'saddle'],
+            paint: {
+              'fill-color': LAYER_COLORS.funnelSaddle,
+              'fill-opacity': 0.5,
+            },
+          });
+
+          map.addLayer({
+            id: 'terrain-funnels-draw',
+            type: 'line',
+            source: 'terrain-funnels',
+            filter: ['==', ['get', 'funnelType'], 'draw'],
+            paint: {
+              'line-color': LAYER_COLORS.funnelDraw,
+              'line-width': 5,
+              'line-dasharray': [4, 2],
+              'line-opacity': 1,
+            },
+          });
+
+          map.addLayer({
+            id: 'terrain-funnels-corridor',
+            type: 'line',
+            source: 'terrain-funnels',
+            filter: ['==', ['get', 'funnelType'], 'corridor'],
+            paint: {
+              'line-color': LAYER_COLORS.funnelCorridor,
+              'line-width': 6,
+              'line-opacity': 1,
+            },
+          });
+          console.log('[Intel] Funnel layers added successfully');
+        }
+      } catch (err) {
+        console.error('[Intel] Error adding terrain layers:', err);
       }
 
-      // Funnels
-      if (layers.funnels.features.length > 0) {
-        map.addSource('terrain-funnels', {
-          type: 'geojson',
-          data: layers.funnels as GeoJSON.FeatureCollection,
-        });
-
-        map.addLayer({
-          id: 'terrain-funnels-saddle-fill',
-          type: 'fill',
-          source: 'terrain-funnels',
-          filter: ['==', ['get', 'funnelType'], 'saddle'],
-          paint: {
-            'fill-color': LAYER_COLORS.funnelSaddle,
-            'fill-opacity': visibility.funnels ? 0.5 : 0,
-          },
-        });
-
-        map.addLayer({
-          id: 'terrain-funnels-draw',
-          type: 'line',
-          source: 'terrain-funnels',
-          filter: ['==', ['get', 'funnelType'], 'draw'],
-          paint: {
-            'line-color': LAYER_COLORS.funnelDraw,
-            'line-width': 4,
-            'line-dasharray': [4, 2],
-            'line-opacity': visibility.funnels ? 1 : 0,
-          },
-        });
-
-        map.addLayer({
-          id: 'terrain-funnels-corridor',
-          type: 'line',
-          source: 'terrain-funnels',
-          filter: ['==', ['get', 'funnelType'], 'corridor'],
-          paint: {
-            'line-color': LAYER_COLORS.funnelCorridor,
-            'line-width': 5,
-            'line-opacity': visibility.corridors ? 0.9 : 0,
-          },
-        });
-      }
-
-      // Stand markers
+      // Stand markers (these work even without full style)
       addStandMarkers();
     };
 
-    if (map.isStyleLoaded()) {
-      addLayers();
-    } else {
-      map.once('style.load', addLayers);
-    }
+    // Wait for style to be fully ready, then add layers
+    const tryAddLayers = () => {
+      if (map.isStyleLoaded()) {
+        console.log('[Intel] Style loaded, adding layers now...');
+        addLayers();
+      } else {
+        console.log('[Intel] Style not loaded, waiting...');
+        map.once('style.load', () => {
+          console.log('[Intel] Style loaded via event, adding layers...');
+          addLayers();
+        });
+      }
+    };
+
+    // Small delay to ensure map is fully initialized
+    setTimeout(tryAddLayers, 100);
 
   }, [layers, mapReady]);
 
