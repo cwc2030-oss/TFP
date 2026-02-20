@@ -6,6 +6,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { PathStyleExtension } from '@deck.gl/extensions';
 import { 
   Target, TreePine, Wind, Calendar, ChevronLeft, ChevronRight, 
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
@@ -268,6 +269,40 @@ function DeerIntelContent() {
 
       const data = await response.json();
       setProgress(90);
+      
+      // === COMPREHENSIVE DEBUG LOGGING ===
+      console.log('[TFP-API] ====== TERRAIN ANALYSIS RESPONSE ======');
+      console.log('[TFP-API] Mode:', data.mode);
+      console.log('[TFP-API] Parcel sent - coords[0][0]:', parcel.geometry.coordinates[0][0], '(should be [lng, lat])');
+      
+      // Bedding areas
+      const beddingCount = data.layers?.beddingPolygons?.features?.length || 0;
+      console.log('[TFP-API] Bedding polygons count:', beddingCount);
+      if (beddingCount > 0) {
+        const firstBedding = data.layers.beddingPolygons.features[0];
+        console.log('[TFP-API] First bedding coords[0][0]:', firstBedding?.geometry?.coordinates?.[0]?.[0]);
+      }
+      
+      // Funnels
+      const funnelCount = data.layers?.funnels?.features?.length || 0;
+      console.log('[TFP-API] Funnels count:', funnelCount);
+      if (funnelCount > 0) {
+        const firstFunnel = data.layers.funnels.features[0];
+        console.log('[TFP-API] First funnel type:', firstFunnel?.geometry?.type, 'props:', firstFunnel?.properties);
+      }
+      
+      // Stand points  
+      const standCount = data.layers?.standPoints?.features?.length || 0;
+      console.log('[TFP-API] Stand points count:', standCount);
+      if (standCount > 0) {
+        const firstStand = data.layers.standPoints.features[0];
+        const coords = firstStand?.geometry?.coordinates;
+        console.log('[TFP-API] First stand coords:', coords, '(should be [lng, lat] ~[-94.x, 38.x])');
+        console.log('[TFP-API] First stand score:', firstStand?.properties?.score);
+      }
+      
+      console.log('[TFP-API] Summary:', data.summary);
+      console.log('[TFP-API] ====================================');
 
       setMode(data.mode);
       setLayers(data.layers);
@@ -296,6 +331,7 @@ function DeerIntelContent() {
     // 1. PARCEL BOUNDARY (yellow dashed line) - always visible
     if (parcelPolygon) {
       const parcelFC = validateGeoJSON(parcelPolygon);
+      console.log('[TFP-Deck] Parcel boundary FeatureCollection:', JSON.stringify(parcelFC).substring(0, 500));
       layersList.push(
         new GeoJsonLayer({
           id: 'tfp-parcel-boundary',
@@ -308,7 +344,7 @@ function DeerIntelContent() {
           lineWidthMinPixels: 3,
           getDashArray: [12, 6],
           dashJustified: true,
-          extensions: [], // no extensions needed for dashed lines in deck.gl v9
+          extensions: [new PathStyleExtension({ dash: true })],
         })
       );
       console.log('[TFP-Deck] Added parcel boundary layer');
@@ -318,6 +354,13 @@ function DeerIntelContent() {
     if (layers?.beddingPolygons && visibility.bedding) {
       const beddingFC = validateGeoJSON(layers.beddingPolygons);
       const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
+      
+      console.log('[TFP-Deck] Bedding raw features:', layers.beddingPolygons.features?.length || 0);
+      console.log('[TFP-Deck] Bedding validated polygons:', polygonsOnly.features.length);
+      if (polygonsOnly.features.length > 0) {
+        const geom = polygonsOnly.features[0]?.geometry as GeoJSON.Polygon;
+        console.log('[TFP-Deck] First bedding vertex:', JSON.stringify(geom?.coordinates?.[0]?.[0]));
+      }
       
       layersList.push(
         new GeoJsonLayer({
@@ -421,9 +464,16 @@ function DeerIntelContent() {
 
   // ========== UPDATE DECK OVERLAY WHEN LAYERS CHANGE ==========
   useEffect(() => {
+    console.log('[TFP-Deck] Update effect triggered - mapReady:', mapReady, 'deckOverlayRef:', !!deckOverlayRef.current, 'deckLayers:', deckLayers.length);
+    
     if (deckOverlayRef.current && mapReady) {
-      console.log('[TFP-Deck] Updating overlay with', deckLayers.length, 'layers');
+      console.log('[TFP-Deck] ✓ Updating overlay with', deckLayers.length, 'layers');
+      console.log('[TFP-Deck] Layer IDs:', deckLayers.map((l: any) => l.id).join(', '));
       deckOverlayRef.current.setProps({ layers: deckLayers });
+    } else if (!mapReady) {
+      console.log('[TFP-Deck] ✗ Map not ready yet, deferring layer update');
+    } else if (!deckOverlayRef.current) {
+      console.log('[TFP-Deck] ✗ Deck overlay not initialized yet');
     }
   }, [deckLayers, mapReady]);
 
