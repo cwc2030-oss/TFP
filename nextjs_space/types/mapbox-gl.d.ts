@@ -29,6 +29,24 @@ declare module 'mapbox-gl' {
     geometry: any;
   };
 
+  // Style types
+  export interface StyleLayer {
+    id: string;
+    type: string;
+    source?: string;
+    paint?: Record<string, any>;
+    layout?: Record<string, any>;
+  }
+
+  export interface Style {
+    layers?: StyleLayer[];
+  }
+
+  // GeoJSON Source interface
+  export interface GeoJSONSource {
+    setData(data: GeoJSON.GeoJSON): void;
+  }
+
   export class Map {
     constructor(options: MapOptions);
     on(event: string, callback: (...args: any[]) => void): void;
@@ -38,8 +56,9 @@ declare module 'mapbox-gl' {
     addLayer(layer: any, before?: string): void;
     removeLayer(id: string): void;
     removeSource(id: string): void;
-    getSource(id: string): any;
-    getLayer(id: string): any;
+    getSource(id: string): GeoJSONSource | any;
+    getLayer(id: string): StyleLayer | undefined;
+    getStyle(): Style | undefined;
     setLayoutProperty(layerId: string, name: string, value: any): void;
     setPaintProperty(layerId: string, name: string, value: any): void;
     setTerrain(terrain: any): void;
