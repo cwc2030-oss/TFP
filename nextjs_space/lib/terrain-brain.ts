@@ -2,6 +2,7 @@
 // Connects to external geoprocessor or falls back to preview mode
 // NOTE: Real API calls happen server-side only via /api/terrain-analysis
 
+import * as turf from '@turf/turf';
 import type {
   TerrainAnalysisRequest,
   TerrainAnalysisResponse,
@@ -82,35 +83,93 @@ export async function analyzeTerrainReal(
 // ============ Preview Mode (Client-side Heuristics) ============
 
 // ============ Final Validation: Ensure all features are inside parcel ============
+// Uses Turf.js for robust geometry operations on concave/complex parcels
 
 function validateAndClipFeatures(
   layers: TerrainLayers,
-  parcelCoords: number[][]
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): TerrainLayers {
-  // Final pass: remove any features that ended up outside the parcel
+  // Create Turf polygon/multipolygon for validation
+  const parcelFeature = turf.feature(parcelGeometry);
   
-  // Validate bedding polygons - ensure at least one vertex is inside
-  const validBedding = layers.beddingPolygons.features.filter(f => {
-    const coords = f.geometry.coordinates[0];
-    return coords.some((c: number[]) => pointInPolygon(c as [number, number], parcelCoords));
-  });
+  // Validate bedding polygons - clip to parcel boundary
+  const validBedding = layers.beddingPolygons.features
+    .map(f => {
+      try {
+        const clipped = turf.intersect(turf.featureCollection([
+          turf.feature(f.geometry),
+          parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+        ]));
+        if (clipped && (clipped.geometry.type === 'Polygon' || clipped.geometry.type === 'MultiPolygon')) {
+          // Return clipped geometry with original properties
+          if (clipped.geometry.type === 'MultiPolygon') {
+            // Take largest polygon from MultiPolygon result
+            const coords = clipped.geometry.coordinates;
+            let largestIdx = 0;
+            let largestArea = 0;
+            coords.forEach((poly, idx) => {
+              const area = turf.area(turf.polygon(poly as number[][][]));
+              if (area > largestArea) {
+                largestArea = area;
+                largestIdx = idx;
+              }
+            });
+            return {
+              ...f,
+              geometry: { type: 'Polygon' as const, coordinates: coords[largestIdx] as number[][][] }
+            };
+          }
+          return { ...f, geometry: clipped.geometry as GeoJSON.Polygon };
+        }
+      } catch (e) {
+        // Intersection failed - check if centroid is inside
+        try {
+          const centroid = turf.centroid(turf.feature(f.geometry));
+          if (pointInParcel(centroid.geometry.coordinates as [number, number], parcelGeometry)) {
+            return f; // Keep original if centroid inside
+          }
+        } catch { /* skip */ }
+      }
+      return null;
+    })
+    .filter((f): f is GeoJSON.Feature<GeoJSON.Polygon, BeddingProperties> => f !== null);
   
-  // Validate funnels - polygons need at least one vertex inside, lines need at least one point inside
-  const validFunnels = layers.funnels.features.filter(f => {
-    if (f.geometry.type === 'Polygon') {
-      const coords = f.geometry.coordinates[0];
-      return coords.some((c: number[]) => pointInPolygon(c as [number, number], parcelCoords));
-    } else if (f.geometry.type === 'LineString') {
-      const coords = f.geometry.coordinates;
-      return coords.some((c: number[]) => pointInPolygon(c as [number, number], parcelCoords));
-    }
-    return true;
-  });
+  // Validate funnels - clip polygons and lines to parcel
+  const validFunnels = layers.funnels.features
+    .map(f => {
+      try {
+        if (f.geometry.type === 'Polygon') {
+          const clipped = turf.intersect(turf.featureCollection([
+            turf.feature(f.geometry),
+            parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+          ]));
+          if (clipped && clipped.geometry.type === 'Polygon') {
+            return { ...f, geometry: clipped.geometry as GeoJSON.Polygon };
+          }
+        } else if (f.geometry.type === 'LineString') {
+          // Clip LineString to parcel
+          const clipped = clipLineToParcel(f.geometry.coordinates, parcelGeometry);
+          if (clipped.length >= 2) {
+            return { ...f, geometry: { type: 'LineString' as const, coordinates: clipped } };
+          }
+        }
+      } catch (e) {
+        // Clipping failed - check if any point is inside
+        const coords = f.geometry.type === 'Polygon' 
+          ? f.geometry.coordinates[0] 
+          : f.geometry.coordinates;
+        if (coords.some(c => pointInParcel(c as [number, number], parcelGeometry))) {
+          return f;
+        }
+      }
+      return null;
+    })
+    .filter((f): f is GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties> => f !== null);
   
-  // Validate stand points - must be inside parcel
+  // Validate stand points - must be strictly inside parcel
   const validStands = layers.standPoints.features.filter(f => {
     const coords = f.geometry.coordinates as [number, number];
-    return pointInPolygon(coords, parcelCoords);
+    return pointInParcel(coords, parcelGeometry);
   });
   
   // Re-rank stands after filtering
@@ -126,7 +185,7 @@ function validateAndClipFeatures(
   
   return {
     beddingPolygons: { type: 'FeatureCollection', features: validBedding },
-    funnels: { type: 'FeatureCollection', features: validFunnels as any },
+    funnels: { type: 'FeatureCollection', features: validFunnels },
     standPoints: { type: 'FeatureCollection', features: validStands },
   };
 }
@@ -139,33 +198,37 @@ export function generatePreviewAnalysis(
     prevailingWinds?: WindDirection[];
   }
 ): TerrainAnalysisResponse {
-  // Handle both Polygon and MultiPolygon - extract the largest ring
-  const coords = extractPrimaryRing(parcel.geometry);
-  const center = calculateCentroid(coords);
-  const bounds = calculateBounds(coords);
-  const acreage = calculateAcreage(coords);
+  // Get the full parcel geometry for Turf.js operations (handles MultiPolygon correctly)
+  const parcelGeometry = parcel.geometry;
+  
+  // Extract primary ring for centroid/bounds calculations (backward compat)
+  const primaryRing = extractPrimaryRing(parcelGeometry);
+  const center = calculateCentroid(primaryRing);
+  const bounds = calculateBoundsFromGeometry(parcelGeometry); // Use full geometry for bounds
+  const acreage = calculateAcreageFromGeometry(parcelGeometry); // Use Turf for accuracy
   const bufferMeters = options?.bufferMeters ?? 800;
   const prevailingWinds = options?.prevailingWinds ?? ['NW'];
   const seasonProfile = options?.seasonProfile ?? 'rut';
-
-  // Pass parcel coordinates to ensure all features stay INSIDE the parcel
-  const parcelCoords = coords as number[][];
   
-  console.log(`[TFP] Generating preview analysis for ${acreage.toFixed(1)} acre parcel with ${parcelCoords.length} vertices`);
+  const vertexCount = parcelGeometry.type === 'MultiPolygon'
+    ? parcelGeometry.coordinates.reduce((sum, poly) => sum + poly[0].length, 0)
+    : parcelGeometry.coordinates[0].length;
+  
+  console.log(`[TFP] Generating preview analysis for ${acreage.toFixed(1)} acre ${parcelGeometry.type} with ${vertexCount} vertices`);
 
   // Generate synthetic bedding areas (south-facing slopes) - constrained to parcel
-  const beddingPolygons = generateSyntheticBedding(center, bounds, acreage, parcelCoords);
+  const beddingPolygons = generateSyntheticBedding(center, bounds, acreage, parcelGeometry);
   
   // Generate synthetic funnels (draws and saddles) - constrained to parcel
-  const funnels = generateSyntheticFunnels(center, bounds, parcelCoords);
+  const funnels = generateSyntheticFunnels(center, bounds, parcelGeometry);
   
   // Generate ranked stand points - constrained to parcel
-  const standPoints = generateSyntheticStands(center, bounds, prevailingWinds, beddingPolygons, funnels, parcelCoords);
+  const standPoints = generateSyntheticStands(center, bounds, prevailingWinds, beddingPolygons, funnels, parcelGeometry);
 
-  // FINAL VALIDATION: Ensure all features are clipped/filtered to parcel boundary
+  // FINAL VALIDATION: Ensure all features are clipped/filtered to parcel boundary (using Turf.js)
   const validatedLayers = validateAndClipFeatures(
     { beddingPolygons, funnels, standPoints },
-    parcelCoords
+    parcelGeometry
   );
 
   const layers: TerrainLayers = validatedLayers;
@@ -257,6 +320,17 @@ function calculateBounds(coords: number[][]): { minLng: number; maxLng: number; 
   return { minLng, maxLng, minLat, maxLat };
 }
 
+// Calculate bounds from full Polygon/MultiPolygon geometry
+function calculateBoundsFromGeometry(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): { minLng: number; maxLng: number; minLat: number; maxLat: number } {
+  const bbox = turf.bbox(turf.feature(geometry));
+  return {
+    minLng: bbox[0],
+    minLat: bbox[1],
+    maxLng: bbox[2],
+    maxLat: bbox[3]
+  };
+}
+
 function calculateAcreage(coords: number[][]): number {
   // Shoelace formula for polygon area, converted to acres
   let area = 0;
@@ -272,6 +346,18 @@ function calculateAcreage(coords: number[][]): number {
   const metersPerDegLat = 111000;
   const sqMeters = area * metersPerDegLng * metersPerDegLat;
   return sqMeters / 4046.86;
+}
+
+// Calculate acreage from full Polygon/MultiPolygon using Turf.js for accuracy
+function calculateAcreageFromGeometry(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): number {
+  try {
+    const sqMeters = turf.area(turf.feature(geometry));
+    return sqMeters / 4046.86; // Convert sq meters to acres
+  } catch {
+    // Fallback to primary ring calculation
+    const primaryRing = extractPrimaryRing(geometry);
+    return calculateAcreage(primaryRing);
+  }
 }
 
 // ============ Geometry Helpers ============
@@ -327,9 +413,20 @@ function createSeedFromCenter(center: [number, number]): number {
   return Math.abs(Math.floor(center[0] * 10000) + Math.floor(center[1] * 10000));
 }
 
-// ============ Point-in-Polygon Testing ============
+// ============ Point-in-Polygon Testing (Turf.js-based) ============
 
-// Ray-casting algorithm for point-in-polygon
+// Point-in-Polygon using Turf.js - handles Polygon and MultiPolygon correctly
+function pointInParcel(point: [number, number], parcel: GeoJSON.Polygon | GeoJSON.MultiPolygon): boolean {
+  try {
+    const pt = turf.point(point);
+    const poly = turf.feature(parcel);
+    return turf.booleanPointInPolygon(pt, poly as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
+  } catch {
+    return false;
+  }
+}
+
+// Legacy point-in-polygon for simple coordinate arrays (backward compat)
 function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
   if (!polygon || polygon.length < 3) return false;
   
@@ -352,222 +449,172 @@ function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
   return inside;
 }
 
-// Generate a random point INSIDE the parcel polygon
+// Generate a random point INSIDE the parcel (Polygon or MultiPolygon)
 // Uses rejection sampling with hard maxAttempts limit
-const MAX_POINT_ATTEMPTS = 100; // Hard limit to prevent infinite loops
+const MAX_POINT_ATTEMPTS = 100;
 
 function generatePointInsideParcel(
-  parcelCoords: number[][],
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
   center: [number, number],
   bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
   rand: () => number,
   maxAttempts = 50
 ): [number, number] {
-  // Enforce hard limit
   const attempts = Math.min(maxAttempts, MAX_POINT_ATTEMPTS);
-  
-  // Validate inputs
-  if (!parcelCoords || parcelCoords.length < 3) {
-    return center;
-  }
   
   const lngSpan = bounds.maxLng - bounds.minLng;
   const latSpan = bounds.maxLat - bounds.minLat;
   
-  // Guard against degenerate bounds
   if (lngSpan <= 0 || latSpan <= 0) {
     return center;
   }
   
-  // Try random points within bounding box, keep if inside polygon
+  // Try random points within bounding box, keep if inside any component
   for (let attempt = 0; attempt < attempts; attempt++) {
     const point: [number, number] = [
       bounds.minLng + rand() * lngSpan,
       bounds.minLat + rand() * latSpan,
     ];
     
-    if (pointInPolygon(point, parcelCoords)) {
+    if (pointInParcel(point, parcelGeometry)) {
       return point;
     }
   }
   
-  // Fallback: return centroid (should be inside for most parcels)
-  // For very weird shapes, centroid might be outside - that's acceptable for preview mode
+  // Fallback: try centroid of largest component
+  try {
+    const centroid = turf.centroid(turf.feature(parcelGeometry));
+    const pt = centroid.geometry.coordinates as [number, number];
+    if (pointInParcel(pt, parcelGeometry)) {
+      return pt;
+    }
+  } catch { /* ignore */ }
+  
+  // Last resort: return provided center
   return center;
 }
 
-// Shrink a polygon toward its center to ensure it stays inside parcel
-// Hard limit of 10 shrink attempts to prevent infinite loops
-const MAX_SHRINK_ATTEMPTS = 10;
+// ============ Polygon Clipping (Turf.js-based) ============
 
-function shrinkPolygonToFit(
-  polygonCoords: number[][],
-  parcelCoords: number[][],
-  center: [number, number],
-  shrinkFactor = 0.8
+// Clip a polygon to parcel boundary using Turf.js intersect
+function clipPolygonToParcel(
+  subjectPolygon: number[][], 
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): number[][] {
-  // Validate inputs
-  if (!polygonCoords || polygonCoords.length < 3) {
-    return polygonCoords;
-  }
-  if (!parcelCoords || parcelCoords.length < 3) {
-    return polygonCoords;
-  }
-  
-  // Calculate polygon center
-  const polygonCenter: [number, number] = [
-    polygonCoords.reduce((sum, p) => sum + p[0], 0) / polygonCoords.length,
-    polygonCoords.reduce((sum, p) => sum + p[1], 0) / polygonCoords.length,
-  ];
-  
-  let factor = 1.0;
-  
-  // Try shrinking with hard attempt limit
-  for (let attempts = 0; attempts < MAX_SHRINK_ATTEMPTS; attempts++) {
-    const shrunk = polygonCoords.map(p => [
-      polygonCenter[0] + (p[0] - polygonCenter[0]) * factor,
-      polygonCenter[1] + (p[1] - polygonCenter[1]) * factor,
-    ]);
+  try {
+    // Create Turf features
+    const subject = turf.polygon([subjectPolygon]);
+    const clip = turf.feature(parcelGeometry);
     
-    // Check if all points are inside parcel
-    const allInside = shrunk.every(p => pointInPolygon(p as [number, number], parcelCoords));
-    if (allInside) return shrunk;
+    // Intersect using Turf
+    const intersection = turf.intersect(turf.featureCollection([subject, clip as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>]));
     
-    factor *= shrinkFactor;
-  }
-  
-  // Last resort: tiny polygon at parcel center (guaranteed to be "inside" for display)
-  const tinyRadius = 0.0001; // ~10m
-  return [
-    [center[0] - tinyRadius, center[1] - tinyRadius],
-    [center[0] + tinyRadius, center[1] - tinyRadius],
-    [center[0] + tinyRadius, center[1] + tinyRadius],
-    [center[0] - tinyRadius, center[1] + tinyRadius],
-    [center[0] - tinyRadius, center[1] - tinyRadius], // close ring
-  ];
-}
-
-// ============ Polygon Clipping (Sutherland-Hodgman Algorithm) ============
-
-// Clip a polygon to another polygon boundary using Sutherland-Hodgman
-function clipPolygonToParcel(subjectPolygon: number[][], clipPolygon: number[][]): number[][] {
-  if (!subjectPolygon || subjectPolygon.length < 3) return subjectPolygon;
-  if (!clipPolygon || clipPolygon.length < 3) return subjectPolygon;
-  
-  let outputList = [...subjectPolygon];
-  
-  // Remove closing point if present for processing
-  if (outputList.length > 0 && 
-      outputList[0][0] === outputList[outputList.length - 1][0] &&
-      outputList[0][1] === outputList[outputList.length - 1][1]) {
-    outputList = outputList.slice(0, -1);
-  }
-  
-  const clipEdges = clipPolygon.slice(0, -1); // Remove closing point
-  
-  for (let i = 0; i < clipEdges.length; i++) {
-    if (outputList.length === 0) break;
-    
-    const edgeStart = clipEdges[i];
-    const edgeEnd = clipEdges[(i + 1) % clipEdges.length];
-    const inputList = [...outputList];
-    outputList = [];
-    
-    for (let j = 0; j < inputList.length; j++) {
-      const current = inputList[j];
-      const previous = inputList[(j + inputList.length - 1) % inputList.length];
-      
-      const currentInside = isInsideEdge(current, edgeStart, edgeEnd);
-      const previousInside = isInsideEdge(previous, edgeStart, edgeEnd);
-      
-      if (currentInside) {
-        if (!previousInside) {
-          const intersection = lineIntersection(previous, current, edgeStart, edgeEnd);
-          if (intersection) outputList.push(intersection);
-        }
-        outputList.push(current);
-      } else if (previousInside) {
-        const intersection = lineIntersection(previous, current, edgeStart, edgeEnd);
-        if (intersection) outputList.push(intersection);
+    if (intersection) {
+      if (intersection.geometry.type === 'Polygon') {
+        return intersection.geometry.coordinates[0] as number[][];
+      } else if (intersection.geometry.type === 'MultiPolygon') {
+        // Return largest polygon from result
+        const coords = intersection.geometry.coordinates;
+        let largestIdx = 0;
+        let largestArea = 0;
+        coords.forEach((poly, idx) => {
+          const area = turf.area(turf.polygon(poly as number[][][]));
+          if (area > largestArea) {
+            largestArea = area;
+            largestIdx = idx;
+          }
+        });
+        return coords[largestIdx][0] as number[][];
       }
     }
+  } catch (e) {
+    console.warn('[TFP] Polygon clip failed, using original:', e);
   }
   
-  // Close the polygon
-  if (outputList.length > 0) {
-    outputList.push([...outputList[0]]);
+  // Return original if clipping fails
+  return subjectPolygon;
+}
+
+// Clip a LineString to stay within parcel using Turf.js
+function clipLineToParcel(
+  lineCoords: number[][], 
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): number[][] {
+  try {
+    const line = turf.lineString(lineCoords);
+    const poly = turf.feature(parcelGeometry);
+    
+    // Use lineSplit and filter segments inside
+    const clipped = turf.booleanWithin(line, poly as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>)
+      ? lineCoords 
+      : getLineSegmentsInsidePolygon(lineCoords, parcelGeometry);
+    
+    return clipped.length >= 2 ? clipped : lineCoords;
+  } catch {
+    return lineCoords;
   }
-  
-  return outputList;
 }
 
-// Check if point is inside (left of) an edge
-function isInsideEdge(point: number[], edgeStart: number[], edgeEnd: number[]): boolean {
-  return (edgeEnd[0] - edgeStart[0]) * (point[1] - edgeStart[1]) - 
-         (edgeEnd[1] - edgeStart[1]) * (point[0] - edgeStart[0]) >= 0;
-}
-
-// Find intersection of two line segments
-function lineIntersection(p1: number[], p2: number[], p3: number[], p4: number[]): number[] | null {
-  const d = (p1[0] - p2[0]) * (p3[1] - p4[1]) - (p1[1] - p2[1]) * (p3[0] - p4[0]);
-  if (Math.abs(d) < 1e-10) return null;
-  
-  const t = ((p1[0] - p3[0]) * (p3[1] - p4[1]) - (p1[1] - p3[1]) * (p3[0] - p4[0])) / d;
-  
-  return [
-    p1[0] + t * (p2[0] - p1[0]),
-    p1[1] + t * (p2[1] - p1[1])
-  ];
-}
-
-// Clip a LineString to stay within parcel (keep segments inside)
-function clipLineToParcel(lineCoords: number[][], parcelCoords: number[][]): number[][] {
-  if (!parcelCoords || parcelCoords.length < 3) return lineCoords;
-  
-  const clippedPoints: number[][] = [];
+// Get line segments that are inside the polygon
+function getLineSegmentsInsidePolygon(
+  lineCoords: number[][], 
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): number[][] {
+  const result: number[][] = [];
   
   for (let i = 0; i < lineCoords.length; i++) {
-    const point = lineCoords[i];
+    const point = lineCoords[i] as [number, number];
     
-    if (pointInPolygon(point as [number, number], parcelCoords)) {
-      clippedPoints.push(point);
-    } else if (i > 0) {
+    if (pointInParcel(point, parcelGeometry)) {
+      result.push(point);
+    } else if (result.length > 0 && i > 0) {
       // Find intersection with parcel boundary
-      const prevPoint = lineCoords[i - 1];
-      if (pointInPolygon(prevPoint as [number, number], parcelCoords)) {
-        const intersection = findParcelBoundaryIntersection(prevPoint, point, parcelCoords);
-        if (intersection) clippedPoints.push(intersection);
+      const prevPoint = lineCoords[i - 1] as [number, number];
+      if (pointInParcel(prevPoint, parcelGeometry)) {
+        const intersection = findBoundaryIntersection(prevPoint, point, parcelGeometry);
+        if (intersection) result.push(intersection);
+        break; // Stop at first exit
       }
     }
   }
   
-  return clippedPoints.length >= 2 ? clippedPoints : lineCoords;
+  return result;
 }
 
 // Find where a line segment crosses the parcel boundary
-function findParcelBoundaryIntersection(inside: number[], outside: number[], parcelCoords: number[][]): number[] | null {
-  for (let i = 0; i < parcelCoords.length - 1; i++) {
-    const edgeStart = parcelCoords[i];
-    const edgeEnd = parcelCoords[i + 1];
-    const intersection = lineIntersection(inside, outside, edgeStart, edgeEnd);
+function findBoundaryIntersection(
+  inside: [number, number], 
+  outside: [number, number], 
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): number[] | null {
+  try {
+    const line = turf.lineString([inside, outside]);
+    const poly = turf.feature(parcelGeometry);
     
-    if (intersection) {
-      // Check if intersection is within both line segments
-      const onSegment1 = isPointOnSegment(intersection, inside, outside);
-      const onSegment2 = isPointOnSegment(intersection, edgeStart, edgeEnd);
-      if (onSegment1 && onSegment2) return intersection;
+    // Get polygon boundary as linestring(s)
+    const boundary = turf.polygonToLine(poly as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
+    
+    // Find intersections
+    const intersections = turf.lineIntersect(line, boundary);
+    
+    if (intersections.features.length > 0) {
+      // Return closest intersection to inside point
+      let closest = intersections.features[0].geometry.coordinates;
+      let minDist = turf.distance(turf.point(inside), turf.point(closest as [number, number]));
+      
+      for (const feat of intersections.features) {
+        const dist = turf.distance(turf.point(inside), feat);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = feat.geometry.coordinates;
+        }
+      }
+      
+      return closest as number[];
     }
-  }
+  } catch { /* ignore */ }
+  
   return null;
-}
-
-// Check if point lies on a line segment
-function isPointOnSegment(point: number[], segStart: number[], segEnd: number[]): boolean {
-  const minX = Math.min(segStart[0], segEnd[0]) - 1e-9;
-  const maxX = Math.max(segStart[0], segEnd[0]) + 1e-9;
-  const minY = Math.min(segStart[1], segEnd[1]) - 1e-9;
-  const maxY = Math.max(segStart[1], segEnd[1]) + 1e-9;
-  return point[0] >= minX && point[0] <= maxX && point[1] >= minY && point[1] <= maxY;
 }
 
 // ============ Synthetic Data Generators ============
@@ -576,7 +623,7 @@ function generateSyntheticBedding(
   center: [number, number],
   bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
   acreage: number,
-  parcelCoords?: number[][]
+  parcelGeometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): GeoJSON.FeatureCollection<GeoJSON.Polygon, BeddingProperties> {
   const features: GeoJSON.Feature<GeoJSON.Polygon, BeddingProperties>[] = [];
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -591,8 +638,8 @@ function generateSyntheticBedding(
   for (let i = 0; i < numBedding; i++) {
     // Generate center point INSIDE the parcel
     let beddingCenter: [number, number];
-    if (parcelCoords) {
-      beddingCenter = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    if (parcelGeometry) {
+      beddingCenter = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
     } else {
       // Fallback: small offset from center
       beddingCenter = [
@@ -606,9 +653,9 @@ function generateSyntheticBedding(
     const radius = baseRadius * (0.6 + rand() * 0.6);
     let polygon = createIrregularPolygon(beddingCenter, radius, 8 + Math.floor(rand() * 4), rand);
     
-    // CLIP polygon to parcel boundary (proper intersection, not shrink)
-    if (parcelCoords && parcelCoords.length >= 3) {
-      polygon = clipPolygonToParcel(polygon, parcelCoords);
+    // CLIP polygon to parcel boundary using Turf.js (handles concave polygons)
+    if (parcelGeometry) {
+      polygon = clipPolygonToParcel(polygon, parcelGeometry);
       
       // Skip if clipped polygon is degenerate
       if (polygon.length < 4) continue;
@@ -637,7 +684,7 @@ function generateSyntheticBedding(
 function generateSyntheticFunnels(
   center: [number, number],
   bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
-  parcelCoords?: number[][]
+  parcelGeometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties> {
   const features: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties>[] = [];
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -651,8 +698,8 @@ function generateSyntheticFunnels(
   for (let i = 0; i < numSaddles; i++) {
     // Generate saddle center inside parcel
     let saddleCenter: [number, number];
-    if (parcelCoords) {
-      saddleCenter = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    if (parcelGeometry) {
+      saddleCenter = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
     } else {
       saddleCenter = [
         center[0] + (rand() - 0.5) * lngSpan * 0.2,
@@ -665,9 +712,9 @@ function generateSyntheticFunnels(
     const radius = baseRadius * (0.6 + rand() * 0.6);
     let polygon = createIrregularPolygon(saddleCenter, radius, 6, rand);
     
-    // CLIP polygon to parcel boundary (proper intersection)
-    if (parcelCoords && parcelCoords.length >= 3) {
-      polygon = clipPolygonToParcel(polygon, parcelCoords);
+    // CLIP polygon to parcel boundary using Turf.js
+    if (parcelGeometry) {
+      polygon = clipPolygonToParcel(polygon, parcelGeometry);
       
       // Skip if clipped polygon is degenerate
       if (polygon.length < 4) continue;
@@ -691,10 +738,10 @@ function generateSyntheticFunnels(
     let endPoint: [number, number];
     let midPoint: [number, number];
     
-    if (parcelCoords) {
-      startPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
-      endPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
-      midPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    if (parcelGeometry) {
+      startPoint = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
+      endPoint = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
+      midPoint = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
     } else {
       startPoint = [center[0] - lngSpan * 0.15, center[1] + latSpan * 0.1];
       endPoint = [center[0] + lngSpan * 0.15, center[1] - latSpan * 0.1];
@@ -703,8 +750,8 @@ function generateSyntheticFunnels(
     
     // Clip line to parcel boundary
     let lineCoords: number[][] = [startPoint, midPoint, endPoint];
-    if (parcelCoords && parcelCoords.length >= 3) {
-      lineCoords = clipLineToParcel(lineCoords, parcelCoords);
+    if (parcelGeometry) {
+      lineCoords = clipLineToParcel(lineCoords, parcelGeometry);
       if (lineCoords.length < 2) continue; // Skip degenerate lines
     }
     
@@ -724,10 +771,10 @@ function generateSyntheticFunnels(
   let corridorEnd: [number, number];
   let corridorMid: [number, number];
   
-  if (parcelCoords) {
-    corridorStart = generatePointInsideParcel(parcelCoords, center, bounds, rand);
-    corridorEnd = generatePointInsideParcel(parcelCoords, center, bounds, rand);
-    corridorMid = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+  if (parcelGeometry) {
+    corridorStart = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
+    corridorEnd = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
+    corridorMid = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
   } else {
     corridorStart = [center[0] - lngSpan * 0.2, center[1]];
     corridorEnd = [center[0] + lngSpan * 0.2, center[1]];
@@ -736,8 +783,8 @@ function generateSyntheticFunnels(
   
   // Clip corridor line to parcel
   let corridorCoords: number[][] = [corridorStart, corridorMid, corridorEnd];
-  if (parcelCoords && parcelCoords.length >= 3) {
-    corridorCoords = clipLineToParcel(corridorCoords, parcelCoords);
+  if (parcelGeometry) {
+    corridorCoords = clipLineToParcel(corridorCoords, parcelGeometry);
   }
   
   if (corridorCoords.length >= 2) {
@@ -762,7 +809,7 @@ function generateSyntheticStands(
   prevailingWinds: WindDirection[],
   bedding: GeoJSON.FeatureCollection<GeoJSON.Polygon, BeddingProperties>,
   funnels: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties>,
-  parcelCoords?: number[][]
+  parcelGeometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): GeoJSON.FeatureCollection<GeoJSON.Point, StandPointProperties> {
   const features: GeoJSON.Feature<GeoJSON.Point, StandPointProperties>[] = [];
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -791,9 +838,9 @@ function generateSyntheticStands(
   for (let i = 0; i < 10; i++) {
     let standPoint: [number, number];
     
-    if (parcelCoords) {
-      // Generate point guaranteed inside parcel
-      standPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    if (parcelGeometry) {
+      // Generate point guaranteed inside parcel using Turf.js
+      standPoint = generatePointInsideParcel(parcelGeometry, center, bounds, rand);
     } else {
       // Fallback: small offset from center
       standPoint = [

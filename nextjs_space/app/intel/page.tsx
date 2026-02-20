@@ -204,6 +204,7 @@ function DeerIntelContent() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon> | null>(null);
+  const [isSyntheticParcel, setIsSyntheticParcel] = useState(false); // Warn if using fallback geometry
 
   // Check WebGL support
   const checkWebGLSupport = (): boolean => {
@@ -287,13 +288,17 @@ function DeerIntelContent() {
       // First, try to get real parcel geometry from Regrid
       setProgress(15);
       let parcel = await fetchRealParcelGeometry(lat, lng);
+      let usingSynthetic = false;
       
       // Fallback to synthetic square if Regrid fails
       if (!parcel) {
         const acreage = acreageParam ? parseFloat(acreageParam) : 80;
         parcel = generateFallbackParcelPolygon(lat, lng, acreage) as GeoJSON.Feature<GeoJSON.Polygon>;
+        usingSynthetic = true;
+        console.warn('[TFP] Using synthetic square parcel - Regrid unavailable');
       }
       
+      setIsSyntheticParcel(usingSynthetic);
       setParcelPolygon(parcel as GeoJSON.Feature<GeoJSON.Polygon>); // Save for map display
 
       setProgress(30);
@@ -1244,6 +1249,18 @@ function DeerIntelContent() {
         <div className="absolute bottom-4 left-4 z-30 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-amber-500/30">
           <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
           <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
+        </div>
+      )}
+
+      {/* Synthetic Parcel Warning - warns user when Regrid lookup failed */}
+      {isSyntheticParcel && !isLoading && (
+        <div className="absolute top-4 right-4 z-30 bg-red-900/90 backdrop-blur-sm rounded-lg px-3 py-2 border border-red-500/50 max-w-xs">
+          <p className="text-red-300 text-xs font-bold flex items-center gap-1">
+            <AlertTriangle className="w-3.5 h-3.5" /> Synthetic Parcel Geometry
+          </p>
+          <p className="text-white/70 text-xs mt-1">
+            Unable to fetch real parcel boundaries. Using estimated square geometry. Intel features may extend beyond actual property lines.
+          </p>
         </div>
       )}
 
