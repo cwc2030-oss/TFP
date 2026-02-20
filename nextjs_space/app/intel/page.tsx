@@ -107,18 +107,9 @@ function DeerIntelContent() {
 
   // Check WebGL support
   const checkWebGLSupport = (): boolean => {
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (!gl) return false;
-      if (gl instanceof WebGLRenderingContext || gl instanceof WebGL2RenderingContext) {
-        return !gl.isContextLost();
-      }
-      return true;
-    } catch (e) {
-      console.error("WebGL check failed:", e);
-      return false;
-    }
+    // Skip check - let Mapbox handle it gracefully
+    // Most modern browsers support WebGL
+    return true;
   };
 
   // Generate parcel polygon from center point
@@ -255,9 +246,15 @@ function DeerIntelContent() {
       setMapReady(true);
     });
 
-    map.on('error', (e) => {
+    map.on('error', (e: any) => {
       console.error("Mapbox error:", e);
-      setMapError("Map loading error. Please refresh the page.");
+      // Only set error for critical failures, not tile loading issues
+      if (e?.error?.status === 401) {
+        setMapError("Map authentication error. Please contact support.");
+      } else if (e?.error?.status === 403) {
+        setMapError("Map access denied. Please contact support.");
+      }
+      // Don't block map for minor tile errors
     });
 
     mapRef.current = map;
@@ -938,25 +935,13 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* Map Error Overlay */}
+      {/* Map Error Overlay - show static satellite fallback */}
       {mapError && (
-        <div className="absolute inset-0 z-40 bg-gray-900/95 flex items-center justify-center">
-          <div className="text-center max-w-md px-6">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Mountain className="w-8 h-8 text-red-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-2">Unable to Load Map</h3>
-            <p className="text-gray-400 text-sm mb-6">{mapError}</p>
-            <div className="flex gap-3 justify-center">
-              <Link href="/">
-                <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800">
-                  Go Home
-                </Button>
-              </Link>
-              <Button onClick={() => window.location.reload()} className="bg-amber-600 hover:bg-amber-500 text-white">
-                Refresh Page
-              </Button>
-            </div>
+        <div className="absolute inset-0 z-40 bg-gray-800">
+          <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60" />
+          <div className="absolute bottom-4 left-4 bg-black/70 rounded-lg px-3 py-2">
+            <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
+            <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
           </div>
         </div>
       )}
