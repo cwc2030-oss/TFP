@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { X, RotateCcw, Compass, Mountain, Target, Info, Maximize2, Camera, Pause, Layers } from "lucide-react";
+import { X, RotateCcw, Compass, Mountain, Target, Info, Maximize2, Camera, Pause, Layers, Crosshair } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -435,6 +435,17 @@ export default function Terrain3DView({
                 {isSpinning ? <Pause className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
                 <span className="hidden md:inline">{isSpinning ? 'Stop' : 'Cinematic'}</span>
               </Button>
+              {onUnlockIntel && (
+                <Button
+                  size="sm"
+                  onClick={onUnlockIntel}
+                  className="bg-red-600 hover:bg-red-500 text-white gap-1.5 text-xs font-semibold animate-pulse"
+                  title="View Deer Intel Analysis"
+                >
+                  <Crosshair className="w-4 h-4" />
+                  <span className="hidden sm:inline">Deer Intel</span>
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -594,6 +605,18 @@ export default function Terrain3DView({
                       <span className="text-amber-400 font-medium"> Yellow topo lines</span> are USGS-verified elevation contours you can walk on-site.
                     </p>
                   </div>
+
+                  {/* Deer Intel CTA */}
+                  {onUnlockIntel && (
+                    <button
+                      onClick={onUnlockIntel}
+                      className="w-full mt-3 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-all shadow-lg"
+                    >
+                      <Crosshair className="w-5 h-5" />
+                      <span className="font-semibold">View Full Deer Intel Analysis</span>
+                      <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">NEW</span>
+                    </button>
+                  )}
 
                   <p className="text-[10px] text-stone-500 mt-3 text-center">
                     Drag to rotate • Scroll to zoom • Right-click to tilt • Hit <span className="text-amber-400">Cinematic</span> for the flyover

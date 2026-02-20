@@ -119,7 +119,8 @@ function PreviewContent() {
   }, [lat, lng, address, router]);
   
   const handleUnlock = () => {
-    router.push(`/map?lat=${lat}&lng=${lng}&product=hunting_intel&checkout=true`);
+    // Go to the new Deer Intel page with terrain analysis
+    router.push(`/intel?lat=${parcelInfo?.lat || lat}&lng=${parcelInfo?.lng || lng}&address=${encodeURIComponent(parcelInfo?.address || address)}&acreage=${parcelInfo?.acreage || 80}`);
   };
   
   const handleExploreMap = () => {
