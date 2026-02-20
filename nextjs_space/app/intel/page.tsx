@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import { MapboxOverlay } from '@deck.gl/mapbox';
+import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { 
   Target, TreePine, Wind, Calendar, ChevronLeft, ChevronRight, 
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
@@ -32,7 +34,7 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 declare global {
   interface Window {
     __TFP_MAP__: mapboxgl.Map | null;
-    __TFP_LAYERS_INITIALIZED__: boolean;
+    __TFP_DECK__: MapboxOverlay | null;
   }
 }
 
@@ -49,7 +51,7 @@ function closePolygonRing(coords: number[][]): number[][] {
   return coords;
 }
 
-// Validate and fix GeoJSON for Mapbox consumption
+// Validate and fix GeoJSON for consumption
 function validateGeoJSON(geojson: GeoJSON.FeatureCollection | GeoJSON.Feature | null): GeoJSON.FeatureCollection {
   const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
   
@@ -104,21 +106,13 @@ function filterByGeometryType(
   };
 }
 
-// ========== LAYER STATE MACHINE ==========
-const LAYER_IDS = {
-  // Sources
-  PARCEL_SOURCE: 'tfp-parcel',
-  BEDDING_SOURCE: 'tfp-bedding',
-  FUNNELS_SOURCE: 'tfp-funnels',
-  
-  // Layers
-  PARCEL_LINE: 'tfp-parcel-line',
-  BEDDING_FILL: 'tfp-bedding-fill',
-  BEDDING_LINE: 'tfp-bedding-line',
-  FUNNELS_FILL: 'tfp-funnels-fill',
-  FUNNELS_LINE: 'tfp-funnels-line',
-  FUNNELS_POINTS: 'tfp-funnels-points',
-} as const;
+// ========== HELPER: Convert hex to RGBA array for Deck.gl ==========
+function hexToRgba(hex: string, alpha = 255): [number, number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return [r, g, b, alpha];
+}
 
 const WIND_DIRECTIONS: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: string }[] = [
@@ -127,6 +121,7 @@ const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: strin
   { value: 'late', label: 'Late Season', dates: 'Dec-Jan', icon: '❄️' },
 ];
 
+// Colors as hex (for UI) and rgba (for Deck.gl)
 const LAYER_COLORS = {
   bedding: '#22c55e',
   beddingOutline: '#16a34a',
@@ -136,6 +131,17 @@ const LAYER_COLORS = {
   standHigh: '#ef4444',
   standMed: '#f59e0b',
   standLow: '#6b7280',
+  parcelBoundary: '#fbbf24',
+};
+
+// Deck.gl RGBA colors
+const DECK_COLORS = {
+  bedding: hexToRgba('#22c55e', 100),       // fill with alpha
+  beddingOutline: hexToRgba('#16a34a', 255),
+  funnelSaddle: hexToRgba('#f97316', 130),
+  funnelDraw: hexToRgba('#3b82f6', 230),
+  funnelCorridor: hexToRgba('#a855f7', 230),
+  parcelBoundary: hexToRgba('#fbbf24', 255),
 };
 
 function LoadingFallback() {
@@ -276,197 +282,150 @@ function DeerIntelContent() {
     }
   }, [lat, lng, season, windDirection, acreageParam, generateParcelPolygon]);
 
-  // ========== TERRAIN LAYERS INITIALIZATION (State Machine) ==========
-  const initTerrainLayers = useCallback((map: mapboxgl.Map) => {
-    if (typeof window !== 'undefined' && window.__TFP_LAYERS_INITIALIZED__) {
-      console.log('[TFP] Layers already initialized, skipping init');
-      return;
-    }
+  // ========== DECK.GL OVERLAY REF ==========
+  const deckOverlayRef = useRef<MapboxOverlay | null>(null);
+
+  // ========== DECK.GL LAYERS (computed from data + visibility) ==========
+  const deckLayers = useMemo(() => {
+    const layersList: any[] = [];
     
-    console.log('[TFP] ====== initTerrainLayers START ======');
-    
-    // Find a suitable beforeId - we want to be above satellite but below labels
-    // Look for first symbol layer (usually labels)
-    let beforeId: string | undefined;
-    const styleLayers = map.getStyle()?.layers || [];
-    for (const layer of styleLayers) {
-      if (layer.type === 'symbol') {
-        beforeId = layer.id;
-        break;
-      }
-    }
-    console.log('[TFP] Will insert layers before:', beforeId || '(top of stack)');
-    
-    // Empty GeoJSON for initial sources
-    const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-    
-    try {
-      // 1. PARCEL SOURCE & LAYER (yellow boundary line)
-      if (!map.getSource(LAYER_IDS.PARCEL_SOURCE)) {
-        map.addSource(LAYER_IDS.PARCEL_SOURCE, { type: 'geojson', data: emptyFC });
-        console.log('[TFP] Added source:', LAYER_IDS.PARCEL_SOURCE);
-      }
-      if (!map.getLayer(LAYER_IDS.PARCEL_LINE)) {
-        map.addLayer({
-          id: LAYER_IDS.PARCEL_LINE,
-          type: 'line',
-          source: LAYER_IDS.PARCEL_SOURCE,
-          paint: {
-            'line-color': '#fbbf24',
-            'line-width': 4,
-            'line-dasharray': [3, 2],
-          },
-        }, beforeId);
-        console.log('[TFP] Added layer:', LAYER_IDS.PARCEL_LINE);
-      }
-      
-      // 2. BEDDING SOURCE & LAYERS (green fill + outline)
-      if (!map.getSource(LAYER_IDS.BEDDING_SOURCE)) {
-        map.addSource(LAYER_IDS.BEDDING_SOURCE, { type: 'geojson', data: emptyFC });
-        console.log('[TFP] Added source:', LAYER_IDS.BEDDING_SOURCE);
-      }
-      if (!map.getLayer(LAYER_IDS.BEDDING_FILL)) {
-        map.addLayer({
-          id: LAYER_IDS.BEDDING_FILL,
-          type: 'fill',
-          source: LAYER_IDS.BEDDING_SOURCE,
-          paint: {
-            'fill-color': LAYER_COLORS.bedding,
-            'fill-opacity': 0.4,
-          },
-        }, beforeId);
-        console.log('[TFP] Added layer:', LAYER_IDS.BEDDING_FILL);
-      }
-      if (!map.getLayer(LAYER_IDS.BEDDING_LINE)) {
-        map.addLayer({
-          id: LAYER_IDS.BEDDING_LINE,
-          type: 'line',
-          source: LAYER_IDS.BEDDING_SOURCE,
-          paint: {
-            'line-color': LAYER_COLORS.beddingOutline,
-            'line-width': 2,
-          },
-        }, beforeId);
-        console.log('[TFP] Added layer:', LAYER_IDS.BEDDING_LINE);
-      }
-      
-      // 3. FUNNELS SOURCE & LAYERS (fill for saddles, lines for draws/corridors, circles for points)
-      if (!map.getSource(LAYER_IDS.FUNNELS_SOURCE)) {
-        map.addSource(LAYER_IDS.FUNNELS_SOURCE, { type: 'geojson', data: emptyFC });
-        console.log('[TFP] Added source:', LAYER_IDS.FUNNELS_SOURCE);
-      }
-      // Saddle fills (orange polygons)
-      if (!map.getLayer(LAYER_IDS.FUNNELS_FILL)) {
-        map.addLayer({
-          id: LAYER_IDS.FUNNELS_FILL,
-          type: 'fill',
-          source: LAYER_IDS.FUNNELS_SOURCE,
-          filter: ['==', ['geometry-type'], 'Polygon'],
-          paint: {
-            'fill-color': LAYER_COLORS.funnelSaddle,
-            'fill-opacity': 0.5,
-          },
-        }, beforeId);
-        console.log('[TFP] Added layer:', LAYER_IDS.FUNNELS_FILL);
-      }
-      // Draw/corridor lines
-      if (!map.getLayer(LAYER_IDS.FUNNELS_LINE)) {
-        map.addLayer({
-          id: LAYER_IDS.FUNNELS_LINE,
-          type: 'line',
-          source: LAYER_IDS.FUNNELS_SOURCE,
-          filter: ['==', ['geometry-type'], 'LineString'],
-          paint: {
-            'line-color': [
-              'case',
-              ['==', ['get', 'funnelType'], 'draw'], LAYER_COLORS.funnelDraw,
-              ['==', ['get', 'funnelType'], 'corridor'], LAYER_COLORS.funnelCorridor,
-              LAYER_COLORS.funnelSaddle
-            ],
-            'line-width': 5,
-            'line-opacity': 0.9,
-          },
-        }, beforeId);
-        console.log('[TFP] Added layer:', LAYER_IDS.FUNNELS_LINE);
-      }
-      // Funnel points (circles)
-      if (!map.getLayer(LAYER_IDS.FUNNELS_POINTS)) {
-        map.addLayer({
-          id: LAYER_IDS.FUNNELS_POINTS,
-          type: 'circle',
-          source: LAYER_IDS.FUNNELS_SOURCE,
-          filter: ['==', ['geometry-type'], 'Point'],
-          paint: {
-            'circle-radius': 10,
-            'circle-color': LAYER_COLORS.funnelSaddle,
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#fff',
-          },
-        }, beforeId);
-        console.log('[TFP] Added layer:', LAYER_IDS.FUNNELS_POINTS);
-      }
-      
-      if (typeof window !== 'undefined') {
-        window.__TFP_LAYERS_INITIALIZED__ = true;
-      }
-      console.log('[TFP] ====== initTerrainLayers COMPLETE ======');
-      
-    } catch (err) {
-      console.error('[TFP] Error in initTerrainLayers:', err);
-    }
-  }, []);
-  
-  // ========== UPDATE LAYER DATA (setData, no add/remove) ==========
-  const updateLayerData = useCallback((map: mapboxgl.Map) => {
-    console.log('[TFP] ====== updateLayerData START ======');
-    
-    // 1. Update parcel boundary
+    console.log('[TFP-Deck] Computing layers, visibility:', visibility);
+    console.log('[TFP-Deck] parcelPolygon:', parcelPolygon ? 'exists' : 'null');
+    console.log('[TFP-Deck] layers:', layers ? 'exists' : 'null');
+
+    // 1. PARCEL BOUNDARY (yellow dashed line) - always visible
     if (parcelPolygon) {
       const parcelFC = validateGeoJSON(parcelPolygon);
-      const source = map.getSource(LAYER_IDS.PARCEL_SOURCE) as mapboxgl.GeoJSONSource;
-      if (source) {
-        source.setData(parcelFC);
-        console.log('[TFP] Updated parcel data:', parcelFC.features.length, 'features');
-      } else {
-        console.warn('[TFP] Parcel source not found');
-      }
+      layersList.push(
+        new GeoJsonLayer({
+          id: 'tfp-parcel-boundary',
+          data: parcelFC,
+          stroked: true,
+          filled: false,
+          lineWidthUnits: 'pixels',
+          getLineColor: DECK_COLORS.parcelBoundary,
+          getLineWidth: 4,
+          lineWidthMinPixels: 3,
+          getDashArray: [12, 6],
+          dashJustified: true,
+          extensions: [], // no extensions needed for dashed lines in deck.gl v9
+        })
+      );
+      console.log('[TFP-Deck] Added parcel boundary layer');
     }
-    
-    // 2. Update bedding
-    if (layers?.beddingPolygons) {
+
+    // 2. BEDDING AREAS (green filled polygons)
+    if (layers?.beddingPolygons && visibility.bedding) {
       const beddingFC = validateGeoJSON(layers.beddingPolygons);
-      // Only keep polygon/multipolygon geometries for fill layers
-      const filteredBedding = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
-      const source = map.getSource(LAYER_IDS.BEDDING_SOURCE) as mapboxgl.GeoJSONSource;
-      if (source) {
-        source.setData(filteredBedding);
-        console.log('[TFP] Updated bedding data:', filteredBedding.features.length, 'polygon features');
-      } else {
-        console.warn('[TFP] Bedding source not found');
-      }
+      const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
+      
+      layersList.push(
+        new GeoJsonLayer({
+          id: 'tfp-bedding-fill',
+          data: polygonsOnly,
+          stroked: true,
+          filled: true,
+          getFillColor: DECK_COLORS.bedding,
+          getLineColor: DECK_COLORS.beddingOutline,
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 1,
+        })
+      );
+      console.log('[TFP-Deck] Added bedding layer with', polygonsOnly.features.length, 'features');
     }
-    
-    // 3. Update funnels (mixed geometry types)
-    if (layers?.funnels) {
+
+    // 3. FUNNELS - Saddles (orange filled polygons)
+    if (layers?.funnels && visibility.funnels) {
       const funnelsFC = validateGeoJSON(layers.funnels);
-      const source = map.getSource(LAYER_IDS.FUNNELS_SOURCE) as mapboxgl.GeoJSONSource;
-      if (source) {
-        source.setData(funnelsFC);
-        console.log('[TFP] Updated funnels data:', funnelsFC.features.length, 'features');
-        // Log geometry type breakdown
-        const geomTypes: Record<string, number> = {};
-        funnelsFC.features.forEach(f => {
-          const t = f.geometry?.type || 'unknown';
-          geomTypes[t] = (geomTypes[t] || 0) + 1;
-        });
-        console.log('[TFP] Funnel geometry breakdown:', geomTypes);
-      } else {
-        console.warn('[TFP] Funnels source not found');
+      const saddlePolygons = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
+      
+      if (saddlePolygons.features.length > 0) {
+        layersList.push(
+          new GeoJsonLayer({
+            id: 'tfp-funnel-saddles',
+            data: saddlePolygons,
+            stroked: true,
+            filled: true,
+            getFillColor: DECK_COLORS.funnelSaddle,
+            getLineColor: hexToRgba('#ea580c', 255),
+            getLineWidth: 2,
+            lineWidthUnits: 'pixels',
+            lineWidthMinPixels: 1,
+          })
+        );
+        console.log('[TFP-Deck] Added saddle polygons:', saddlePolygons.features.length);
       }
     }
-    
-    console.log('[TFP] ====== updateLayerData COMPLETE ======');
-  }, [parcelPolygon, layers]);
+
+    // 4. FUNNELS - Draws and Corridors (lines)
+    if (layers?.funnels && (visibility.funnels || visibility.corridors)) {
+      const funnelsFC = validateGeoJSON(layers.funnels);
+      const lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
+      
+      if (lines.features.length > 0) {
+        layersList.push(
+          new GeoJsonLayer({
+            id: 'tfp-funnel-lines',
+            data: lines,
+            stroked: true,
+            filled: false,
+            getLineColor: (f: any) => {
+              const funnelType = f.properties?.funnelType;
+              if (funnelType === 'draw') return DECK_COLORS.funnelDraw;
+              if (funnelType === 'corridor') return DECK_COLORS.funnelCorridor;
+              return DECK_COLORS.funnelSaddle;
+            },
+            getLineWidth: 6,
+            lineWidthUnits: 'pixels',
+            lineWidthMinPixels: 3,
+          })
+        );
+        console.log('[TFP-Deck] Added funnel lines:', lines.features.length);
+      }
+    }
+
+    // 5. FUNNEL POINTS (circles) - using ScatterplotLayer
+    if (layers?.funnels && visibility.funnels) {
+      const funnelsFC = validateGeoJSON(layers.funnels);
+      const points = filterByGeometryType(funnelsFC, ['Point']);
+      
+      if (points.features.length > 0) {
+        const pointData = points.features.map(f => ({
+          coordinates: (f.geometry as GeoJSON.Point).coordinates as [number, number],
+          properties: f.properties,
+        }));
+        
+        layersList.push(
+          new ScatterplotLayer({
+            id: 'tfp-funnel-points',
+            data: pointData,
+            getPosition: (d: any) => d.coordinates,
+            getFillColor: hexToRgba('#f97316', 200),
+            getLineColor: [255, 255, 255, 255],
+            getRadius: 12,
+            radiusUnits: 'pixels',
+            radiusMinPixels: 8,
+            stroked: true,
+            lineWidthUnits: 'pixels',
+            lineWidthMinPixels: 2,
+          })
+        );
+        console.log('[TFP-Deck] Added funnel points:', points.features.length);
+      }
+    }
+
+    console.log('[TFP-Deck] Total layers created:', layersList.length);
+    return layersList;
+  }, [parcelPolygon, layers, visibility]);
+
+  // ========== UPDATE DECK OVERLAY WHEN LAYERS CHANGE ==========
+  useEffect(() => {
+    if (deckOverlayRef.current && mapReady) {
+      console.log('[TFP-Deck] Updating overlay with', deckLayers.length, 'layers');
+      deckOverlayRef.current.setProps({ layers: deckLayers });
+    }
+  }, [deckLayers, mapReady]);
 
   // Initialize map
   useEffect(() => {
@@ -496,11 +455,6 @@ function DeerIntelContent() {
     console.log('[TFP] Creating Mapbox map with token:', MAPBOX_TOKEN.substring(0, 20) + '...');
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
-    // Reset layer init flag on new map
-    if (typeof window !== 'undefined') {
-      window.__TFP_LAYERS_INITIALIZED__ = false;
-    }
-
     let map: mapboxgl.Map;
 
     try {
@@ -517,7 +471,6 @@ function DeerIntelContent() {
       // Expose for debugging
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = map;
-        console.log('[TFP] window.__TFP_MAP__ set for debugging');
       }
     } catch (err) {
       console.error("[TFP] Failed to initialize Mapbox:", err);
@@ -534,9 +487,6 @@ function DeerIntelContent() {
       console.error("[TFP] ====== MAPBOX ERROR ======");
       console.error("[TFP] Error event:", e);
       console.error("[TFP] Error message:", e?.error?.message || e?.message || 'Unknown');
-      console.error("[TFP] Error status:", e?.error?.status);
-      console.error("[TFP] Source ID:", e?.sourceId);
-      console.error("[TFP] Tile:", e?.tile);
       
       // Only set UI error for critical failures
       if (e?.error?.status === 401) {
@@ -546,7 +496,7 @@ function DeerIntelContent() {
       }
     });
 
-    // Style load handler - initialize our layers
+    // Style load handler - set up terrain and Deck.gl overlay
     const handleStyleLoad = () => {
       console.log('[TFP] style.load event fired');
       
@@ -576,8 +526,20 @@ function DeerIntelContent() {
         console.log('[TFP] Added sky layer');
       }
       
-      // Initialize our terrain layers (state machine)
-      initTerrainLayers(map);
+      // Create Deck.gl overlay (only once)
+      if (!deckOverlayRef.current) {
+        const overlay = new MapboxOverlay({
+          interleaved: true, // Renders with Mapbox layers for proper depth
+          layers: [], // Start empty, will be updated by effect
+        });
+        map.addControl(overlay as any);
+        deckOverlayRef.current = overlay;
+        
+        if (typeof window !== 'undefined') {
+          window.__TFP_DECK__ = overlay;
+        }
+        console.log('[TFP-Deck] MapboxOverlay created and added to map');
+      }
       
       setMapReady(true);
       console.log('[TFP] Map ready state set to true');
@@ -586,9 +548,15 @@ function DeerIntelContent() {
     // Handle both initial load and style changes
     map.on('load', handleStyleLoad);
     map.on('style.load', () => {
-      console.log('[TFP] style.load event - checking if re-init needed');
-      if (typeof window !== 'undefined') {
-        window.__TFP_LAYERS_INITIALIZED__ = false;
+      console.log('[TFP] style.load event - re-creating Deck overlay');
+      // On style change, we need to re-add the overlay
+      if (deckOverlayRef.current) {
+        try {
+          (map as any).removeControl(deckOverlayRef.current);
+        } catch (e) {
+          // Ignore - may already be removed
+        }
+        deckOverlayRef.current = null;
       }
       handleStyleLoad();
     });
@@ -599,111 +567,42 @@ function DeerIntelContent() {
       console.log('[TFP] Cleaning up map');
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = null;
-        window.__TFP_LAYERS_INITIALIZED__ = false;
+        window.__TFP_DECK__ = null;
+      }
+      if (deckOverlayRef.current) {
+        deckOverlayRef.current = null;
       }
       map.remove();
       mapRef.current = null;
     };
-  }, [lat, lng, initTerrainLayers]);
+  }, [lat, lng]);
 
   // Run analysis immediately on mount, and when season/wind changes
   useEffect(() => {
     runAnalysis();
   }, [season, windDirection]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ========== DATA UPDATE EFFECT ==========
-  // When layers or parcelPolygon change, update the source data (no add/remove)
+  // ========== STAND MARKERS EFFECT (HTML markers for interactivity) ==========
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady) {
-      console.log('[TFP] Skipping data update - map not ready');
+    if (!map || !mapReady || !layers?.standPoints) {
       return;
     }
-    if (!layers && !parcelPolygon) {
-      console.log('[TFP] Skipping data update - no data yet');
-      return;
-    }
+    
+    console.log('[TFP] Adding stand markers');
+    addStandMarkers();
+  }, [layers, mapReady]);
 
-    console.log('[TFP] Data update effect triggered');
-    console.log('[TFP] parcelPolygon:', parcelPolygon ? 'exists' : 'null');
-    console.log('[TFP] layers:', layers ? 'exists' : 'null');
-    console.log('[TFP] layers initialized:', typeof window !== 'undefined' ? window.__TFP_LAYERS_INITIALIZED__ : 'N/A');
-
-    // Ensure layers are initialized
-    if (typeof window !== 'undefined' && !window.__TFP_LAYERS_INITIALIZED__) {
-      console.log('[TFP] Layers not initialized yet, calling initTerrainLayers');
-      initTerrainLayers(map);
-    }
-
-    // Small delay to ensure sources exist after init
-    const timerId = setTimeout(() => {
-      updateLayerData(map);
-      // Also add stand markers (HTML elements)
-      addStandMarkers();
-    }, 100);
-
-    return () => clearTimeout(timerId);
-  }, [layers, mapReady, parcelPolygon, initTerrainLayers, updateLayerData]);
-
-  // ========== VISIBILITY TOGGLE EFFECT ==========
+  // ========== VISIBILITY EFFECT (for HTML markers only - Deck.gl handles layer visibility) ==========
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-
-    console.log('[TFP] Visibility update:', visibility);
-
-    // Bedding layers
-    if (map.getLayer(LAYER_IDS.BEDDING_FILL)) {
-      map.setPaintProperty(LAYER_IDS.BEDDING_FILL, 'fill-opacity', visibility.bedding ? 0.4 : 0);
-    }
-    if (map.getLayer(LAYER_IDS.BEDDING_LINE)) {
-      map.setPaintProperty(LAYER_IDS.BEDDING_LINE, 'line-opacity', visibility.bedding ? 1 : 0);
-    }
-
-    // Funnel layers (fill = saddles which use funnels toggle)
-    if (map.getLayer(LAYER_IDS.FUNNELS_FILL)) {
-      map.setPaintProperty(LAYER_IDS.FUNNELS_FILL, 'fill-opacity', visibility.funnels ? 0.5 : 0);
-    }
-    // Funnel lines (draws/corridors)
-    if (map.getLayer(LAYER_IDS.FUNNELS_LINE)) {
-      // Line visibility depends on both funnels and corridors toggles
-      // For now, use funnels toggle (can be refined if draws need separate control)
-      map.setPaintProperty(LAYER_IDS.FUNNELS_LINE, 'line-opacity', visibility.funnels || visibility.corridors ? 0.9 : 0);
-    }
-    // Funnel points
-    if (map.getLayer(LAYER_IDS.FUNNELS_POINTS)) {
-      map.setPaintProperty(LAYER_IDS.FUNNELS_POINTS, 'circle-opacity', visibility.funnels ? 1 : 0);
-    }
-
-    // Stand markers (HTML elements)
+    // Stand markers (HTML elements) - visibility controlled separately from Deck.gl layers
     markersRef.current.forEach(marker => {
       marker.getElement().style.display = visibility.stands ? 'block' : 'none';
     });
+  }, [visibility.stands]);
 
-  }, [visibility, mapReady]);
-
-  // Clean up layers (called before re-adding markers)
-  const removeLayers = () => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    // Remove layers first
-    [LAYER_IDS.PARCEL_LINE, LAYER_IDS.BEDDING_FILL, LAYER_IDS.BEDDING_LINE, 
-     LAYER_IDS.FUNNELS_FILL, LAYER_IDS.FUNNELS_LINE, LAYER_IDS.FUNNELS_POINTS].forEach(id => {
-      if (map.getLayer(id)) map.removeLayer(id);
-    });
-
-    // Then remove sources
-    [LAYER_IDS.PARCEL_SOURCE, LAYER_IDS.BEDDING_SOURCE, LAYER_IDS.FUNNELS_SOURCE].forEach(id => {
-      if (map.getSource(id)) map.removeSource(id);
-    });
-
-    // Reset init flag
-    if (typeof window !== 'undefined') {
-      window.__TFP_LAYERS_INITIALIZED__ = false;
-    }
-
-    // Clean up markers
+  // Clean up stand markers
+  const cleanupMarkers = () => {
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
@@ -712,7 +611,7 @@ function DeerIntelContent() {
       popupRef.current = null;
     }
     
-    console.log('[TFP] Layers removed');
+    console.log('[TFP] Markers cleaned up');
   };
 
   const addStandMarkers = () => {
@@ -720,8 +619,7 @@ function DeerIntelContent() {
     if (!map || !layers?.standPoints) return;
 
     // Clear existing markers first
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    cleanupMarkers();
 
     // Only show TOP 2 stands on the map
     const topTwoStands = layers.standPoints.features.slice(0, 2);
