@@ -8,7 +8,7 @@ import {
   Target, TreePine, Wind, Calendar, ChevronLeft, ChevronRight, 
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
-  Maximize2, Minimize2, RefreshCw
+  Maximize2, Minimize2, RefreshCw, Check
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -703,56 +703,6 @@ function DeerIntelContent() {
                 <p className="text-xs text-white/50 text-center mt-2">Select your dominant wind</p>
               </div>
 
-              {/* Layer Visibility */}
-              <div className="p-4 border-b border-white/10">
-                <div className="flex items-center gap-2 mb-3">
-                  <Layers className="h-4 w-4 text-purple-400" />
-                  <span className="text-sm font-medium text-white">Intel Layers</span>
-                </div>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibility.bedding}
-                      onChange={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
-                      className="rounded border-white/30 bg-white/10 text-green-500"
-                    />
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding }} />
-                    <span className="text-sm text-white/80">Bedding Areas</span>
-                  </label>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibility.funnels}
-                      onChange={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
-                      className="rounded border-white/30 bg-white/10 text-orange-500"
-                    />
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle }} />
-                    <span className="text-sm text-white/80">Saddles & Draws</span>
-                  </label>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibility.corridors}
-                      onChange={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
-                      className="rounded border-white/30 bg-white/10 text-purple-500"
-                    />
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelCorridor }} />
-                    <span className="text-sm text-white/80">Travel Corridors</span>
-                  </label>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibility.stands}
-                      onChange={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
-                      className="rounded border-white/30 bg-white/10 text-red-500"
-                    />
-                    <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
-                    <span className="text-sm text-white/80">Stand Sites</span>
-                  </label>
-                </div>
-              </div>
-
               {/* Analysis Summary */}
               {summary && (
                 <div className="p-4 flex-1">
@@ -819,7 +769,7 @@ function DeerIntelContent() {
         </div>
       </div>
 
-      {/* Right Panel - Stand List */}
+      {/* Right Panel - Layer Filters + Top 2 Stands */}
       <div className={`
         absolute top-16 bottom-4 right-4 z-10 transition-all duration-300
         ${rightPanelCollapsed ? 'w-12' : 'w-72'}
@@ -835,21 +785,72 @@ function DeerIntelContent() {
 
           {rightPanelCollapsed ? (
             <div className="flex flex-col items-center py-4 gap-3 text-white/60">
-              <Target className="h-5 w-5" />
-              <span className="text-xs [writing-mode:vertical-rl] rotate-180">Stands</span>
+              <Layers className="h-5 w-5" />
+              <span className="text-xs [writing-mode:vertical-rl] rotate-180">Filters</span>
             </div>
           ) : (
-            <>
+            <div className="flex flex-col h-full overflow-y-auto">
+              {/* Layer Filters */}
+              <div className="p-4 border-b border-white/10">
+                <h3 className="font-semibold text-white flex items-center gap-2 mb-3">
+                  <Layers className="h-4 w-4 text-purple-400" />
+                  Map Layers
+                </h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
+                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
+                      visibility.bedding ? 'bg-green-500/20 border border-green-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.bedding }} />
+                    <span className="text-sm text-white/90 flex-1 text-left">Bedding Areas</span>
+                    {visibility.bedding && <Check className="h-4 w-4 text-green-400" />}
+                  </button>
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
+                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
+                      visibility.funnels ? 'bg-orange-500/20 border border-orange-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.funnelSaddle }} />
+                    <span className="text-sm text-white/90 flex-1 text-left">Saddles & Draws</span>
+                    {visibility.funnels && <Check className="h-4 w-4 text-orange-400" />}
+                  </button>
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
+                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
+                      visibility.corridors ? 'bg-purple-500/20 border border-purple-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.funnelCorridor }} />
+                    <span className="text-sm text-white/90 flex-1 text-left">Travel Corridors</span>
+                    {visibility.corridors && <Check className="h-4 w-4 text-purple-400" />}
+                  </button>
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
+                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
+                      visibility.stands ? 'bg-red-500/20 border border-red-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
+                    <span className="text-sm text-white/90 flex-1 text-left">Stand Sites</span>
+                    {visibility.stands && <Check className="h-4 w-4 text-red-400" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Top 2 Stand Sites */}
               <div className="p-4 border-b border-white/10">
                 <h3 className="font-semibold text-white flex items-center gap-2">
                   <Target className="h-4 w-4 text-red-500" />
-                  Top 10 Stand Sites
+                  Top 2 Stand Sites
                 </h3>
                 <p className="text-xs text-white/50 mt-1">Click to fly to location</p>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
-                {layers?.standPoints.features.map((feature) => {
+              <div className="flex-1">
+                {layers?.standPoints.features.slice(0, 2).map((feature) => {
                   const props = feature.properties as StandPointProperties;
                   const isSelected = selectedStand === props.rank;
                   const coords = feature.geometry.coordinates as [number, number];
@@ -869,28 +870,25 @@ function DeerIntelContent() {
                     >
                       <div className="flex items-center gap-3">
                         <span
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
-                          style={{
-                            background: props.rank <= 3 ? LAYER_COLORS.standHigh : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow,
-                          }}
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-lg"
+                          style={{ background: LAYER_COLORS.standHigh }}
                         >
                           {props.rank}
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
-                            <span className="font-semibold text-white">{props.score}<span className="text-white/50 text-xs">/100</span></span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                            <span className="font-bold text-white text-lg">{props.score}<span className="text-white/50 text-sm">/100</span></span>
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
                               props.approachRisk === 'low' ? 'bg-green-500/30 text-green-300' :
                               props.approachRisk === 'medium' ? 'bg-amber-500/30 text-amber-300' :
                               'bg-red-500/30 text-red-300'
                             }`}>
-                              {props.approachRisk}
+                              {props.approachRisk} risk
                             </span>
                           </div>
-                          <p className="text-xs text-white/50 truncate mt-0.5">{props.reasoning}</p>
-                          <div className="flex gap-2 mt-1 text-[10px]">
-                            <span className="text-green-400">✓ {props.windOk.slice(0,2).join(',')}</span>
-                            <span className="text-red-400">✗ {props.windBad.slice(0,2).join(',')}</span>
+                          <p className="text-xs text-white/60 mt-1">{props.reasoning}</p>
+                          <div className="flex gap-3 mt-2 text-xs">
+                            <span className="text-green-400">✓ Wind: {props.windOk.slice(0,2).join(', ')}</span>
                           </div>
                         </div>
                       </div>
@@ -898,7 +896,7 @@ function DeerIntelContent() {
                   );
                 })}
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
