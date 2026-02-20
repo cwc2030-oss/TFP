@@ -516,7 +516,11 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map || !layers?.standPoints) return;
 
-    layers.standPoints.features.forEach((feature) => {
+    // Only show TOP 2 stands on the map
+    const topTwoStands = layers.standPoints.features.slice(0, 2);
+    console.log('[Intel] Adding', topTwoStands.length, 'stand markers (top 2 only)');
+
+    topTwoStands.forEach((feature) => {
       const props = feature.properties as StandPointProperties;
       const coords = feature.geometry.coordinates as [number, number];
 
@@ -524,18 +528,18 @@ function DeerIntelContent() {
       el.className = 'intel-stand-marker';
       el.innerHTML = `
         <div style="
-          width: ${props.rank <= 3 ? 40 : 32}px;
-          height: ${props.rank <= 3 ? 40 : 32}px;
-          background: ${props.rank <= 3 ? LAYER_COLORS.standHigh : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow};
-          border: 3px solid white;
+          width: 48px;
+          height: 48px;
+          background: ${LAYER_COLORS.standHigh};
+          border: 4px solid white;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
           color: white;
           font-weight: bold;
-          font-size: ${props.rank <= 3 ? 16 : 14}px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          font-size: 20px;
+          box-shadow: 0 6px 20px rgba(0,0,0,0.5);
           cursor: pointer;
           transition: transform 0.2s, box-shadow 0.2s;
         ">
