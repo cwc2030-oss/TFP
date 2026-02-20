@@ -97,14 +97,17 @@ export function generatePreviewAnalysis(
   const prevailingWinds = options?.prevailingWinds ?? ['NW'];
   const seasonProfile = options?.seasonProfile ?? 'rut';
 
-  // Generate synthetic bedding areas (south-facing slopes)
-  const beddingPolygons = generateSyntheticBedding(center, bounds, acreage);
+  // Pass parcel coordinates to ensure all features stay INSIDE the parcel
+  const parcelCoords = coords as number[][];
+
+  // Generate synthetic bedding areas (south-facing slopes) - constrained to parcel
+  const beddingPolygons = generateSyntheticBedding(center, bounds, acreage, parcelCoords);
   
-  // Generate synthetic funnels (draws and saddles)
-  const funnels = generateSyntheticFunnels(center, bounds);
+  // Generate synthetic funnels (draws and saddles) - constrained to parcel
+  const funnels = generateSyntheticFunnels(center, bounds, parcelCoords);
   
-  // Generate ranked stand points
-  const standPoints = generateSyntheticStands(center, bounds, prevailingWinds, beddingPolygons, funnels);
+  // Generate ranked stand points - constrained to parcel
+  const standPoints = generateSyntheticStands(center, bounds, prevailingWinds, beddingPolygons, funnels, parcelCoords);
 
   const layers: TerrainLayers = {
     beddingPolygons,
@@ -231,12 +234,97 @@ function createSeedFromCenter(center: [number, number]): number {
   return Math.abs(Math.floor(center[0] * 10000) + Math.floor(center[1] * 10000));
 }
 
+// ============ Point-in-Polygon Testing ============
+
+// Ray-casting algorithm for point-in-polygon
+function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
+  const [x, y] = point;
+  let inside = false;
+  
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    
+    if (intersect) inside = !inside;
+  }
+  
+  return inside;
+}
+
+// Generate a random point INSIDE the parcel polygon
+function generatePointInsideParcel(
+  parcelCoords: number[][],
+  center: [number, number],
+  bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
+  rand: () => number,
+  maxAttempts = 50
+): [number, number] {
+  const lngSpan = bounds.maxLng - bounds.minLng;
+  const latSpan = bounds.maxLat - bounds.minLat;
+  
+  // Try random points within bounding box, keep if inside polygon
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const point: [number, number] = [
+      bounds.minLng + rand() * lngSpan,
+      bounds.minLat + rand() * latSpan,
+    ];
+    
+    if (pointInPolygon(point, parcelCoords)) {
+      return point;
+    }
+  }
+  
+  // Fallback: return centroid (always should be inside for convex parcels)
+  return center;
+}
+
+// Shrink a polygon toward its center to ensure it stays inside parcel
+function shrinkPolygonToFit(
+  polygonCoords: number[][],
+  parcelCoords: number[][],
+  center: [number, number],
+  shrinkFactor = 0.8
+): number[][] {
+  // Shrink polygon toward its center until all points are inside parcel
+  const polygonCenter: [number, number] = [
+    polygonCoords.reduce((sum, p) => sum + p[0], 0) / polygonCoords.length,
+    polygonCoords.reduce((sum, p) => sum + p[1], 0) / polygonCoords.length,
+  ];
+  
+  let factor = 1.0;
+  let attempts = 0;
+  
+  while (attempts < 10) {
+    const shrunk = polygonCoords.map(p => [
+      polygonCenter[0] + (p[0] - polygonCenter[0]) * factor,
+      polygonCenter[1] + (p[1] - polygonCenter[1]) * factor,
+    ]);
+    
+    // Check if all points are inside parcel
+    const allInside = shrunk.every(p => pointInPolygon(p as [number, number], parcelCoords));
+    if (allInside) return shrunk;
+    
+    factor *= shrinkFactor;
+    attempts++;
+  }
+  
+  // Last resort: tiny polygon at center
+  return polygonCoords.map(p => [
+    center[0] + (p[0] - polygonCenter[0]) * 0.1,
+    center[1] + (p[1] - polygonCenter[1]) * 0.1,
+  ]);
+}
+
 // ============ Synthetic Data Generators ============
 
 function generateSyntheticBedding(
   center: [number, number],
   bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
-  acreage: number
+  acreage: number,
+  parcelCoords?: number[][]
 ): GeoJSON.FeatureCollection<GeoJSON.Polygon, BeddingProperties> {
   const features: GeoJSON.Feature<GeoJSON.Polygon, BeddingProperties>[] = [];
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -248,22 +336,30 @@ function generateSyntheticBedding(
   // Generate 2-4 bedding areas based on property size
   const numBedding = Math.min(4, Math.max(2, Math.floor(acreage / 50)));
   
-  // Keep features INSIDE the parcel - use smaller offsets (max 30% from center)
   for (let i = 0; i < numBedding; i++) {
-    // Place bedding areas on south-facing slopes (bias toward south portion)
-    const offsetLng = (rand() - 0.5) * lngSpan * 0.3; // max 15% from center
-    const offsetLat = (rand() - 0.6) * latSpan * 0.25; // bias slightly south
+    // Generate center point INSIDE the parcel
+    let beddingCenter: [number, number];
+    if (parcelCoords) {
+      beddingCenter = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    } else {
+      // Fallback: small offset from center
+      beddingCenter = [
+        center[0] + (rand() - 0.5) * lngSpan * 0.2,
+        center[1] + (rand() - 0.5) * latSpan * 0.2,
+      ];
+    }
     
-    const beddingCenter: [number, number] = [
-      center[0] + offsetLng,
-      center[1] + offsetLat,
-    ];
+    // Create irregular polygon - size proportional to parcel
+    const baseRadius = Math.min(lngSpan, latSpan) * 0.08;
+    const radius = baseRadius * (0.5 + rand() * 0.5);
+    let polygon = createIrregularPolygon(beddingCenter, radius, 6 + Math.floor(rand() * 4), rand);
     
-    // Create irregular polygon - smaller radius to stay inside parcel
-    const radius = Math.min(0.0008, lngSpan * 0.08) + rand() * Math.min(0.001, lngSpan * 0.05);
-    const polygon = createIrregularPolygon(beddingCenter, radius, 6 + Math.floor(rand() * 4), rand);
+    // Shrink to fit inside parcel if needed
+    if (parcelCoords) {
+      polygon = shrinkPolygonToFit(polygon, parcelCoords, center);
+    }
     
-    const aspectDegrees = 135 + rand() * 90; // 135-225 (south-facing)
+    const aspectDegrees = 135 + rand() * 90;
     const aspectLabels = ['S', 'SW', 'SE'];
     
     features.push({
@@ -285,7 +381,8 @@ function generateSyntheticBedding(
 
 function generateSyntheticFunnels(
   center: [number, number],
-  bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number }
+  bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
+  parcelCoords?: number[][]
 ): GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties> {
   const features: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties>[] = [];
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -297,13 +394,25 @@ function generateSyntheticFunnels(
   // Generate 1-2 saddles - INSIDE the parcel
   const numSaddles = 1 + Math.floor(rand() * 2);
   for (let i = 0; i < numSaddles; i++) {
-    const saddleCenter: [number, number] = [
-      center[0] + (rand() - 0.5) * lngSpan * 0.25, // max 12.5% offset from center
-      center[1] + (rand() - 0.5) * latSpan * 0.25,
-    ];
+    // Generate saddle center inside parcel
+    let saddleCenter: [number, number];
+    if (parcelCoords) {
+      saddleCenter = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    } else {
+      saddleCenter = [
+        center[0] + (rand() - 0.5) * lngSpan * 0.2,
+        center[1] + (rand() - 0.5) * latSpan * 0.2,
+      ];
+    }
     
-    const radius = Math.min(0.0006, lngSpan * 0.06);
-    const polygon = createIrregularPolygon(saddleCenter, radius, 5, rand);
+    const baseRadius = Math.min(lngSpan, latSpan) * 0.05;
+    const radius = baseRadius * (0.5 + rand() * 0.5);
+    let polygon = createIrregularPolygon(saddleCenter, radius, 5, rand);
+    
+    // Shrink to fit inside parcel if needed
+    if (parcelCoords) {
+      polygon = shrinkPolygonToFit(polygon, parcelCoords, center);
+    }
     
     features.push({
       type: 'Feature',
@@ -316,24 +425,22 @@ function generateSyntheticFunnels(
     });
   }
   
-  // Generate 1-2 draws (as lines) - INSIDE the parcel
+  // Generate 1-2 draws (as lines) - points must be INSIDE parcel
   const numDraws = 1 + Math.floor(rand() * 2);
   for (let i = 0; i < numDraws; i++) {
-    // Start and end points within parcel bounds (use 80% inset)
-    const startPoint: [number, number] = [
-      bounds.minLng + lngSpan * 0.15 + rand() * lngSpan * 0.15,
-      bounds.maxLat - latSpan * 0.15 - rand() * latSpan * 0.2,
-    ];
-    const endPoint: [number, number] = [
-      bounds.maxLng - lngSpan * 0.15 - rand() * lngSpan * 0.15,
-      bounds.minLat + latSpan * 0.15 + rand() * latSpan * 0.2,
-    ];
+    let startPoint: [number, number];
+    let endPoint: [number, number];
+    let midPoint: [number, number];
     
-    // Create slightly curved line through center area
-    const midPoint: [number, number] = [
-      center[0] + (rand() - 0.5) * lngSpan * 0.15,
-      center[1] + (rand() - 0.5) * latSpan * 0.15,
-    ];
+    if (parcelCoords) {
+      startPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+      endPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+      midPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    } else {
+      startPoint = [center[0] - lngSpan * 0.15, center[1] + latSpan * 0.1];
+      endPoint = [center[0] + lngSpan * 0.15, center[1] - latSpan * 0.1];
+      midPoint = [center[0], center[1]];
+    }
     
     features.push({
       type: 'Feature',
@@ -346,19 +453,20 @@ function generateSyntheticFunnels(
     });
   }
   
-  // Generate 1 corridor (least-cost path) - crossing through center
-  const corridorStart: [number, number] = [
-    bounds.minLng + lngSpan * 0.15,
-    center[1] + (rand() - 0.5) * latSpan * 0.15,
-  ];
-  const corridorEnd: [number, number] = [
-    bounds.maxLng - lngSpan * 0.15,
-    center[1] + (rand() - 0.5) * latSpan * 0.15,
-  ];
-  const corridorMid: [number, number] = [
-    center[0],
-    center[1] + (rand() - 0.5) * latSpan * 0.1,
-  ];
+  // Generate 1 corridor (least-cost path) - all points inside parcel
+  let corridorStart: [number, number];
+  let corridorEnd: [number, number];
+  let corridorMid: [number, number];
+  
+  if (parcelCoords) {
+    corridorStart = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    corridorEnd = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    corridorMid = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+  } else {
+    corridorStart = [center[0] - lngSpan * 0.2, center[1]];
+    corridorEnd = [center[0] + lngSpan * 0.2, center[1]];
+    corridorMid = [center[0], center[1] + latSpan * 0.05];
+  }
   
   features.push({
     type: 'Feature',
@@ -379,7 +487,8 @@ function generateSyntheticStands(
   bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
   prevailingWinds: WindDirection[],
   bedding: GeoJSON.FeatureCollection<GeoJSON.Polygon, BeddingProperties>,
-  funnels: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties>
+  funnels: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties>,
+  parcelCoords?: number[][]
 ): GeoJSON.FeatureCollection<GeoJSON.Point, StandPointProperties> {
   const features: GeoJSON.Feature<GeoJSON.Point, StandPointProperties>[] = [];
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -404,12 +513,20 @@ function generateSyntheticStands(
     'Creek crossing with historical rub line nearby',
   ];
   
-  // Generate 10 stand points - INSIDE the parcel (use tighter bounds)
+  // Generate 10 stand points - ALL must be INSIDE the parcel
   for (let i = 0; i < 10; i++) {
-    const standPoint: [number, number] = [
-      center[0] + (rand() - 0.5) * lngSpan * 0.5, // max 25% offset from center
-      center[1] + (rand() - 0.5) * latSpan * 0.5,
-    ];
+    let standPoint: [number, number];
+    
+    if (parcelCoords) {
+      // Generate point guaranteed inside parcel
+      standPoint = generatePointInsideParcel(parcelCoords, center, bounds, rand);
+    } else {
+      // Fallback: small offset from center
+      standPoint = [
+        center[0] + (rand() - 0.5) * lngSpan * 0.3,
+        center[1] + (rand() - 0.5) * latSpan * 0.3,
+      ];
+    }
     
     // Calculate distances (approximate)
     const distToCorridor = 20 + rand() * 150;
