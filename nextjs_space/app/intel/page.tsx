@@ -216,8 +216,10 @@ function DeerIntelContent() {
       const response = await fetch(`/api/parcels?lat=${centerLat}&lng=${centerLng}`);
       if (!response.ok) return null;
       
-      const data = await response.json();
-      if (!data.coordinates || !data.geometryType) return null;
+      const result = await response.json();
+      // API returns { parcels: [...] } - get first parcel
+      const data = result.parcels?.[0];
+      if (!data || !data.coordinates || !data.geometryType) return null;
       
       return {
         type: 'Feature',
