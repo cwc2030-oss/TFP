@@ -716,10 +716,18 @@ function DeerIntelContent() {
     mapRef.current?.flyTo({ center: [lng, lat], zoom: 14, pitch: 45, bearing: -20 });
   };
 
+  // BUILD STAMP - remove after debugging
+  const BUILD_STAMP = 'V3-DECK-ONLY-2026-02-21T14:30Z';
+
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
       {/* Map Container - z-0 ensures it's behind UI but visible */}
       <div ref={mapContainerRef} className="absolute inset-0 z-0" style={{ minHeight: '100vh', minWidth: '100vw' }} />
+
+      {/* BUILD STAMP - visible debug marker */}
+      <div className="absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg">
+        BUILD: {BUILD_STAMP}
+      </div>
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
