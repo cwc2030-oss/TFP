@@ -42,9 +42,20 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
   // Validate config
   const validation = validateWeightsConfig(config);
   
-  // Build weighted outputs
+  // Build weighted outputs and track status
   const weightedComponents: ComponentWeightedOutput[] = [];
   let sumWeighted = 0;
+  let sumWeightedConfidence = 0;
+  
+  // Status breakdown tracking
+  const statusBreakdown = {
+    real: 0,
+    estimated: 0,
+    stubbed: 0,
+    realComponents: [] as string[],
+    estimatedComponents: [] as string[],
+    stubbedComponents: [] as string[]
+  };
   
   for (const component of input.components) {
     const componentId = component.componentId as ComponentId;
@@ -60,6 +71,17 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
     const weighted = component.normalized * weight;
     sumWeighted += weighted;
     
+    // Track confidence weighted by component weight
+    const confidence = component.confidence ?? 0.5;
+    sumWeightedConfidence += confidence * weight;
+    
+    // Track status
+    const status = component.status ?? 'stubbed';
+    statusBreakdown[status]++;
+    if (status === 'real') statusBreakdown.realComponents.push(componentId);
+    else if (status === 'estimated') statusBreakdown.estimatedComponents.push(componentId);
+    else statusBreakdown.stubbedComponents.push(componentId);
+    
     weightedComponents.push({
       componentId,
       name: componentDef.name,
@@ -69,7 +91,10 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
       weight,
       weighted,
       unit: component.unit,
-      notes: component.notes
+      notes: component.notes,
+      status,
+      confidence,
+      inputsUsed: component.inputsUsed ?? []
     });
   }
   
@@ -79,6 +104,9 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
   // totalScore = 100 * sum(weighted)
   const totalScore = Math.round(sumWeighted * 1000) / 10;
   
+  // Overall confidence = weighted average of component confidences
+  const overallConfidence = Math.round(sumWeightedConfidence * 100) / 100;
+  
   return {
     weightsVersion: config.version,
     season: input.season,
@@ -87,7 +115,9 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
     grade: calculateGrade(totalScore),
     components: weightedComponents,
     validation,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    overallConfidence,
+    statusBreakdown
   };
 }
 
@@ -158,6 +188,8 @@ function generateNotes(
 
 /**
  * Create a complete normalized output from raw value
+ * Note: This marks the output as 'estimated' since we don't have
+ * full component provenance from raw values alone.
  */
 export function createNormalizedOutput(
   componentId: ComponentId,
@@ -173,7 +205,11 @@ export function createNormalizedOutput(
     raw: rawValue,
     normalized,
     unit: componentDef.unit,
-    notes
+    notes,
+    // Mark as estimated since this is from raw values, not full analysis
+    status: 'estimated',
+    confidence: 0.5,
+    inputsUsed: ['raw_value']
   };
 }
 

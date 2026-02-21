@@ -20,9 +20,13 @@ export interface ComponentRawOutput {
   metadata?: Record<string, unknown>;
 }
 
+/** Data source status for component calculations */
+export type ComponentStatus = 'real' | 'estimated' | 'stubbed';
+
 /**
  * Normalized component output (0-1 scale)
  * Produced by normalizing raw values against component ranges
+ * Includes provenance for explainability
  */
 export interface ComponentNormalizedOutput {
   /** Unique component identifier */
@@ -35,6 +39,14 @@ export interface ComponentNormalizedOutput {
   unit: string;
   /** Human-readable explanation of the score */
   notes: string;
+  
+  // === Provenance fields ===
+  /** Data source status */
+  status: ComponentStatus;
+  /** Confidence in this component's accuracy (0-1) */
+  confidence: number;
+  /** List of input data sources used */
+  inputsUsed: string[];
 }
 
 /**
@@ -60,9 +72,31 @@ export interface ComponentWeightedOutput {
   unit: string;
   /** Human-readable explanation */
   notes: string;
+  
+  // === Provenance fields ===
+  /** Data source status */
+  status: ComponentStatus;
+  /** Confidence in this component (0-1) */
+  confidence: number;
+  /** Input data sources used */
+  inputsUsed: string[];
 }
 
 // ============ Scoring Result Contract ============
+
+/**
+ * Status breakdown for scoring result
+ */
+export interface StatusBreakdown {
+  /** Count of components by status */
+  real: number;
+  estimated: number;
+  stubbed: number;
+  /** Component IDs by status */
+  realComponents: string[];
+  estimatedComponents: string[];
+  stubbedComponents: string[];
+}
 
 /**
  * Complete scoring result with full explainability
@@ -84,6 +118,12 @@ export interface ScoringResult {
   validation: ValidationResult;
   /** Timestamp of scoring */
   timestamp: string;
+  
+  // === Overall provenance ===
+  /** Weighted overall confidence (0-1), reflects estimated/stubbed components */
+  overallConfidence: number;
+  /** Breakdown of component statuses */
+  statusBreakdown: StatusBreakdown;
 }
 
 /**

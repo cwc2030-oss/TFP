@@ -1,8 +1,11 @@
 /**
- * Bedding Quality Component
+ * Bedding Quality (Parcel-Level) Component
  * 
- * Calculates bedding area quality from DEM-derived bedding polygons.
+ * Calculates parcel-wide bedding area quality from DEM-derived bedding polygons.
  * Uses slope, aspect, area density, and type distribution.
+ * 
+ * NOTE: This is bedding_quality_parcel (parcel-wide score).
+ * A separate bedding_quality_local will be added later for stand-level ranking.
  * 
  * Scoring factors (weighted):
  * - Bedding density (acres/parcel acre): 30%
@@ -13,7 +16,7 @@
  * Normalization: 0-100 scale
  */
 
-import type { ComponentInput, ComponentResult, BeddingMetrics } from './types';
+import type { ComponentInput, ComponentResult, BeddingMetrics, ComponentStatus } from './types';
 import type { BeddingProperties } from '@/types/terrain';
 
 // Weights for bedding quality sub-factors
@@ -31,10 +34,14 @@ const ADEQUATE_DENSITY = 0.04; // 4% = 50
 const EXCELLENT_THERMAL_RATIO = 0.40; // 40% thermal = 100
 const GOOD_THERMAL_RATIO = 0.25;      // 25% = 70
 
+// Confidence levels
+const CONFIDENCE_REAL_BEDDING = 0.90; // DEM-derived bedding is reliable
+const CONFIDENCE_NO_BEDDING = 0.85;   // Absence is also informative
+
 /**
- * Calculate bedding quality score from terrain analysis data
+ * Calculate parcel-level bedding quality score from terrain analysis data
  */
-export function calculateBeddingQuality(input: ComponentInput): ComponentResult {
+export function calculateBeddingQualityParcel(input: ComponentInput): ComponentResult {
   const { layers, summary, parcelAcres } = input;
   const beddingFeatures = layers.beddingPolygons.features;
   
@@ -46,7 +53,9 @@ export function calculateBeddingQuality(input: ComponentInput): ComponentResult 
       normalized: 0,
       unit: 'score',
       notes: 'No bedding areas detected. Property may lack suitable terrain for deer bedding.',
-      dataSource: 'real',
+      status: 'real',
+      confidence: CONFIDENCE_NO_BEDDING,
+      inputsUsed: ['dem_slope', 'dem_aspect', 'parcel_boundary'],
       metadata: {
         polygonCount: 0,
         totalAcres: 0,
@@ -77,13 +86,18 @@ export function calculateBeddingQuality(input: ComponentInput): ComponentResult 
   // Generate explanatory notes
   const notes = generateNotes(metrics, densityScore, diversityScore, thermalScore, parcelAcres);
   
+  // Component confidence based on DEM-derived analysis confidence
+  const componentConfidence = CONFIDENCE_REAL_BEDDING * metrics.avgConfidence;
+  
   return {
     componentId: 'bedding_quality',
     raw: Math.round(rawScore),
     normalized: Math.round(normalized * 10000) / 10000,
     unit: 'score',
     notes,
-    dataSource: 'real',
+    status: 'real',
+    confidence: Math.round(componentConfidence * 100) / 100,
+    inputsUsed: ['dem_slope', 'dem_aspect', 'bedding_polygons', 'parcel_boundary'],
     metadata: {
       ...metrics,
       subScores: {
@@ -98,10 +112,14 @@ export function calculateBeddingQuality(input: ComponentInput): ComponentResult 
         thermal: WEIGHT_THERMAL,
         confidence: WEIGHT_CONFIDENCE
       },
-      method: 'terrain_analysis'
+      method: 'terrain_analysis',
+      scope: 'parcel' // Distinguish from future 'local' scope
     }
   };
 }
+
+// Alias for backwards compatibility
+export const calculateBeddingQuality = calculateBeddingQualityParcel;
 
 /**
  * Compute aggregate metrics from bedding polygons

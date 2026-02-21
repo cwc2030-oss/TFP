@@ -35,17 +35,28 @@ export interface HydroFeatures {
   springs: GeoJSON.FeatureCollection<GeoJSON.Point>;
 }
 
+/** Data source status for component calculations */
+export type ComponentStatus = 'real' | 'estimated' | 'stubbed';
+
 /**
  * Component output before weighting
+ * Includes full provenance for explainability and licensing
  */
 export interface ComponentResult {
   componentId: string;
   raw: number;
-  normalized: number; // 0-1
+  normalized: number; // 0-1 (may be capped for estimated data)
   unit: string;
   notes: string;
-  /** Whether this used real data or estimation */
-  dataSource: 'real' | 'estimated' | 'stubbed';
+  
+  // === Provenance fields for explainability ===
+  /** Data source status */
+  status: ComponentStatus;
+  /** Confidence in this component's accuracy (0-1) */
+  confidence: number;
+  /** List of input data sources used */
+  inputsUsed: string[];
+  
   /** Additional metadata for debugging */
   metadata?: Record<string, unknown>;
 }

@@ -9,9 +9,11 @@ export type {
   ComponentRawOutput,
   ComponentNormalizedOutput,
   ComponentWeightedOutput,
+  ComponentStatus,
   ScoringResult,
   ScoringInput,
   ValidationResult,
+  StatusBreakdown,
   SeasonId,
   ComponentId,
   ComponentDefinition,
@@ -54,8 +56,10 @@ export {
   calculateComponent,
   calculateNormalizedComponents,
   toNormalizedOutput,
+  calculateOverallConfidence,
   calculateWaterProximity,
   calculateBeddingQuality,
+  calculateBeddingQualityParcel,
   COMPONENT_STATUS
 } from './components';
 

@@ -6,15 +6,24 @@
  * 
  * Normalization: 0-1000m range, inverted (closer = higher score)
  * Formula: normalized = 1 - (avgDistanceMeters / 1000)
+ * 
+ * IMPORTANT: When dataSource='estimated', normalized is capped at 0.75
+ * to prevent proxies from dominating totals.
  */
 
-import type { ComponentInput, ComponentResult, StandMetrics } from './types';
+import type { ComponentInput, ComponentResult, StandMetrics, ComponentStatus } from './types';
 import type { StandPointProperties, FunnelProperties } from '@/types/terrain';
 
 // Constants for water proximity calculation
 const MAX_WATER_DISTANCE_METERS = 1000;
 const DRAW_WATER_LIKELIHOOD = 0.7; // 70% of draws have seasonal water
 const DRAW_PROXIMITY_ESTIMATE_METERS = 150; // Assume water ~150m from draw center
+
+// Caps and confidence levels by data source
+const ESTIMATED_NORMALIZED_CAP = 0.75; // Estimated data can't score above 75%
+const CONFIDENCE_REAL = 0.95;
+const CONFIDENCE_ESTIMATED_DRAWS = 0.65;
+const CONFIDENCE_ESTIMATED_PARCEL = 0.40;
 
 /**
  * Calculate water proximity score from terrain analysis data
@@ -36,7 +45,9 @@ export function calculateWaterProximity(input: ComponentInput): ComponentResult 
   });
   
   let avgDistanceMeters: number;
-  let dataSource: 'real' | 'estimated' | 'stubbed';
+  let status: ComponentStatus;
+  let confidence: number;
+  let inputsUsed: string[];
   let notes: string;
   let metadata: Record<string, unknown> = {};
   
@@ -46,7 +57,9 @@ export function calculateWaterProximity(input: ComponentInput): ComponentResult 
     avgDistanceMeters = distances.length > 0 
       ? distances.reduce((a, b) => a + b, 0) / distances.length 
       : MAX_WATER_DISTANCE_METERS;
-    dataSource = 'real';
+    status = 'real';
+    confidence = CONFIDENCE_REAL;
+    inputsUsed = ['nhd_streams', 'nhd_water_bodies', 'stand_points'];
     notes = `Real hydro data: ${hydroFeatures.streams.features.length} streams, ${hydroFeatures.waterBodies.features.length} water bodies`;
     metadata = {
       streamCount: hydroFeatures.streams.features.length,
@@ -58,7 +71,9 @@ export function calculateWaterProximity(input: ComponentInput): ComponentResult 
     // Estimate from terrain draws
     const estimatedDistances = estimateDistancesFromDraws(stands, draws);
     avgDistanceMeters = estimatedDistances.avg;
-    dataSource = 'estimated';
+    status = 'estimated';
+    confidence = CONFIDENCE_ESTIMATED_DRAWS;
+    inputsUsed = ['terrain_draws', 'stand_points'];
     notes = `Estimated from ${draws.length} terrain draws (${Math.round(DRAW_WATER_LIKELIHOOD * 100)}% water likelihood)`;
     metadata = {
       drawCount: draws.length,
@@ -67,9 +82,10 @@ export function calculateWaterProximity(input: ComponentInput): ComponentResult 
     };
   } else {
     // No water indicators - use parcel size estimate
-    // Larger parcels more likely to have water features
     avgDistanceMeters = estimateFromParcelSize(parcelAcres);
-    dataSource = 'estimated';
+    status = 'estimated';
+    confidence = CONFIDENCE_ESTIMATED_PARCEL;
+    inputsUsed = ['parcel_acreage'];
     notes = `No water features detected; estimated from ${parcelAcres.toFixed(1)} acre parcel`;
     metadata = {
       method: 'parcel_size_estimate',
@@ -81,7 +97,13 @@ export function calculateWaterProximity(input: ComponentInput): ComponentResult 
   avgDistanceMeters = Math.max(0, Math.min(MAX_WATER_DISTANCE_METERS, avgDistanceMeters));
   
   // Normalize: inverted (0m = 1.0, 1000m = 0.0)
-  const normalized = 1 - (avgDistanceMeters / MAX_WATER_DISTANCE_METERS);
+  let normalized = 1 - (avgDistanceMeters / MAX_WATER_DISTANCE_METERS);
+  
+  // CAP estimated data to prevent proxies from dominating totals
+  if (status === 'estimated' && normalized > ESTIMATED_NORMALIZED_CAP) {
+    normalized = ESTIMATED_NORMALIZED_CAP;
+    notes += ` [capped at ${Math.round(ESTIMATED_NORMALIZED_CAP * 100)}%]`;
+  }
   
   // Generate quality note
   const qualityLabel = getQualityLabel(normalized);
@@ -93,7 +115,9 @@ export function calculateWaterProximity(input: ComponentInput): ComponentResult 
     normalized: Math.round(normalized * 10000) / 10000,
     unit: 'meters',
     notes: fullNotes,
-    dataSource,
+    status,
+    confidence,
+    inputsUsed,
     metadata
   };
 }

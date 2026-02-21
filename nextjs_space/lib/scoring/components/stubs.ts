@@ -3,9 +3,17 @@
  * 
  * Returns deterministic stub values for components not yet implemented.
  * Each stub includes clear notes indicating it's a placeholder.
+ * 
+ * All stubs have:
+ * - status: 'stubbed'
+ * - confidence: 0.30 (low confidence for stubs)
+ * - inputsUsed: minimal list of what data was used
  */
 
-import type { ComponentInput, ComponentResult } from './types';
+import type { ComponentInput, ComponentResult, ComponentStatus } from './types';
+
+// Stub confidence level (low since these are placeholders)
+const STUB_CONFIDENCE = 0.30;
 
 /**
  * Stubbed funnel density - placeholder until real calculation
@@ -22,7 +30,9 @@ export function stubFunnelDensity(input: ComponentInput): ComponentResult {
     normalized: clampedDensity / 10,
     unit: 'features_per_acre',
     notes: `[STUB] ${funnelCount} funnels on ${parcelAcres.toFixed(0)} acres. Real calculation pending.`,
-    dataSource: 'stubbed',
+    status: 'stubbed',
+    confidence: STUB_CONFIDENCE,
+    inputsUsed: ['funnel_count', 'parcel_acreage'],
     metadata: { funnelCount, parcelAcres }
   };
 }
@@ -45,7 +55,9 @@ export function stubCorridorCoverage(input: ComponentInput): ComponentResult {
     normalized: estimatedCoverage / 100,
     unit: 'percent',
     notes: `[STUB] ${funnels.length} corridors detected. Real coverage calculation pending.`,
-    dataSource: 'stubbed',
+    status: 'stubbed',
+    confidence: STUB_CONFIDENCE,
+    inputsUsed: ['corridor_features', 'parcel_acreage'],
     metadata: { corridorCount: funnels.length, parcelAcres }
   };
 }
@@ -76,7 +88,9 @@ export function stubEdgeHabitat(input: ComponentInput): ComponentResult {
     normalized: estimatedScore / 100,
     unit: 'score',
     notes: `[STUB] Estimated from parcel size (${parcelAcres.toFixed(0)} ac). Real landcover analysis pending.`,
-    dataSource: 'stubbed',
+    status: 'stubbed',
+    confidence: STUB_CONFIDENCE,
+    inputsUsed: ['parcel_acreage', 'bedding_presence'],
     metadata: { parcelAcres, hasBedding: summary.totalBeddingAcres > 0 }
   };
 }
@@ -113,7 +127,9 @@ export function stubTerrainDiversity(input: ComponentInput): ComponentResult {
     normalized: score / 100,
     unit: 'score',
     notes: `[STUB] Estimated from ${summary.funnelCount} funnels, ${beddingTypes.size} bedding types. Full DEM analysis pending.`,
-    dataSource: 'stubbed',
+    status: 'stubbed',
+    confidence: STUB_CONFIDENCE,
+    inputsUsed: ['funnel_count', 'bedding_types', 'parcel_acreage'],
     metadata: {
       funnelCount: summary.funnelCount,
       beddingTypeCount: beddingTypes.size,
@@ -133,13 +149,18 @@ export function stubStandSiteCount(input: ComponentInput): ComponentResult {
   // Range is 0-20, so normalize by /20
   const clampedCount = Math.min(20, Math.max(0, standCount));
   
+  // Slightly higher confidence since we use actual stand data
+  const confidence = 0.50;
+  
   return {
     componentId: 'stand_site_count',
     raw: clampedCount,
     normalized: clampedCount / 20,
     unit: 'count',
     notes: `${standCount} stand sites identified. Ranking methodology being refined.`,
-    dataSource: 'stubbed',
+    status: 'stubbed',
+    confidence,
+    inputsUsed: ['stand_points'],
     metadata: { rawCount: standCount }
   };
 }
