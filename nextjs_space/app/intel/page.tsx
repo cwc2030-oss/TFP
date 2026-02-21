@@ -717,7 +717,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V3-DECK-ONLY-2026-02-21T14:30Z';
+  const BUILD_STAMP = 'V3-DECK-ONLY-2026-02-21T15:05Z';
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
