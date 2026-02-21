@@ -45,6 +45,30 @@ export interface TerrainSummary {
   topStandScore: number;
   analysisAreaAcres: number;
   recommendedSeason: SeasonProfile;
+  
+  // === DEM-derived metrics (optional, from geoprocessor v3+) ===
+  demMetrics?: DEMMetrics;
+}
+
+/**
+ * DEM-derived terrain statistics
+ * Used for terrain_diversity scoring
+ */
+export interface DEMMetrics {
+  /** Elevation range: p95 - p5 (meters) */
+  elevRange: number;
+  /** Standard deviation of slope (degrees) */
+  slopeStd: number;
+  /** TPI contrast: std of TPI at 500m scale */
+  tpiContrast: number;
+  /** Roughness: p90 slope - p10 slope (degrees) */
+  roughness: number;
+  /** Min elevation (meters) */
+  elevMin?: number;
+  /** Max elevation (meters) */
+  elevMax?: number;
+  /** Mean slope (degrees) */
+  slopeMean?: number;
 }
 
 export interface TerrainProvenance {

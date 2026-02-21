@@ -74,49 +74,6 @@ export function stubEdgeHabitat(input: ComponentInput): ComponentResult {
 }
 
 /**
- * Stubbed terrain diversity - placeholder until full DEM analysis
- */
-export function stubTerrainDiversity(input: ComponentInput): ComponentResult {
-  const { layers, summary, parcelAcres } = input;
-  
-  // Estimate from available terrain features
-  let score = 50; // Base score
-  
-  // More funnels = more terrain variation
-  if (summary.funnelCount >= 10) score += 20;
-  else if (summary.funnelCount >= 5) score += 15;
-  else if (summary.funnelCount >= 2) score += 10;
-  
-  // More bedding types = more terrain variety
-  const beddingTypes = new Set(
-    layers.beddingPolygons.features.map(f => f.properties.type)
-  );
-  score += beddingTypes.size * 5;
-  
-  // Larger parcels more likely to have diverse terrain
-  if (parcelAcres >= 160) score += 10;
-  else if (parcelAcres >= 80) score += 5;
-  
-  score = Math.min(100, Math.max(0, score));
-  
-  return {
-    componentId: 'terrain_diversity',
-    raw: score,
-    normalized: score / 100,
-    unit: 'score',
-    notes: `[STUB] Estimated from ${summary.funnelCount} funnels, ${beddingTypes.size} bedding types. Full DEM analysis pending.`,
-    status: 'stubbed',
-    confidence: STUB_CONFIDENCE,
-    inputsUsed: ['funnel_count', 'bedding_types', 'parcel_acreage'],
-    metadata: {
-      funnelCount: summary.funnelCount,
-      beddingTypeCount: beddingTypes.size,
-      parcelAcres
-    }
-  };
-}
-
-/**
  * Stubbed stand site count - uses actual count but marks as stub
  * since ranking/filtering logic not yet finalized
  */
