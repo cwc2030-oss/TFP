@@ -540,9 +540,9 @@ function DeerIntelContent() {
       return;
     }
 
-    // Error handler
+    // Error handler - log ALL map errors
     map.on('error', (e: any) => {
-      console.error("[MAP] error event:", e?.error?.message || e?.message);
+      console.error("[MAP ERROR]", e?.error || e);
       if (e?.error?.status === 401 || e?.error?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
       }
@@ -552,60 +552,78 @@ function DeerIntelContent() {
     const onMapLoad = () => {
       console.log('[MAP] LOAD EVENT FIRED id=' + mountId + ' map.loaded()=' + map.loaded());
       
-      // Add terrain DEM (3D elevation)
-      console.log('[MAP] Adding terrain source...');
-      if (!map.getSource('mapbox-dem')) {
-        map.addSource('mapbox-dem', {
-          type: 'raster-dem',
-          url: 'mapbox://mapbox.terrain-rgb',
-          tileSize: 512,
-          maxzoom: 14,
-        });
-        map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+      // Wrap terrain/sky in try/catch - map should be interactive even if these fail
+      try {
+        // Add terrain DEM (3D elevation)
+        console.log('[MAP] BEFORE addSource mapbox-dem, exists=' + !!map.getSource('mapbox-dem'));
+        if (!map.getSource('mapbox-dem')) {
+          map.addSource('mapbox-dem', {
+            type: 'raster-dem',
+            url: 'mapbox://mapbox.terrain-rgb',
+            tileSize: 512,
+            maxzoom: 14,
+          });
+          console.log('[MAP] AFTER addSource mapbox-dem');
+          
+          console.log('[MAP] BEFORE setTerrain');
+          map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+          console.log('[MAP] AFTER setTerrain');
+        } else {
+          console.log('[MAP] mapbox-dem source already exists, skipping');
+        }
+      } catch (terrainErr) {
+        console.error('[MAP] Terrain setup failed (non-fatal):', terrainErr);
       }
-      console.log('[MAP] Terrain source added');
 
-      // Add sky atmosphere
-      console.log('[MAP] Adding sky layer...');
-      if (!map.getLayer('sky')) {
-        map.addLayer({
-          id: 'sky',
-          type: 'sky',
-          paint: {
-            'sky-type': 'atmosphere',
-            'sky-atmosphere-sun': [0.0, 90.0],
-            'sky-atmosphere-sun-intensity': 15,
-          },
+      try {
+        // Add sky atmosphere
+        console.log('[MAP] BEFORE addLayer sky, exists=' + !!map.getLayer('sky'));
+        if (!map.getLayer('sky')) {
+          map.addLayer({
+            id: 'sky',
+            type: 'sky',
+            paint: {
+              'sky-type': 'atmosphere',
+              'sky-atmosphere-sun': [0.0, 90.0],
+              'sky-atmosphere-sun-intensity': 15,
+            },
+          });
+          console.log('[MAP] AFTER addLayer sky');
+        } else {
+          console.log('[MAP] sky layer already exists, skipping');
+        }
+      } catch (skyErr) {
+        console.error('[MAP] Sky setup failed (non-fatal):', skyErr);
+      }
+      
+      // Re-enable Deck.gl overlay
+      try {
+        console.log('[MAP] BEFORE Deck overlay setup');
+        const center = map.getCenter();
+        console.log('[MAP] Got center: lng=' + center.lng + ' lat=' + center.lat);
+        setMapCenter([center.lng, center.lat]);
+        
+        const overlay = new MapboxOverlay({
+          interleaved: true,
+          layers: [],
         });
+        console.log('[MAP] BEFORE addControl overlay');
+        map.addControl(overlay as any);
+        console.log('[MAP] AFTER addControl overlay');
+        deckOverlayRef.current = overlay;
+        
+        if (typeof window !== 'undefined') {
+          window.__TFP_DECK__ = overlay;
+        }
+        console.log('[MAP] Deck overlay attached successfully');
+      } catch (deckErr) {
+        console.error('[MAP] Deck overlay failed (non-fatal):', deckErr);
       }
-      console.log('[MAP] Sky layer added');
       
-      // ============ DECK OVERLAY DISABLED FOR TESTING ============
-      // Temporarily skip Deck.gl to confirm base Mapbox loads
-      console.log('[MAP] SKIPPING Deck.gl overlay (disabled for testing)');
-      /*
-      const center = map.getCenter();
-      console.log('[MAP] setMapCenter BEFORE lng=' + center.lng + ' lat=' + center.lat);
-      setMapCenter([center.lng, center.lat]);
-      console.log('[MAP] setMapCenter AFTER');
-      
-      const overlay = new MapboxOverlay({
-        interleaved: true,
-        layers: [],
-      });
-      map.addControl(overlay as any);
-      deckOverlayRef.current = overlay;
-      
-      if (typeof window !== 'undefined') {
-        window.__TFP_DECK__ = overlay;
-      }
-      console.log('[MAP] Deck overlay attached');
-      */
-      // ============ END DECK DISABLED ============
-      
-      console.log('[MAP] setMapReady BEFORE (currently ' + mapReady + ')');
+      // ALWAYS set map ready - even if terrain/sky/deck failed
+      console.log('[MAP] BEFORE setMapReady(true)');
       setMapReady(true);
-      console.log('[MAP] setMapReady AFTER (called with true)');
+      console.log('[MAP] AFTER setMapReady(true) - map should now be interactive');
     };
     
     // Register load handler
@@ -789,7 +807,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V3-NODECK-2026-02-21T17:00Z';
+  const BUILD_STAMP = 'V3-SAFETERRAIN-2026-02-21T17:20Z';
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
