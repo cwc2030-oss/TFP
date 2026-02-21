@@ -12,10 +12,8 @@ import { calculateBeddingQuality, calculateBeddingQualityParcel } from './beddin
 import { calculateFunnelDensity } from './funnel-density';
 import { calculateTerrainDiversity } from './terrain-diversity';
 import { calculateCorridorCoverage } from './corridor-coverage';
-import {
-  stubEdgeHabitat,
-  stubStandSiteCount
-} from './stubs';
+import { calculateStandSiteCount } from './stand-site-count';
+import { stubEdgeHabitat } from './stubs';
 
 export type { ComponentInput, ComponentResult, ComponentStatus, BeddingMetrics, StandMetrics, HydroFeatures } from './types';
 
@@ -25,10 +23,8 @@ export { calculateBeddingQuality, calculateBeddingQualityParcel } from './beddin
 export { calculateFunnelDensity } from './funnel-density';
 export { calculateTerrainDiversity } from './terrain-diversity';
 export { calculateCorridorCoverage } from './corridor-coverage';
-export {
-  stubEdgeHabitat,
-  stubStandSiteCount
-} from './stubs';
+export { calculateStandSiteCount } from './stand-site-count';
+export { stubEdgeHabitat } from './stubs';
 
 /**
  * Component calculator registry
@@ -41,7 +37,7 @@ const COMPONENT_CALCULATORS: Record<ComponentId, (input: ComponentInput) => Comp
   corridor_coverage: calculateCorridorCoverage,
   edge_habitat: stubEdgeHabitat,
   terrain_diversity: calculateTerrainDiversity,
-  stand_site_count: stubStandSiteCount
+  stand_site_count: calculateStandSiteCount
 };
 
 /**
@@ -55,7 +51,7 @@ export const COMPONENT_STATUS: Record<ComponentId, 'real' | 'stubbed'> = {
   corridor_coverage: 'real',
   edge_habitat: 'stubbed',
   terrain_diversity: 'real',
-  stand_site_count: 'stubbed'
+  stand_site_count: 'real'
 };
 
 /**

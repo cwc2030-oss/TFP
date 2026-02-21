@@ -8,29 +8,38 @@
  * - status: 'stubbed'
  * - confidence: 0.30 (low confidence for stubs)
  * - inputsUsed: minimal list of what data was used
+ * 
+ * V1.0 Status (2026-02-21):
+ * - 6/7 components are REAL
+ * - Only edge_habitat remains stubbed (requires NLCD landcover)
  */
 
-import type { ComponentInput, ComponentResult, ComponentStatus } from './types';
+import type { ComponentInput, ComponentResult } from './types';
 
 // Stub confidence level (low since these are placeholders)
 const STUB_CONFIDENCE = 0.30;
 
 /**
- * Stubbed edge habitat - placeholder until landcover data available
+ * Stubbed edge habitat - placeholder until NLCD landcover data available
+ * 
+ * NOTE: Intentionally NOT using terrain-only proxies to avoid
+ * double-counting with corridor_coverage and terrain_diversity.
+ * Will implement when real landcover source (NLCD) is integrated.
  */
 export function stubEdgeHabitat(input: ComponentInput): ComponentResult {
   const { parcelAcres, summary } = input;
   
-  // Estimate based on parcel size (larger parcels tend to have more edge)
+  // Conservative estimate based on parcel size only
+  // (larger parcels tend to have more edge naturally)
   let estimatedScore: number;
-  if (parcelAcres >= 200) estimatedScore = 75;
-  else if (parcelAcres >= 80) estimatedScore = 65;
-  else if (parcelAcres >= 40) estimatedScore = 55;
-  else estimatedScore = 45;
+  if (parcelAcres >= 200) estimatedScore = 70;
+  else if (parcelAcres >= 80) estimatedScore = 60;
+  else if (parcelAcres >= 40) estimatedScore = 50;
+  else estimatedScore = 40;
   
-  // Adjust based on bedding presence (bedding implies cover variation)
+  // Minor adjustment based on bedding presence (bedding implies cover variation)
   if (summary.totalBeddingAcres > 0) {
-    estimatedScore += 10;
+    estimatedScore += 5;
   }
   
   estimatedScore = Math.min(100, estimatedScore);
@@ -40,37 +49,14 @@ export function stubEdgeHabitat(input: ComponentInput): ComponentResult {
     raw: estimatedScore,
     normalized: estimatedScore / 100,
     unit: 'score',
-    notes: `[STUB] Estimated from parcel size (${parcelAcres.toFixed(0)} ac). Real landcover analysis pending.`,
+    notes: `[STUB] Estimated from parcel size (${parcelAcres.toFixed(0)} ac). Requires NLCD landcover for real calculation.`,
     status: 'stubbed',
     confidence: STUB_CONFIDENCE,
     inputsUsed: ['parcel_acreage', 'bedding_presence'],
-    metadata: { parcelAcres, hasBedding: summary.totalBeddingAcres > 0 }
-  };
-}
-
-/**
- * Stubbed stand site count - uses actual count but marks as stub
- * since ranking/filtering logic not yet finalized
- */
-export function stubStandSiteCount(input: ComponentInput): ComponentResult {
-  const { layers } = input;
-  const standCount = layers.standPoints.features.length;
-  
-  // Range is 0-20, so normalize by /20
-  const clampedCount = Math.min(20, Math.max(0, standCount));
-  
-  // Slightly higher confidence since we use actual stand data
-  const confidence = 0.50;
-  
-  return {
-    componentId: 'stand_site_count',
-    raw: clampedCount,
-    normalized: clampedCount / 20,
-    unit: 'count',
-    notes: `${standCount} stand sites identified. Ranking methodology being refined.`,
-    status: 'stubbed',
-    confidence,
-    inputsUsed: ['stand_points'],
-    metadata: { rawCount: standCount }
+    metadata: { 
+      parcelAcres, 
+      hasBedding: summary.totalBeddingAcres > 0,
+      pendingDataSource: 'NLCD_2021'
+    }
   };
 }

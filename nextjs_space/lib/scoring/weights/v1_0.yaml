@@ -1,10 +1,19 @@
-# Terra Firma Scoring Weights v1.0
+# Terra Firma Scoring Weights v1.0 (FROZEN)
+# ==========================================
+# FROZEN: 2026-02-21 - Do not modify without version bump
+# 
 # All weights within a season profile MUST sum to 1.0
 # Component order is deterministic for reproducibility
+#
+# V1.0 Implementation Status:
+#   REAL (6/7): bedding_quality, funnel_density, corridor_coverage,
+#               water_proximity, terrain_diversity, stand_site_count
+#   STUBBED (1/7): edge_habitat (pending NLCD landcover)
 
 version: "1.0"
 description: "Initial scoring weights for deer hunting terrain analysis"
 last_updated: "2026-02-21"
+frozen: true
 
 # Component definitions with metadata
 components:
