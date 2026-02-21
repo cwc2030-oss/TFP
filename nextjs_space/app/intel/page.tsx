@@ -482,8 +482,23 @@ function DeerIntelContent() {
   }, [deckLayers]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
+  // Track instance count for debugging double-mount issues
+  const mountIdRef = useRef<string>('');
+  
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    const mountId = Date.now().toString(36);
+    mountIdRef.current = mountId;
+    console.log('[LIFECYCLE] useEffect mount id=' + mountId + ' mapRef.current=' + !!mapRef.current + ' containerRef=' + !!mapContainerRef.current);
+    
+    if (!mapContainerRef.current) {
+      console.log('[LIFECYCLE] No container ref, skipping');
+      return;
+    }
+    
+    if (mapRef.current) {
+      console.log('[LIFECYCLE] Map already exists, skipping creation');
+      return;
+    }
 
     // Check WebGL support
     if (!checkWebGLSupport()) {
@@ -503,6 +518,7 @@ function DeerIntelContent() {
     let map: mapboxgl.Map;
 
     try {
+      console.log('[MAP] Creating new mapboxgl.Map() id=' + mountId);
       map = new mapboxgl.Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/satellite-streets-v12',
@@ -511,6 +527,7 @@ function DeerIntelContent() {
         pitch: 45,
         bearing: -20,
       });
+      console.log('[MAP] Map created successfully id=' + mountId);
       
       // Expose for debugging
       if (typeof window !== 'undefined') {
@@ -523,8 +540,6 @@ function DeerIntelContent() {
       return;
     }
 
-    // Navigation controls removed - using custom UI instead
-
     // Error handler - only show critical failures
     map.on('error', (e: any) => {
       console.error("[TFP] Mapbox error:", e?.error?.message || e?.message);
@@ -533,9 +548,15 @@ function DeerIntelContent() {
       }
     });
 
-    // Attach overlay function - called once map is loaded
+    // Attach overlay function - called ONCE after map is loaded
     const attachOverlay = () => {
-      console.log('[MAP] attachOverlay called, map.loaded()=' + map.loaded());
+      // Guard against multiple calls
+      if (deckOverlayRef.current) {
+        console.log('[MAP] attachOverlay called but overlay already exists, skipping');
+        return;
+      }
+      
+      console.log('[MAP] attachOverlay called id=' + mountId + ' map.loaded()=' + map.loaded());
       
       // Add terrain DEM (3D elevation)
       if (!map.getSource('mapbox-dem')) {
@@ -561,41 +582,39 @@ function DeerIntelContent() {
         });
       }
       
-      // Create SINGLE persistent Deck.gl overlay
-      if (!deckOverlayRef.current) {
-        // Get actual map center for proof layer
-        const center = map.getCenter();
-        console.log('[MAP] Creating overlay at center:', center.lng, center.lat);
-        setMapCenter([center.lng, center.lat]);
-        
-        const overlay = new MapboxOverlay({
-          interleaved: true,
-          layers: [], // Start empty, setProps will populate
-        });
-        map.addControl(overlay as any);
-        deckOverlayRef.current = overlay;
-        
-        if (typeof window !== 'undefined') {
-          window.__TFP_DECK__ = overlay;
-        }
-        console.log('[MAP] overlay attached');
+      // Get actual map center for proof layer
+      const center = map.getCenter();
+      console.log('[MAP] Creating overlay at center: lng=' + center.lng + ' lat=' + center.lat);
+      setMapCenter([center.lng, center.lat]);
+      
+      const overlay = new MapboxOverlay({
+        interleaved: true,
+        layers: [], // Start empty, setProps will populate
+      });
+      map.addControl(overlay as any);
+      deckOverlayRef.current = overlay;
+      
+      if (typeof window !== 'undefined') {
+        window.__TFP_DECK__ = overlay;
       }
+      console.log('[MAP] overlay attached id=' + mountId);
       
       setMapReady(true);
     };
     
-    // Use proper attachment pattern: if already loaded, attach now; else wait for load
+    // Use proper attachment pattern
     if (map.loaded()) {
-      console.log('[MAP] Map already loaded, attaching immediately');
+      console.log('[MAP] Map already loaded, attaching immediately id=' + mountId);
       attachOverlay();
     } else {
-      console.log('[MAP] Waiting for load event');
+      console.log('[MAP] Waiting for load event id=' + mountId);
       map.once('load', attachOverlay);
     }
 
     mapRef.current = map;
 
     return () => {
+      console.log('[LIFECYCLE] Cleanup called id=' + mountId + ' (current mountId=' + mountIdRef.current + ')');
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = null;
         window.__TFP_DECK__ = null;
@@ -604,7 +623,7 @@ function DeerIntelContent() {
       map.remove();
       mapRef.current = null;
     };
-  }, [lat, lng]);
+  }, []); // Empty deps - only mount once, don't recreate on lat/lng change
 
   // Run analysis immediately on mount, and when season/wind changes
   useEffect(() => {
@@ -762,7 +781,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V3-PROOF-FIX-2026-02-21T16:10Z';
+  const BUILD_STAMP = 'V3-LIFECYCLE-2026-02-21T16:30Z';
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
