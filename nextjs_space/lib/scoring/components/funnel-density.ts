@@ -1,13 +1,16 @@
 /**
  * Funnel Density Component
  * 
- * Calculates the density of terrain-derived funnel features per acre.
+ * Calculates the density of terrain-derived funnel features per 100 acres.
  * Funnels include saddles (topographic pinch points) and convergence lines
  * (draws/corridors where deer movement naturally concentrates).
  * 
- * Normalization: clamp01(funnels_per_acre / 0.08)
- * - 0.08 funnels/acre is the high-density benchmark
- * - A 40-acre parcel with 3 quality funnels = 0.075 funnels/acre ≈ 93.75%
+ * Normalization: clamp01(funnels_per_100_acres / 8)
+ * - 8 funnels/100ac is the high-density benchmark
+ * - A 40-acre parcel with 3 funnels = 7.5/100ac ≈ 93.75%
+ * - A 400-acre parcel with 30 funnels = 7.5/100ac ≈ 93.75% (same density)
+ * 
+ * This per-100-acre normalization prevents big parcels from auto-scoring higher.
  * 
  * Real data: Uses actual geoprocessor funnel features (status='real')
  * Estimated: Falls back to stand-derived indicators if funnels missing
@@ -18,8 +21,8 @@ import type { FunnelProperties, FunnelType } from '@/types/terrain';
 
 // ============ Constants ============
 
-/** Benchmark: high-density funnel count per acre */
-const FUNNELS_PER_ACRE_BENCHMARK = 0.08;
+/** Benchmark: high-density funnel count per 100 acres */
+const FUNNELS_PER_100_ACRES_BENCHMARK = 8;
 
 /** Confidence levels by data source */
 const CONFIDENCE_REAL = 0.90;
@@ -85,11 +88,12 @@ export function calculateFunnelDensity(input: ComponentInput): ComponentResult {
     inputsUsed = ['stand_points', 'parcel_acreage'];
   }
   
-  // ============ Step 4: Calculate density ============
-  const funnelsPerAcre = weightedCount / parcelAcres;
+  // ============ Step 4: Calculate density per 100 acres ============
+  // Normalize to per-100-acres so big parcels don't auto-score higher
+  const funnelsPer100Acres = (weightedCount / parcelAcres) * 100;
   
   // ============ Step 5: Normalize ============
-  let normalized = clamp01(funnelsPerAcre / FUNNELS_PER_ACRE_BENCHMARK);
+  let normalized = clamp01(funnelsPer100Acres / FUNNELS_PER_100_ACRES_BENCHMARK);
   
   // Cap estimated data to prevent overstating
   if (status === 'estimated' && normalized > ESTIMATED_NORMALIZED_CAP) {
@@ -100,7 +104,7 @@ export function calculateFunnelDensity(input: ComponentInput): ComponentResult {
   const notes = generateNotes({
     totalRawCount,
     weightedCount,
-    funnelsPerAcre,
+    funnelsPer100Acres,
     parcelAcres,
     breakdown,
     status,
@@ -113,9 +117,9 @@ export function calculateFunnelDensity(input: ComponentInput): ComponentResult {
   
   return {
     componentId: 'funnel_density',
-    raw: Math.round(funnelsPerAcre * 10000) / 10000, // 4 decimal precision
+    raw: Math.round(funnelsPer100Acres * 100) / 100, // 2 decimal precision
     normalized: Math.round(normalized * 10000) / 10000,
-    unit: 'funnels_per_acre',
+    unit: 'funnels_per_100_acres',
     notes: fullNotes,
     status,
     confidence,
@@ -123,10 +127,10 @@ export function calculateFunnelDensity(input: ComponentInput): ComponentResult {
     metadata: {
       totalRawCount,
       weightedCount: Math.round(weightedCount * 100) / 100,
-      funnelsPerAcre: Math.round(funnelsPerAcre * 10000) / 10000,
+      funnelsPer100Acres: Math.round(funnelsPer100Acres * 100) / 100,
       parcelAcres: Math.round(parcelAcres * 10) / 10,
       breakdown,
-      benchmark: FUNNELS_PER_ACRE_BENCHMARK
+      benchmark: FUNNELS_PER_100_ACRES_BENCHMARK
     }
   };
 }
@@ -219,7 +223,7 @@ function clamp01(value: number): number {
 function generateNotes(params: {
   totalRawCount: number;
   weightedCount: number;
-  funnelsPerAcre: number;
+  funnelsPer100Acres: number;
   parcelAcres: number;
   breakdown: Record<FunnelType, { count: number; weighted: number }>;
   status: ComponentStatus;
@@ -227,16 +231,14 @@ function generateNotes(params: {
 }): string {
   const {
     totalRawCount,
-    weightedCount,
-    funnelsPerAcre,
+    funnelsPer100Acres,
     parcelAcres,
     breakdown,
-    status,
-    normalized
+    status
   } = params;
   
   if (totalRawCount === 0) {
-    return `No terrain funnels detected on ${Math.round(parcelAcres)} acres. Density: 0.00/acre.`;
+    return `No terrain funnels detected on ${Math.round(parcelAcres)} acres. Density: 0/100ac.`;
   }
   
   // Build breakdown string
@@ -252,10 +254,10 @@ function generateNotes(params: {
   }
   
   const featureList = parts.join(', ');
-  const densityStr = funnelsPerAcre.toFixed(4);
+  const densityStr = funnelsPer100Acres.toFixed(1);
   
   let note = `${totalRawCount} funnel features (${featureList}) on ${Math.round(parcelAcres)} acres. `;
-  note += `Density: ${densityStr}/acre (benchmark: ${FUNNELS_PER_ACRE_BENCHMARK}).`;
+  note += `Density: ${densityStr}/100ac (benchmark: ${FUNNELS_PER_100_ACRES_BENCHMARK}).`;
   
   if (status === 'estimated') {
     note += ` [estimated, capped at ${Math.round(ESTIMATED_NORMALIZED_CAP * 100)}%]`;
