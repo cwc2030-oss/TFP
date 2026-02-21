@@ -482,7 +482,7 @@ function DeerIntelContent() {
       return;
     }
 
-    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    // Navigation controls removed - using custom UI instead
 
     // Error handler - only show critical failures
     map.on('error', (e: any) => {
@@ -717,7 +717,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V3-DECK-ONLY-2026-02-21T15:05Z';
+  const BUILD_STAMP = 'V3-DECK-ONLY-2026-02-21T15:20Z';
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
