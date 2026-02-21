@@ -422,10 +422,23 @@ function DeerIntelContent() {
 
   // ========== SYNC DECK LAYERS TO OVERLAY ==========
   useEffect(() => {
+    console.log('[DECK DEBUG] Sync effect triggered', {
+      hasOverlay: !!deckOverlayRef.current,
+      mapReady,
+      layerCount: deckLayers.length,
+      layerIds: deckLayers.map(l => l.id),
+      hasParcelPolygon: !!parcelPolygon,
+      hasLayers: !!layers,
+      visibility,
+    });
+    
     if (deckOverlayRef.current && mapReady) {
+      console.log('[DECK DEBUG] Setting layers:', deckLayers.map(l => l.id));
       deckOverlayRef.current.setProps({ layers: deckLayers });
+    } else {
+      console.log('[DECK DEBUG] Cannot set layers - overlay:', !!deckOverlayRef.current, 'mapReady:', mapReady);
     }
-  }, [deckLayers, mapReady]);
+  }, [deckLayers, mapReady, parcelPolygon, layers, visibility]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   useEffect(() => {
