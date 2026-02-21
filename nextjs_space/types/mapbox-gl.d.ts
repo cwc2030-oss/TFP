@@ -73,6 +73,8 @@ declare module 'mapbox-gl' {
     getCanvas(): HTMLCanvasElement;
     addControl(control: any, position?: string): void;
     isStyleLoaded(): boolean;
+    loaded(): boolean;
+    getCenter(): LngLatLike;
     remove(): void;
   }
 
