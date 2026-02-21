@@ -20,6 +20,8 @@ export interface ComponentInput {
   centroid: [number, number];
   /** Optional: Real hydro features if available */
   hydroFeatures?: HydroFeatures;
+  /** Optional: Parcel boundary polygon for coverage calculations */
+  parcelGeometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon;
 }
 
 /**

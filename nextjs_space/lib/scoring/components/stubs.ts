@@ -16,31 +16,6 @@ import type { ComponentInput, ComponentResult, ComponentStatus } from './types';
 const STUB_CONFIDENCE = 0.30;
 
 /**
- * Stubbed corridor coverage - placeholder until real calculation
- */
-export function stubCorridorCoverage(input: ComponentInput): ComponentResult {
-  const { layers, parcelAcres } = input;
-  const funnels = layers.funnels.features.filter(
-    f => (f.properties as any).funnelType === 'corridor'
-  );
-  
-  // Estimate coverage based on corridor count
-  const estimatedCoverage = Math.min(100, funnels.length * 8);
-  
-  return {
-    componentId: 'corridor_coverage',
-    raw: estimatedCoverage,
-    normalized: estimatedCoverage / 100,
-    unit: 'percent',
-    notes: `[STUB] ${funnels.length} corridors detected. Real coverage calculation pending.`,
-    status: 'stubbed',
-    confidence: STUB_CONFIDENCE,
-    inputsUsed: ['corridor_features', 'parcel_acreage'],
-    metadata: { corridorCount: funnels.length, parcelAcres }
-  };
-}
-
-/**
  * Stubbed edge habitat - placeholder until landcover data available
  */
 export function stubEdgeHabitat(input: ComponentInput): ComponentResult {

@@ -11,8 +11,8 @@ import { calculateWaterProximity } from './water-proximity';
 import { calculateBeddingQuality, calculateBeddingQualityParcel } from './bedding-quality';
 import { calculateFunnelDensity } from './funnel-density';
 import { calculateTerrainDiversity } from './terrain-diversity';
+import { calculateCorridorCoverage } from './corridor-coverage';
 import {
-  stubCorridorCoverage,
   stubEdgeHabitat,
   stubStandSiteCount
 } from './stubs';
@@ -24,8 +24,8 @@ export { calculateWaterProximity } from './water-proximity';
 export { calculateBeddingQuality, calculateBeddingQualityParcel } from './bedding-quality';
 export { calculateFunnelDensity } from './funnel-density';
 export { calculateTerrainDiversity } from './terrain-diversity';
+export { calculateCorridorCoverage } from './corridor-coverage';
 export {
-  stubCorridorCoverage,
   stubEdgeHabitat,
   stubStandSiteCount
 } from './stubs';
@@ -38,7 +38,7 @@ const COMPONENT_CALCULATORS: Record<ComponentId, (input: ComponentInput) => Comp
   water_proximity: calculateWaterProximity,
   bedding_quality: calculateBeddingQuality,
   funnel_density: calculateFunnelDensity,
-  corridor_coverage: stubCorridorCoverage,
+  corridor_coverage: calculateCorridorCoverage,
   edge_habitat: stubEdgeHabitat,
   terrain_diversity: calculateTerrainDiversity,
   stand_site_count: stubStandSiteCount
@@ -52,7 +52,7 @@ export const COMPONENT_STATUS: Record<ComponentId, 'real' | 'stubbed'> = {
   water_proximity: 'real',
   bedding_quality: 'real',
   funnel_density: 'real',
-  corridor_coverage: 'stubbed',
+  corridor_coverage: 'real',
   edge_habitat: 'stubbed',
   terrain_diversity: 'real',
   stand_site_count: 'stubbed'
