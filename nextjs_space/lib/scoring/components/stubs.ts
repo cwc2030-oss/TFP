@@ -16,28 +16,6 @@ import type { ComponentInput, ComponentResult, ComponentStatus } from './types';
 const STUB_CONFIDENCE = 0.30;
 
 /**
- * Stubbed funnel density - placeholder until real calculation
- */
-export function stubFunnelDensity(input: ComponentInput): ComponentResult {
-  const { summary, parcelAcres } = input;
-  const funnelCount = summary.funnelCount || 0;
-  const density = parcelAcres > 0 ? (funnelCount / parcelAcres) * 40 : 0; // Scale to ~0-10 range
-  const clampedDensity = Math.min(10, Math.max(0, density));
-  
-  return {
-    componentId: 'funnel_density',
-    raw: Math.round(clampedDensity * 10) / 10,
-    normalized: clampedDensity / 10,
-    unit: 'features_per_acre',
-    notes: `[STUB] ${funnelCount} funnels on ${parcelAcres.toFixed(0)} acres. Real calculation pending.`,
-    status: 'stubbed',
-    confidence: STUB_CONFIDENCE,
-    inputsUsed: ['funnel_count', 'parcel_acreage'],
-    metadata: { funnelCount, parcelAcres }
-  };
-}
-
-/**
  * Stubbed corridor coverage - placeholder until real calculation
  */
 export function stubCorridorCoverage(input: ComponentInput): ComponentResult {

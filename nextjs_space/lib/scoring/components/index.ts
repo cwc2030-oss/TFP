@@ -9,8 +9,8 @@ import type { ComponentInput, ComponentResult, ComponentStatus } from './types';
 import type { ComponentNormalizedOutput, ComponentId } from '../types';
 import { calculateWaterProximity } from './water-proximity';
 import { calculateBeddingQuality, calculateBeddingQualityParcel } from './bedding-quality';
+import { calculateFunnelDensity } from './funnel-density';
 import {
-  stubFunnelDensity,
   stubCorridorCoverage,
   stubEdgeHabitat,
   stubTerrainDiversity,
@@ -22,8 +22,8 @@ export type { ComponentInput, ComponentResult, ComponentStatus, BeddingMetrics, 
 // Re-export individual calculators
 export { calculateWaterProximity } from './water-proximity';
 export { calculateBeddingQuality, calculateBeddingQualityParcel } from './bedding-quality';
+export { calculateFunnelDensity } from './funnel-density';
 export {
-  stubFunnelDensity,
   stubCorridorCoverage,
   stubEdgeHabitat,
   stubTerrainDiversity,
@@ -37,7 +37,7 @@ export {
 const COMPONENT_CALCULATORS: Record<ComponentId, (input: ComponentInput) => ComponentResult> = {
   water_proximity: calculateWaterProximity,
   bedding_quality: calculateBeddingQuality,
-  funnel_density: stubFunnelDensity,
+  funnel_density: calculateFunnelDensity,
   corridor_coverage: stubCorridorCoverage,
   edge_habitat: stubEdgeHabitat,
   terrain_diversity: stubTerrainDiversity,
@@ -51,7 +51,7 @@ const COMPONENT_CALCULATORS: Record<ComponentId, (input: ComponentInput) => Comp
 export const COMPONENT_STATUS: Record<ComponentId, 'real' | 'stubbed'> = {
   water_proximity: 'real',
   bedding_quality: 'real',
-  funnel_density: 'stubbed',
+  funnel_density: 'real',
   corridor_coverage: 'stubbed',
   edge_habitat: 'stubbed',
   terrain_diversity: 'stubbed',
