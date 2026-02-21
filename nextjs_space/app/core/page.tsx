@@ -462,6 +462,7 @@ function CoreScoringContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [progressStep, setProgressStep] = useState('');
   const hasRun = useRef(false);
   
   // Parse query params with defaults
@@ -484,43 +485,72 @@ function CoreScoringContent() {
     setIsLoading(true);
     setError(null);
     setProgress(10);
+    setProgressStep('Preparing request...');
     
     const startTime = Date.now();
     const parcel = generateParcelGeometry(lat, lng, acreage);
     
+    const apiUrl = '/api/terrain-analysis';
+    const requestBody = {
+      parcel,
+      seasonProfile: season,
+      prevailingWinds: [wind],
+      bufferMeters: 800
+    };
+    
+    console.log('[CORE] Calling:', apiUrl);
+    console.log('[CORE] Request body:', JSON.stringify(requestBody).slice(0, 200) + '...');
+    
     try {
-      setProgress(30);
+      setProgress(20);
+      setProgressStep('Calling terrain API...');
       
-      const response = await fetch('/api/terrain-analysis', {
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parcel,
-          seasonProfile: season,
-          prevailingWinds: [wind],
-          bufferMeters: 800
-        })
+        body: JSON.stringify(requestBody)
       });
       
-      setProgress(70);
+      setProgress(40);
+      setProgressStep(`Response: ${response.status} ${response.statusText}`);
+      
+      console.log('[CORE] Response status:', response.status);
+      console.log('[CORE] Response headers:', Object.fromEntries(response.headers.entries()));
       
       if (!response.ok) {
-        throw new Error(`Analysis failed: ${response.status}`);
+        const errorText = await response.text();
+        console.error('[CORE] Error response body:', errorText);
+        throw new Error(`API returned ${response.status}: ${errorText.slice(0, 100)}`);
       }
       
+      setProgress(60);
+      setProgressStep('Parsing response...');
+      
       const terrain = await response.json() as TerrainAnalysisResponse;
+      console.log('[CORE] Terrain mode:', terrain.mode);
+      console.log('[CORE] Layers:', {
+        bedding: terrain.layers?.beddingPolygons?.features?.length || 0,
+        funnels: terrain.layers?.funnels?.features?.length || 0,
+        stands: terrain.layers?.standPoints?.features?.length || 0
+      });
+      
+      setProgress(80);
+      setProgressStep('Computing scores...');
+      
       const processingMs = Date.now() - startTime;
-      
-      setProgress(90);
-      
       const result = convertTerrainToScoring(terrain, season, acreage, processingMs);
+      
+      setProgress(100);
+      setProgressStep('Complete!');
+      
       setCachedScoring(result);
       setScoring(result);
-      setProgress(100);
       
     } catch (err) {
-      console.error('[Core] Analysis error:', err);
-      setError(err instanceof Error ? err.message : 'Analysis failed');
+      console.error('[CORE] Analysis error:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
+      setError(errorMsg);
+      setProgressStep(`FAILED: ${errorMsg}`);
       
       // Fall back to mock
       const mock = generateMockScoring(acreage, season);
@@ -579,14 +609,18 @@ function CoreScoringContent() {
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                <div className="text-xs text-gray-500 mt-1">Processing terrain data...</div>
+                <div className="text-xs text-gray-500 mt-1 font-mono">{progressStep || 'Processing terrain data...'}</div>
               </div>
             )}
             
             {error && (
-              <div className="text-sm text-amber-600 flex items-center gap-1">
-                <AlertCircle className="w-4 h-4" />
-                {error} (using mock fallback)
+              <div className="flex-1 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="text-sm text-amber-700 flex items-center gap-1 font-medium">
+                  <AlertCircle className="w-4 h-4" />
+                  Analysis Error (using mock fallback)
+                </div>
+                <div className="text-xs text-amber-600 mt-1 font-mono break-all">{error}</div>
+                <div className="text-xs text-gray-500 mt-1">Check browser DevTools console for full details</div>
               </div>
             )}
           </div>
@@ -599,6 +633,15 @@ function CoreScoringContent() {
             <div className="text-lg font-medium text-gray-700">Running terrain analysis...</div>
             <div className="text-sm text-gray-500 mt-2">
               Analyzing {acreage.toFixed(0)} acres at {lat.toFixed(4)}, {lng.toFixed(4)}
+            </div>
+            <div className="mt-4 max-w-md mx-auto">
+              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-blue-500 transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <div className="text-xs text-gray-500 mt-2 font-mono">{progressStep}</div>
             </div>
           </div>
         )}
