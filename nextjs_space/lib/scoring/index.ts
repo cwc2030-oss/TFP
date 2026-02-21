@@ -39,3 +39,55 @@ export {
   getStubbedNormalizedValues,
   scoreWithStubs
 } from './aggregator';
+
+// Components
+export type {
+  ComponentInput,
+  ComponentResult,
+  BeddingMetrics,
+  StandMetrics,
+  HydroFeatures
+} from './components';
+
+export {
+  calculateAllComponents,
+  calculateComponent,
+  calculateNormalizedComponents,
+  toNormalizedOutput,
+  calculateWaterProximity,
+  calculateBeddingQuality,
+  COMPONENT_STATUS
+} from './components';
+
+// Convenience function: score terrain analysis directly
+import type { TerrainLayers, TerrainSummary } from '@/types/terrain';
+import type { SeasonId, ScoringResult } from './types';
+import { aggregateScores } from './aggregator';
+import { calculateNormalizedComponents } from './components';
+import type { ComponentInput } from './components';
+
+/**
+ * Score terrain analysis results directly
+ * Combines component calculation and aggregation in one call
+ */
+export function scoreTerrainAnalysis(
+  layers: TerrainLayers,
+  summary: TerrainSummary,
+  parcelAcres: number,
+  centroid: [number, number],
+  season: SeasonId
+): ScoringResult {
+  const input: ComponentInput = {
+    layers,
+    summary,
+    parcelAcres,
+    centroid
+  };
+  
+  const components = calculateNormalizedComponents(input);
+  
+  return aggregateScores({
+    season,
+    components
+  });
+}
