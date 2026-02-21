@@ -21,7 +21,7 @@ export interface ComponentRawOutput {
 }
 
 /**
- * Normalized component output (0-100 scale)
+ * Normalized component output (0-1 scale)
  * Produced by normalizing raw values against component ranges
  */
 export interface ComponentNormalizedOutput {
@@ -29,7 +29,7 @@ export interface ComponentNormalizedOutput {
   componentId: string;
   /** Original raw value */
   raw: number;
-  /** Normalized value (0-100) */
+  /** Normalized value (0-1) */
   normalized: number;
   /** Unit of the raw measurement */
   unit: string;
@@ -48,11 +48,13 @@ export interface ComponentWeightedOutput {
   name: string;
   /** Original raw value */
   raw: number;
-  /** Normalized value (0-100) */
+  /** Normalized value (0-1) */
   normalized: number;
+  /** Normalized value scaled to 0-100 for UI display */
+  normalized100: number;
   /** Weight applied for this season (0-1) */
   weight: number;
-  /** Weighted contribution (normalized * weight) */
+  /** Weighted contribution (normalized * weight), contributes to total when summed and *100 */
   weighted: number;
   /** Unit of the raw measurement */
   unit: string;

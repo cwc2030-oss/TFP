@@ -17,18 +17,22 @@ import type {
 import { getWeights, getSeasonProfile, getComponentDefinition, validateWeightsConfig } from './weight-loader';
 
 /**
- * Calculate letter grade from score
+ * Calculate letter grade from score (forgiving bands)
+ * A ≥ 85, B ≥ 70, C ≥ 55, D ≥ 40, F < 40
  */
 function calculateGrade(score: number): string {
-  if (score >= 90) return 'A';
-  if (score >= 80) return 'B';
-  if (score >= 70) return 'C';
-  if (score >= 60) return 'D';
+  if (score >= 85) return 'A';
+  if (score >= 70) return 'B';
+  if (score >= 55) return 'C';
+  if (score >= 40) return 'D';
   return 'F';
 }
 
 /**
  * Aggregate normalized component scores into a final weighted score
+ * 
+ * Formula: totalScore = 100 * sum(normalized_i * weight_i)
+ * where normalized_i is 0-1 and weights sum to 1
  */
 export function aggregateScores(input: ScoringInput): ScoringResult {
   const config = getWeights();
@@ -40,7 +44,7 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
   
   // Build weighted outputs
   const weightedComponents: ComponentWeightedOutput[] = [];
-  let totalWeightedScore = 0;
+  let sumWeighted = 0;
   
   for (const component of input.components) {
     const componentId = component.componentId as ComponentId;
@@ -52,14 +56,16 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
     }
     
     const componentDef = getComponentDefinition(config, componentId);
+    // weighted = normalized (0-1) * weight (0-1)
     const weighted = component.normalized * weight;
-    totalWeightedScore += weighted;
+    sumWeighted += weighted;
     
     weightedComponents.push({
       componentId,
       name: componentDef.name,
       raw: component.raw,
       normalized: component.normalized,
+      normalized100: Math.round(component.normalized * 1000) / 10, // 0-100 for UI
       weight,
       weighted,
       unit: component.unit,
@@ -70,12 +76,15 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
   // Sort by weight descending for consistent output
   weightedComponents.sort((a, b) => b.weight - a.weight);
   
+  // totalScore = 100 * sum(weighted)
+  const totalScore = Math.round(sumWeighted * 1000) / 10;
+  
   return {
     weightsVersion: config.version,
     season: input.season,
     seasonName: seasonProfile.name,
-    totalScore: Math.round(totalWeightedScore * 10) / 10,
-    grade: calculateGrade(totalWeightedScore),
+    totalScore,
+    grade: calculateGrade(totalScore),
     components: weightedComponents,
     validation,
     timestamp: new Date().toISOString()
@@ -83,8 +92,15 @@ export function aggregateScores(input: ScoringInput): ScoringResult {
 }
 
 /**
- * Normalize a raw value to 0-100 scale
+ * Normalize a raw value to 0-1 scale
  * Handles inverted components (where lower is better)
+ * 
+ * Normalization ranges:
+ * - funnel_density: /10
+ * - corridor_coverage: /100
+ * - water_proximity: inverted, 0-1000m
+ * - stand_site_count: /20
+ * - others: /100
  */
 export function normalizeValue(
   componentId: ComponentId,
@@ -106,32 +122,33 @@ export function normalizeValue(
     normalized = 1 - normalized;
   }
   
-  // Scale to 0-100
-  const score = normalized * 100;
-  
-  // Generate notes
-  const notes = generateNotes(componentId, rawValue, score, componentDef);
+  // Generate notes using 0-100 scale for human readability
+  const normalized100 = normalized * 100;
+  const notes = generateNotes(componentId, rawValue, normalized100, componentDef);
   
   return {
-    normalized: Math.round(score * 10) / 10,
+    // Return 0-1 scale, rounded to 4 decimal places for precision
+    normalized: Math.round(normalized * 10000) / 10000,
     notes
   };
 }
 
 /**
  * Generate human-readable notes for a component score
+ * Uses 0-100 scale for display
  */
 function generateNotes(
   componentId: ComponentId,
   rawValue: number,
-  normalizedScore: number,
+  normalized100: number,
   componentDef: { name: string; unit: string; range: [number, number]; invert?: boolean }
 ): string {
+  // Forgiving quality labels matching grade bands
   const qualityLabel = 
-    normalizedScore >= 80 ? 'Excellent' :
-    normalizedScore >= 60 ? 'Good' :
-    normalizedScore >= 40 ? 'Average' :
-    normalizedScore >= 20 ? 'Below Average' : 'Poor';
+    normalized100 >= 85 ? 'Excellent' :
+    normalized100 >= 70 ? 'Good' :
+    normalized100 >= 55 ? 'Average' :
+    normalized100 >= 40 ? 'Below Average' : 'Poor';
   
   const [min, max] = componentDef.range;
   const rangePosition = ((rawValue - min) / (max - min) * 100).toFixed(0);
