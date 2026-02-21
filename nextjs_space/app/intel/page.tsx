@@ -298,6 +298,39 @@ function DeerIntelContent() {
   const deckLayers = useMemo(() => {
     const layersList: any[] = [];
 
+    // 0. PROOF LAYER - bright red box at map center (always rendered to test overlay)
+    const proofPolygon: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: { name: 'proof' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [lng - 0.002, lat - 0.002],
+            [lng + 0.002, lat - 0.002],
+            [lng + 0.002, lat + 0.002],
+            [lng - 0.002, lat + 0.002],
+            [lng - 0.002, lat - 0.002],
+          ]]
+        }
+      }]
+    };
+    layersList.push(
+      new GeoJsonLayer({
+        id: 'tfp-proof',
+        data: proofPolygon,
+        stroked: true,
+        filled: true,
+        getFillColor: [255, 0, 0, 180], // Bright red, semi-transparent
+        getLineColor: [255, 255, 0, 255], // Yellow outline
+        getLineWidth: 6,
+        lineWidthUnits: 'pixels',
+        lineWidthMinPixels: 4,
+        parameters: { depthTest: false }, // Render on top of terrain
+      })
+    );
+
     // 1. PARCEL BOUNDARY (yellow dashed line) - always visible
     if (parcelPolygon) {
       const parcelFC = validateGeoJSON(parcelPolygon);
@@ -314,6 +347,7 @@ function DeerIntelContent() {
           getDashArray: [12, 6],
           dashJustified: true,
           extensions: [new PathStyleExtension({ dash: true })],
+          parameters: { depthTest: false },
         })
       );
     }
@@ -335,6 +369,7 @@ function DeerIntelContent() {
             getLineWidth: 2,
             lineWidthUnits: 'pixels',
             lineWidthMinPixels: 1,
+            parameters: { depthTest: false },
           })
         );
       }
@@ -357,6 +392,7 @@ function DeerIntelContent() {
             getLineWidth: 2,
             lineWidthUnits: 'pixels',
             lineWidthMinPixels: 1,
+            parameters: { depthTest: false },
           })
         );
       }
@@ -383,6 +419,7 @@ function DeerIntelContent() {
             getLineWidth: 6,
             lineWidthUnits: 'pixels',
             lineWidthMinPixels: 3,
+            parameters: { depthTest: false },
           })
         );
       }
@@ -412,33 +449,28 @@ function DeerIntelContent() {
             stroked: true,
             lineWidthUnits: 'pixels',
             lineWidthMinPixels: 2,
+            parameters: { depthTest: false },
           })
         );
       }
     }
 
+    console.log('[DECK] Built layers:', layersList.map(l => l.id));
     return layersList;
-  }, [parcelPolygon, layers, visibility]);
+  }, [parcelPolygon, layers, visibility, lat, lng]);
 
   // ========== SYNC DECK LAYERS TO OVERLAY ==========
+  // This is the ONLY place we call setProps - triggered when deckLayers changes
   useEffect(() => {
-    console.log('[DECK DEBUG] Sync effect triggered', {
-      hasOverlay: !!deckOverlayRef.current,
-      mapReady,
-      layerCount: deckLayers.length,
-      layerIds: deckLayers.map(l => l.id),
-      hasParcelPolygon: !!parcelPolygon,
-      hasLayers: !!layers,
-      visibility,
-    });
-    
-    if (deckOverlayRef.current && mapReady) {
-      console.log('[DECK DEBUG] Setting layers:', deckLayers.map(l => l.id));
-      deckOverlayRef.current.setProps({ layers: deckLayers });
-    } else {
-      console.log('[DECK DEBUG] Cannot set layers - overlay:', !!deckOverlayRef.current, 'mapReady:', mapReady);
+    const overlay = deckOverlayRef.current;
+    if (!overlay) {
+      console.log('[DECK SYNC] No overlay ref yet');
+      return;
     }
-  }, [deckLayers, mapReady, parcelPolygon, layers, visibility]);
+    
+    console.log('[DECK SYNC] Setting', deckLayers.length, 'layers:', deckLayers.map(l => l.id));
+    overlay.setProps({ layers: deckLayers });
+  }, [deckLayers]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   useEffect(() => {
@@ -492,8 +524,10 @@ function DeerIntelContent() {
       }
     });
 
-    // Style load handler - set up terrain + Deck.gl overlay
-    const handleStyleLoad = () => {
+    // Create Deck.gl overlay ONCE on map load - persist it
+    map.on('load', () => {
+      console.log('[MAP] Load event fired');
+      
       // Add terrain DEM (3D elevation)
       if (!map.getSource('mapbox-dem')) {
         map.addSource('mapbox-dem', {
@@ -518,11 +552,12 @@ function DeerIntelContent() {
         });
       }
       
-      // Create SINGLE Deck.gl overlay
+      // Create SINGLE persistent Deck.gl overlay
       if (!deckOverlayRef.current) {
+        console.log('[MAP] Creating MapboxOverlay');
         const overlay = new MapboxOverlay({
-          interleaved: true, // Renders with Mapbox layers for proper depth
-          layers: [],
+          interleaved: true,
+          layers: deckLayers, // Initialize with current layers
         });
         map.addControl(overlay as any);
         deckOverlayRef.current = overlay;
@@ -530,22 +565,10 @@ function DeerIntelContent() {
         if (typeof window !== 'undefined') {
           window.__TFP_DECK__ = overlay;
         }
+        console.log('[MAP] MapboxOverlay attached, initial layers:', deckLayers.map(l => l.id));
       }
       
       setMapReady(true);
-    };
-
-    // Handle both initial load and style changes
-    map.on('load', handleStyleLoad);
-    map.on('style.load', () => {
-      // Re-create overlay on style change
-      if (deckOverlayRef.current) {
-        try {
-          (map as any).removeControl(deckOverlayRef.current);
-        } catch { /* ignore */ }
-        deckOverlayRef.current = null;
-      }
-      handleStyleLoad();
     });
 
     mapRef.current = map;
@@ -717,7 +740,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V3-DECK-ONLY-2026-02-21T15:20Z';
+  const BUILD_STAMP = 'V3-DECK-PROOF-2026-02-21T15:45Z';
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
