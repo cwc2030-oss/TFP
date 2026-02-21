@@ -807,7 +807,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V3-SAFETERRAIN-2026-02-21T17:20Z';
+  const BUILD_STAMP = 'V4-SCORING-2026-02-21T17:45Z';
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">

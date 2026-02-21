@@ -1,0 +1,117 @@
+# Terra Firma Scoring Weights v1.0
+# All weights within a season profile MUST sum to 1.0
+# Component order is deterministic for reproducibility
+
+version: "1.0"
+description: "Initial scoring weights for deer hunting terrain analysis"
+last_updated: "2026-02-21"
+
+# Component definitions with metadata
+components:
+  bedding_quality:
+    id: "bedding_quality"
+    name: "Bedding Area Quality"
+    description: "Quality and quantity of identified bedding areas"
+    unit: "score"
+    range: [0, 100]
+    
+  funnel_density:
+    id: "funnel_density"
+    name: "Terrain Funnel Density"
+    description: "Concentration of natural terrain funnels (saddles, draws, benches)"
+    unit: "features_per_acre"
+    range: [0, 10]
+    
+  corridor_coverage:
+    id: "corridor_coverage"
+    name: "Travel Corridor Coverage"
+    description: "Percentage of property with identified travel corridors"
+    unit: "percent"
+    range: [0, 100]
+    
+  water_proximity:
+    id: "water_proximity"
+    name: "Water Source Proximity"
+    description: "Average distance to water sources from key features"
+    unit: "meters"
+    range: [0, 1000]
+    invert: true  # Lower is better
+    
+  edge_habitat:
+    id: "edge_habitat"
+    name: "Edge Habitat Quality"
+    description: "Quality of transition zones between cover types"
+    unit: "score"
+    range: [0, 100]
+    
+  terrain_diversity:
+    id: "terrain_diversity"
+    name: "Terrain Diversity Index"
+    description: "Variety of elevation changes and terrain features"
+    unit: "score"
+    range: [0, 100]
+    
+  stand_site_count:
+    id: "stand_site_count"
+    name: "Viable Stand Sites"
+    description: "Number of high-quality stand placement opportunities"
+    unit: "count"
+    range: [0, 20]
+
+# Season profiles with weights that sum to 1.0
+seasons:
+  early:
+    name: "Early Season"
+    description: "Focus on food sources, water, and predictable patterns"
+    date_range: "Sept 15 - Oct 31"
+    weights:
+      bedding_quality: 0.15
+      funnel_density: 0.10
+      corridor_coverage: 0.15
+      water_proximity: 0.25
+      edge_habitat: 0.20
+      terrain_diversity: 0.05
+      stand_site_count: 0.10
+    # Sum: 1.00
+    
+  rut:
+    name: "Rut Season"
+    description: "Focus on terrain funnels, travel corridors, and doe bedding"
+    date_range: "Nov 1 - Nov 30"
+    weights:
+      bedding_quality: 0.25
+      funnel_density: 0.25
+      corridor_coverage: 0.20
+      water_proximity: 0.05
+      edge_habitat: 0.10
+      terrain_diversity: 0.10
+      stand_site_count: 0.05
+    # Sum: 1.00
+    
+  late:
+    name: "Late Season"
+    description: "Focus on thermal cover, food sources, and energy conservation"
+    date_range: "Dec 1 - Jan 15"
+    weights:
+      bedding_quality: 0.30
+      funnel_density: 0.10
+      corridor_coverage: 0.15
+      water_proximity: 0.10
+      edge_habitat: 0.15
+      terrain_diversity: 0.05
+      stand_site_count: 0.15
+    # Sum: 1.00
+
+  annual:
+    name: "Annual Average"
+    description: "Balanced weights for year-round property evaluation"
+    date_range: "Year-round"
+    weights:
+      bedding_quality: 0.20
+      funnel_density: 0.15
+      corridor_coverage: 0.15
+      water_proximity: 0.15
+      edge_habitat: 0.15
+      terrain_diversity: 0.10
+      stand_site_count: 0.10
+    # Sum: 1.00
