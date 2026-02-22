@@ -676,8 +676,8 @@ function DeerIntelContent() {
         style: 'mapbox://styles/mapbox/satellite-streets-v12',
         center: [lng, lat],
         zoom: 14,
-        pitch: 45,
-        bearing: -20,
+        pitch: 0,    // Flat 2D view - no 3D terrain
+        bearing: 0,  // North up
       });
       console.log('[MAP] AFTER new mapboxgl.Map() id=' + mountId + ' map exists=' + !!map);
       
@@ -687,7 +687,7 @@ function DeerIntelContent() {
       }
     } catch (err) {
       console.error("[MAP] FAILED to create Map:", err);
-      setMapError("Failed to load 3D map. Please try refreshing the page.");
+      setMapError("Failed to load map. Please try refreshing the page.");
       setIsLoading(false);
       return;
     }
@@ -704,51 +704,11 @@ function DeerIntelContent() {
     const onMapLoad = () => {
       console.log('[MAP] LOAD EVENT FIRED id=' + mountId + ' map.loaded()=' + map.loaded());
       
-      // Wrap terrain/sky in try/catch - map should be interactive even if these fail
-      try {
-        // Add terrain DEM (3D elevation)
-        console.log('[MAP] BEFORE addSource mapbox-dem, exists=' + !!map.getSource('mapbox-dem'));
-        if (!map.getSource('mapbox-dem')) {
-          map.addSource('mapbox-dem', {
-            type: 'raster-dem',
-            url: 'mapbox://mapbox.terrain-rgb',
-            tileSize: 512,
-            maxzoom: 14,
-          });
-          console.log('[MAP] AFTER addSource mapbox-dem');
-          
-          console.log('[MAP] BEFORE setTerrain');
-          map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-          console.log('[MAP] AFTER setTerrain');
-        } else {
-          console.log('[MAP] mapbox-dem source already exists, skipping');
-        }
-      } catch (terrainErr) {
-        console.error('[MAP] Terrain setup failed (non-fatal):', terrainErr);
-      }
-
-      try {
-        // Add sky atmosphere
-        console.log('[MAP] BEFORE addLayer sky, exists=' + !!map.getLayer('sky'));
-        if (!map.getLayer('sky')) {
-          map.addLayer({
-            id: 'sky',
-            type: 'sky',
-            paint: {
-              'sky-type': 'atmosphere',
-              'sky-atmosphere-sun': [0.0, 90.0],
-              'sky-atmosphere-sun-intensity': 15,
-            },
-          });
-          console.log('[MAP] AFTER addLayer sky');
-        } else {
-          console.log('[MAP] sky layer already exists, skipping');
-        }
-      } catch (skyErr) {
-        console.error('[MAP] Sky setup failed (non-fatal):', skyErr);
-      }
+      // DISABLED: 3D terrain + sky - using flat 2D map only for stability
+      // Terrain DEM and sky layer removed to prevent page crashes
+      console.log('[MAP] Skipping terrain/sky setup (flat 2D mode)');
       
-      // Re-enable Deck.gl overlay
+      // Deck.gl overlay
       try {
         console.log('[MAP] BEFORE Deck overlay setup');
         const center = map.getCenter();
@@ -882,7 +842,7 @@ function DeerIntelContent() {
       el.onclick = () => {
         setSelectedStand(props.rank);
         showStandPopup(coords, props);
-        map.flyTo({ center: coords, zoom: 16, pitch: 60 });
+        map.flyTo({ center: coords, zoom: 16 });
       };
 
       markersRef.current.push(marker);
@@ -955,11 +915,11 @@ function DeerIntelContent() {
   };
 
   const flyToCenter = () => {
-    mapRef.current?.flyTo({ center: [lng, lat], zoom: 14, pitch: 45, bearing: -20 });
+    mapRef.current?.flyTo({ center: [lng, lat], zoom: 14 });
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V5-ERROR-BOUNDARY-2026-02-22';
+  const BUILD_STAMP = 'V6-FLAT-2D-2026-02-22';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -1323,7 +1283,7 @@ function DeerIntelContent() {
                       onClick={() => {
                         setSelectedStand(props.rank);
                         showStandPopup(coords, props);
-                        mapRef.current?.flyTo({ center: coords, zoom: 16, pitch: 60 });
+                        mapRef.current?.flyTo({ center: coords, zoom: 16 });
                       }}
                       className={`
                         w-full px-4 py-3 text-left transition-colors border-b border-white/5
