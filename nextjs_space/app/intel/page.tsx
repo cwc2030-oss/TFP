@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo, Component, ErrorInfo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -11,7 +11,7 @@ import {
   Target, TreePine, Wind, Calendar, ChevronLeft, ChevronRight, 
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
-  Maximize2, Minimize2, RefreshCw, Check
+  Maximize2, Minimize2, RefreshCw, Check, Bug
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -27,6 +27,88 @@ import type {
   SeasonProfile,
   WindDirection,
 } from '@/types/terrain';
+
+// ========== ERROR BOUNDARY ==========
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
+}
+
+class IntelErrorBoundary extends Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[INTEL ERROR BOUNDARY] Caught error:', error);
+    console.error('[INTEL ERROR BOUNDARY] Component stack:', errorInfo.componentStack);
+    this.setState({ errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
+          <div className="max-w-2xl w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6">
+            <div className="flex items-start gap-4">
+              <Bug className="h-8 w-8 text-red-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl font-bold text-red-300 mb-2">Intel Page Crashed</h1>
+                <div className="bg-black/50 rounded-lg p-4 mb-4 overflow-auto max-h-48">
+                  <p className="text-red-200 font-mono text-sm break-words">
+                    {this.state.error?.message || 'Unknown error'}
+                  </p>
+                </div>
+                {this.state.error?.stack && (
+                  <details className="mb-4">
+                    <summary className="text-red-400 text-sm cursor-pointer hover:text-red-300">
+                      Stack trace
+                    </summary>
+                    <pre className="bg-black/50 rounded-lg p-3 mt-2 text-xs text-red-300/80 overflow-auto max-h-64 whitespace-pre-wrap">
+                      {this.state.error.stack}
+                    </pre>
+                  </details>
+                )}
+                {this.state.errorInfo?.componentStack && (
+                  <details className="mb-4">
+                    <summary className="text-red-400 text-sm cursor-pointer hover:text-red-300">
+                      Component stack
+                    </summary>
+                    <pre className="bg-black/50 rounded-lg p-3 mt-2 text-xs text-red-300/80 overflow-auto max-h-48 whitespace-pre-wrap">
+                      {this.state.errorInfo.componentStack}
+                    </pre>
+                  </details>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg font-medium"
+                  >
+                    Reload Page
+                  </button>
+                  <Link
+                    href="/core"
+                    className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg font-medium"
+                  >
+                    Try /core instead
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // Mapbox token
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
@@ -158,9 +240,11 @@ function LoadingFallback() {
 
 export default function DeerIntelPage() {
   return (
-    <Suspense fallback={<LoadingFallback />}>
-      <DeerIntelContent />
-    </Suspense>
+    <IntelErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <DeerIntelContent />
+      </Suspense>
+    </IntelErrorBoundary>
   );
 }
 
@@ -187,6 +271,9 @@ function DeerIntelContent() {
   const [summary, setSummary] = useState<TerrainSummary | null>(null);
   const [provenance, setProvenance] = useState<TerrainProvenance | null>(null);
 
+  // Global/unhandled error state
+  const [globalError, setGlobalError] = useState<{ message: string; stack?: string } | null>(null);
+
   // User controls
   const [season, setSeason] = useState<SeasonProfile>('rut');
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
@@ -204,6 +291,40 @@ function DeerIntelContent() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
+
+  // ========== GLOBAL ERROR HANDLERS ==========
+  useEffect(() => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('[INTEL] Unhandled promise rejection:', event.reason);
+      const errorMsg = event.reason instanceof Error 
+        ? event.reason.message 
+        : String(event.reason);
+      const errorStack = event.reason instanceof Error ? event.reason.stack : undefined;
+      setGlobalError({ message: `Unhandled rejection: ${errorMsg}`, stack: errorStack });
+      setError(`Unhandled error: ${errorMsg}`);
+      setIsLoading(false);
+    };
+
+    const handleGlobalError = (event: ErrorEvent) => {
+      console.error('[INTEL] Global error:', event.message, event.filename, event.lineno);
+      setGlobalError({ 
+        message: `${event.message} (${event.filename}:${event.lineno})`,
+        stack: event.error?.stack 
+      });
+      setError(`Error: ${event.message}`);
+      setIsLoading(false);
+    };
+
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    window.addEventListener('error', handleGlobalError);
+
+    console.log('[INTEL] Global error handlers registered');
+
+    return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      window.removeEventListener('error', handleGlobalError);
+    };
+  }, []);
 
   // Check WebGL support
   const checkWebGLSupport = (): boolean => {
@@ -716,7 +837,7 @@ function DeerIntelContent() {
     cleanupMarkers();
 
     // Only show TOP 2 stands
-    const topTwoStands = layers.standPoints.features.slice(0, 2);
+    const topTwoStands = layers.standPoints?.features?.slice(0, 2) || [];
 
     topTwoStands.forEach((feature) => {
       const props = feature.properties as StandPointProperties;
@@ -838,7 +959,52 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V4-SCORING-2026-02-21T17:45Z';
+  const BUILD_STAMP = 'V5-ERROR-BOUNDARY-2026-02-22';
+
+  // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
+  if (globalError) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
+        <div className="max-w-2xl w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6">
+          <div className="flex items-start gap-4">
+            <Bug className="h-8 w-8 text-red-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl font-bold text-red-300 mb-2">Unhandled Error in /intel</h1>
+              <div className="bg-black/50 rounded-lg p-4 mb-4 overflow-auto max-h-48">
+                <p className="text-red-200 font-mono text-sm break-words">
+                  {globalError.message}
+                </p>
+              </div>
+              {globalError.stack && (
+                <details className="mb-4">
+                  <summary className="text-red-400 text-sm cursor-pointer hover:text-red-300">
+                    Stack trace
+                  </summary>
+                  <pre className="bg-black/50 rounded-lg p-3 mt-2 text-xs text-red-300/80 overflow-auto max-h-64 whitespace-pre-wrap">
+                    {globalError.stack}
+                  </pre>
+                </details>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setGlobalError(null); window.location.reload(); }}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg font-medium"
+                >
+                  Reload Page
+                </button>
+                <Link
+                  href="/core"
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg font-medium"
+                >
+                  Try /core instead
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
@@ -1146,7 +1312,7 @@ function DeerIntelContent() {
               </div>
 
               <div className="flex-1">
-                {layers?.standPoints.features.slice(0, 2).map((feature) => {
+                {(layers?.standPoints?.features || []).slice(0, 2).map((feature) => {
                   const props = feature.properties as StandPointProperties;
                   const isSelected = selectedStand === props.rank;
                   const coords = feature.geometry.coordinates as [number, number];
