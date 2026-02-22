@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Clock, Info, RefreshCw, Loader2, Server, MapPin } from 'lucide-react';
+import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Clock, Info, RefreshCw, Loader2, Server, MapPin, AlertTriangle } from 'lucide-react';
 import type { TerrainAnalysisResponse, SeasonProfile, WindDirection } from '@/types/terrain';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -12,7 +12,7 @@ mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 
 // Build stamp for deployment verification
 const BUILD_STAMP = {
-  version: '1.0.0',
+  version: '1.0.1',
   frozen: '2026-02-21',
   components: { real: 6, stubbed: 1, total: 7 }
 };
@@ -25,8 +25,19 @@ const DEFAULT_DEMO = {
   address: 'Pleasant Hill, MO'
 };
 
-// Generate parcel polygon from center point and acreage
-function generateParcelGeometry(lat: number, lng: number, acreage: number): GeoJSON.Feature<GeoJSON.Polygon> {
+// Parcel data from Regrid API
+interface ParcelData {
+  parcelId: string;
+  coordinates: number[][][] | number[][][][];
+  geometryType: string;
+  acreage: number;
+  siteAddress: string;
+  owner: string;
+  county: string | null;
+}
+
+// Generate synthetic parcel polygon from center point and acreage (fallback)
+function generateSyntheticGeometry(lat: number, lng: number, acreage: number): GeoJSON.Feature<GeoJSON.Polygon> {
   const sqMeters = acreage * 4046.86;
   const side = Math.sqrt(sqMeters);
   const halfSide = side / 2;
@@ -39,7 +50,7 @@ function generateParcelGeometry(lat: number, lng: number, acreage: number): GeoJ
   
   return {
     type: 'Feature',
-    properties: { acreage, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` },
+    properties: { acreage, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, isEstimated: true },
     geometry: {
       type: 'Polygon',
       coordinates: [[
@@ -51,6 +62,65 @@ function generateParcelGeometry(lat: number, lng: number, acreage: number): GeoJ
       ]]
     }
   };
+}
+
+// Convert Regrid parcel data to GeoJSON Feature
+function parcelToGeoJSON(parcel: ParcelData): GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> {
+  const props = { 
+    parcelId: parcel.parcelId,
+    acreage: parcel.acreage, 
+    address: parcel.siteAddress,
+    owner: parcel.owner,
+    county: parcel.county,
+    isEstimated: false
+  };
+  
+  if (parcel.geometryType === 'MultiPolygon') {
+    return {
+      type: 'Feature',
+      properties: props,
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: parcel.coordinates as number[][][][]
+      }
+    };
+  }
+  
+  return {
+    type: 'Feature',
+    properties: props,
+    geometry: {
+      type: 'Polygon',
+      coordinates: parcel.coordinates as number[][][]
+    }
+  };
+}
+
+// Fetch real parcel boundary from Regrid API
+async function fetchParcelBoundary(lat: number, lng: number): Promise<ParcelData | null> {
+  try {
+    const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (!data.parcels || data.parcels.length === 0) return null;
+    
+    const parcel = data.parcels[0];
+    if (!parcel.coordinates || parcel.coordinates.length === 0) return null;
+    
+    return {
+      parcelId: parcel.parcelId,
+      coordinates: parcel.coordinates,
+      geometryType: parcel.geometryType || 'Polygon',
+      acreage: parcel.acreage,
+      siteAddress: parcel.siteAddress,
+      owner: parcel.owner,
+      county: parcel.county
+    };
+  } catch (error) {
+    console.error('[Core] Failed to fetch parcel boundary:', error);
+    return null;
+  }
 }
 
 // Types for scoring output
@@ -127,21 +197,38 @@ const SEASON_NAMES: Record<string, string> = {
 
 // ============ Lightweight Parcel Map Component ============
 interface ParcelMapProps {
-  parcel: GeoJSON.Feature<GeoJSON.Polygon>;
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
   scoring: ScoringResult | null;
   acreage: number;
+  isEstimated: boolean;
+  parcelId?: string;
+  address?: string;
 }
 
-function ParcelMap({ parcel, scoring, acreage }: ParcelMapProps) {
+function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address }: ParcelMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const popup = useRef<mapboxgl.Popup | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  // Get parcel center
-  const coords = parcel.geometry.coordinates[0];
-  const centerLng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
-  const centerLat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
+  // Get parcel center - handle both Polygon and MultiPolygon
+  const getCenter = (): [number, number] => {
+    const geom = parcel.geometry;
+    if (geom.type === 'MultiPolygon') {
+      // Use first polygon's coordinates
+      const coords = geom.coordinates[0][0] as number[][];
+      const lng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
+      const lat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
+      return [lng, lat];
+    } else {
+      const coords = geom.coordinates[0] as number[][];
+      const lng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
+      const lat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
+      return [lng, lat];
+    }
+  };
+  
+  const [centerLng, centerLat] = getCenter();
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -173,15 +260,19 @@ function ParcelMap({ parcel, scoring, acreage }: ParcelMapProps) {
         data: parcel
       });
 
-      // Dashed yellow line for boundary
+      // Different styling for estimated vs real boundaries
+      const boundaryColor = isEstimated ? '#F59E0B' : '#10B981'; // Amber for estimated, emerald for real
+      const dashPattern = isEstimated ? [4, 3] : [1, 0]; // Dashed for estimated, solid for real
+      
+      // Boundary line
       map.current.addLayer({
         id: 'parcel-outline',
         type: 'line',
         source: 'parcel',
         paint: {
-          'line-color': '#FFD700', // Gold/yellow
-          'line-width': 3,
-          'line-dasharray': [3, 2], // Dashed pattern
+          'line-color': boundaryColor,
+          'line-width': isEstimated ? 2.5 : 3,
+          'line-dasharray': dashPattern,
           'line-opacity': 0.9
         }
       });
@@ -192,8 +283,8 @@ function ParcelMap({ parcel, scoring, acreage }: ParcelMapProps) {
         type: 'fill',
         source: 'parcel',
         paint: {
-          'fill-color': '#FFD700',
-          'fill-opacity': 0.1
+          'fill-color': boundaryColor,
+          'fill-opacity': isEstimated ? 0.08 : 0.12
         }
       });
 
@@ -238,8 +329,18 @@ function ParcelMap({ parcel, scoring, acreage }: ParcelMapProps) {
           grade === 'C' ? '#ca8a04' : 
           grade === 'D' ? '#ea580c' : '#dc2626';
 
+        const boundaryBadge = isEstimated 
+          ? '<div style="background: #FEF3C7; color: #92400E; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-bottom: 6px; display: inline-block;">⚠ ESTIMATED BOUNDARY</div>'
+          : parcelId ? `<div style="background: #D1FAE5; color: #065F46; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-bottom: 6px; display: inline-block;">✓ REGRID: ${parcelId}</div>` : '';
+
+        const addressLine = address && !isEstimated 
+          ? `<div style="font-size: 11px; color: #6b7280; margin-bottom: 4px;">${address}</div>` 
+          : '';
+
         const html = `
           <div style="font-family: system-ui; padding: 4px;">
+            ${boundaryBadge}
+            ${addressLine}
             <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px; color: #1f2937;">
               ${acreage.toFixed(1)} Acres
             </div>
@@ -292,8 +393,22 @@ function ParcelMap({ parcel, scoring, acreage }: ParcelMapProps) {
   return (
     <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
       <div className="px-4 py-3 border-b bg-gray-50 flex items-center gap-2">
-        <MapPin className="w-4 h-4 text-amber-600" />
+        <MapPin className={`w-4 h-4 ${isEstimated ? 'text-amber-600' : 'text-emerald-600'}`} />
         <span className="font-medium text-gray-700">Parcel Overview</span>
+        
+        {/* Boundary type badge */}
+        {isEstimated ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded">
+            <AlertTriangle className="w-3 h-3" />
+            ESTIMATED BOUNDARY
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded">
+            <CheckCircle2 className="w-3 h-3" />
+            REGRID VERIFIED
+          </span>
+        )}
+        
         <span className="text-xs text-gray-400 ml-auto">Click parcel for details</span>
       </div>
       <div 
@@ -650,12 +765,46 @@ function CoreScoringContent() {
   const [progressStep, setProgressStep] = useState('');
   const hasRun = useRef(false);
   
+  // Parcel boundary state
+  const [parcelData, setParcelData] = useState<ParcelData | null>(null);
+  const [parcelGeometry, setParcelGeometry] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
+  const [isEstimatedBoundary, setIsEstimatedBoundary] = useState(true);
+  const [boundaryLoading, setBoundaryLoading] = useState(true);
+  
   // Parse query params with defaults
   const lat = parseFloat(searchParams.get('lat') || '') || DEFAULT_DEMO.lat;
   const lng = parseFloat(searchParams.get('lng') || '') || DEFAULT_DEMO.lng;
   const season = (searchParams.get('season') as SeasonProfile) || 'rut';
   const wind = (searchParams.get('wind') as WindDirection) || 'NW';
-  const acreage = parseFloat(searchParams.get('acres') || '') || DEFAULT_DEMO.acreage;
+  const acreageParam = parseFloat(searchParams.get('acres') || '') || DEFAULT_DEMO.acreage;
+  
+  // Use real acreage from parcel data if available
+  const acreage = parcelData?.acreage || acreageParam;
+  
+  // Fetch real parcel boundary on mount
+  useEffect(() => {
+    async function loadParcelBoundary() {
+      setBoundaryLoading(true);
+      console.log('[CORE] Fetching real parcel boundary for:', lat, lng);
+      
+      const data = await fetchParcelBoundary(lat, lng);
+      
+      if (data) {
+        console.log('[CORE] Got real parcel boundary:', data.parcelId, data.acreage, 'acres');
+        setParcelData(data);
+        setParcelGeometry(parcelToGeoJSON(data));
+        setIsEstimatedBoundary(false);
+      } else {
+        console.log('[CORE] Using synthetic boundary (no Regrid data)');
+        setParcelGeometry(generateSyntheticGeometry(lat, lng, acreageParam));
+        setIsEstimatedBoundary(true);
+      }
+      
+      setBoundaryLoading(false);
+    }
+    
+    loadParcelBoundary();
+  }, [lat, lng, acreageParam]);
   
   const runAnalysis = useCallback(async (force = false) => {
     // Check cache first (unless forced)
@@ -673,7 +822,9 @@ function CoreScoringContent() {
     setProgressStep('Preparing request...');
     
     const startTime = Date.now();
-    const parcel = generateParcelGeometry(lat, lng, acreage);
+    
+    // Use real parcel geometry if available, otherwise synthetic
+    const parcel = parcelGeometry || generateSyntheticGeometry(lat, lng, acreage);
     
     const apiUrl = '/api/terrain-analysis';
     const requestBody = {
@@ -743,15 +894,15 @@ function CoreScoringContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [lat, lng, acreage, season, wind]);
+  }, [lat, lng, acreage, season, wind, parcelGeometry]);
   
-  // Auto-run on mount
+  // Auto-run once parcel geometry is loaded
   useEffect(() => {
-    if (!hasRun.current) {
+    if (!hasRun.current && !boundaryLoading && parcelGeometry) {
       hasRun.current = true;
       runAnalysis();
     }
-  }, [runAnalysis]);
+  }, [runAnalysis, boundaryLoading, parcelGeometry]);
   
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
@@ -811,13 +962,25 @@ function CoreScoringContent() {
           </div>
         </div>
         
-        {/* Loading State */}
-        {isLoading && !scoring && (
+        {/* Boundary Loading State */}
+        {boundaryLoading && (
+          <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mx-auto mb-3" />
+            <div className="text-md font-medium text-gray-700">Fetching parcel boundary...</div>
+            <div className="text-sm text-gray-500 mt-1">Looking up Regrid data for {lat.toFixed(4)}, {lng.toFixed(4)}</div>
+          </div>
+        )}
+        
+        {/* Analysis Loading State */}
+        {!boundaryLoading && isLoading && !scoring && (
           <div className="bg-white rounded-lg shadow-sm border p-12 text-center">
             <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
             <div className="text-lg font-medium text-gray-700">Running terrain analysis...</div>
             <div className="text-sm text-gray-500 mt-2">
               Analyzing {acreage.toFixed(0)} acres at {lat.toFixed(4)}, {lng.toFixed(4)}
+              {!isEstimatedBoundary && parcelData?.parcelId && (
+                <span className="block text-emerald-600 mt-1">Using Regrid boundary: {parcelData.parcelId}</span>
+              )}
             </div>
             <div className="mt-4 max-w-md mx-auto">
               <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -837,8 +1000,15 @@ function CoreScoringContent() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white rounded-lg shadow-sm border p-6">
                 <div className="text-sm text-gray-500 mb-1">Location</div>
-                <div className="text-lg font-semibold text-gray-900">{lat.toFixed(4)}, {lng.toFixed(4)}</div>
+                {parcelData?.siteAddress ? (
+                  <div className="text-md font-semibold text-gray-900 leading-tight">{parcelData.siteAddress}</div>
+                ) : (
+                  <div className="text-lg font-semibold text-gray-900">{lat.toFixed(4)}, {lng.toFixed(4)}</div>
+                )}
                 <div className="text-2xl font-bold text-gray-900 mt-1">{acreage.toFixed(1)} ac</div>
+                {parcelData?.parcelId && (
+                  <div className="text-xs text-emerald-600 mt-1 font-mono">ID: {parcelData.parcelId}</div>
+                )}
               </div>
               
               <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -853,11 +1023,16 @@ function CoreScoringContent() {
             </div>
             
             {/* Parcel Map */}
-            <ParcelMap 
-              parcel={generateParcelGeometry(lat, lng, acreage)} 
-              scoring={scoring} 
-              acreage={acreage} 
-            />
+            {parcelGeometry && (
+              <ParcelMap 
+                parcel={parcelGeometry} 
+                scoring={scoring} 
+                acreage={acreage}
+                isEstimated={isEstimatedBoundary}
+                parcelId={parcelData?.parcelId}
+                address={parcelData?.siteAddress}
+              />
+            )}
             
             {/* Confidence Summary */}
             <div className="bg-white rounded-lg shadow-sm border p-6">
