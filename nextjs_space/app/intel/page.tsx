@@ -4,9 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo, Com
 import { useSearchParams, useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapboxOverlay } from '@deck.gl/mapbox';
-import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
-import { PathStyleExtension } from '@deck.gl/extensions';
+// NOTE: Deck.gl removed - using native Mapbox sources/layers only for stability
 import { 
   Target, TreePine, Wind, Calendar, ChevronLeft, ChevronRight, 
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
@@ -117,7 +115,6 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 declare global {
   interface Window {
     __TFP_MAP__: mapboxgl.Map | null;
-    __TFP_DECK__: MapboxOverlay | null;
   }
 }
 
@@ -189,14 +186,6 @@ function filterByGeometryType(
   };
 }
 
-// ========== HELPER: Convert hex to RGBA array for Deck.gl ==========
-function hexToRgba(hex: string, alpha = 255): [number, number, number, number] {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return [r, g, b, alpha];
-}
-
 const WIND_DIRECTIONS: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: string }[] = [
   { value: 'early', label: 'Early Season', dates: 'Sept-Oct', icon: '🌿' },
@@ -204,7 +193,7 @@ const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: strin
   { value: 'late', label: 'Late Season', dates: 'Dec-Jan', icon: '❄️' },
 ];
 
-// Colors as hex (for UI) and rgba (for Deck.gl)
+// Colors as hex (for UI and native Mapbox layers)
 const LAYER_COLORS = {
   bedding: '#22c55e',
   beddingOutline: '#16a34a',
@@ -217,15 +206,8 @@ const LAYER_COLORS = {
   parcelBoundary: '#fbbf24',
 };
 
-// Deck.gl RGBA colors
-const DECK_COLORS = {
-  bedding: hexToRgba('#22c55e', 100),       // fill with alpha
-  beddingOutline: hexToRgba('#16a34a', 255),
-  funnelSaddle: hexToRgba('#f97316', 130),
-  funnelDraw: hexToRgba('#3b82f6', 230),
-  funnelCorridor: hexToRgba('#a855f7', 230),
-  parcelBoundary: hexToRgba('#fbbf24', 255),
-};
+// Empty GeoJSON for initializing sources
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 function LoadingFallback() {
   return (
@@ -443,195 +425,80 @@ function DeerIntelContent() {
     }
   }, [lat, lng, season, windDirection, acreageParam]);
 
-  // ========== SINGLE DECK.GL OVERLAY ==========
-  const deckOverlayRef = useRef<MapboxOverlay | null>(null);
-  
-  // Track map center for proof layer (updated when map moves)
-  const [mapCenter, setMapCenter] = useState<[number, number]>([lng, lat]);
+  // ========== NATIVE MAPBOX SOURCES INITIALIZED FLAG ==========
+  const overlaySourcesCreated = useRef(false);
 
-  // ========== DECK.GL LAYERS (reactive to data + visibility) ==========
-  const deckLayers = useMemo(() => {
-    const layersList: any[] = [];
-    
-    // Use map center for proof layer [lng, lat] order (GeoJSON standard)
-    const cLng = mapCenter[0];
-    const cLat = mapCenter[1];
-
-    // 0. PROOF LAYER - bright red box at map center (always rendered to test overlay)
-    const proofPolygon: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        properties: { name: 'tfp-proof-polygon' },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [[
-            [cLng - 0.003, cLat - 0.003],
-            [cLng + 0.003, cLat - 0.003],
-            [cLng + 0.003, cLat + 0.003],
-            [cLng - 0.003, cLat + 0.003],
-            [cLng - 0.003, cLat - 0.003],
-          ]]
-        }
-      }]
-    };
-    console.log('[DECK] Proof polygon center:', cLng, cLat);
-    layersList.push(
-      new GeoJsonLayer({
-        id: 'tfp-proof',
-        data: proofPolygon,
-        stroked: true,
-        filled: true,
-        getFillColor: [255, 0, 0, 200], // Bright red
-        getLineColor: [255, 255, 0, 255], // Yellow outline
-        getLineWidth: 8,
-        lineWidthUnits: 'pixels',
-        lineWidthMinPixels: 6,
-        parameters: { depthTest: false },
-      })
-    );
-
-    // 1. PARCEL BOUNDARY (yellow dashed line) - always visible
-    if (parcelPolygon) {
-      const parcelFC = validateGeoJSON(parcelPolygon);
-      layersList.push(
-        new GeoJsonLayer({
-          id: 'tfp-parcel-boundary',
-          data: parcelFC,
-          stroked: true,
-          filled: false,
-          lineWidthUnits: 'pixels',
-          getLineColor: DECK_COLORS.parcelBoundary,
-          getLineWidth: 4,
-          lineWidthMinPixels: 3,
-          getDashArray: [12, 6],
-          dashJustified: true,
-          extensions: [new PathStyleExtension({ dash: true })],
-          parameters: { depthTest: false },
-        })
-      );
-    }
-
-    // 2. BEDDING AREAS (green filled polygons)
-    if (layers?.beddingPolygons && visibility.bedding) {
-      const beddingFC = validateGeoJSON(layers.beddingPolygons);
-      const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
-      
-      if (polygonsOnly.features.length > 0) {
-        layersList.push(
-          new GeoJsonLayer({
-            id: 'tfp-bedding-fill',
-            data: polygonsOnly,
-            stroked: true,
-            filled: true,
-            getFillColor: DECK_COLORS.bedding,
-            getLineColor: DECK_COLORS.beddingOutline,
-            getLineWidth: 2,
-            lineWidthUnits: 'pixels',
-            lineWidthMinPixels: 1,
-            parameters: { depthTest: false },
-          })
-        );
-      }
-    }
-
-    // 3. FUNNELS - Saddles (orange filled polygons)
-    if (layers?.funnels && visibility.funnels) {
-      const funnelsFC = validateGeoJSON(layers.funnels);
-      const saddlePolygons = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
-      
-      if (saddlePolygons.features.length > 0) {
-        layersList.push(
-          new GeoJsonLayer({
-            id: 'tfp-funnel-saddles',
-            data: saddlePolygons,
-            stroked: true,
-            filled: true,
-            getFillColor: DECK_COLORS.funnelSaddle,
-            getLineColor: hexToRgba('#ea580c', 255),
-            getLineWidth: 2,
-            lineWidthUnits: 'pixels',
-            lineWidthMinPixels: 1,
-            parameters: { depthTest: false },
-          })
-        );
-      }
-    }
-
-    // 4. FUNNELS - Draws and Corridors (lines)
-    if (layers?.funnels && (visibility.funnels || visibility.corridors)) {
-      const funnelsFC = validateGeoJSON(layers.funnels);
-      const lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
-      
-      if (lines.features.length > 0) {
-        layersList.push(
-          new GeoJsonLayer({
-            id: 'tfp-funnel-lines',
-            data: lines,
-            stroked: true,
-            filled: false,
-            getLineColor: (f: any) => {
-              const funnelType = f.properties?.funnelType;
-              if (funnelType === 'draw') return DECK_COLORS.funnelDraw;
-              if (funnelType === 'corridor') return DECK_COLORS.funnelCorridor;
-              return DECK_COLORS.funnelSaddle;
-            },
-            getLineWidth: 6,
-            lineWidthUnits: 'pixels',
-            lineWidthMinPixels: 3,
-            parameters: { depthTest: false },
-          })
-        );
-      }
-    }
-
-    // 5. FUNNEL POINTS (circles) - using ScatterplotLayer
-    if (layers?.funnels && visibility.funnels) {
-      const funnelsFC = validateGeoJSON(layers.funnels);
-      const points = filterByGeometryType(funnelsFC, ['Point']);
-      
-      if (points.features.length > 0) {
-        const pointData = points.features.map(f => ({
-          coordinates: (f.geometry as GeoJSON.Point).coordinates as [number, number],
-          properties: f.properties,
-        }));
-        
-        layersList.push(
-          new ScatterplotLayer({
-            id: 'tfp-funnel-points',
-            data: pointData,
-            getPosition: (d: any) => d.coordinates,
-            getFillColor: hexToRgba('#f97316', 200),
-            getLineColor: [255, 255, 255, 255],
-            getRadius: 12,
-            radiusUnits: 'pixels',
-            radiusMinPixels: 8,
-            stroked: true,
-            lineWidthUnits: 'pixels',
-            lineWidthMinPixels: 2,
-            parameters: { depthTest: false },
-          })
-        );
-      }
-    }
-
-    console.log('[DECK] Built layers:', layersList.map(l => l.id));
-    return layersList;
-  }, [parcelPolygon, layers, visibility, mapCenter]);
-
-  // ========== SYNC DECK LAYERS TO OVERLAY ==========
-  // This is the ONLY place we call setProps - triggered when deckLayers changes
+  // ========== UPDATE NATIVE MAPBOX SOURCES WHEN DATA CHANGES ==========
   useEffect(() => {
-    const overlay = deckOverlayRef.current;
-    const overlayExists = !!overlay;
-    const layerIds = deckLayers.map(l => l.id);
-    
-    console.log('[DECK] setProps layerIds=' + layerIds.join(',') + ' count=' + deckLayers.length + ' overlayExists=' + overlayExists);
-    
-    if (overlay) {
-      overlay.setProps({ layers: deckLayers });
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+
+    try {
+      // Update parcel boundary
+      const parcelSource = map.getSource('tfp-parcel') as mapboxgl.GeoJSONSource;
+      if (parcelSource && parcelPolygon) {
+        parcelSource.setData(validateGeoJSON(parcelPolygon));
+      }
+
+      // Update bedding polygons
+      const beddingSource = map.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
+      if (beddingSource) {
+        const beddingFC = layers?.beddingPolygons ? validateGeoJSON(layers.beddingPolygons) : EMPTY_FC;
+        const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
+        beddingSource.setData(polygonsOnly);
+      }
+
+      // Update funnel lines (draws, corridors)
+      const funnelLinesSource = map.getSource('tfp-funnels-lines') as mapboxgl.GeoJSONSource;
+      if (funnelLinesSource) {
+        const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
+        const lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
+        funnelLinesSource.setData(lines);
+      }
+
+      // Update funnel polygons (saddles)
+      const funnelPolysSource = map.getSource('tfp-funnels-polys') as mapboxgl.GeoJSONSource;
+      if (funnelPolysSource) {
+        const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
+        const polys = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
+        funnelPolysSource.setData(polys);
+      }
+
+      console.log('[MAP] Updated native Mapbox sources with terrain data');
+    } catch (err) {
+      console.error('[MAP] Error updating sources (non-fatal):', err);
     }
-  }, [deckLayers]);
+  }, [layers, parcelPolygon, mapReady]);
+
+  // ========== UPDATE LAYER VISIBILITY ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+
+    try {
+      // Bedding visibility
+      if (map.getLayer('tfp-bedding-fill')) {
+        map.setLayoutProperty('tfp-bedding-fill', 'visibility', visibility.bedding ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-bedding-outline')) {
+        map.setLayoutProperty('tfp-bedding-outline', 'visibility', visibility.bedding ? 'visible' : 'none');
+      }
+
+      // Funnel visibility
+      const funnelVisible = visibility.funnels || visibility.corridors;
+      if (map.getLayer('tfp-funnels-lines')) {
+        map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-funnels-polys-fill')) {
+        map.setLayoutProperty('tfp-funnels-polys-fill', 'visibility', visibility.funnels ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-funnels-polys-outline')) {
+        map.setLayoutProperty('tfp-funnels-polys-outline', 'visibility', visibility.funnels ? 'visible' : 'none');
+      }
+    } catch (err) {
+      console.error('[MAP] Error updating visibility (non-fatal):', err);
+    }
+  }, [visibility, mapReady]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -705,34 +572,100 @@ function DeerIntelContent() {
       console.log('[MAP] LOAD EVENT FIRED id=' + mountId + ' map.loaded()=' + map.loaded());
       
       // DISABLED: 3D terrain + sky - using flat 2D map only for stability
-      // Terrain DEM and sky layer removed to prevent page crashes
-      console.log('[MAP] Skipping terrain/sky setup (flat 2D mode)');
-      
-      // Deck.gl overlay
-      try {
-        console.log('[MAP] BEFORE Deck overlay setup');
-        const center = map.getCenter();
-        console.log('[MAP] Got center: lng=' + center.lng + ' lat=' + center.lat);
-        setMapCenter([center.lng, center.lat]);
-        
-        const overlay = new MapboxOverlay({
-          interleaved: true,
-          layers: [],
-        });
-        console.log('[MAP] BEFORE addControl overlay');
-        map.addControl(overlay as any);
-        console.log('[MAP] AFTER addControl overlay');
-        deckOverlayRef.current = overlay;
-        
-        if (typeof window !== 'undefined') {
-          window.__TFP_DECK__ = overlay;
-        }
-        console.log('[MAP] Deck overlay attached successfully');
-      } catch (deckErr) {
-        console.error('[MAP] Deck overlay failed (non-fatal):', deckErr);
+      // Guard: only call setTerrain if the method exists (Mapbox GL v2+)
+      if (typeof map.setTerrain === 'function') {
+        console.log('[MAP] setTerrain is available but DISABLED for stability');
+      } else {
+        console.log('[MAP] setTerrain not available (Mapbox GL v1 or MapLibre)');
       }
       
-      // ALWAYS set map ready - even if terrain/sky/deck failed
+      // Create native Mapbox sources and layers (NO Deck.gl)
+      try {
+        console.log('[MAP] Creating native Mapbox sources...');
+        
+        // Parcel boundary source
+        if (!map.getSource('tfp-parcel')) {
+          map.addSource('tfp-parcel', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-parcel-outline',
+            type: 'line',
+            source: 'tfp-parcel',
+            paint: {
+              'line-color': LAYER_COLORS.parcelBoundary,
+              'line-width': 3,
+              'line-dasharray': [4, 2],
+            },
+          });
+        }
+        
+        // Bedding source
+        if (!map.getSource('tfp-bedding')) {
+          map.addSource('tfp-bedding', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-bedding-fill',
+            type: 'fill',
+            source: 'tfp-bedding',
+            paint: {
+              'fill-color': LAYER_COLORS.bedding,
+              'fill-opacity': 0.25,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-bedding-outline',
+            type: 'line',
+            source: 'tfp-bedding',
+            paint: {
+              'line-color': LAYER_COLORS.beddingOutline,
+              'line-width': 2,
+            },
+          });
+        }
+        
+        // Funnel lines source (draws, corridors)
+        if (!map.getSource('tfp-funnels-lines')) {
+          map.addSource('tfp-funnels-lines', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-funnels-lines',
+            type: 'line',
+            source: 'tfp-funnels-lines',
+            paint: {
+              'line-color': LAYER_COLORS.funnelDraw,
+              'line-width': 3,
+            },
+          });
+        }
+        
+        // Funnel polygons source (saddles)
+        if (!map.getSource('tfp-funnels-polys')) {
+          map.addSource('tfp-funnels-polys', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-funnels-polys-fill',
+            type: 'fill',
+            source: 'tfp-funnels-polys',
+            paint: {
+              'fill-color': LAYER_COLORS.funnelSaddle,
+              'fill-opacity': 0.2,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-funnels-polys-outline',
+            type: 'line',
+            source: 'tfp-funnels-polys',
+            paint: {
+              'line-color': '#EA580C',
+              'line-width': 2,
+            },
+          });
+        }
+        
+        overlaySourcesCreated.current = true;
+        console.log('[MAP] Native Mapbox sources created successfully');
+      } catch (sourceErr) {
+        console.error('[MAP] Source/layer setup failed (non-fatal):', sourceErr);
+        // Continue anyway - panels must render even if map overlays fail
+      }
+      
+      // ALWAYS set map ready - even if source setup failed
       console.log('[MAP] BEFORE setMapReady(true)');
       setMapReady(true);
       console.log('[MAP] AFTER setMapReady(true) - map should now be interactive');
@@ -755,9 +688,8 @@ function DeerIntelContent() {
       console.log('[LIFECYCLE] CLEANUP id=' + mountId + ' (current=' + mountIdRef.current + ')');
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = null;
-        window.__TFP_DECK__ = null;
       }
-      deckOverlayRef.current = null;
+      overlaySourcesCreated.current = false;
       map.remove();
       mapRef.current = null;
     };
@@ -919,7 +851,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V6-FLAT-2D-2026-02-22';
+  const BUILD_STAMP = 'V7-NATIVE-MAPBOX-2026-02-22';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
