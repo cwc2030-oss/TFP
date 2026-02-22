@@ -210,86 +210,117 @@ function DeerIntelContent() {
     return true; // Let Mapbox handle gracefully
   };
 
-  // Fetch real parcel geometry from Regrid API - REQUIRED (no fallback)
-  const fetchRealParcelGeometry = useCallback(async (centerLat: number, centerLng: number): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> => {
-    try {
-      const response = await fetch(`/api/parcels?lat=${centerLat}&lng=${centerLng}`);
-      if (!response.ok) return null;
-      
-      const result = await response.json();
-      // API returns { parcels: [...] } - get first parcel
-      const data = result.parcels?.[0];
-      if (!data || !data.coordinates || !data.geometryType) return null;
-      
-      return {
-        type: 'Feature',
-        properties: {
-          parcelId: data.parcelId,
-          owner: data.owner,
-          acreage: data.acreage,
-          address: data.siteAddress,
-        },
-        geometry: {
-          type: data.geometryType as 'Polygon' | 'MultiPolygon',
-          coordinates: data.coordinates,
-        },
-      };
-    } catch {
-      return null;
-    }
-  }, []);
+  // Progress step text for UI
+  const [progressStep, setProgressStep] = useState<string>('Initializing...');
 
-  // Fetch terrain analysis - requires real parcel geometry
+  // Fetch terrain analysis using shared client
   const runAnalysis = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     setProgress(10);
+    setProgressStep('Fetching parcel boundary...');
+    
+    const startTime = Date.now();
+    console.log('[INTEL] === ANALYSIS START ===');
+    console.log('[INTEL] Coordinates:', lat, lng);
+    console.log('[INTEL] Season:', season, 'Wind:', windDirection);
 
     try {
-      // Get real parcel geometry from Regrid - REQUIRED
+      // Import shared terrain client
+      const { fetchParcelGeometry, fetchTerrainAnalysis, generateSyntheticParcel } = await import('@/lib/terrain-client');
+      
+      // Get real parcel geometry from Regrid
       setProgress(15);
-      const parcel = await fetchRealParcelGeometry(lat, lng);
+      const parcel = await fetchParcelGeometry(lat, lng);
       
       if (!parcel) {
-        throw new Error('Unable to fetch parcel boundary. Please verify the location has valid parcel data.');
+        // Use synthetic fallback instead of failing
+        console.warn('[INTEL] No Regrid parcel, using synthetic boundary');
+        const syntheticParcel = generateSyntheticParcel(lat, lng, parseFloat(acreageParam || '80'));
+        setParcelPolygon(syntheticParcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
+        setProgress(20);
+        setProgressStep('Using estimated boundary...');
+        
+        // Run analysis with synthetic parcel
+        const result = await fetchTerrainAnalysis(
+          {
+            parcel: syntheticParcel,
+            seasonProfile: season,
+            prevailingWinds: [windDirection],
+            bufferMeters: 800,
+          },
+          (step, prog) => {
+            setProgressStep(step);
+            setProgress(20 + Math.round(prog * 0.8)); // Scale 0-100 to 20-100
+          },
+          120_000 // 120 second timeout
+        );
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Analysis failed');
+        }
+        
+        const data = result.data!;
+        setMode(data.mode);
+        setLayers(data.layers);
+        setSummary(data.summary);
+        setProvenance(data.provenance);
+        setProgress(100);
+        setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
+        console.log('[INTEL] Analysis complete (synthetic):', result.durationMs, 'ms');
+        return;
       }
       
       setParcelPolygon(parcel);
-      setProgress(30);
+      setProgress(20);
+      setProgressStep('Running terrain analysis...');
+      console.log('[INTEL] Got real parcel:', parcel.properties?.parcelId);
 
-      const response = await fetch('/api/terrain-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Run terrain analysis with 120s timeout
+      const result = await fetchTerrainAnalysis(
+        {
           parcel,
-          bufferMeters: 800,
           seasonProfile: season,
           prevailingWinds: [windDirection],
-        }),
-      });
+          bufferMeters: 800,
+        },
+        (step, prog) => {
+          setProgressStep(step);
+          setProgress(20 + Math.round(prog * 0.8)); // Scale 0-100 to 20-100
+        },
+        120_000 // 120 second timeout for Modal cold starts
+      );
 
-      setProgress(70);
+      const totalDuration = Date.now() - startTime;
+      console.log('[INTEL] Total analysis time:', totalDuration, 'ms');
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.message || 'Analysis failed');
+      if (!result.success) {
+        // Show the actual error, not generic message
+        const errorMsg = result.status 
+          ? `Error ${result.status}: ${result.error}` 
+          : result.error || 'Analysis failed';
+        throw new Error(errorMsg);
       }
 
-      const data = await response.json();
-      setProgress(90);
-
+      const data = result.data!;
       setMode(data.mode);
       setLayers(data.layers);
       setSummary(data.summary);
       setProvenance(data.provenance);
       setProgress(100);
+      setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
+      
+      console.log('[INTEL] === ANALYSIS COMPLETE ===');
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Analysis failed');
+      const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
+      console.error('[INTEL] Analysis error:', errorMsg);
+      setError(errorMsg);
+      setProgressStep('Failed');
     } finally {
       setIsLoading(false);
     }
-  }, [lat, lng, season, windDirection, fetchRealParcelGeometry]);
+  }, [lat, lng, season, windDirection, acreageParam]);
 
   // ========== SINGLE DECK.GL OVERLAY ==========
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
@@ -1179,12 +1210,10 @@ function DeerIntelContent() {
               <Target className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-amber-500" />
             </div>
             <h3 className="text-white font-semibold text-lg mb-2">Analyzing Terrain</h3>
-            <p className="text-white/60 text-sm mb-4">
-              {progress < 30 ? 'Fetching elevation data...' :
-               progress < 60 ? 'Calculating slopes & aspect...' :
-               progress < 80 ? 'Identifying bedding & funnels...' :
-               'Scoring stand sites...'}
+            <p className="text-white/60 text-sm mb-4 font-mono">
+              {progressStep}
             </p>
+            <div className="text-white/40 text-xs mb-3">{progress}%</div>
             <div className="w-full bg-white/10 rounded-full h-2">
               <div
                 className="bg-amber-500 h-2 rounded-full transition-all duration-300"
@@ -1196,17 +1225,34 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* Error Toast */}
+      {/* Error Toast - shows actual error message */}
       {error && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-red-900/90 border border-red-500/50 rounded-lg px-6 py-4 flex items-center gap-4 shadow-xl">
-          <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0" />
-          <div>
-            <p className="text-red-200 font-medium">Analysis Error</p>
-            <p className="text-red-300/80 text-sm">{error}</p>
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-red-900/95 border border-red-500/50 rounded-lg px-6 py-4 shadow-xl max-w-lg">
+          <div className="flex items-start gap-4">
+            <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-red-200 font-medium">Analysis Failed</p>
+              <p className="text-red-300/80 text-sm mt-1 font-mono break-words">{error}</p>
+              <div className="flex gap-3 mt-3">
+                <button 
+                  onClick={() => { setError(null); runAnalysis(); }}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs rounded font-medium flex items-center gap-1.5"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry
+                </button>
+                <button 
+                  onClick={() => setError(null)}
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white/80 text-xs rounded font-medium"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 flex-shrink-0">
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
-            <X className="h-5 w-5" />
-          </button>
         </div>
       )}
 
