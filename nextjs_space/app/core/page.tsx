@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Clock, Info, RefreshCw, Loader2, Server } from 'lucide-react';
+import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Clock, Info, RefreshCw, Loader2, Server, MapPin } from 'lucide-react';
 import type { TerrainAnalysisResponse, SeasonProfile, WindDirection } from '@/types/terrain';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+
+// Mapbox token
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
 
 // Build stamp for deployment verification
 const BUILD_STAMP = {
@@ -119,6 +124,186 @@ const SEASON_NAMES: Record<string, string> = {
   late: 'Late Season',
   annual: 'Annual Average'
 };
+
+// ============ Lightweight Parcel Map Component ============
+interface ParcelMapProps {
+  parcel: GeoJSON.Feature<GeoJSON.Polygon>;
+  scoring: ScoringResult | null;
+  acreage: number;
+}
+
+function ParcelMap({ parcel, scoring, acreage }: ParcelMapProps) {
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const popup = useRef<mapboxgl.Popup | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Get parcel center
+  const coords = parcel.geometry.coordinates[0];
+  const centerLng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
+  const centerLat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
+
+  useEffect(() => {
+    if (!mapContainer.current || map.current) return;
+    if (!mapboxgl.accessToken) {
+      console.warn('[ParcelMap] No Mapbox token');
+      return;
+    }
+
+    // Initialize simple 2D map (no terrain, no 3D)
+    map.current = new mapboxgl.Map({
+      container: mapContainer.current,
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      center: [centerLng, centerLat],
+      zoom: 14,
+      pitch: 0, // Flat 2D view
+      bearing: 0,
+      attributionControl: false,
+      // Disable expensive features
+      antialias: false,
+      preserveDrawingBuffer: false,
+    });
+
+    map.current.on('load', () => {
+      if (!map.current) return;
+      
+      // Add parcel boundary source
+      map.current.addSource('parcel', {
+        type: 'geojson',
+        data: parcel
+      });
+
+      // Dashed yellow line for boundary
+      map.current.addLayer({
+        id: 'parcel-outline',
+        type: 'line',
+        source: 'parcel',
+        paint: {
+          'line-color': '#FFD700', // Gold/yellow
+          'line-width': 3,
+          'line-dasharray': [3, 2], // Dashed pattern
+          'line-opacity': 0.9
+        }
+      });
+
+      // Light fill for parcel area
+      map.current.addLayer({
+        id: 'parcel-fill',
+        type: 'fill',
+        source: 'parcel',
+        paint: {
+          'fill-color': '#FFD700',
+          'fill-opacity': 0.1
+        }
+      });
+
+      setMapReady(true);
+    });
+
+    // Navigation controls (minimal)
+    map.current.addControl(
+      new mapboxgl.NavigationControl({ showCompass: false }),
+      'top-right'
+    );
+
+    // Cleanup
+    return () => {
+      if (popup.current) popup.current.remove();
+      if (map.current) map.current.remove();
+      map.current = null;
+    };
+  }, [centerLng, centerLat, parcel]);
+
+  // Handle click on parcel to show popup
+  useEffect(() => {
+    if (!map.current || !mapReady) return;
+
+    const handleClick = (e: mapboxgl.MapMouseEvent) => {
+      // Check if clicked inside parcel
+      const features = map.current?.queryRenderedFeatures(e.point, {
+        layers: ['parcel-fill']
+      });
+
+      if (features && features.length > 0) {
+        // Close existing popup
+        if (popup.current) popup.current.remove();
+
+        // Build popup content
+        const grade = scoring?.grade || 'N/A';
+        const score = scoring?.totalScore || 0;
+        const confidence = scoring ? (scoring.overallConfidence * 100).toFixed(0) : 'N/A';
+        const gradeColor = 
+          grade === 'A' ? '#16a34a' : 
+          grade === 'B' ? '#2563eb' : 
+          grade === 'C' ? '#ca8a04' : 
+          grade === 'D' ? '#ea580c' : '#dc2626';
+
+        const html = `
+          <div style="font-family: system-ui; padding: 4px;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px; color: #1f2937;">
+              ${acreage.toFixed(1)} Acres
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <div style="background: ${gradeColor}; color: white; font-weight: 700; font-size: 18px; padding: 4px 10px; border-radius: 6px;">
+                ${grade}
+              </div>
+              <div style="font-size: 20px; font-weight: 700; color: #374151;">${score}</div>
+            </div>
+            <div style="font-size: 12px; color: #6b7280;">
+              Confidence: ${confidence}%
+            </div>
+            <div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">
+              ${scoring?.seasonName || 'Rut'} Season
+            </div>
+          </div>
+        `;
+
+        popup.current = new mapboxgl.Popup({
+          closeButton: true,
+          closeOnClick: false,
+          maxWidth: '200px'
+        })
+          .setLngLat(e.lngLat)
+          .setHTML(html)
+          .addTo(map.current!);
+      }
+    };
+
+    // Cursor styling
+    const handleMouseEnter = () => {
+      if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+    };
+    const handleMouseLeave = () => {
+      if (map.current) map.current.getCanvas().style.cursor = '';
+    };
+
+    map.current.on('click', 'parcel-fill', handleClick);
+    map.current.on('mouseenter', 'parcel-fill', handleMouseEnter);
+    map.current.on('mouseleave', 'parcel-fill', handleMouseLeave);
+
+    return () => {
+      if (!map.current) return;
+      map.current.off('click', 'parcel-fill', handleClick);
+      map.current.off('mouseenter', 'parcel-fill', handleMouseEnter);
+      map.current.off('mouseleave', 'parcel-fill', handleMouseLeave);
+    };
+  }, [mapReady, scoring, acreage]);
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+      <div className="px-4 py-3 border-b bg-gray-50 flex items-center gap-2">
+        <MapPin className="w-4 h-4 text-amber-600" />
+        <span className="font-medium text-gray-700">Parcel Overview</span>
+        <span className="text-xs text-gray-400 ml-auto">Click parcel for details</span>
+      </div>
+      <div 
+        ref={mapContainer} 
+        className="w-full h-64"
+        style={{ minHeight: '256px' }}
+      />
+    </div>
+  );
+}
 
 // Convert terrain response to scoring result
 function convertTerrainToScoring(
@@ -666,6 +851,13 @@ function CoreScoringContent() {
                 <GradeBadge grade={scoring.grade} score={scoring.totalScore} />
               </div>
             </div>
+            
+            {/* Parcel Map */}
+            <ParcelMap 
+              parcel={generateParcelGeometry(lat, lng, acreage)} 
+              scoring={scoring} 
+              acreage={acreage} 
+            />
             
             {/* Confidence Summary */}
             <div className="bg-white rounded-lg shadow-sm border p-6">

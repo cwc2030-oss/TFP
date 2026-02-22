@@ -12,10 +12,18 @@ declare module 'mapbox-gl' {
     pitch?: number;
     bearing?: number;
     antialias?: boolean;
+    attributionControl?: boolean;
+    preserveDrawingBuffer?: boolean;
+  }
+
+  export interface Point {
+    x: number;
+    y: number;
   }
 
   export interface MapLayerMouseEvent {
     lngLat: LngLatLike;
+    point: Point;
     features?: Array<{
       properties: Record<string, any>;
       geometry: any;
@@ -52,6 +60,8 @@ declare module 'mapbox-gl' {
     on(event: string, callback: (...args: any[]) => void): void;
     on(event: string, layer: string, callback: (...args: any[]) => void): void;
     once(event: string, callback: (...args: any[]) => void): void;
+    off(event: string, callback: (...args: any[]) => void): void;
+    off(event: string, layer: string, callback: (...args: any[]) => void): void;
     addSource(id: string, source: any): void;
     addLayer(layer: any, before?: string): void;
     removeLayer(id: string): void;
@@ -75,6 +85,7 @@ declare module 'mapbox-gl' {
     isStyleLoaded(): boolean;
     loaded(): boolean;
     getCenter(): LngLatLike;
+    queryRenderedFeatures(point: Point | [Point, Point], options?: { layers?: string[]; filter?: any[] }): MapboxGeoJSONFeature[];
     remove(): void;
   }
 
