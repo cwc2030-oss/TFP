@@ -203,19 +203,23 @@ interface ParcelMapProps {
   isEstimated: boolean;
   parcelId?: string;
   address?: string;
+  terrainData?: TerrainAnalysisResponse | null;
 }
 
-function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address }: ParcelMapProps) {
+// Empty GeoJSON for initial sources
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address, terrainData }: ParcelMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const popup = useRef<mapboxgl.Popup | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const overlaySourcesCreated = useRef(false);
 
   // Get parcel center - handle both Polygon and MultiPolygon
   const getCenter = (): [number, number] => {
     const geom = parcel.geometry;
     if (geom.type === 'MultiPolygon') {
-      // Use first polygon's coordinates
       const coords = geom.coordinates[0][0] as number[][];
       const lng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
       const lat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
@@ -243,10 +247,9 @@ function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address }:
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center: [centerLng, centerLat],
       zoom: 14,
-      pitch: 0, // Flat 2D view
+      pitch: 0,
       bearing: 0,
       attributionControl: false,
-      // Disable expensive features
       antialias: false,
       preserveDrawingBuffer: false,
     });
@@ -254,56 +257,188 @@ function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address }:
     map.current.on('load', () => {
       if (!map.current) return;
       
-      // Add parcel boundary source
-      map.current.addSource('parcel', {
-        type: 'geojson',
-        data: parcel
-      });
+      try {
+        // Add parcel boundary source
+        map.current.addSource('parcel', {
+          type: 'geojson',
+          data: parcel
+        });
 
-      // Different styling for estimated vs real boundaries
-      const boundaryColor = isEstimated ? '#F59E0B' : '#10B981'; // Amber for estimated, emerald for real
-      const dashPattern = isEstimated ? [4, 3] : [1, 0]; // Dashed for estimated, solid for real
-      
-      // Boundary line
-      map.current.addLayer({
-        id: 'parcel-outline',
-        type: 'line',
-        source: 'parcel',
-        paint: {
-          'line-color': boundaryColor,
-          'line-width': isEstimated ? 2.5 : 3,
-          'line-dasharray': dashPattern,
-          'line-opacity': 0.9
-        }
-      });
+        const boundaryColor = isEstimated ? '#F59E0B' : '#10B981';
+        const dashPattern = isEstimated ? [4, 3] : [1, 0];
+        
+        map.current.addLayer({
+          id: 'parcel-outline',
+          type: 'line',
+          source: 'parcel',
+          paint: {
+            'line-color': boundaryColor,
+            'line-width': isEstimated ? 2.5 : 3,
+            'line-dasharray': dashPattern,
+            'line-opacity': 0.9
+          }
+        });
 
-      // Light fill for parcel area
-      map.current.addLayer({
-        id: 'parcel-fill',
-        type: 'fill',
-        source: 'parcel',
-        paint: {
-          'fill-color': boundaryColor,
-          'fill-opacity': isEstimated ? 0.08 : 0.12
-        }
-      });
+        map.current.addLayer({
+          id: 'parcel-fill',
+          type: 'fill',
+          source: 'parcel',
+          paint: {
+            'fill-color': boundaryColor,
+            'fill-opacity': isEstimated ? 0.08 : 0.12
+          }
+        });
+
+        // === Create overlay sources (empty initially) ===
+        // Bedding polygons
+        map.current.addSource('tfp-bedding', {
+          type: 'geojson',
+          data: EMPTY_FC
+        });
+        
+        // Funnels - lines (draws, corridors as LineString)
+        map.current.addSource('tfp-funnels-lines', {
+          type: 'geojson',
+          data: EMPTY_FC
+        });
+        
+        // Funnels - polygons (saddles, corridors as Polygon)
+        map.current.addSource('tfp-funnels-polys', {
+          type: 'geojson',
+          data: EMPTY_FC
+        });
+
+        // === Add overlay layers ===
+        // Bedding fill (purple/magenta tint)
+        map.current.addLayer({
+          id: 'tfp-bedding-fill',
+          type: 'fill',
+          source: 'tfp-bedding',
+          paint: {
+            'fill-color': '#9333EA', // Purple
+            'fill-opacity': 0.25
+          }
+        });
+        
+        // Bedding outline
+        map.current.addLayer({
+          id: 'tfp-bedding-outline',
+          type: 'line',
+          source: 'tfp-bedding',
+          paint: {
+            'line-color': '#7C3AED',
+            'line-width': 2,
+            'line-opacity': 0.8
+          }
+        });
+
+        // Funnel polygons fill (orange/amber)
+        map.current.addLayer({
+          id: 'tfp-funnels-polys-fill',
+          type: 'fill',
+          source: 'tfp-funnels-polys',
+          paint: {
+            'fill-color': '#F97316', // Orange
+            'fill-opacity': 0.2
+          }
+        });
+        
+        // Funnel polygons outline
+        map.current.addLayer({
+          id: 'tfp-funnels-polys-outline',
+          type: 'line',
+          source: 'tfp-funnels-polys',
+          paint: {
+            'line-color': '#EA580C',
+            'line-width': 2,
+            'line-opacity': 0.8
+          }
+        });
+
+        // Funnel lines (cyan for corridors/draws)
+        map.current.addLayer({
+          id: 'tfp-funnels-lines',
+          type: 'line',
+          source: 'tfp-funnels-lines',
+          paint: {
+            'line-color': '#06B6D4', // Cyan
+            'line-width': 3,
+            'line-opacity': 0.85
+          }
+        });
+
+        overlaySourcesCreated.current = true;
+        
+      } catch (err) {
+        console.error('[ParcelMap] Error creating base layers:', err);
+      }
 
       setMapReady(true);
     });
 
-    // Navigation controls (minimal)
     map.current.addControl(
       new mapboxgl.NavigationControl({ showCompass: false }),
       'top-right'
     );
 
-    // Cleanup
     return () => {
       if (popup.current) popup.current.remove();
       if (map.current) map.current.remove();
       map.current = null;
+      overlaySourcesCreated.current = false;
     };
   }, [centerLng, centerLat, parcel]);
+
+  // === Update overlay data when terrainData changes ===
+  useEffect(() => {
+    if (!map.current || !mapReady || !overlaySourcesCreated.current) return;
+    if (!terrainData?.layers) {
+      console.log('[ParcelMap] No terrain layers to render');
+      return;
+    }
+
+    try {
+      const { beddingPolygons, funnels } = terrainData.layers;
+
+      // Update bedding source
+      if (beddingPolygons?.features?.length > 0) {
+        const beddingSource = map.current.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
+        if (beddingSource) {
+          beddingSource.setData(beddingPolygons);
+          console.log(`[ParcelMap] Rendered ${beddingPolygons.features.length} bedding areas`);
+        }
+      }
+
+      // Split funnels into lines vs polygons
+      if (funnels?.features?.length > 0) {
+        const lineFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+        const polyFeatures: GeoJSON.Feature<GeoJSON.Polygon>[] = [];
+
+        for (const f of funnels.features) {
+          if (f.geometry.type === 'LineString') {
+            lineFeatures.push(f as GeoJSON.Feature<GeoJSON.LineString>);
+          } else if (f.geometry.type === 'Polygon') {
+            polyFeatures.push(f as GeoJSON.Feature<GeoJSON.Polygon>);
+          }
+        }
+
+        const linesSource = map.current.getSource('tfp-funnels-lines') as mapboxgl.GeoJSONSource;
+        if (linesSource) {
+          linesSource.setData({ type: 'FeatureCollection', features: lineFeatures });
+          console.log(`[ParcelMap] Rendered ${lineFeatures.length} funnel lines`);
+        }
+
+        const polysSource = map.current.getSource('tfp-funnels-polys') as mapboxgl.GeoJSONSource;
+        if (polysSource) {
+          polysSource.setData({ type: 'FeatureCollection', features: polyFeatures });
+          console.log(`[ParcelMap] Rendered ${polyFeatures.length} funnel polygons`);
+        }
+      }
+    } catch (err) {
+      // Never block the page - just log overlay errors
+      console.error('[ParcelMap] Error updating overlay data:', err);
+    }
+  }, [mapReady, terrainData]);
 
   // Handle click on parcel to show popup
   useEffect(() => {
@@ -390,9 +525,14 @@ function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address }:
     };
   }, [mapReady, scoring, acreage]);
 
+  // Count overlay features for legend
+  const beddingCount = terrainData?.layers?.beddingPolygons?.features?.length || 0;
+  const funnelCount = terrainData?.layers?.funnels?.features?.length || 0;
+  const hasOverlays = beddingCount > 0 || funnelCount > 0;
+
   return (
     <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-      <div className="px-4 py-3 border-b bg-gray-50 flex items-center gap-2">
+      <div className="px-4 py-3 border-b bg-gray-50 flex flex-wrap items-center gap-2">
         <MapPin className={`w-4 h-4 ${isEstimated ? 'text-amber-600' : 'text-emerald-600'}`} />
         <span className="font-medium text-gray-700">Parcel Overview</span>
         
@@ -411,11 +551,33 @@ function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address }:
         
         <span className="text-xs text-gray-400 ml-auto">Click parcel for details</span>
       </div>
-      <div 
-        ref={mapContainer} 
-        className="w-full h-64"
-        style={{ minHeight: '256px' }}
-      />
+      
+      {/* Map container */}
+      <div className="relative">
+        <div 
+          ref={mapContainer} 
+          className="w-full h-72"
+          style={{ minHeight: '288px' }}
+        />
+        
+        {/* Overlay legend (bottom-left) */}
+        {hasOverlays && (
+          <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm rounded px-2.5 py-1.5 text-xs text-white space-y-1">
+            {beddingCount > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#9333EA' }} />
+                <span>Bedding ({beddingCount})</span>
+              </div>
+            )}
+            {funnelCount > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-0.5" style={{ backgroundColor: '#06B6D4' }} />
+                <span>Funnels ({funnelCount})</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -771,6 +933,9 @@ function CoreScoringContent() {
   const [isEstimatedBoundary, setIsEstimatedBoundary] = useState(true);
   const [boundaryLoading, setBoundaryLoading] = useState(true);
   
+  // Store raw terrain response for map overlays
+  const [terrainResponse, setTerrainResponse] = useState<TerrainAnalysisResponse | null>(null);
+  
   // Parse query params with defaults
   const lat = parseFloat(searchParams.get('lat') || '') || DEFAULT_DEMO.lat;
   const lng = parseFloat(searchParams.get('lng') || '') || DEFAULT_DEMO.lng;
@@ -869,6 +1034,9 @@ function CoreScoringContent() {
         funnels: terrain.layers?.funnels?.features?.length || 0,
         stands: terrain.layers?.standPoints?.features?.length || 0
       });
+      
+      // Store terrain for map overlays (never blocks scoring)
+      setTerrainResponse(terrain);
       
       setProgress(80);
       setProgressStep('Computing scores...');
@@ -1022,7 +1190,7 @@ function CoreScoringContent() {
               </div>
             </div>
             
-            {/* Parcel Map */}
+            {/* Parcel Map with Terrain Overlays */}
             {parcelGeometry && (
               <ParcelMap 
                 parcel={parcelGeometry} 
@@ -1031,6 +1199,7 @@ function CoreScoringContent() {
                 isEstimated={isEstimatedBoundary}
                 parcelId={parcelData?.parcelId}
                 address={parcelData?.siteAddress}
+                terrainData={terrainResponse}
               />
             )}
             
