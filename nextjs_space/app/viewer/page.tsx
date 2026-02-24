@@ -338,7 +338,7 @@ function ViewerContent() {
 
         {/* Legend Panel */}
         {showLegend && mapReady && (
-          <div className="absolute top-4 right-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-20 w-56 shadow-xl">
+          <div className="absolute top-4 right-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-[1000] w-56 shadow-xl">
             <h3 className="text-white font-semibold mb-3 text-sm">Layers</h3>
             
             <div className="space-y-2">
@@ -434,7 +434,7 @@ function ViewerContent() {
 
         {/* System Panel - Bottom Left */}
         {showSystemPanel && mapReady && (
-          <div className="absolute bottom-4 left-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-20 min-w-[200px] shadow-xl">
+          <div className="absolute bottom-4 left-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-[1000] min-w-[200px] shadow-xl">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-slate-300 font-medium text-xs uppercase tracking-wider flex items-center gap-1.5">
                 <Activity className="w-3 h-3" />
@@ -472,7 +472,7 @@ function ViewerContent() {
         {!showSystemPanel && mapReady && (
           <button
             onClick={() => setShowSystemPanel(true)}
-            className="absolute bottom-4 left-4 bg-slate-800/90 backdrop-blur rounded-lg border border-slate-700 p-2 z-20 hover:bg-slate-700/90 transition-colors"
+            className="absolute bottom-4 left-4 bg-slate-800/90 backdrop-blur rounded-lg border border-slate-700 p-2 z-[1000] hover:bg-slate-700/90 transition-colors"
             title="Show System Status"
           >
             <Activity className="w-4 h-4 text-slate-300" />
@@ -481,7 +481,7 @@ function ViewerContent() {
 
         {/* Active Parcel Panel - Bottom Center */}
         {activeParcel && mapReady && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/95 backdrop-blur rounded-lg border border-cyan-500/50 shadow-xl shadow-cyan-500/10 z-30 min-w-[320px] max-w-[90vw]">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/95 backdrop-blur rounded-lg border border-cyan-500/50 shadow-xl shadow-cyan-500/10 z-[1000] min-w-[320px] max-w-[90vw]">
             {/* Header with close */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700">
               <div className="flex items-center gap-2">
@@ -576,7 +576,7 @@ function ViewerContent() {
 
         {/* Hint to click parcel (when no active parcel) */}
         {!activeParcel && mapReady && !isLoading && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/80 backdrop-blur rounded-full px-4 py-2 z-20 flex items-center gap-2 border border-slate-700">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/80 backdrop-blur rounded-full px-4 py-2 z-[1000] flex items-center gap-2 border border-slate-700">
             <Crosshair className="w-4 h-4 text-amber-400" />
             <span className="text-slate-300 text-sm">Click a parcel to begin analysis</span>
           </div>

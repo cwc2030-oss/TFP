@@ -188,6 +188,8 @@ export default function LeafletMap({
         const parcelId = props.parcelId || props.ll_uuid || `parcel_${center[0]}_${center[1]}`;
         const isActive = activeParcel?.id === parcelId;
         
+        console.log('[LeafletMap] Rendering parcel layer, isActive:', isActive, 'parcelId:', parcelId);
+        
         const parcelLayer = L.geoJSON(parcel, {
           style: {
             // Active parcel: solid cyan glow, inactive: amber dashed
@@ -199,12 +201,18 @@ export default function LeafletMap({
           },
           onEachFeature: (feature, layer) => {
             const featureProps = feature.properties || {};
+            const featureParcelId = featureProps.parcelId || featureProps.ll_uuid || parcelId;
             
-            // Make parcel clickable
-            layer.on('click', () => {
+            // Click handler - select parcel (fires before popup)
+            layer.on('click', (e: L.LeafletMouseEvent) => {
+              console.log('[LeafletMap] Parcel CLICKED!', featureParcelId);
+              
+              // Stop event propagation to prevent map click
+              L.DomEvent.stopPropagation(e);
+              
               if (onParcelClick) {
                 const parcelInfo: ActiveParcelInfo = {
-                  id: featureProps.parcelId || featureProps.ll_uuid || parcelId,
+                  id: featureParcelId,
                   geometry: feature.geometry,
                   county: featureProps.county || featureProps.county_name,
                   state: featureProps.state || featureProps.state_abbr || 'MO',
@@ -212,7 +220,10 @@ export default function LeafletMap({
                   owner: featureProps.owner || featureProps.owner_name,
                   address: featureProps.address || featureProps.siteaddr,
                 };
+                console.log('[LeafletMap] Calling onParcelClick with:', parcelInfo);
                 onParcelClick(parcelInfo);
+              } else {
+                console.warn('[LeafletMap] onParcelClick callback is not defined!');
               }
             });
 
@@ -234,20 +245,18 @@ export default function LeafletMap({
               }
             });
 
-            // Popup with click hint
-            layer.bindPopup(`
-              <div class="font-sans">
-                <h3 class="font-bold ${isActive ? 'text-cyan-600' : 'text-amber-600'} mb-1">
-                  ${isActive ? '✓ Active Parcel' : 'Parcel Boundary'}
-                </h3>
-                <p><strong>Parcel ID:</strong> ${featureProps.parcelId || featureProps.ll_uuid || 'N/A'}</p>
-                <p><strong>Owner:</strong> ${featureProps.owner || featureProps.owner_name || 'N/A'}</p>
-                <p><strong>Acreage:</strong> ${(featureProps.acreage || featureProps.ll_gisacre)?.toFixed(1) || 'N/A'} ac</p>
-                <p><strong>Address:</strong> ${featureProps.address || featureProps.siteaddr || 'N/A'}</p>
-                ${featureProps.synthetic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Synthetic boundary (Regrid unavailable)</p>' : ''}
-                ${!isActive ? '<p class="text-xs text-blue-500 mt-2 font-medium">Click to select this parcel</p>' : ''}
+            // Tooltip on hover instead of popup on click (so click is free for selection)
+            layer.bindTooltip(`
+              <div class="font-sans text-sm">
+                <strong>${isActive ? '✓ Selected' : 'Click to select'}</strong><br/>
+                ${featureProps.address || featureProps.siteaddr || 'Parcel'}
               </div>
-            `);
+            `, {
+              sticky: true,
+              direction: 'top',
+              offset: [0, -10],
+              className: 'parcel-tooltip',
+            });
           },
         }).addTo(group);
 
