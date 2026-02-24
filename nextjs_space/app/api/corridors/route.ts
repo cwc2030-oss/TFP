@@ -14,8 +14,8 @@ import { uploadToS3, getCorridorPath, fileExists, getFileUrl } from '@/lib/s3';
 import { getBucketConfig } from '@/lib/aws-config';
 
 const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL || 
-  'https://cwc2030--terrain-brain-v3-corridors.modal.run/v1/corridors';
-const REQUEST_TIMEOUT_MS = 90000; // 90 seconds for corridor computation
+  'https://cwc2030--terrain-brain-v3-corridors-corridors-web.modal.run/v1/corridors';
+const REQUEST_TIMEOUT_MS = 120000; // 120 seconds for corridor computation (includes DEM fetch)
 
 interface CorridorRequest {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
@@ -94,54 +94,70 @@ export async function POST(request: NextRequest) {
 
     // Call Modal geoprocessor for corridor computation
     console.log('[Corridors] Computing for parcel:', parcel_id);
+    console.log('[Corridors] Using Modal endpoint:', CORRIDOR_API_URL);
     
-    const modalResponse = await fetch(CORRIDOR_API_URL, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
-      },
-      body: JSON.stringify({
-        parcel,
-        parcel_id,
-        state,
-        county,
-        options: {
-          dem_source: 'USGS3DEP1m',
-          slope_preference: 'moderate', // 5-15 degrees preferred
-          concavity_weight: 0.4,        // Higher = more weight to draws/swales
-          output_format: 'png',          // png for V1, cog for V2
+    try {
+      const modalResponse = await fetch(CORRIDOR_API_URL, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
         },
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+        body: JSON.stringify({
+          parcel,
+          parcel_id,
+          state,
+          county,
+          options: {
+            dem_source: 'USGS3DEP1m',
+            slope_preference: 'moderate', // 5-15 degrees preferred
+            concavity_weight: 0.4,        // Higher = more weight to draws/swales
+            output_format: 'geojson',     // GeoJSON for V1
+          },
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
 
-    if (!modalResponse.ok) {
-      const errorText = await modalResponse.text();
-      console.error('[Corridors] Modal error:', modalResponse.status, errorText);
+      if (!modalResponse.ok) {
+        const errorText = await modalResponse.text();
+        console.error('[Corridors] Modal error:', modalResponse.status, errorText);
+        
+        // Fallback to synthetic only if Modal is truly down
+        console.log('[Corridors] Falling back to synthetic corridors');
+        return generateSyntheticCorridor(parcel, parcel_id, startTime);
+      }
+
+      const result = await modalResponse.json();
       
-      // Return synthetic corridor for V1 demo
+      // Check if Modal returned success
+      if (!result.success) {
+        console.error('[Corridors] Modal returned error:', result.error);
+        return generateSyntheticCorridor(parcel, parcel_id, startTime);
+      }
+      
+      // Update processing time to include network latency
+      if (result.metadata) {
+        result.metadata.processing_time_seconds = (Date.now() - startTime) / 1000;
+      }
+
+      console.log('[Corridors] Real DEM corridors computed:', {
+        mode: result.mode,
+        corridors: result.corridors?.features?.length || 0,
+        dem_source: result.metadata?.dem_source,
+      });
+
+      return NextResponse.json(result, {
+        headers: {
+          'X-Processing-Time-Ms': String(Date.now() - startTime),
+          'X-Corridor-Mode': result.mode || 'real',
+        },
+      });
+    } catch (fetchError) {
+      console.error('[Corridors] Fetch error:', fetchError);
+      
+      // Fallback to synthetic on network errors
       return generateSyntheticCorridor(parcel, parcel_id, startTime);
     }
-
-    const result = await modalResponse.json() as CorridorResponse;
-    
-    // If Modal returned PNG data, upload to S3
-    if (result.corridor_png_base64) {
-      const pngBuffer = Buffer.from(result.corridor_png_base64, 'base64');
-      const pngPath = corridorPath.replace('.tif', '.png');
-      
-      const { url } = await uploadToS3(pngPath, pngBuffer, 'image/png', false);
-      result.corridor_url = url;
-    }
-
-    result.metadata.processing_time_seconds = (Date.now() - startTime) / 1000;
-
-    return NextResponse.json(result, {
-      headers: {
-        'X-Processing-Time-Ms': String(Date.now() - startTime),
-      },
-    });
 
   } catch (error) {
     console.error('[Corridors] Error:', error);

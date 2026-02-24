@@ -17,6 +17,17 @@ interface CorridorData {
   corridor_url?: string;
   bbox: [number, number, number, number];
   mode?: string;
+  metadata?: {
+    processing_time_seconds?: number;
+    dem_source?: string;
+    resolution_m?: number;
+    weights?: {
+      slope_preference?: string;
+      concavity_weight?: number;
+    };
+    corridors_found?: number;
+    timestamp?: string;
+  };
 }
 
 // Dynamic import for Leaflet components (avoid SSR issues)

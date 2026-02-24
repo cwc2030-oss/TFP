@@ -24,6 +24,17 @@ interface CorridorData {
   corridor_url?: string;
   bbox: [number, number, number, number];
   mode?: string;
+  metadata?: {
+    processing_time_seconds?: number;
+    dem_source?: string;
+    resolution_m?: number;
+    weights?: {
+      slope_preference?: string;
+      concavity_weight?: number;
+    };
+    corridors_found?: number;
+    timestamp?: string;
+  };
 }
 
 interface LeafletMapProps {
@@ -407,13 +418,19 @@ export default function LeafletMap({
             },
             onEachFeature: (f, layer) => {
               layer.bindPopup(`
-                <div class="font-sans min-w-[180px]">
+                <div class="font-sans min-w-[200px]">
                   <h3 class="font-bold text-orange-600 mb-1">🦌 Travel Corridor</h3>
                   <p><strong>ID:</strong> ${props.corridor_id || 'N/A'}</p>
                   <p><strong>Movement Probability:</strong> <span class="font-bold">${probability}%</span></p>
                   <p><strong>Type:</strong> ${props.type || 'predicted'}</p>
-                  ${props.width_m ? `<p><strong>Estimated Width:</strong> ${props.width_m.toFixed(0)}m</p>` : ''}
-                  <p class="text-xs text-gray-500 mt-2">Provenance: DEM slope + concavity analysis (V1)</p>
+                  ${props.length_m ? `<p><strong>Length:</strong> ${props.length_m}m</p>` : ''}
+                  ${props.width_m ? `<p><strong>Width:</strong> ${Math.round(props.width_m)}m</p>` : ''}
+                  <hr class="my-2 border-gray-300" />
+                  <p class="text-xs text-gray-600"><strong>Provenance:</strong></p>
+                  <p class="text-xs text-gray-500">DEM: ${corridorData?.metadata?.dem_source || 'SRTMGL1'}</p>
+                  <p class="text-xs text-gray-500">Resolution: ${corridorData?.metadata?.resolution_m || '~30'}m</p>
+                  <p class="text-xs text-gray-500">Slope pref: ${corridorData?.metadata?.weights?.slope_preference || 'moderate'}</p>
+                  <p class="text-xs text-gray-500">Concavity wt: ${corridorData?.metadata?.weights?.concavity_weight || 0.4}</p>
                 </div>
               `);
             },
