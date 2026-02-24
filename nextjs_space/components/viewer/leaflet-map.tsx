@@ -19,16 +19,25 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
+interface CorridorData {
+  corridors?: GeoJSON.FeatureCollection;
+  corridor_url?: string;
+  bbox: [number, number, number, number];
+  mode?: string;
+}
+
 interface LeafletMapProps {
   center: [number, number];
   parcel: GeoJSON.Feature | null;
   layers: TerrainLayers | null;
+  corridorData: CorridorData | null;
   layerVisibility: {
     parcel: boolean;
     bedding: boolean;
     funnels: boolean;
     saddles: boolean;
     stands: boolean;
+    corridors: boolean;
   };
   provenance: TerrainAnalysisResponse['provenance'] | null;
   onMapReady?: () => void;
@@ -38,6 +47,7 @@ export default function LeafletMap({
   center,
   parcel,
   layers,
+  corridorData,
   layerVisibility,
   provenance,
   onMapReady,
@@ -50,12 +60,14 @@ export default function LeafletMap({
     funnels: L.LayerGroup | null;
     saddles: L.LayerGroup | null;
     stands: L.LayerGroup | null;
+    corridors: L.LayerGroup | null;
   }>({
     parcel: null,
     bedding: null,
     funnels: null,
     saddles: null,
     stands: null,
+    corridors: null,
   });
 
   // MapTiler API key from env
@@ -121,6 +133,7 @@ export default function LeafletMap({
         funnels: L.layerGroup().addTo(map),
         saddles: L.layerGroup().addTo(map),
         stands: L.layerGroup().addTo(map),
+        corridors: L.layerGroup().addTo(map),
       };
 
       mapRef.current = map;
@@ -360,6 +373,57 @@ export default function LeafletMap({
       }
     }
   }, [layers?.standPoints, layerVisibility.stands]);
+
+  // Update corridors layer (V1 - GeoJSON lines with probability styling)
+  useEffect(() => {
+    const group = layerGroupsRef.current.corridors;
+    if (!group) return;
+
+    group.clearLayers();
+
+    if (corridorData?.corridors?.features && layerVisibility.corridors) {
+      try {
+        corridorData.corridors.features.forEach((feature) => {
+          const props = feature.properties || {};
+          const probability = props.probability || 70;
+          
+          // Color based on probability: higher = more red/orange
+          const color = probability > 80 
+            ? '#ef4444' // red-500 for high probability
+            : probability > 60 
+              ? '#f97316' // orange-500 for medium
+              : '#fbbf24'; // amber-400 for lower
+          
+          // Width based on probability
+          const weight = Math.max(2, probability / 20);
+
+          L.geoJSON(feature as GeoJSON.Feature, {
+            style: {
+              color,
+              weight,
+              opacity: 0.8,
+              lineCap: 'round',
+              lineJoin: 'round',
+            },
+            onEachFeature: (f, layer) => {
+              layer.bindPopup(`
+                <div class="font-sans min-w-[180px]">
+                  <h3 class="font-bold text-orange-600 mb-1">🦌 Travel Corridor</h3>
+                  <p><strong>ID:</strong> ${props.corridor_id || 'N/A'}</p>
+                  <p><strong>Movement Probability:</strong> <span class="font-bold">${probability}%</span></p>
+                  <p><strong>Type:</strong> ${props.type || 'predicted'}</p>
+                  ${props.width_m ? `<p><strong>Estimated Width:</strong> ${props.width_m.toFixed(0)}m</p>` : ''}
+                  <p class="text-xs text-gray-500 mt-2">Provenance: DEM slope + concavity analysis (V1)</p>
+                </div>
+              `);
+            },
+          }).addTo(group);
+        });
+      } catch (err) {
+        console.error('[LeafletMap] Corridors render error:', err);
+      }
+    }
+  }, [corridorData, layerVisibility.corridors]);
 
   return (
     <div

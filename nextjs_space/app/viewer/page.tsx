@@ -12,6 +12,13 @@ import { Button } from '@/components/ui/button';
 import { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } from '@/lib/terrain-client';
 import type { TerrainAnalysisResponse, TerrainLayers, BeddingProperties, FunnelProperties, StandPointProperties } from '@/types/terrain';
 
+interface CorridorData {
+  corridors?: GeoJSON.FeatureCollection;
+  corridor_url?: string;
+  bbox: [number, number, number, number];
+  mode?: string;
+}
+
 // Dynamic import for Leaflet components (avoid SSR issues)
 const LeafletMap = dynamic(() => import('@/components/viewer/leaflet-map'), {
   ssr: false,
@@ -38,6 +45,8 @@ function ViewerContent() {
   const [parcel, setParcel] = useState<GeoJSON.Feature | null>(null);
   const [layers, setLayers] = useState<TerrainLayers | null>(null);
   const [provenance, setProvenance] = useState<TerrainAnalysisResponse['provenance'] | null>(null);
+  const [corridorData, setCorridorData] = useState<CorridorData | null>(null);
+  const [corridorLoading, setCorridorLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +60,7 @@ function ViewerContent() {
     funnels: true,
     saddles: true,
     stands: true,
+    corridors: false, // Off by default, user toggles on
   });
   const [showLegend, setShowLegend] = useState(true);
 
@@ -117,6 +127,48 @@ function ViewerContent() {
   const toggleLayer = (layer: keyof typeof layerVisibility) => {
     setLayerVisibility(prev => ({ ...prev, [layer]: !prev[layer] }));
   };
+
+  // Load corridor data when toggled on
+  const loadCorridors = useCallback(async () => {
+    if (!parcel || corridorData || corridorLoading) return;
+    
+    setCorridorLoading(true);
+    try {
+      const parcelId = (parcel.properties?.parcelId || `parcel_${lat}_${lng}`).replace(/[^a-zA-Z0-9]/g, '_');
+      
+      const response = await fetch('/api/corridors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcel,
+          parcel_id: parcelId,
+          state: 'mo',
+          county: 'johnson',
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCorridorData(data);
+        console.log('[Viewer] Corridor data loaded:', data.mode || 'real');
+      } else {
+        console.warn('[Viewer] Corridor fetch failed:', response.status);
+        setOverlayError('Could not load corridor data');
+      }
+    } catch (err) {
+      console.error('[Viewer] Corridor error:', err);
+      setOverlayError('Corridor analysis failed');
+    } finally {
+      setCorridorLoading(false);
+    }
+  }, [parcel, corridorData, corridorLoading, lat, lng]);
+
+  // Trigger corridor load when toggled on
+  useEffect(() => {
+    if (layerVisibility.corridors && !corridorData && !corridorLoading) {
+      loadCorridors();
+    }
+  }, [layerVisibility.corridors, corridorData, corridorLoading, loadCorridors]);
 
   return (
     <div className="fixed inset-0 bg-slate-900 flex flex-col">
@@ -186,6 +238,7 @@ function ViewerContent() {
           center={[lat, lng]}
           parcel={parcel}
           layers={layers}
+          corridorData={corridorData}
           layerVisibility={layerVisibility}
           provenance={provenance}
           onMapReady={() => setMapReady(true)}
@@ -257,6 +310,21 @@ function ViewerContent() {
                   <Target className="w-3 h-3 text-white" />
                 </div>
                 <span className="text-slate-200 text-sm">Stand Sites</span>
+              </label>
+
+              {/* Corridors (V1) */}
+              <label className="flex items-center gap-2 cursor-pointer mt-2 pt-2 border-t border-slate-700">
+                <input
+                  type="checkbox"
+                  checked={layerVisibility.corridors}
+                  onChange={() => toggleLayer('corridors')}
+                  className="rounded border-slate-600 bg-slate-700 text-orange-500 focus:ring-orange-500"
+                />
+                <div className="w-4 h-1 bg-gradient-to-r from-orange-400 to-red-500 rounded-sm" />
+                <span className="text-slate-200 text-sm">
+                  Travel Corridors
+                  {corridorLoading && <span className="text-xs text-amber-400 ml-1">(loading...)</span>}
+                </span>
               </label>
             </div>
 
