@@ -7,10 +7,18 @@
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { AlertTriangle, Layers, X, Target, Bed, TreeDeciduous, Droplet, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Layers, X, Target, Bed, TreeDeciduous, Droplet, ChevronRight, Activity, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } from '@/lib/terrain-client';
 import type { TerrainAnalysisResponse, TerrainLayers, BeddingProperties, FunnelProperties, StandPointProperties } from '@/types/terrain';
+
+// Compute state types
+type ComputeState = 'idle' | 'processing' | 'computed' | 'error';
+
+interface ComputeStatus {
+  terrain: { state: ComputeState; timestamp?: string };
+  corridors: { state: ComputeState; timestamp?: string };
+}
 
 interface CorridorData {
   corridors?: GeoJSON.FeatureCollection;
@@ -74,6 +82,13 @@ function ViewerContent() {
     corridors: false, // Off by default, user toggles on
   });
   const [showLegend, setShowLegend] = useState(true);
+  const [showSystemPanel, setShowSystemPanel] = useState(true);
+  
+  // Compute status tracking
+  const [computeStatus, setComputeStatus] = useState<ComputeStatus>({
+    terrain: { state: 'idle' },
+    corridors: { state: 'idle' },
+  });
 
   // Fetch parcel and terrain data
   const loadData = useCallback(async () => {
@@ -81,6 +96,12 @@ function ViewerContent() {
     setProgress(10);
     setError(null);
     setOverlayError(null);
+    
+    // Set terrain compute state to processing
+    setComputeStatus(prev => ({
+      ...prev,
+      terrain: { state: 'processing' }
+    }));
 
     try {
       // Step 1: Get parcel geometry
@@ -111,6 +132,10 @@ function ViewerContent() {
       if (result.success && result.data) {
         setLayers(result.data.layers);
         setProvenance(result.data.provenance);
+        setComputeStatus(prev => ({
+          ...prev,
+          terrain: { state: 'computed', timestamp: new Date().toISOString() }
+        }));
         console.log('[Viewer] Terrain data loaded:', {
           bedding: result.data.layers.beddingPolygons?.features?.length || 0,
           funnels: result.data.layers.funnels?.features?.length || 0,
@@ -119,6 +144,10 @@ function ViewerContent() {
       } else {
         // Non-fatal: viewer still loads, just show banner
         setOverlayError(result.error || 'Could not load terrain overlays');
+        setComputeStatus(prev => ({
+          ...prev,
+          terrain: { state: 'error' }
+        }));
         console.warn('[Viewer] Overlay fetch failed:', result.error);
       }
 
@@ -126,6 +155,10 @@ function ViewerContent() {
     } catch (err) {
       console.error('[Viewer] Load error:', err);
       setOverlayError(err instanceof Error ? err.message : 'Failed to load overlays');
+      setComputeStatus(prev => ({
+        ...prev,
+        terrain: { state: 'error' }
+      }));
     } finally {
       setIsLoading(false);
     }
@@ -144,6 +177,11 @@ function ViewerContent() {
     if (!parcel || corridorData || corridorLoading) return;
     
     setCorridorLoading(true);
+    setComputeStatus(prev => ({
+      ...prev,
+      corridors: { state: 'processing' }
+    }));
+    
     try {
       const parcelId = (parcel.properties?.parcelId || `parcel_${lat}_${lng}`).replace(/[^a-zA-Z0-9]/g, '_');
       
@@ -161,14 +199,26 @@ function ViewerContent() {
       if (response.ok) {
         const data = await response.json();
         setCorridorData(data);
+        setComputeStatus(prev => ({
+          ...prev,
+          corridors: { state: 'computed', timestamp: new Date().toISOString() }
+        }));
         console.log('[Viewer] Corridor data loaded:', data.mode || 'real');
       } else {
         console.warn('[Viewer] Corridor fetch failed:', response.status);
         setOverlayError('Could not load corridor data');
+        setComputeStatus(prev => ({
+          ...prev,
+          corridors: { state: 'error' }
+        }));
       }
     } catch (err) {
       console.error('[Viewer] Corridor error:', err);
       setOverlayError('Corridor analysis failed');
+      setComputeStatus(prev => ({
+        ...prev,
+        corridors: { state: 'error' }
+      }));
     } finally {
       setCorridorLoading(false);
     }
@@ -349,6 +399,116 @@ function ViewerContent() {
               </div>
             )}
           </div>
+        )}
+
+        {/* System Panel - Bottom Left */}
+        {showSystemPanel && mapReady && (
+          <div className="absolute bottom-4 left-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-20 min-w-[200px] shadow-xl">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-slate-300 font-medium text-xs uppercase tracking-wider flex items-center gap-1.5">
+                <Activity className="w-3 h-3" />
+                System Status
+              </h4>
+              <button 
+                onClick={() => setShowSystemPanel(false)}
+                className="text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              {/* Terrain Analysis Status */}
+              <ComputeIndicator
+                label="Terrain Analysis"
+                state={computeStatus.terrain.state}
+                timestamp={computeStatus.terrain.timestamp}
+              />
+              
+              {/* Corridor Analysis Status */}
+              {(computeStatus.corridors.state !== 'idle' || layerVisibility.corridors) && (
+                <ComputeIndicator
+                  label="Travel Corridors"
+                  state={computeStatus.corridors.state}
+                  timestamp={computeStatus.corridors.timestamp}
+                />
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* System Panel Toggle (when hidden) */}
+        {!showSystemPanel && mapReady && (
+          <button
+            onClick={() => setShowSystemPanel(true)}
+            className="absolute bottom-4 left-4 bg-slate-800/90 backdrop-blur rounded-lg border border-slate-700 p-2 z-20 hover:bg-slate-700/90 transition-colors"
+            title="Show System Status"
+          >
+            <Activity className="w-4 h-4 text-slate-300" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Compute Indicator Component
+function ComputeIndicator({ 
+  label, 
+  state, 
+  timestamp 
+}: { 
+  label: string; 
+  state: ComputeState; 
+  timestamp?: string;
+}) {
+  const formatTime = (iso: string) => {
+    const date = new Date(iso);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* Pulse/Solid Indicator */}
+      <div className="relative flex items-center justify-center w-4 h-4">
+        {state === 'processing' && (
+          <>
+            {/* Pulsing ring */}
+            <div className="absolute w-3 h-3 rounded-full bg-amber-500/30 animate-ping" />
+            {/* Core dot */}
+            <div className="relative w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          </>
+        )}
+        {state === 'computed' && (
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+        )}
+        {state === 'error' && (
+          <AlertTriangle className="w-4 h-4 text-red-400" />
+        )}
+        {state === 'idle' && (
+          <div className="w-2 h-2 rounded-full bg-slate-500" />
+        )}
+      </div>
+      
+      {/* Label and State */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-300 truncate">{label}</span>
+          <span className={`text-[10px] font-medium uppercase tracking-wide ${
+            state === 'processing' ? 'text-amber-400' :
+            state === 'computed' ? 'text-emerald-400' :
+            state === 'error' ? 'text-red-400' :
+            'text-slate-500'
+          }`}>
+            {state === 'processing' ? 'Processing' :
+             state === 'computed' ? 'Computed' :
+             state === 'error' ? 'Error' :
+             'Idle'}
+          </span>
+        </div>
+        {/* Timestamp */}
+        {timestamp && state === 'computed' && (
+          <p className="text-[9px] text-slate-500 mt-0.5">{formatTime(timestamp)}</p>
         )}
       </div>
     </div>
