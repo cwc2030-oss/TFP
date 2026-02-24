@@ -37,6 +37,17 @@ interface CorridorData {
   };
 }
 
+// Active parcel info for bottom panel
+export interface ActiveParcelInfo {
+  id: string;
+  geometry: GeoJSON.Geometry;
+  county?: string;
+  state?: string;
+  acreage?: number;
+  owner?: string;
+  address?: string;
+}
+
 interface LeafletMapProps {
   center: [number, number];
   parcel: GeoJSON.Feature | null;
@@ -52,6 +63,8 @@ interface LeafletMapProps {
   };
   provenance: TerrainAnalysisResponse['provenance'] | null;
   onMapReady?: () => void;
+  activeParcel?: ActiveParcelInfo | null;
+  onParcelClick?: (parcelInfo: ActiveParcelInfo) => void;
 }
 
 export default function LeafletMap({
@@ -62,6 +75,8 @@ export default function LeafletMap({
   layerVisibility,
   provenance,
   onMapReady,
+  activeParcel,
+  onParcelClick,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -160,7 +175,7 @@ export default function LeafletMap({
     }
   }, [center, maptilerKey, onMapReady]);
 
-  // Update parcel layer
+  // Update parcel layer with click interaction
   useEffect(() => {
     const group = layerGroupsRef.current.parcel;
     if (!group || !mapRef.current) return;
@@ -169,30 +184,74 @@ export default function LeafletMap({
 
     if (parcel && layerVisibility.parcel) {
       try {
+        const props = parcel.properties || {};
+        const parcelId = props.parcelId || props.ll_uuid || `parcel_${center[0]}_${center[1]}`;
+        const isActive = activeParcel?.id === parcelId;
+        
         const parcelLayer = L.geoJSON(parcel, {
           style: {
-            color: '#f59e0b', // amber-500
-            weight: 3,
-            fillColor: '#f59e0b',
-            fillOpacity: 0.1,
-            dashArray: '5, 5',
+            // Active parcel: solid cyan glow, inactive: amber dashed
+            color: isActive ? '#06b6d4' : '#f59e0b', // cyan-500 vs amber-500
+            weight: isActive ? 4 : 3,
+            fillColor: isActive ? '#06b6d4' : '#f59e0b',
+            fillOpacity: isActive ? 0.2 : 0.1,
+            dashArray: isActive ? '' : '5, 5',
           },
           onEachFeature: (feature, layer) => {
-            const props = feature.properties || {};
+            const featureProps = feature.properties || {};
+            
+            // Make parcel clickable
+            layer.on('click', () => {
+              if (onParcelClick) {
+                const parcelInfo: ActiveParcelInfo = {
+                  id: featureProps.parcelId || featureProps.ll_uuid || parcelId,
+                  geometry: feature.geometry,
+                  county: featureProps.county || featureProps.county_name,
+                  state: featureProps.state || featureProps.state_abbr || 'MO',
+                  acreage: featureProps.acreage || featureProps.ll_gisacre,
+                  owner: featureProps.owner || featureProps.owner_name,
+                  address: featureProps.address || featureProps.siteaddr,
+                };
+                onParcelClick(parcelInfo);
+              }
+            });
+
+            // Hover effects
+            layer.on('mouseover', () => {
+              if (!isActive) {
+                (layer as L.Path).setStyle({
+                  weight: 4,
+                  fillOpacity: 0.15,
+                });
+              }
+            });
+            layer.on('mouseout', () => {
+              if (!isActive) {
+                (layer as L.Path).setStyle({
+                  weight: 3,
+                  fillOpacity: 0.1,
+                });
+              }
+            });
+
+            // Popup with click hint
             layer.bindPopup(`
               <div class="font-sans">
-                <h3 class="font-bold text-amber-600 mb-1">Parcel Boundary</h3>
-                <p><strong>Parcel ID:</strong> ${props.parcelId || 'N/A'}</p>
-                <p><strong>Owner:</strong> ${props.owner || 'N/A'}</p>
-                <p><strong>Acreage:</strong> ${props.acreage?.toFixed(1) || 'N/A'} ac</p>
-                <p><strong>Address:</strong> ${props.address || 'N/A'}</p>
-                ${props.synthetic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Synthetic boundary (Regrid unavailable)</p>' : ''}
+                <h3 class="font-bold ${isActive ? 'text-cyan-600' : 'text-amber-600'} mb-1">
+                  ${isActive ? '✓ Active Parcel' : 'Parcel Boundary'}
+                </h3>
+                <p><strong>Parcel ID:</strong> ${featureProps.parcelId || featureProps.ll_uuid || 'N/A'}</p>
+                <p><strong>Owner:</strong> ${featureProps.owner || featureProps.owner_name || 'N/A'}</p>
+                <p><strong>Acreage:</strong> ${(featureProps.acreage || featureProps.ll_gisacre)?.toFixed(1) || 'N/A'} ac</p>
+                <p><strong>Address:</strong> ${featureProps.address || featureProps.siteaddr || 'N/A'}</p>
+                ${featureProps.synthetic ? '<p class="text-xs text-gray-500 mt-1">⚠️ Synthetic boundary (Regrid unavailable)</p>' : ''}
+                ${!isActive ? '<p class="text-xs text-blue-500 mt-2 font-medium">Click to select this parcel</p>' : ''}
               </div>
             `);
           },
         }).addTo(group);
 
-        // Fit map to parcel bounds
+        // Fit map to parcel bounds on initial load
         const bounds = parcelLayer.getBounds();
         if (bounds.isValid()) {
           mapRef.current.fitBounds(bounds, { padding: [50, 50] });
@@ -201,7 +260,7 @@ export default function LeafletMap({
         console.error('[LeafletMap] Parcel render error:', err);
       }
     }
-  }, [parcel, layerVisibility.parcel]);
+  }, [parcel, layerVisibility.parcel, activeParcel, onParcelClick, center]);
 
   // Update bedding layer
   useEffect(() => {

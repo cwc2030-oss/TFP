@@ -7,10 +7,11 @@
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { AlertTriangle, Layers, X, Target, Bed, TreeDeciduous, Droplet, ChevronRight, Activity, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, Layers, X, Target, ChevronRight, Activity, CheckCircle2, MapPin, Crosshair, Route, Scan } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } from '@/lib/terrain-client';
-import type { TerrainAnalysisResponse, TerrainLayers, BeddingProperties, FunnelProperties, StandPointProperties } from '@/types/terrain';
+import type { TerrainAnalysisResponse, TerrainLayers } from '@/types/terrain';
+import type { ActiveParcelInfo } from '@/components/viewer/leaflet-map';
 
 // Compute state types
 type ComputeState = 'idle' | 'processing' | 'computed' | 'error';
@@ -83,6 +84,9 @@ function ViewerContent() {
   });
   const [showLegend, setShowLegend] = useState(true);
   const [showSystemPanel, setShowSystemPanel] = useState(true);
+  
+  // Active parcel (selected for analysis)
+  const [activeParcel, setActiveParcel] = useState<ActiveParcelInfo | null>(null);
   
   // Compute status tracking
   const [computeStatus, setComputeStatus] = useState<ComputeStatus>({
@@ -231,6 +235,31 @@ function ViewerContent() {
     }
   }, [layerVisibility.corridors, corridorData, corridorLoading, loadCorridors]);
 
+  // Handle parcel click - select parcel for analysis
+  const handleParcelClick = useCallback((parcelInfo: ActiveParcelInfo) => {
+    console.log('[Viewer] Parcel selected:', parcelInfo.id);
+    setActiveParcel(parcelInfo);
+    // Clear previous corridor data when switching parcels
+    setCorridorData(null);
+    setComputeStatus(prev => ({
+      ...prev,
+      corridors: { state: 'idle' }
+    }));
+  }, []);
+
+  // Deselect parcel
+  const handleDeselectParcel = useCallback(() => {
+    setActiveParcel(null);
+  }, []);
+
+  // Trigger corridor analysis for active parcel
+  const handleAnalyzeCorridors = useCallback(() => {
+    if (!activeParcel) return;
+    // Turn on corridor layer and load corridors
+    setLayerVisibility(prev => ({ ...prev, corridors: true }));
+    // loadCorridors will be triggered by the useEffect
+  }, [activeParcel]);
+
   return (
     <div className="fixed inset-0 bg-slate-900 flex flex-col">
       {/* Header */}
@@ -303,6 +332,8 @@ function ViewerContent() {
           layerVisibility={layerVisibility}
           provenance={provenance}
           onMapReady={() => setMapReady(true)}
+          activeParcel={activeParcel}
+          onParcelClick={handleParcelClick}
         />
 
         {/* Legend Panel */}
@@ -446,6 +477,109 @@ function ViewerContent() {
           >
             <Activity className="w-4 h-4 text-slate-300" />
           </button>
+        )}
+
+        {/* Active Parcel Panel - Bottom Center */}
+        {activeParcel && mapReady && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/95 backdrop-blur rounded-lg border border-cyan-500/50 shadow-xl shadow-cyan-500/10 z-30 min-w-[320px] max-w-[90vw]">
+            {/* Header with close */}
+            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                <span className="text-cyan-400 font-semibold text-sm uppercase tracking-wide">Working Parcel</span>
+              </div>
+              <button
+                onClick={handleDeselectParcel}
+                className="text-slate-400 hover:text-white transition-colors p-1"
+                title="Deselect parcel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Parcel Info */}
+            <div className="px-4 py-3">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm mb-3">
+                <div>
+                  <span className="text-slate-400">Parcel ID</span>
+                  <p className="text-white font-mono text-xs truncate" title={activeParcel.id}>
+                    {activeParcel.id.length > 20 ? `${activeParcel.id.slice(0, 20)}...` : activeParcel.id}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-slate-400">Location</span>
+                  <p className="text-white">
+                    {activeParcel.county || 'Unknown'}, {activeParcel.state || 'MO'}
+                  </p>
+                </div>
+                {activeParcel.acreage && (
+                  <div>
+                    <span className="text-slate-400">Acreage</span>
+                    <p className="text-white font-semibold">{activeParcel.acreage.toFixed(1)} ac</p>
+                  </div>
+                )}
+                {activeParcel.address && (
+                  <div>
+                    <span className="text-slate-400">Address</span>
+                    <p className="text-white text-xs truncate" title={activeParcel.address}>
+                      {activeParcel.address}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Analysis Actions */}
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
+                <Button
+                  size="sm"
+                  onClick={handleAnalyzeCorridors}
+                  disabled={corridorLoading || (layerVisibility.corridors && !!corridorData)}
+                  className={`flex-1 ${
+                    corridorLoading 
+                      ? 'bg-amber-600 text-white' 
+                      : layerVisibility.corridors && corridorData
+                        ? 'bg-emerald-600 text-white cursor-default'
+                        : 'bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white'
+                  }`}
+                >
+                  {corridorLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                      Analyzing...
+                    </>
+                  ) : layerVisibility.corridors && corridorData ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 mr-1" />
+                      Corridors Computed
+                    </>
+                  ) : (
+                    <>
+                      <Route className="w-4 h-4 mr-1" />
+                      Analyze Corridors
+                    </>
+                  )}
+                </Button>
+                
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                  title="More analysis options (coming soon)"
+                  disabled
+                >
+                  <Scan className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Hint to click parcel (when no active parcel) */}
+        {!activeParcel && mapReady && !isLoading && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/80 backdrop-blur rounded-full px-4 py-2 z-20 flex items-center gap-2 border border-slate-700">
+            <Crosshair className="w-4 h-4 text-amber-400" />
+            <span className="text-slate-300 text-sm">Click a parcel to begin analysis</span>
+          </div>
         )}
       </div>
     </div>
