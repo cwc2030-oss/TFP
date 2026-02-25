@@ -15,8 +15,8 @@ import { getBucketConfig } from '@/lib/aws-config';
 
 const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL || 
   'https://cwc2030--terrain-brain-v3-corridors-corridors-web.modal.run/v1/corridors';
-const REQUEST_TIMEOUT_MS = 120000; // 120 seconds for corridor computation (includes DEM fetch)
-const API_VERSION = 'v3.1-diag-2026-02-24';
+const REQUEST_TIMEOUT_MS = 40000; // 40 seconds for corridor computation (client has 45s timeout)
+const API_VERSION = 'v3.2-timeout-2026-02-25';
 
 interface CorridorRequest {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
@@ -65,9 +65,10 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  let body: CorridorRequest | null = null;
   
   try {
-    const body = await request.json() as CorridorRequest;
+    body = await request.json() as CorridorRequest;
     const { parcel, parcel_id, state = 'mo', county = 'johnson' } = body;
 
     // Validate input
@@ -241,19 +242,40 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('[Corridors] Error:', error);
-
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      return NextResponse.json(
-        { success: false, error: 'Corridor computation timed out (90s)' },
-        { status: 504 }
+    console.error('[Corridors] Outer catch error:', error);
+    const isTimeout = error instanceof Error && error.name === 'TimeoutError';
+    const errorCode = isTimeout ? 'SERVER_TIMEOUT' : 'SERVER_ERROR';
+    
+    // ALWAYS return a response - never hang
+    // Return fallback data so UI can still render something
+    if (body?.parcel) {
+      console.log('[Corridors] Returning fallback due to outer catch:', errorCode);
+      return generateSyntheticCorridor(
+        body.parcel, 
+        body.parcel_id || 'unknown', 
+        startTime, 
+        errorCode, 
+        undefined,
+        'outer_catch'
       );
     }
-
-    return NextResponse.json(
-      { success: false, error: 'Corridor analysis failed' },
-      { status: 500 }
-    );
+    
+    // If we can't even parse the body, return error JSON
+    return NextResponse.json({
+      success: false,
+      error: isTimeout ? 'Corridor computation timed out' : 'Corridor analysis failed',
+      error_code: errorCode,
+      error_message: isTimeout ? 'Server timeout while computing corridors' : 'An unexpected server error occurred',
+      version: API_VERSION,
+      request_id: `error_${Date.now().toString(36)}`,
+      last_stage: 'outer_catch',
+    }, { 
+      status: isTimeout ? 504 : 500,
+      headers: {
+        'X-API-Version': API_VERSION,
+        'X-Error-Code': errorCode,
+      },
+    });
   }
 }
 

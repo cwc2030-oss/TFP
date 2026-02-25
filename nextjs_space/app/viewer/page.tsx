@@ -26,6 +26,9 @@ interface ComputeStatusItem {
   mode?: string;  // 'real', 'synthetic', 'cached'
 }
 
+// Client-side timeout for corridor requests (45 seconds)
+const CORRIDOR_CLIENT_TIMEOUT_MS = 45000;
+
 interface ComputeStatus {
   terrain: ComputeStatusItem;
   corridors: ComputeStatusItem;
@@ -109,6 +112,9 @@ function ViewerContent() {
     terrain: { state: 'idle' },
     corridors: { state: 'idle' },
   });
+  
+  // Debug log for on-screen display (no devtools needed)
+  const [debugLog, setDebugLog] = useState<string[]>([]);
 
   // Fetch parcel and terrain data
   const loadData = useCallback(async () => {
@@ -187,16 +193,34 @@ function ViewerContent() {
     setLayerVisibility(prev => ({ ...prev, [layer]: !prev[layer] }));
   };
 
-  // Load corridor data when toggled on
+  // Add debug log entry (keeps last 5 entries)
+  const addDebugLog = useCallback((message: string) => {
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setDebugLog(prev => [...prev.slice(-4), `[${timestamp}] ${message}`]);
+    console.log(`[Viewer Debug] ${message}`);
+  }, []);
+
+  // Load corridor data when toggled on - WITH CLIENT-SIDE TIMEOUT
   const loadCorridors = useCallback(async () => {
     if (!parcel || corridorData || corridorLoading) return;
     
     setCorridorLoading(true);
     const requestStartTime = Date.now();
+    const requestId = `req_${Date.now().toString(36)}`;
+    
+    addDebugLog(`Corridors request started... (id: ${requestId})`);
+    
     setComputeStatus(prev => ({
       ...prev,
-      corridors: { state: 'processing', request_id: undefined }
+      corridors: { state: 'processing', request_id: requestId }
     }));
+    
+    // Create abort controller for client-side timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      addDebugLog(`⏱️ Client timeout after ${CORRIDOR_CLIENT_TIMEOUT_MS / 1000}s`);
+    }, CORRIDOR_CLIENT_TIMEOUT_MS);
     
     try {
       const parcelId = (parcel.properties?.parcelId || `parcel_${lat}_${lng}`).replace(/[^a-zA-Z0-9]/g, '_');
@@ -210,7 +234,10 @@ function ViewerContent() {
           state: 'mo',
           county: 'johnson',
         }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data: CorridorData = await response.json();
@@ -219,13 +246,17 @@ function ViewerContent() {
         // Determine compute state based on mode
         const isSynthetic = data.mode === 'synthetic';
         const isCached = data.metadata?.dem_source?.includes('cached');
+        const elapsedMs = Date.now() - requestStartTime;
+        
+        const statusLabel = isSynthetic ? 'FALLBACK' : (isCached ? 'CACHED' : 'COMPUTED');
+        addDebugLog(`Corridors response: ${statusLabel} (${data.request_id || requestId}) ${elapsedMs}ms`);
         
         setComputeStatus(prev => ({
           ...prev,
           corridors: { 
             state: isSynthetic ? 'fallback' : 'computed',
             timestamp: new Date().toISOString(),
-            request_id: data.request_id,
+            request_id: data.request_id || requestId,
             error_code: data.error_code,
             error_message: data.error_message,
             last_stage: data.last_stage,
@@ -238,11 +269,14 @@ function ViewerContent() {
           request_id: data.request_id,
           error_code: data.error_code,
           last_stage: data.last_stage,
-          time_ms: Date.now() - requestStartTime,
+          time_ms: elapsedMs,
         });
       } else {
+        clearTimeout(timeoutId);
         const errorText = await response.text().catch(() => 'Unknown error');
         console.warn('[Viewer] Corridor fetch failed:', response.status, errorText);
+        
+        addDebugLog(`Corridors response: ERROR HTTP_${response.status}`);
         setOverlayError(`Corridor analysis failed (HTTP ${response.status})`);
         setComputeStatus(prev => ({
           ...prev,
@@ -255,22 +289,32 @@ function ViewerContent() {
         }));
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[Viewer] Corridor error:', err);
-      setOverlayError('Corridor analysis failed');
+      clearTimeout(timeoutId);
+      
+      // Check if this was an abort (timeout)
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      const errorCode = isTimeout ? 'TERRAIN_TIMEOUT' : 'CLIENT_ERROR';
+      const errorMsg = isTimeout 
+        ? `Request timed out after ${CORRIDOR_CLIENT_TIMEOUT_MS / 1000}s` 
+        : (err instanceof Error ? err.message : 'Unknown error');
+      
+      addDebugLog(`Corridors response: ERROR ${errorCode}`);
+      console.error('[Viewer] Corridor error:', errorCode, err);
+      
+      setOverlayError(isTimeout ? 'Corridor analysis timed out' : 'Corridor analysis failed');
       setComputeStatus(prev => ({
         ...prev,
         corridors: { 
           state: 'error',
-          error_code: 'CLIENT_ERROR',
+          error_code: errorCode,
           error_message: errorMsg,
-          last_stage: 'fetch',
+          last_stage: isTimeout ? 'timeout' : 'fetch',
         }
       }));
     } finally {
       setCorridorLoading(false);
     }
-  }, [parcel, corridorData, corridorLoading, lat, lng]);
+  }, [parcel, corridorData, corridorLoading, lat, lng, addDebugLog]);
 
   // Trigger corridor load when toggled on
   useEffect(() => {
@@ -524,9 +568,31 @@ function ViewerContent() {
           </button>
         )}
         
+        {/* Debug Log Panel - Fixed Top Right (below header) */}
+        {debugLog.length > 0 && (
+          <div className="fixed top-16 right-4 z-[2000] bg-slate-900/95 backdrop-blur border border-slate-700 rounded-lg p-2 max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono text-amber-400 uppercase tracking-wider">Debug Log</span>
+              <button 
+                onClick={() => setDebugLog([])}
+                className="text-slate-500 hover:text-white text-xs"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="space-y-0.5">
+              {debugLog.map((log, i) => (
+                <div key={i} className="text-[10px] font-mono text-slate-300 leading-tight">
+                  {log}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Build Stamp - Fixed Bottom Right */}
         <div className="fixed bottom-2 right-2 z-[2000] text-[10px] font-mono text-slate-500/70 bg-slate-900/60 backdrop-blur px-2 py-1 rounded select-text">
-          Build: v3.2-diag | Corridors UI: v3.1 | Deployed: 2026-02-24T19:55
+          Build: v3.3-timeout | Corridors UI: v3.2 | Deployed: 2026-02-25T14:00
         </div>
 
         {/* Active Parcel Panel - Bottom Center */}
