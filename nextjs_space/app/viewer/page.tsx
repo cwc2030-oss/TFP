@@ -523,6 +523,11 @@ function ViewerContent() {
             <Activity className="w-4 h-4 text-slate-300" />
           </button>
         )}
+        
+        {/* Build Stamp - Fixed Bottom Right */}
+        <div className="fixed bottom-2 right-2 z-[2000] text-[10px] font-mono text-slate-500/70 bg-slate-900/60 backdrop-blur px-2 py-1 rounded select-text">
+          Build: v3.2-diag | Corridors UI: v3.1 | Deployed: 2026-02-24T19:55
+        </div>
 
         {/* Active Parcel Panel - Bottom Center */}
         {activeParcel && mapReady && (

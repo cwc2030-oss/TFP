@@ -16,6 +16,7 @@ import { getBucketConfig } from '@/lib/aws-config';
 const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL || 
   'https://cwc2030--terrain-brain-v3-corridors-corridors-web.modal.run/v1/corridors';
 const REQUEST_TIMEOUT_MS = 120000; // 120 seconds for corridor computation (includes DEM fetch)
+const API_VERSION = 'v3.1-diag-2026-02-24';
 
 interface CorridorRequest {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
@@ -110,6 +111,12 @@ export async function POST(request: NextRequest) {
           weights: { slope_preference: 'moderate', concavity_weight: 0.4 },
         },
         cached: true,
+        mode: 'cached',
+        version: API_VERSION,
+        request_id: `cache_${Date.now().toString(36)}`,
+        error_code: null,
+        error_message: null,
+        last_stage: null,
       });
     }
 
@@ -207,10 +214,21 @@ export async function POST(request: NextRequest) {
         processing_time: result.metadata?.processing_time_seconds,
       });
 
-      return NextResponse.json(result, {
+      // Ensure diagnostic fields are present in response
+      const enrichedResult = {
+        ...result,
+        version: result.version || API_VERSION,
+        request_id: result.request_id || `modal_${Date.now().toString(36)}`,
+        error_code: result.error_code || null,
+        error_message: result.error_message || null,
+        last_stage: result.last_stage || 'complete',
+      };
+
+      return NextResponse.json(enrichedResult, {
         headers: {
           'X-Processing-Time-Ms': String(Date.now() - startTime),
           'X-Corridor-Mode': result.mode || 'real',
+          'X-API-Version': API_VERSION,
         },
       });
     } catch (fetchError) {
@@ -293,7 +311,7 @@ function generateSyntheticCorridor(
     },
     // Diagnostic fields for UI
     request_id: requestId,
-    version: 'synthetic-fallback',
+    version: `${API_VERSION}-synthetic`,
     error_code: fallbackReason || null,
     error_message: fallbackReason ? ERROR_MESSAGES[fallbackReason] || 'Falling back to synthetic data' : null,
     last_stage: originalLastStage || null,
@@ -302,6 +320,7 @@ function generateSyntheticCorridor(
       'X-Corridor-Mode': 'synthetic',
       'X-Fallback-Reason': fallbackReason || 'modal_unavailable',
       'X-Request-Id': requestId,
+      'X-API-Version': API_VERSION,
     },
   });
 }
