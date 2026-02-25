@@ -112,12 +112,7 @@ export async function getParcelsGeoJSON(): Promise<GeoJSONFeatureCollection> {
           'geometry', ST_AsGeoJSON(geom)::json,
           'properties', json_build_object(
             'id', id,
-            'parcel_id', parcel_id,
-            'address', address,
-            'county', county,
-            'state', state,
-            'acres', acres,
-            'owner_name', owner_name,
+            'name', name,
             'created_at', created_at
           )
         )
@@ -144,7 +139,6 @@ export async function getCorridorsGeoJSON(): Promise<GeoJSONFeatureCollection> {
           'properties', json_build_object(
             'id', id,
             'parcel_id', parcel_id,
-            'corridor_type', corridor_type,
             'score', score,
             'created_at', created_at
           )
