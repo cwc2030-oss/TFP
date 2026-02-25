@@ -38,9 +38,14 @@ interface CorridorResponse {
       concavity_weight: number;
     };
     stage_log?: object;
+    fallback_reason?: string | null;
   };
   error?: string;
   error_code?: string;
+  error_message?: string;   // User-friendly error message
+  last_stage?: string;      // Stage where processing failed
+  request_id?: string;      // Unique request identifier
+  version?: string;         // Service version
 }
 
 // User-friendly error messages for error codes from Modal
@@ -146,7 +151,7 @@ export async function POST(request: NextRequest) {
         
         // Fallback to synthetic only if Modal is truly down
         console.log('[Corridors] Falling back to synthetic due to HTTP', statusCode);
-        return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode);
+        return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode, undefined, 'http_error');
       }
 
       const result = await modalResponse.json();
@@ -180,7 +185,14 @@ export async function POST(request: NextRequest) {
         
         // For transient errors, fall back to synthetic but include the error info
         console.log('[Corridors] Falling back to synthetic due to:', errorCode);
-        return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode);
+        return generateSyntheticCorridor(
+          parcel, 
+          parcel_id, 
+          startTime, 
+          errorCode, 
+          result.request_id,
+          result.last_stage
+        );
       }
       
       // Update processing time to include network latency
@@ -207,7 +219,7 @@ export async function POST(request: NextRequest) {
       console.error('[Corridors] Fetch error:', errorCode, fetchError);
       
       // Fallback to synthetic on network errors
-      return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode);
+      return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode, undefined, 'fetch_error');
     }
 
   } catch (error) {
@@ -235,7 +247,9 @@ function generateSyntheticCorridor(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   parcel_id: string,
   startTime: number,
-  fallbackReason?: string
+  fallbackReason?: string,
+  originalRequestId?: string,
+  originalLastStage?: string
 ): NextResponse {
   const coords = parcel.geometry.type === 'Polygon'
     ? parcel.geometry.coordinates[0]
@@ -258,6 +272,9 @@ function generateSyntheticCorridor(
   const reasonText = fallbackReason 
     ? `SYNTHETIC (fallback: ${fallbackReason})`
     : 'SYNTHETIC (Modal unavailable)';
+  
+  // Generate local request_id if none from Modal
+  const requestId = originalRequestId || `local_${Date.now().toString(36)}`;
 
   return NextResponse.json({
     success: true,
@@ -274,10 +291,17 @@ function generateSyntheticCorridor(
       weights: { slope_preference: 'moderate', concavity_weight: 0.4 },
       fallback_reason: fallbackReason || null,
     },
+    // Diagnostic fields for UI
+    request_id: requestId,
+    version: 'synthetic-fallback',
+    error_code: fallbackReason || null,
+    error_message: fallbackReason ? ERROR_MESSAGES[fallbackReason] || 'Falling back to synthetic data' : null,
+    last_stage: originalLastStage || null,
   }, {
     headers: {
       'X-Corridor-Mode': 'synthetic',
       'X-Fallback-Reason': fallbackReason || 'modal_unavailable',
+      'X-Request-Id': requestId,
     },
   });
 }

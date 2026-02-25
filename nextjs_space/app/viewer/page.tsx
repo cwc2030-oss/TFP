@@ -14,11 +14,21 @@ import type { TerrainAnalysisResponse, TerrainLayers } from '@/types/terrain';
 import type { ActiveParcelInfo } from '@/components/viewer/leaflet-map';
 
 // Compute state types
-type ComputeState = 'idle' | 'processing' | 'computed' | 'error';
+type ComputeState = 'idle' | 'processing' | 'computed' | 'error' | 'fallback';
+
+interface ComputeStatusItem {
+  state: ComputeState;
+  timestamp?: string;
+  request_id?: string;
+  error_code?: string | null;
+  error_message?: string | null;
+  last_stage?: string | null;
+  mode?: string;  // 'real', 'synthetic', 'cached'
+}
 
 interface ComputeStatus {
-  terrain: { state: ComputeState; timestamp?: string };
-  corridors: { state: ComputeState; timestamp?: string };
+  terrain: ComputeStatusItem;
+  corridors: ComputeStatusItem;
 }
 
 interface CorridorData {
@@ -36,7 +46,14 @@ interface CorridorData {
     };
     corridors_found?: number;
     timestamp?: string;
+    fallback_reason?: string | null;
   };
+  // Diagnostic fields
+  request_id?: string;
+  version?: string;
+  error_code?: string | null;
+  error_message?: string | null;
+  last_stage?: string | null;
 }
 
 // Dynamic import for Leaflet components (avoid SSR issues)
@@ -68,7 +85,6 @@ function ViewerContent() {
   const [corridorData, setCorridorData] = useState<CorridorData | null>(null);
   const [corridorLoading, setCorridorLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [overlayError, setOverlayError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -97,7 +113,6 @@ function ViewerContent() {
   // Fetch parcel and terrain data
   const loadData = useCallback(async () => {
     setIsLoading(true);
-    setProgress(10);
     setError(null);
     setOverlayError(null);
     
@@ -109,7 +124,6 @@ function ViewerContent() {
 
     try {
       // Step 1: Get parcel geometry
-      setProgress(20);
       let parcelFeature = await fetchParcelGeometry(lat, lng);
       
       if (!parcelFeature) {
@@ -119,7 +133,6 @@ function ViewerContent() {
       }
       
       setParcel(parcelFeature);
-      setProgress(40);
 
       // Step 2: Fetch terrain analysis
       const result = await fetchTerrainAnalysis(
@@ -129,7 +142,7 @@ function ViewerContent() {
           prevailingWinds: ['NW', 'N'],
           bufferMeters: 800,
         },
-        (step, pct) => setProgress(40 + pct * 0.5),
+        undefined, // No progress callback
         120000
       );
 
@@ -154,8 +167,6 @@ function ViewerContent() {
         }));
         console.warn('[Viewer] Overlay fetch failed:', result.error);
       }
-
-      setProgress(100);
     } catch (err) {
       console.error('[Viewer] Load error:', err);
       setOverlayError(err instanceof Error ? err.message : 'Failed to load overlays');
@@ -181,9 +192,10 @@ function ViewerContent() {
     if (!parcel || corridorData || corridorLoading) return;
     
     setCorridorLoading(true);
+    const requestStartTime = Date.now();
     setComputeStatus(prev => ({
       ...prev,
-      corridors: { state: 'processing' }
+      corridors: { state: 'processing', request_id: undefined }
     }));
     
     try {
@@ -201,27 +213,59 @@ function ViewerContent() {
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data: CorridorData = await response.json();
         setCorridorData(data);
+        
+        // Determine compute state based on mode
+        const isSynthetic = data.mode === 'synthetic';
+        const isCached = data.metadata?.dem_source?.includes('cached');
+        
         setComputeStatus(prev => ({
           ...prev,
-          corridors: { state: 'computed', timestamp: new Date().toISOString() }
+          corridors: { 
+            state: isSynthetic ? 'fallback' : 'computed',
+            timestamp: new Date().toISOString(),
+            request_id: data.request_id,
+            error_code: data.error_code,
+            error_message: data.error_message,
+            last_stage: data.last_stage,
+            mode: isCached ? 'cached' : (isSynthetic ? 'synthetic' : 'real'),
+          }
         }));
-        console.log('[Viewer] Corridor data loaded:', data.mode || 'real');
+        
+        console.log('[Viewer] Corridor data loaded:', {
+          mode: data.mode,
+          request_id: data.request_id,
+          error_code: data.error_code,
+          last_stage: data.last_stage,
+          time_ms: Date.now() - requestStartTime,
+        });
       } else {
-        console.warn('[Viewer] Corridor fetch failed:', response.status);
-        setOverlayError('Could not load corridor data');
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.warn('[Viewer] Corridor fetch failed:', response.status, errorText);
+        setOverlayError(`Corridor analysis failed (HTTP ${response.status})`);
         setComputeStatus(prev => ({
           ...prev,
-          corridors: { state: 'error' }
+          corridors: { 
+            state: 'error',
+            error_code: `HTTP_${response.status}`,
+            error_message: `Server returned ${response.status}`,
+            last_stage: 'http_request',
+          }
         }));
       }
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('[Viewer] Corridor error:', err);
       setOverlayError('Corridor analysis failed');
       setComputeStatus(prev => ({
         ...prev,
-        corridors: { state: 'error' }
+        corridors: { 
+          state: 'error',
+          error_code: 'CLIENT_ERROR',
+          error_message: errorMsg,
+          last_stage: 'fetch',
+        }
       }));
     } finally {
       setCorridorLoading(false);
@@ -243,7 +287,15 @@ function ViewerContent() {
     setCorridorData(null);
     setComputeStatus(prev => ({
       ...prev,
-      corridors: { state: 'idle' }
+      corridors: { 
+        state: 'idle',
+        request_id: undefined,
+        error_code: null,
+        error_message: null,
+        last_stage: null,
+        mode: undefined,
+        timestamp: undefined,
+      }
     }));
   }, []);
 
@@ -312,12 +364,7 @@ function ViewerContent() {
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-4 border-amber-500 border-t-transparent mx-auto mb-4" />
             <p className="text-white mb-2">Loading terrain data...</p>
-            <div className="w-48 h-2 bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
+            <p className="text-slate-400 text-sm">Fetching parcel and analysis layers</p>
           </div>
         </div>
       )}
@@ -434,7 +481,7 @@ function ViewerContent() {
 
         {/* System Panel - Bottom Left */}
         {showSystemPanel && mapReady && (
-          <div className="absolute bottom-4 left-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-[1000] min-w-[200px] shadow-xl">
+          <div className="absolute bottom-4 left-4 bg-slate-800/95 backdrop-blur rounded-lg border border-slate-700 p-3 z-[1000] min-w-[220px] max-w-[280px] shadow-xl">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-slate-300 font-medium text-xs uppercase tracking-wider flex items-center gap-1.5">
                 <Activity className="w-3 h-3" />
@@ -448,20 +495,18 @@ function ViewerContent() {
               </button>
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-3">
               {/* Terrain Analysis Status */}
               <ComputeIndicator
                 label="Terrain Analysis"
-                state={computeStatus.terrain.state}
-                timestamp={computeStatus.terrain.timestamp}
+                status={computeStatus.terrain}
               />
               
-              {/* Corridor Analysis Status */}
+              {/* Corridor Analysis Status - always show when active or toggled */}
               {(computeStatus.corridors.state !== 'idle' || layerVisibility.corridors) && (
                 <ComputeIndicator
                   label="Travel Corridors"
-                  state={computeStatus.corridors.state}
-                  timestamp={computeStatus.corridors.timestamp}
+                  status={computeStatus.corridors}
                 />
               )}
             </div>
@@ -586,65 +631,105 @@ function ViewerContent() {
   );
 }
 
-// Compute Indicator Component
+// Compute Indicator Component with full diagnostics
 function ComputeIndicator({ 
   label, 
-  state, 
-  timestamp 
+  status
 }: { 
   label: string; 
-  state: ComputeState; 
-  timestamp?: string;
+  status: ComputeStatusItem;
 }) {
+  const { state, timestamp, request_id, error_code, error_message, last_stage, mode } = status;
+  
   const formatTime = (iso: string) => {
     const date = new Date(iso);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
+  
+  // Short request ID for display
+  const shortRequestId = request_id ? request_id.slice(-12) : null;
 
   return (
-    <div className="flex items-center gap-2">
-      {/* Pulse/Solid Indicator */}
-      <div className="relative flex items-center justify-center w-4 h-4">
-        {state === 'processing' && (
-          <>
-            {/* Pulsing ring */}
-            <div className="absolute w-3 h-3 rounded-full bg-amber-500/30 animate-ping" />
-            {/* Core dot */}
-            <div className="relative w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-          </>
+    <div className="space-y-1">
+      {/* Main status line */}
+      <div className="flex items-center gap-2">
+        {/* Pulse/Solid Indicator */}
+        <div className="relative flex items-center justify-center w-4 h-4 flex-shrink-0">
+          {state === 'processing' && (
+            <>
+              <div className="absolute w-3 h-3 rounded-full bg-amber-500/30 animate-ping" />
+              <div className="relative w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            </>
+          )}
+          {state === 'computed' && (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          )}
+          {state === 'fallback' && (
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+          )}
+          {state === 'error' && (
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+          )}
+          {state === 'idle' && (
+            <div className="w-2 h-2 rounded-full bg-slate-500" />
+          )}
+        </div>
+        
+        {/* Label and State */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-300 truncate">{label}</span>
+            <span className={`text-[10px] font-medium uppercase tracking-wide ${
+              state === 'processing' ? 'text-amber-400' :
+              state === 'computed' ? 'text-emerald-400' :
+              state === 'fallback' ? 'text-amber-400' :
+              state === 'error' ? 'text-red-400' :
+              'text-slate-500'
+            }`}>
+              {state === 'processing' ? 'Processing' :
+               state === 'computed' ? 'Computed' :
+               state === 'fallback' ? 'Fallback' :
+               state === 'error' ? 'Error' :
+               'Idle'}
+            </span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Diagnostic detail line */}
+      <div className="pl-6 text-[9px] font-mono text-slate-500 leading-tight">
+        {state === 'processing' && shortRequestId && (
+          <span>req: {shortRequestId}</span>
         )}
+        
         {state === 'computed' && (
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <span>
+            {mode === 'cached' ? '⚡ cached' : '✓ fresh'}
+            {timestamp && ` · ${formatTime(timestamp)}`}
+          </span>
         )}
+        
+        {state === 'fallback' && (
+          <span className="text-amber-500/80">
+            SYNTHETIC {error_code && `(${error_code})`}
+            {last_stage && ` at ${last_stage}`}
+          </span>
+        )}
+        
         {state === 'error' && (
-          <AlertTriangle className="w-4 h-4 text-red-400" />
-        )}
-        {state === 'idle' && (
-          <div className="w-2 h-2 rounded-full bg-slate-500" />
+          <span className="text-red-400/80">
+            {error_code || 'ERROR'}
+            {last_stage && ` at ${last_stage}`}
+          </span>
         )}
       </div>
       
-      {/* Label and State */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-300 truncate">{label}</span>
-          <span className={`text-[10px] font-medium uppercase tracking-wide ${
-            state === 'processing' ? 'text-amber-400' :
-            state === 'computed' ? 'text-emerald-400' :
-            state === 'error' ? 'text-red-400' :
-            'text-slate-500'
-          }`}>
-            {state === 'processing' ? 'Processing' :
-             state === 'computed' ? 'Computed' :
-             state === 'error' ? 'Error' :
-             'Idle'}
-          </span>
+      {/* Error message tooltip-style on hover (always visible for errors) */}
+      {(state === 'error' || state === 'fallback') && error_message && (
+        <div className="pl-6 text-[9px] text-slate-400 italic truncate" title={error_message}>
+          {error_message}
         </div>
-        {/* Timestamp */}
-        {timestamp && state === 'computed' && (
-          <p className="text-[9px] text-slate-500 mt-0.5">{formatTime(timestamp)}</p>
-        )}
-      </div>
+      )}
     </div>
   );
 }
