@@ -37,9 +37,25 @@ interface CorridorResponse {
       slope_preference: string;
       concavity_weight: number;
     };
+    stage_log?: object;
   };
   error?: string;
+  error_code?: string;
 }
+
+// User-friendly error messages for error codes from Modal
+const ERROR_MESSAGES: Record<string, string> = {
+  DEM_FETCH_TIMEOUT: 'Terrain data request timed out. Please try again in a moment.',
+  DEM_FETCH_RATE_LIMIT: 'Terrain data service is busy. Please try again in a few minutes.',
+  DEM_FETCH_ERROR: 'Unable to fetch terrain data. Please try again.',
+  DEM_OPEN_FAIL: 'Terrain data was corrupted. Retrying should fix this.',
+  CACHE_CORRUPT: 'Cached terrain data was invalid. Retrying should fix this.',
+  AOI_TOO_LARGE: 'Selected area is too large. Please zoom in on a smaller parcel.',
+  GEOMETRY_INVALID: 'Parcel boundary data is invalid. Please select a different parcel.',
+  API_KEY_MISSING: 'Terrain service is not configured. Contact support.',
+  COMPUTE_FAIL: 'Corridor analysis failed. Please try again.',
+  UNKNOWN_ERROR: 'An unexpected error occurred. Please try again.',
+};
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -120,19 +136,51 @@ export async function POST(request: NextRequest) {
 
       if (!modalResponse.ok) {
         const errorText = await modalResponse.text();
-        console.error('[Corridors] Modal error:', modalResponse.status, errorText);
+        const statusCode = modalResponse.status;
+        console.error('[Corridors] Modal HTTP error:', statusCode, errorText);
+        
+        // Map HTTP status to error code
+        let errorCode = 'DEM_FETCH_ERROR';
+        if (statusCode === 429) errorCode = 'DEM_FETCH_RATE_LIMIT';
+        else if (statusCode === 504 || statusCode === 408) errorCode = 'DEM_FETCH_TIMEOUT';
         
         // Fallback to synthetic only if Modal is truly down
-        console.log('[Corridors] Falling back to synthetic corridors');
-        return generateSyntheticCorridor(parcel, parcel_id, startTime);
+        console.log('[Corridors] Falling back to synthetic due to HTTP', statusCode);
+        return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode);
       }
 
       const result = await modalResponse.json();
       
       // Check if Modal returned success
       if (!result.success) {
-        console.error('[Corridors] Modal returned error:', result.error);
-        return generateSyntheticCorridor(parcel, parcel_id, startTime);
+        const errorCode = result.error_code || 'UNKNOWN_ERROR';
+        const userMessage = ERROR_MESSAGES[errorCode] || result.error || 'Analysis failed';
+        
+        console.error('[Corridors] Modal returned error:', {
+          error_code: errorCode,
+          error: result.error,
+          stage_log: result.metadata?.stage_log,
+        });
+        
+        // For certain errors, we should NOT fall back to synthetic (user needs to take action)
+        const noFallbackErrors = ['AOI_TOO_LARGE', 'GEOMETRY_INVALID', 'API_KEY_MISSING'];
+        if (noFallbackErrors.includes(errorCode)) {
+          return NextResponse.json({
+            success: false,
+            error: userMessage,
+            error_code: errorCode,
+            metadata: result.metadata,
+          }, {
+            status: errorCode === 'AOI_TOO_LARGE' ? 413 : 400,
+            headers: {
+              'X-Error-Code': errorCode,
+            },
+          });
+        }
+        
+        // For transient errors, fall back to synthetic but include the error info
+        console.log('[Corridors] Falling back to synthetic due to:', errorCode);
+        return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode);
       }
       
       // Update processing time to include network latency
@@ -144,6 +192,7 @@ export async function POST(request: NextRequest) {
         mode: result.mode,
         corridors: result.corridors?.features?.length || 0,
         dem_source: result.metadata?.dem_source,
+        processing_time: result.metadata?.processing_time_seconds,
       });
 
       return NextResponse.json(result, {
@@ -153,10 +202,12 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (fetchError) {
-      console.error('[Corridors] Fetch error:', fetchError);
+      const isTimeout = fetchError instanceof Error && fetchError.name === 'TimeoutError';
+      const errorCode = isTimeout ? 'DEM_FETCH_TIMEOUT' : 'DEM_FETCH_ERROR';
+      console.error('[Corridors] Fetch error:', errorCode, fetchError);
       
       // Fallback to synthetic on network errors
-      return generateSyntheticCorridor(parcel, parcel_id, startTime);
+      return generateSyntheticCorridor(parcel, parcel_id, startTime, errorCode);
     }
 
   } catch (error) {
@@ -183,7 +234,8 @@ export async function POST(request: NextRequest) {
 function generateSyntheticCorridor(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   parcel_id: string,
-  startTime: number
+  startTime: number,
+  fallbackReason?: string
 ): NextResponse {
   const coords = parcel.geometry.type === 'Polygon'
     ? parcel.geometry.coordinates[0]
@@ -203,6 +255,10 @@ function generateSyntheticCorridor(
   const centerLat = (bbox[1] + bbox[3]) / 2;
   const corridorFeatures = generateCorridorLines(bbox, centerLng, centerLat);
 
+  const reasonText = fallbackReason 
+    ? `SYNTHETIC (fallback: ${fallbackReason})`
+    : 'SYNTHETIC (Modal unavailable)';
+
   return NextResponse.json({
     success: true,
     mode: 'synthetic',
@@ -213,9 +269,15 @@ function generateSyntheticCorridor(
     bbox,
     metadata: {
       processing_time_seconds: (Date.now() - startTime) / 1000,
-      dem_source: 'SYNTHETIC (Modal unavailable)',
+      dem_source: reasonText,
       resolution_m: 0,
       weights: { slope_preference: 'moderate', concavity_weight: 0.4 },
+      fallback_reason: fallbackReason || null,
+    },
+  }, {
+    headers: {
+      'X-Corridor-Mode': 'synthetic',
+      'X-Fallback-Reason': fallbackReason || 'modal_unavailable',
     },
   });
 }
