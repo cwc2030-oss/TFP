@@ -292,6 +292,18 @@ export default function Terrain3DView({
         .addTo(map);
 
       setIsMapLoaded(true);
+      
+      // Ensure map is properly sized after modal animation completes
+      setTimeout(() => {
+        try {
+          if (mapRef.current === map) {
+            (map as any).resize();
+            console.log('[Terrain3D] map.resize() called to ensure proper tile rendering');
+          }
+        } catch (e) {
+          console.log('[Terrain3D] map.resize() skipped');
+        }
+      }, 200);
     });
 
     map.on("pitchend", () => setCurrentPitch(Math.round(map.getPitch())));
@@ -438,7 +450,12 @@ export default function Terrain3DView({
               {onUnlockIntel && (
                 <Button
                   size="sm"
-                  onClick={onUnlockIntel}
+                  onClick={() => {
+                    // Stop any running animation before navigating
+                    stopSpin();
+                    console.log('[Terrain3D] Deer Intel clicked - stopping spin and navigating');
+                    onUnlockIntel();
+                  }}
                   className="bg-red-600 hover:bg-red-500 text-white gap-1.5 text-xs font-semibold animate-pulse"
                   title="View Deer Intel Analysis"
                 >
@@ -609,7 +626,12 @@ export default function Terrain3DView({
                   {/* Deer Intel CTA */}
                   {onUnlockIntel && (
                     <button
-                      onClick={onUnlockIntel}
+                      onClick={() => {
+                        // Stop any running animation before navigating
+                        stopSpin();
+                        console.log('[Terrain3D] Deer Intel CTA clicked - stopping spin and navigating');
+                        onUnlockIntel();
+                      }}
                       className="w-full mt-3 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-all shadow-lg"
                     >
                       <Crosshair className="w-5 h-5" />

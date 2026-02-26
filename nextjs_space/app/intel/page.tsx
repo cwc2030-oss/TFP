@@ -669,6 +669,19 @@ function DeerIntelContent() {
       console.log('[MAP] BEFORE setMapReady(true)');
       setMapReady(true);
       console.log('[MAP] AFTER setMapReady(true) - map should now be interactive');
+      
+      // Resize map to ensure proper tile loading after navigation
+      // (prevents "checkered calendar" tile corruption on layout changes)
+      setTimeout(() => {
+        try {
+          if (map && mapRef.current === map) {
+            (map as any).resize();
+            console.log('[MAP] map.resize() called to fix tile rendering');
+          }
+        } catch (e) {
+          console.log('[MAP] map.resize() skipped - map may be disposed');
+        }
+      }, 100);
     };
     
     // Register load handler
