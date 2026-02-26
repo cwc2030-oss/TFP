@@ -124,11 +124,9 @@ export default function LeafletMap({
         attributionControl: true,
       });
 
-      // ESRI World Imagery basemap (free, no API key required)
-      L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { attribution: 'Tiles &copy; Esri', maxZoom: 19 }
-      ).addTo(map);
+      // OpenStreetMap basemap (known-good fallback)
+      const osmUrl = ['https:/', '/', '{s}.tile.openstreetmap.org', '/{z}/{x}/{y}.png'].join('');
+      L.tileLayer(osmUrl, { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
 
       // Initialize layer groups (order matters for z-index - later = on top)
       layerGroupsRef.current = {
