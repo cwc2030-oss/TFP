@@ -135,9 +135,14 @@ function ViewerContent() {
   
   // Debug log for on-screen display (no devtools needed)
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  
+  // Loading progress state for tracking
+  const [loadingProgress, setLoadingProgress] = useState<{ step: string; percent: number }>({ step: 'idle', percent: 0 });
 
-  // Fetch parcel and terrain data
+  // Fetch parcel and terrain data (Regrid flow for non-spatial parcels)
   const loadData = useCallback(async () => {
+    console.log('[Viewer:loadData] ▶️ START (0%)');
+    setLoadingProgress({ step: 'init', percent: 0 });
     setIsLoading(true);
     setError(null);
     setOverlayError(null);
@@ -149,18 +154,30 @@ function ViewerContent() {
     }));
 
     try {
-      // Step 1: Get parcel geometry
+      // Step 1: Get parcel geometry (10%)
+      console.log('[Viewer:loadData] 📍 Fetching parcel geometry... (10%)');
+      setLoadingProgress({ step: 'fetching_parcel', percent: 10 });
+      
       let parcelFeature = await fetchParcelGeometry(lat, lng);
+      
+      console.log('[Viewer:loadData] 📍 Parcel geometry received (25%)');
+      setLoadingProgress({ step: 'parcel_received', percent: 25 });
       
       if (!parcelFeature) {
         // Use synthetic parcel as fallback
         parcelFeature = generateSyntheticParcel(lat, lng, 80);
-        console.log('[Viewer] Using synthetic parcel');
+        console.log('[Viewer:loadData] ⚠️ Using synthetic parcel (30%)');
+        setLoadingProgress({ step: 'synthetic_parcel', percent: 30 });
       }
       
       setParcel(parcelFeature);
+      console.log('[Viewer:loadData] ✅ Parcel set in state (35%)');
+      setLoadingProgress({ step: 'parcel_set', percent: 35 });
 
-      // Step 2: Fetch terrain analysis
+      // Step 2: Fetch terrain analysis (36% - this is where it might hang)
+      console.log('[Viewer:loadData] 🏔️ Fetching terrain analysis... (36%)');
+      setLoadingProgress({ step: 'fetching_terrain', percent: 36 });
+      
       const result = await fetchTerrainAnalysis(
         {
           parcel: parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
@@ -171,6 +188,9 @@ function ViewerContent() {
         undefined, // No progress callback
         120000
       );
+      
+      console.log('[Viewer:loadData] 🏔️ Terrain analysis response received (80%)');
+      setLoadingProgress({ step: 'terrain_received', percent: 80 });
 
       if (result.success && result.data) {
         setLayers(result.data.layers);
@@ -179,11 +199,12 @@ function ViewerContent() {
           ...prev,
           terrain: { state: 'computed', timestamp: new Date().toISOString() }
         }));
-        console.log('[Viewer] Terrain data loaded:', {
+        console.log('[Viewer:loadData] ✅ Terrain data loaded (100%):', {
           bedding: result.data.layers.beddingPolygons?.features?.length || 0,
           funnels: result.data.layers.funnels?.features?.length || 0,
           stands: result.data.layers.standPoints?.features?.length || 0,
         });
+        setLoadingProgress({ step: 'complete', percent: 100 });
       } else {
         // Non-fatal: viewer still loads, just show banner
         setOverlayError(result.error || 'Could not load terrain overlays');
@@ -191,80 +212,126 @@ function ViewerContent() {
           ...prev,
           terrain: { state: 'error' }
         }));
-        console.warn('[Viewer] Overlay fetch failed:', result.error);
+        console.warn('[Viewer:loadData] ⚠️ Overlay fetch failed (100% with error):', result.error);
+        setLoadingProgress({ step: 'error_terrain', percent: 100 });
       }
     } catch (err) {
-      console.error('[Viewer] Load error:', err);
+      console.error('[Viewer:loadData] ❌ Load error:', err);
       setOverlayError(err instanceof Error ? err.message : 'Failed to load overlays');
       setComputeStatus(prev => ({
         ...prev,
         terrain: { state: 'error' }
       }));
+      setLoadingProgress({ step: 'error_exception', percent: 100 });
     } finally {
+      console.log('[Viewer:loadData] 🏁 FINALLY - clearing isLoading');
       setIsLoading(false);
     }
   }, [lat, lng]);
 
   // Load Regrid data only when NOT loading from spatial parcel
   useEffect(() => {
+    console.log('[Viewer:useEffect:loadData] Triggered - spatialParcelId:', spatialParcelId);
     if (!spatialParcelId) {
+      console.log('[Viewer:useEffect:loadData] ▶️ No spatialParcelId, calling loadData()');
       loadData();
+    } else {
+      console.log('[Viewer:useEffect:loadData] ⏭️ spatialParcelId present, skipping loadData()');
     }
   }, [loadData, spatialParcelId]);
 
   // Load spatial parcel from Supabase (parcel only, no auth required)
   const loadSpatialParcel = useCallback(async () => {
-    if (!spatialParcelId) return;
+    if (!spatialParcelId) {
+      console.log('[Viewer:loadSpatialParcel] ⏭️ No spatialParcelId, skipping');
+      return;
+    }
     
+    console.log('[Viewer:loadSpatialParcel] ▶️ START (0%) - parcelId:', spatialParcelId);
+    setLoadingProgress({ step: 'spatial_init', percent: 0 });
     setIsLoading(true);
     
     try {
       // Fetch parcel from Supabase (public access)
+      console.log('[Viewer:loadSpatialParcel] 📡 Fetching from API... (20%)');
+      setLoadingProgress({ step: 'spatial_fetching', percent: 20 });
+      
       const parcelRes = await fetch(`/api/spatial/parcels/${spatialParcelId}`);
+      
+      console.log('[Viewer:loadSpatialParcel] 📡 Response received (36%) - status:', parcelRes.status);
+      setLoadingProgress({ step: 'spatial_response', percent: 36 });
+      
       if (parcelRes.ok) {
+        console.log('[Viewer:loadSpatialParcel] ✅ Response OK, parsing JSON... (50%)');
+        setLoadingProgress({ step: 'spatial_parsing', percent: 50 });
+        
         const { parcel: spatialParcel, centroid } = await parcelRes.json();
+        
+        console.log('[Viewer:loadSpatialParcel] 📦 JSON parsed (70%) - has parcel:', !!spatialParcel);
+        setLoadingProgress({ step: 'spatial_parsed', percent: 70 });
         
         if (spatialParcel) {
           setParcel(spatialParcel);
-          console.log('[Viewer] Loaded spatial parcel:', spatialParcelId);
+          console.log('[Viewer:loadSpatialParcel] ✅ Parcel set in state (90%)');
+          setLoadingProgress({ step: 'spatial_parcel_set', percent: 90 });
           
           // Update center to parcel centroid
           if (centroid) {
             setEffectiveCenter([centroid.lat, centroid.lng]);
+            console.log('[Viewer:loadSpatialParcel] 📍 Center updated (95%):', centroid);
+            setLoadingProgress({ step: 'spatial_centered', percent: 95 });
           }
+          
+          console.log('[Viewer:loadSpatialParcel] ✅ COMPLETE (100%)');
+          setLoadingProgress({ step: 'spatial_complete', percent: 100 });
+        } else {
+          console.warn('[Viewer:loadSpatialParcel] ⚠️ No parcel in response (100%)');
+          setLoadingProgress({ step: 'spatial_no_parcel', percent: 100 });
         }
       } else {
-        console.warn('[Viewer] Failed to load spatial parcel:', spatialParcelId);
+        console.warn('[Viewer:loadSpatialParcel] ❌ HTTP error:', parcelRes.status);
+        setLoadingProgress({ step: 'spatial_http_error', percent: 100 });
       }
     } catch (err) {
-      console.error('[Viewer] Spatial parcel load error:', err);
+      console.error('[Viewer:loadSpatialParcel] ❌ Exception:', err);
+      setLoadingProgress({ step: 'spatial_exception', percent: 100 });
     } finally {
       // Always end main loading after parcel - corridors load separately
+      console.log('[Viewer:loadSpatialParcel] 🏁 FINALLY - clearing isLoading');
       setIsLoading(false);
     }
   }, [spatialParcelId]);
   
   // Load spatial corridors from Supabase (requires auth)
   const loadSpatialCorridors = useCallback(async () => {
-    if (!spatialParcelId) return;
+    if (!spatialParcelId) {
+      console.log('[Viewer:loadSpatialCorridors] ⏭️ No spatialParcelId, skipping');
+      return;
+    }
     
     // Skip if not authenticated - show auth required message instead
     if (!isAuthenticated) {
       setSpatialCorridorsAuthRequired(true);
-      console.log('[Viewer] Corridors require auth - skipping fetch');
+      console.log('[Viewer:loadSpatialCorridors] 🔒 Not authenticated - skipping fetch, showing auth message');
+      // NOTE: This does NOT affect isLoading - main loader should already be cleared by loadSpatialParcel
       return;
     }
     
+    console.log('[Viewer:loadSpatialCorridors] ▶️ START - authenticated, fetching corridors');
     setSpatialCorridorsLoading(true);
     setSpatialCorridorsAuthRequired(false);
     
     try {
+      console.log('[Viewer:loadSpatialCorridors] 📡 Fetching from API...');
       const corridorRes = await fetch(`/api/spatial/parcels/${spatialParcelId}/corridors`);
       
+      console.log('[Viewer:loadSpatialCorridors] 📡 Response received - status:', corridorRes.status);
+      
       if (corridorRes.ok) {
+        console.log('[Viewer:loadSpatialCorridors] ✅ Response OK, parsing JSON...');
         const data: SpatialCorridorData = await corridorRes.json();
         setSpatialCorridors(data);
-        console.log('[Viewer] Loaded spatial corridors:', data.count);
+        console.log('[Viewer:loadSpatialCorridors] ✅ Loaded spatial corridors:', data.count);
         
         // Auto-enable spatial corridors layer if we have data
         if (data.count > 0) {
@@ -273,28 +340,35 @@ function ViewerContent() {
       } else if (corridorRes.status === 401 || corridorRes.status === 403) {
         // Auth required or access denied - show message
         setSpatialCorridorsAuthRequired(true);
-        console.log('[Viewer] Corridors require auth (401/403)');
+        console.log('[Viewer:loadSpatialCorridors] 🔒 Corridors require auth (401/403)');
       } else {
-        console.warn('[Viewer] Failed to load corridors:', corridorRes.status);
+        console.warn('[Viewer:loadSpatialCorridors] ❌ Failed to load corridors:', corridorRes.status);
       }
     } catch (err) {
-      console.error('[Viewer] Spatial corridors load error:', err);
+      console.error('[Viewer:loadSpatialCorridors] ❌ Exception:', err);
     } finally {
+      console.log('[Viewer:loadSpatialCorridors] 🏁 FINALLY - clearing spatialCorridorsLoading');
       setSpatialCorridorsLoading(false);
     }
   }, [spatialParcelId, isAuthenticated]);
 
   // Load spatial parcel if spatialParcelId is provided
   useEffect(() => {
+    console.log('[Viewer:useEffect:loadSpatialParcel] Triggered - spatialParcelId:', spatialParcelId);
     if (spatialParcelId) {
+      console.log('[Viewer:useEffect:loadSpatialParcel] ▶️ spatialParcelId present, calling loadSpatialParcel()');
       loadSpatialParcel();
     }
   }, [spatialParcelId, loadSpatialParcel]);
 
   // Load spatial corridors when we have a spatial parcel and auth status is known
   useEffect(() => {
+    console.log('[Viewer:useEffect:loadSpatialCorridors] Triggered - spatialParcelId:', spatialParcelId, 'sessionStatus:', sessionStatus);
     if (spatialParcelId && sessionStatus !== 'loading') {
+      console.log('[Viewer:useEffect:loadSpatialCorridors] ▶️ spatialParcelId present & session ready, calling loadSpatialCorridors()');
       loadSpatialCorridors();
+    } else if (sessionStatus === 'loading') {
+      console.log('[Viewer:useEffect:loadSpatialCorridors] ⏳ Waiting for session status...');
     }
   }, [spatialParcelId, sessionStatus, loadSpatialCorridors]);
 
@@ -520,13 +594,25 @@ function ViewerContent() {
         </div>
       )}
 
-      {/* Loading Overlay */}
+      {/* Loading Overlay with Progress */}
       {isLoading && (
         <div className="absolute inset-0 bg-slate-900/80 z-30 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-4 border-amber-500 border-t-transparent mx-auto mb-4" />
             <p className="text-white mb-2">Loading terrain data...</p>
             <p className="text-slate-400 text-sm">Fetching parcel and analysis layers</p>
+            {/* Progress indicator */}
+            <div className="mt-4 w-48 mx-auto">
+              <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-amber-500 transition-all duration-300" 
+                  style={{ width: `${loadingProgress.percent}%` }}
+                />
+              </div>
+              <p className="text-amber-400/80 text-xs font-mono mt-2">
+                {loadingProgress.percent}% — {loadingProgress.step.replace(/_/g, ' ')}
+              </p>
+            </div>
           </div>
         </div>
       )}
