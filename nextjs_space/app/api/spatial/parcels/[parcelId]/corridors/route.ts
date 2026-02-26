@@ -24,24 +24,29 @@ export async function GET(
       );
     }
 
-    // Get session for user_id
+    // Require authentication
     const session = await getServerSession(authOptions);
-    const userId = session?.user?.id;
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const userId = session.user.id;
 
     // Check ownership via user_parcels
-    if (userId) {
-      const ownershipCheck = await spatialQuery<{ count: string }>(
-        `SELECT COUNT(*)::text as count FROM public.user_parcels 
-         WHERE user_id = $1 AND parcel_id = $2`,
-        [userId, parcelId]
-      );
+    const ownershipCheck = await spatialQuery<{ count: string }>(
+      `SELECT COUNT(*)::text as count FROM public.user_parcels 
+       WHERE user_id = $1 AND parcel_id = $2`,
+      [userId, parcelId]
+    );
 
-      if (parseInt(ownershipCheck.rows[0]?.count || '0') === 0) {
-        return NextResponse.json(
-          { error: 'Parcel not found or access denied' },
-          { status: 403 }
-        );
-      }
+    if (parseInt(ownershipCheck.rows[0]?.count || '0') === 0) {
+      return NextResponse.json(
+        { error: 'Parcel not found or access denied' },
+        { status: 403 }
+      );
     }
 
     // Fetch corridors for this parcel
