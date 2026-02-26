@@ -72,6 +72,13 @@ const LeafletMap = dynamic(() => import('@/components/viewer/leaflet-map'), {
   ),
 });
 
+// Spatial corridor data type (from Supabase)
+interface SpatialCorridorData {
+  parcelId: string;
+  corridors: GeoJSON.FeatureCollection;
+  count: number;
+}
+
 function ViewerContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -80,6 +87,7 @@ function ViewerContent() {
   const lat = parseFloat(searchParams.get('lat') || '38.5');
   const lng = parseFloat(searchParams.get('lng') || '-92.5');
   const address = searchParams.get('address') || 'Unknown Location';
+  const spatialParcelId = searchParams.get('spatialParcelId') || null; // UUID from Supabase
   
   // State
   const [parcel, setParcel] = useState<GeoJSON.Feature | null>(null);
@@ -92,6 +100,13 @@ function ViewerContent() {
   const [overlayError, setOverlayError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   
+  // Spatial corridors (from Supabase)
+  const [spatialCorridors, setSpatialCorridors] = useState<SpatialCorridorData | null>(null);
+  const [spatialCorridorsLoading, setSpatialCorridorsLoading] = useState(false);
+  
+  // Effective center (from URL or spatial parcel centroid)
+  const [effectiveCenter, setEffectiveCenter] = useState<[number, number]>([lat, lng]);
+  
   // Layer visibility
   const [layerVisibility, setLayerVisibility] = useState({
     parcel: true,
@@ -100,6 +115,7 @@ function ViewerContent() {
     saddles: true,
     stands: true,
     corridors: false, // Off by default, user toggles on
+    spatialCorridors: true, // Supabase corridors ON by default when available
   });
   const [showLegend, setShowLegend] = useState(true);
   const [showSystemPanel, setShowSystemPanel] = useState(true);
@@ -185,9 +201,70 @@ function ViewerContent() {
     }
   }, [lat, lng]);
 
+  // Load Regrid data only when NOT loading from spatial parcel
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!spatialParcelId) {
+      loadData();
+    }
+  }, [loadData, spatialParcelId]);
+
+  // Load spatial parcel and corridors from Supabase when spatialParcelId is provided
+  const loadSpatialParcel = useCallback(async () => {
+    if (!spatialParcelId) return;
+    
+    setIsLoading(true);
+    setSpatialCorridorsLoading(true);
+    
+    try {
+      // Fetch parcel from Supabase
+      const parcelRes = await fetch(`/api/spatial/parcels/${spatialParcelId}`);
+      if (parcelRes.ok) {
+        const { parcel: spatialParcel, centroid } = await parcelRes.json();
+        
+        if (spatialParcel) {
+          setParcel(spatialParcel);
+          console.log('[Viewer] Loaded spatial parcel:', spatialParcelId);
+          
+          // Update center to parcel centroid
+          if (centroid) {
+            setEffectiveCenter([centroid.lat, centroid.lng]);
+          }
+        }
+      } else {
+        console.warn('[Viewer] Failed to load spatial parcel:', spatialParcelId);
+      }
+      
+      // Fetch corridors from Supabase (public endpoint for now)
+      const corridorRes = await fetch(`/api/spatial/parcels/${spatialParcelId}/corridors`);
+      if (corridorRes.ok) {
+        const data: SpatialCorridorData = await corridorRes.json();
+        setSpatialCorridors(data);
+        console.log('[Viewer] Loaded spatial corridors:', data.count);
+        
+        // Auto-enable spatial corridors layer if we have data
+        if (data.count > 0) {
+          setLayerVisibility(prev => ({ ...prev, spatialCorridors: true }));
+        }
+      } else if (corridorRes.status === 401) {
+        // Auth required - that's OK, corridors just won't show
+        console.log('[Viewer] Corridors require auth');
+      } else {
+        console.warn('[Viewer] Failed to load corridors');
+      }
+    } catch (err) {
+      console.error('[Viewer] Spatial parcel load error:', err);
+    } finally {
+      setIsLoading(false);
+      setSpatialCorridorsLoading(false);
+    }
+  }, [spatialParcelId]);
+
+  // Load spatial parcel if spatialParcelId is provided
+  useEffect(() => {
+    if (spatialParcelId) {
+      loadSpatialParcel();
+    }
+  }, [spatialParcelId, loadSpatialParcel]);
 
   const toggleLayer = (layer: keyof typeof layerVisibility) => {
     setLayerVisibility(prev => ({ ...prev, [layer]: !prev[layer] }));
@@ -416,10 +493,11 @@ function ViewerContent() {
       {/* Map Container */}
       <div className="flex-1 relative">
         <LeafletMap
-          center={[lat, lng]}
+          center={spatialParcelId ? effectiveCenter : [lat, lng]}
           parcel={parcel}
           layers={layers}
           corridorData={corridorData}
+          spatialCorridors={spatialCorridors}
           layerVisibility={layerVisibility}
           provenance={provenance}
           onMapReady={() => setMapReady(true)}
@@ -495,7 +573,7 @@ function ViewerContent() {
                 <span className="text-slate-200 text-sm">Stand Sites</span>
               </label>
 
-              {/* Corridors (V1) */}
+              {/* Corridors (V1 - Modal geoprocessor) */}
               <label className="flex items-center gap-2 cursor-pointer mt-2 pt-2 border-t border-slate-700">
                 <input
                   type="checkbox"
@@ -509,6 +587,24 @@ function ViewerContent() {
                   {corridorLoading && <span className="text-xs text-amber-400 ml-1">(loading...)</span>}
                 </span>
               </label>
+
+              {/* Spatial Corridors (from Supabase) */}
+              {(spatialCorridors || spatialParcelId) && (
+                <label className="flex items-center gap-2 cursor-pointer mt-1">
+                  <input
+                    type="checkbox"
+                    checked={layerVisibility.spatialCorridors}
+                    onChange={() => toggleLayer('spatialCorridors')}
+                    className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500"
+                  />
+                  <div className="w-4 h-1 bg-gradient-to-r from-cyan-400 to-teal-500 rounded-sm" />
+                  <span className="text-slate-200 text-sm">
+                    DB Corridors
+                    {spatialCorridorsLoading && <span className="text-xs text-cyan-400 ml-1">(loading...)</span>}
+                    {spatialCorridors && <span className="text-xs text-slate-400 ml-1">({spatialCorridors.count})</span>}
+                  </span>
+                </label>
+              )}
             </div>
 
             {/* Provenance */}

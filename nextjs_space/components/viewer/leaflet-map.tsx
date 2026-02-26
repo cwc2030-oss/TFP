@@ -48,11 +48,19 @@ export interface ActiveParcelInfo {
   address?: string;
 }
 
+// Spatial corridor data from Supabase
+interface SpatialCorridorData {
+  parcelId: string;
+  corridors: GeoJSON.FeatureCollection;
+  count: number;
+}
+
 interface LeafletMapProps {
   center: [number, number];
   parcel: GeoJSON.Feature | null;
   layers: TerrainLayers | null;
   corridorData: CorridorData | null;
+  spatialCorridors?: SpatialCorridorData | null;
   layerVisibility: {
     parcel: boolean;
     bedding: boolean;
@@ -60,6 +68,7 @@ interface LeafletMapProps {
     saddles: boolean;
     stands: boolean;
     corridors: boolean;
+    spatialCorridors?: boolean;
   };
   provenance: TerrainAnalysisResponse['provenance'] | null;
   onMapReady?: () => void;
@@ -72,6 +81,7 @@ export default function LeafletMap({
   parcel,
   layers,
   corridorData,
+  spatialCorridors,
   layerVisibility,
   provenance,
   onMapReady,
@@ -87,6 +97,7 @@ export default function LeafletMap({
     saddles: L.LayerGroup | null;
     stands: L.LayerGroup | null;
     corridors: L.LayerGroup | null;
+    spatialCorridors: L.LayerGroup | null;
   }>({
     parcel: null,
     bedding: null,
@@ -94,6 +105,7 @@ export default function LeafletMap({
     saddles: null,
     stands: null,
     corridors: null,
+    spatialCorridors: null,
   });
 
   // MapTiler API key from env
@@ -112,54 +124,21 @@ export default function LeafletMap({
         attributionControl: true,
       });
 
-      // Add MapTiler hybrid basemap (satellite + labels)
-      // Fallback to OpenStreetMap if no key
-      if (maptilerKey) {
-        // Satellite imagery layer
-        L.tileLayer(
-          `https://i.ytimg.com/vi/TmG8o21vB7E/maxresdefault.jpg`,
-          {
-            attribution: '&copy; <a href="https://www.maptiler.com/">MapTiler</a>',
-            maxZoom: 20,
-          }
-        ).addTo(map);
+      // ESRI World Imagery basemap (free, no API key required)
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles &copy; Esri', maxZoom: 19 }
+      ).addTo(map);
 
-        // Labels overlay
-        L.tileLayer(
-          `https://media.maptiler.com/old/img/tools/mercator2.png`,
-          {
-            attribution: '',
-            maxZoom: 20,
-          }
-        ).addTo(map);
-      } else {
-        // Fallback: ESRI World Imagery (free, no key required)
-        L.tileLayer(
-          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-          {
-            attribution: 'Tiles &copy; Esri',
-            maxZoom: 19,
-          }
-        ).addTo(map);
-
-        // OpenStreetMap labels overlay
-        L.tileLayer(
-          'https://i.ytimg.com/vi/RF4-Ddoti9A/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLDKvCdYDwMewgJQhS9t-rVkjAYo2g',
-          {
-            attribution: '&copy; OSM, CARTO',
-            maxZoom: 19,
-          }
-        ).addTo(map);
-      }
-
-      // Initialize layer groups
+      // Initialize layer groups (order matters for z-index - later = on top)
       layerGroupsRef.current = {
         parcel: L.layerGroup().addTo(map),
         bedding: L.layerGroup().addTo(map),
         funnels: L.layerGroup().addTo(map),
         saddles: L.layerGroup().addTo(map),
-        stands: L.layerGroup().addTo(map),
         corridors: L.layerGroup().addTo(map),
+        spatialCorridors: L.layerGroup().addTo(map), // Above corridors
+        stands: L.layerGroup().addTo(map), // Stands on top
       };
 
       mapRef.current = map;
@@ -173,7 +152,15 @@ export default function LeafletMap({
     } catch (err) {
       console.error('[LeafletMap] Init error:', err);
     }
-  }, [center, maptilerKey, onMapReady]);
+  }, [maptilerKey, onMapReady]); // Removed center from deps - handled separately
+
+  // Re-center map when center prop changes (for spatial parcel loading)
+  useEffect(() => {
+    if (mapRef.current && center) {
+      console.log('[LeafletMap] Re-centering map to:', center);
+      mapRef.current.setView(center, 15, { animate: true });
+    }
+  }, [center]);
 
   // Update parcel layer with click interaction
   useEffect(() => {
@@ -509,6 +496,79 @@ export default function LeafletMap({
       }
     }
   }, [corridorData, layerVisibility.corridors]);
+
+  // Update spatial corridors layer (from Supabase - with type, score, meta.note)
+  useEffect(() => {
+    const group = layerGroupsRef.current.spatialCorridors;
+    if (!group) return;
+
+    group.clearLayers();
+
+    if (spatialCorridors?.corridors?.features && layerVisibility.spatialCorridors) {
+      try {
+        spatialCorridors.corridors.features.forEach((feature) => {
+          const props = feature.properties || {};
+          const score = typeof props.score === 'number' ? props.score : 0.5;
+          const scorePercent = Math.round(score * 100);
+          const corridorType = props.type || 'unknown';
+          const metaNote = props.meta?.note || '';
+          
+          // Color based on score: higher = more cyan/teal
+          const color = score > 0.7 
+            ? '#06b6d4' // cyan-500 for high score
+            : score > 0.4 
+              ? '#14b8a6' // teal-500 for medium
+              : '#0d9488'; // teal-600 for lower
+          
+          // Width based on score
+          const weight = Math.max(3, score * 6);
+
+          L.geoJSON(feature as GeoJSON.Feature, {
+            style: {
+              color,
+              weight,
+              opacity: 0.9,
+              lineCap: 'round',
+              lineJoin: 'round',
+            },
+            onEachFeature: (f, layer) => {
+              // Click popup with type, score, meta.note
+              layer.bindPopup(`
+                <div class="font-sans min-w-[200px]">
+                  <h3 class="font-bold text-cyan-600 mb-1">🦌 Spatial Corridor</h3>
+                  <p><strong>Type:</strong> ${corridorType.replace(/_/g, ' ')}</p>
+                  <p><strong>Score:</strong> <span class="font-bold">${scorePercent}%</span></p>
+                  ${metaNote ? `<p><strong>Note:</strong> ${metaNote}</p>` : ''}
+                  <hr class="my-2 border-gray-300" />
+                  <p class="text-xs text-gray-500">ID: ${props.id || 'N/A'}</p>
+                  <p class="text-xs text-gray-500">Parcel: ${props.parcel_id?.slice(0, 8) || 'N/A'}...</p>
+                  <p class="text-xs text-gray-400">Source: Supabase PostGIS</p>
+                </div>
+              `);
+
+              // Hover tooltip with type + score
+              layer.bindTooltip(`
+                <div class="font-sans text-sm">
+                  <strong>${corridorType.replace(/_/g, ' ')}</strong><br/>
+                  Score: ${scorePercent}%
+                  ${metaNote ? `<br/><em>${metaNote}</em>` : ''}
+                </div>
+              `, {
+                sticky: true,
+                direction: 'top',
+                offset: [0, -5],
+                className: 'corridor-tooltip',
+              });
+            },
+          }).addTo(group);
+        });
+        
+        console.log('[LeafletMap] Rendered', spatialCorridors.corridors.features.length, 'spatial corridors');
+      } catch (err) {
+        console.error('[LeafletMap] Spatial corridors render error:', err);
+      }
+    }
+  }, [spatialCorridors, layerVisibility.spatialCorridors]);
 
   return (
     <div
