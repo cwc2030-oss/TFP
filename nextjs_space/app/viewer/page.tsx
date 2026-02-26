@@ -6,8 +6,9 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
-import { AlertTriangle, Layers, X, Target, ChevronRight, Activity, CheckCircle2, MapPin, Crosshair, Route, Scan } from 'lucide-react';
+import { AlertTriangle, Layers, X, Target, ChevronRight, Activity, CheckCircle2, MapPin, Crosshair, Route, Scan, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } from '@/lib/terrain-client';
 import type { TerrainAnalysisResponse, TerrainLayers } from '@/types/terrain';
@@ -82,6 +83,8 @@ interface SpatialCorridorData {
 function ViewerContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { data: session, status: sessionStatus } = useSession() || {};
+  const isAuthenticated = sessionStatus === 'authenticated';
   
   // URL params
   const lat = parseFloat(searchParams.get('lat') || '38.5');
@@ -103,6 +106,7 @@ function ViewerContent() {
   // Spatial corridors (from Supabase)
   const [spatialCorridors, setSpatialCorridors] = useState<SpatialCorridorData | null>(null);
   const [spatialCorridorsLoading, setSpatialCorridorsLoading] = useState(false);
+  const [spatialCorridorsAuthRequired, setSpatialCorridorsAuthRequired] = useState(false);
   
   // Effective center (from URL or spatial parcel centroid)
   const [effectiveCenter, setEffectiveCenter] = useState<[number, number]>([lat, lng]);
@@ -208,15 +212,14 @@ function ViewerContent() {
     }
   }, [loadData, spatialParcelId]);
 
-  // Load spatial parcel and corridors from Supabase when spatialParcelId is provided
+  // Load spatial parcel from Supabase (parcel only, no auth required)
   const loadSpatialParcel = useCallback(async () => {
     if (!spatialParcelId) return;
     
     setIsLoading(true);
-    setSpatialCorridorsLoading(true);
     
     try {
-      // Fetch parcel from Supabase
+      // Fetch parcel from Supabase (public access)
       const parcelRes = await fetch(`/api/spatial/parcels/${spatialParcelId}`);
       if (parcelRes.ok) {
         const { parcel: spatialParcel, centroid } = await parcelRes.json();
@@ -233,9 +236,31 @@ function ViewerContent() {
       } else {
         console.warn('[Viewer] Failed to load spatial parcel:', spatialParcelId);
       }
-      
-      // Fetch corridors from Supabase (public endpoint for now)
+    } catch (err) {
+      console.error('[Viewer] Spatial parcel load error:', err);
+    } finally {
+      // Always end main loading after parcel - corridors load separately
+      setIsLoading(false);
+    }
+  }, [spatialParcelId]);
+  
+  // Load spatial corridors from Supabase (requires auth)
+  const loadSpatialCorridors = useCallback(async () => {
+    if (!spatialParcelId) return;
+    
+    // Skip if not authenticated - show auth required message instead
+    if (!isAuthenticated) {
+      setSpatialCorridorsAuthRequired(true);
+      console.log('[Viewer] Corridors require auth - skipping fetch');
+      return;
+    }
+    
+    setSpatialCorridorsLoading(true);
+    setSpatialCorridorsAuthRequired(false);
+    
+    try {
       const corridorRes = await fetch(`/api/spatial/parcels/${spatialParcelId}/corridors`);
+      
       if (corridorRes.ok) {
         const data: SpatialCorridorData = await corridorRes.json();
         setSpatialCorridors(data);
@@ -245,19 +270,19 @@ function ViewerContent() {
         if (data.count > 0) {
           setLayerVisibility(prev => ({ ...prev, spatialCorridors: true }));
         }
-      } else if (corridorRes.status === 401) {
-        // Auth required - that's OK, corridors just won't show
-        console.log('[Viewer] Corridors require auth');
+      } else if (corridorRes.status === 401 || corridorRes.status === 403) {
+        // Auth required or access denied - show message
+        setSpatialCorridorsAuthRequired(true);
+        console.log('[Viewer] Corridors require auth (401/403)');
       } else {
-        console.warn('[Viewer] Failed to load corridors');
+        console.warn('[Viewer] Failed to load corridors:', corridorRes.status);
       }
     } catch (err) {
-      console.error('[Viewer] Spatial parcel load error:', err);
+      console.error('[Viewer] Spatial corridors load error:', err);
     } finally {
-      setIsLoading(false);
       setSpatialCorridorsLoading(false);
     }
-  }, [spatialParcelId]);
+  }, [spatialParcelId, isAuthenticated]);
 
   // Load spatial parcel if spatialParcelId is provided
   useEffect(() => {
@@ -265,6 +290,13 @@ function ViewerContent() {
       loadSpatialParcel();
     }
   }, [spatialParcelId, loadSpatialParcel]);
+
+  // Load spatial corridors when we have a spatial parcel and auth status is known
+  useEffect(() => {
+    if (spatialParcelId && sessionStatus !== 'loading') {
+      loadSpatialCorridors();
+    }
+  }, [spatialParcelId, sessionStatus, loadSpatialCorridors]);
 
   const toggleLayer = (layer: keyof typeof layerVisibility) => {
     setLayerVisibility(prev => ({ ...prev, [layer]: !prev[layer] }));
@@ -589,21 +621,39 @@ function ViewerContent() {
               </label>
 
               {/* Spatial Corridors (from Supabase) */}
-              {(spatialCorridors || spatialParcelId) && (
-                <label className="flex items-center gap-2 cursor-pointer mt-1">
-                  <input
-                    type="checkbox"
-                    checked={layerVisibility.spatialCorridors}
-                    onChange={() => toggleLayer('spatialCorridors')}
-                    className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500"
-                  />
-                  <div className="w-4 h-1 bg-gradient-to-r from-cyan-400 to-teal-500 rounded-sm" />
-                  <span className="text-slate-200 text-sm">
-                    DB Corridors
-                    {spatialCorridorsLoading && <span className="text-xs text-cyan-400 ml-1">(loading...)</span>}
-                    {spatialCorridors && <span className="text-xs text-slate-400 ml-1">({spatialCorridors.count})</span>}
-                  </span>
-                </label>
+              {spatialParcelId && (
+                <div className="mt-1">
+                  {spatialCorridorsAuthRequired ? (
+                    // Show auth required message
+                    <div className="flex items-center gap-2 py-1">
+                      <div className="w-4 h-4 flex items-center justify-center opacity-50">
+                        <Lock className="w-3 h-3 text-slate-400" />
+                      </div>
+                      <div className="w-4 h-1 bg-gradient-to-r from-slate-500 to-slate-600 rounded-sm opacity-50" />
+                      <span className="text-slate-400 text-sm">
+                        DB Corridors
+                        <span className="text-xs text-amber-400 ml-1 block">(Sign in to view)</span>
+                      </span>
+                    </div>
+                  ) : (spatialCorridors || spatialCorridorsLoading) ? (
+                    // Normal toggle when auth'd or loading
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.spatialCorridors}
+                        onChange={() => toggleLayer('spatialCorridors')}
+                        disabled={spatialCorridorsLoading}
+                        className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500 disabled:opacity-50"
+                      />
+                      <div className="w-4 h-1 bg-gradient-to-r from-cyan-400 to-teal-500 rounded-sm" />
+                      <span className="text-slate-200 text-sm">
+                        DB Corridors
+                        {spatialCorridorsLoading && <span className="text-xs text-cyan-400 ml-1">(loading...)</span>}
+                        {spatialCorridors && <span className="text-xs text-slate-400 ml-1">({spatialCorridors.count})</span>}
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
               )}
             </div>
 
