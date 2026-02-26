@@ -138,46 +138,67 @@ function ViewerContent() {
   
   // Loading progress state for tracking
   const [loadingProgress, setLoadingProgress] = useState<{ step: string; percent: number }>({ step: 'idle', percent: 0 });
+  
+  // Terrain analysis state (manual trigger for spatial parcels)
+  const [terrainAnalysisRequested, setTerrainAnalysisRequested] = useState(false);
+  const [terrainAnalysisLoading, setTerrainAnalysisLoading] = useState(false);
 
-  // Fetch parcel and terrain data (Regrid flow for non-spatial parcels)
-  const loadData = useCallback(async () => {
-    console.log('[Viewer:loadData] ▶️ START (0%)');
+  // Fetch parcel ONLY (no terrain) - used for Regrid flow when user wants quick load
+  const loadParcelOnly = useCallback(async () => {
+    // NEVER run if spatialParcelId is present - spatial flow handles this
+    if (spatialParcelId) {
+      console.log('[Viewer:loadParcelOnly] ⏭️ spatialParcelId present, skipping');
+      return;
+    }
+    
+    console.log('[Viewer:loadParcelOnly] ▶️ START');
     setLoadingProgress({ step: 'init', percent: 0 });
     setIsLoading(true);
     setError(null);
     setOverlayError(null);
-    
-    // Set terrain compute state to processing
+
+    try {
+      // Fetch parcel geometry only
+      console.log('[Viewer:loadParcelOnly] 📍 Fetching parcel geometry...');
+      setLoadingProgress({ step: 'fetching_parcel', percent: 30 });
+      
+      let parcelFeature = await fetchParcelGeometry(lat, lng);
+      
+      if (!parcelFeature) {
+        parcelFeature = generateSyntheticParcel(lat, lng, 80);
+        console.log('[Viewer:loadParcelOnly] ⚠️ Using synthetic parcel');
+      }
+      
+      setParcel(parcelFeature);
+      console.log('[Viewer:loadParcelOnly] ✅ Parcel loaded');
+      setLoadingProgress({ step: 'complete', percent: 100 });
+    } catch (err) {
+      console.error('[Viewer:loadParcelOnly] ❌ Error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load parcel');
+      setLoadingProgress({ step: 'error', percent: 100 });
+    } finally {
+      console.log('[Viewer:loadParcelOnly] 🏁 FINALLY - clearing isLoading');
+      setIsLoading(false);
+    }
+  }, [lat, lng, spatialParcelId]);
+
+  // Run terrain analysis (manual trigger or lazy load)
+  const runTerrainAnalysis = useCallback(async (parcelFeature: GeoJSON.Feature) => {
+    console.log('[Viewer:runTerrainAnalysis] ▶️ START');
+    setTerrainAnalysisLoading(true);
     setComputeStatus(prev => ({
       ...prev,
       terrain: { state: 'processing' }
     }));
 
-    try {
-      // Step 1: Get parcel geometry (10%)
-      console.log('[Viewer:loadData] 📍 Fetching parcel geometry... (10%)');
-      setLoadingProgress({ step: 'fetching_parcel', percent: 10 });
-      
-      let parcelFeature = await fetchParcelGeometry(lat, lng);
-      
-      console.log('[Viewer:loadData] 📍 Parcel geometry received (25%)');
-      setLoadingProgress({ step: 'parcel_received', percent: 25 });
-      
-      if (!parcelFeature) {
-        // Use synthetic parcel as fallback
-        parcelFeature = generateSyntheticParcel(lat, lng, 80);
-        console.log('[Viewer:loadData] ⚠️ Using synthetic parcel (30%)');
-        setLoadingProgress({ step: 'synthetic_parcel', percent: 30 });
-      }
-      
-      setParcel(parcelFeature);
-      console.log('[Viewer:loadData] ✅ Parcel set in state (35%)');
-      setLoadingProgress({ step: 'parcel_set', percent: 35 });
+    // Create abort controller with 15s timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.log('[Viewer:runTerrainAnalysis] ⏱️ Timeout after 15s');
+    }, 15000);
 
-      // Step 2: Fetch terrain analysis (36% - this is where it might hang)
-      console.log('[Viewer:loadData] 🏔️ Fetching terrain analysis... (36%)');
-      setLoadingProgress({ step: 'fetching_terrain', percent: 36 });
-      
+    try {
       const result = await fetchTerrainAnalysis(
         {
           parcel: parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
@@ -185,12 +206,11 @@ function ViewerContent() {
           prevailingWinds: ['NW', 'N'],
           bufferMeters: 800,
         },
-        undefined, // No progress callback
-        120000
+        undefined,
+        15000 // 15s timeout
       );
       
-      console.log('[Viewer:loadData] 🏔️ Terrain analysis response received (80%)');
-      setLoadingProgress({ step: 'terrain_received', percent: 80 });
+      clearTimeout(timeoutId);
 
       if (result.success && result.data) {
         setLayers(result.data.layers);
@@ -199,46 +219,44 @@ function ViewerContent() {
           ...prev,
           terrain: { state: 'computed', timestamp: new Date().toISOString() }
         }));
-        console.log('[Viewer:loadData] ✅ Terrain data loaded (100%):', {
+        console.log('[Viewer:runTerrainAnalysis] ✅ Terrain loaded:', {
           bedding: result.data.layers.beddingPolygons?.features?.length || 0,
           funnels: result.data.layers.funnels?.features?.length || 0,
           stands: result.data.layers.standPoints?.features?.length || 0,
         });
-        setLoadingProgress({ step: 'complete', percent: 100 });
       } else {
-        // Non-fatal: viewer still loads, just show banner
         setOverlayError(result.error || 'Could not load terrain overlays');
         setComputeStatus(prev => ({
           ...prev,
-          terrain: { state: 'error' }
+          terrain: { state: 'error', error_message: result.error }
         }));
-        console.warn('[Viewer:loadData] ⚠️ Overlay fetch failed (100% with error):', result.error);
-        setLoadingProgress({ step: 'error_terrain', percent: 100 });
+        console.warn('[Viewer:runTerrainAnalysis] ⚠️ Failed:', result.error);
       }
     } catch (err) {
-      console.error('[Viewer:loadData] ❌ Load error:', err);
-      setOverlayError(err instanceof Error ? err.message : 'Failed to load overlays');
+      clearTimeout(timeoutId);
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      const errorMsg = isTimeout ? 'Terrain analysis timed out' : (err instanceof Error ? err.message : 'Unknown error');
+      
+      console.error('[Viewer:runTerrainAnalysis] ❌ Error:', errorMsg);
+      setOverlayError(errorMsg);
       setComputeStatus(prev => ({
         ...prev,
-        terrain: { state: 'error' }
+        terrain: { state: 'error', error_message: errorMsg }
       }));
-      setLoadingProgress({ step: 'error_exception', percent: 100 });
     } finally {
-      console.log('[Viewer:loadData] 🏁 FINALLY - clearing isLoading');
-      setIsLoading(false);
+      setTerrainAnalysisLoading(false);
     }
-  }, [lat, lng]);
+  }, []);
 
-  // Load Regrid data only when NOT loading from spatial parcel
+  // Load Regrid parcel only when NOT loading from spatial parcel
+  // Terrain analysis is NOT auto-triggered - user can manually request it
   useEffect(() => {
-    console.log('[Viewer:useEffect:loadData] Triggered - spatialParcelId:', spatialParcelId);
+    console.log('[Viewer:useEffect:loadParcel] spatialParcelId:', spatialParcelId);
     if (!spatialParcelId) {
-      console.log('[Viewer:useEffect:loadData] ▶️ No spatialParcelId, calling loadData()');
-      loadData();
-    } else {
-      console.log('[Viewer:useEffect:loadData] ⏭️ spatialParcelId present, skipping loadData()');
+      console.log('[Viewer:useEffect:loadParcel] ▶️ Loading Regrid parcel');
+      loadParcelOnly();
     }
-  }, [loadData, spatialParcelId]);
+  }, [loadParcelOnly, spatialParcelId]);
 
   // Load spatial parcel from Supabase (parcel only, no auth required)
   const loadSpatialParcel = useCallback(async () => {
@@ -594,25 +612,19 @@ function ViewerContent() {
         </div>
       )}
 
-      {/* Loading Overlay with Progress */}
+      {/* Loading Overlay - Simplified for fast parcel load */}
       {isLoading && (
         <div className="absolute inset-0 bg-slate-900/80 z-30 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-4 border-amber-500 border-t-transparent mx-auto mb-4" />
-            <p className="text-white mb-2">Loading terrain data...</p>
-            <p className="text-slate-400 text-sm">Fetching parcel and analysis layers</p>
-            {/* Progress indicator */}
-            <div className="mt-4 w-48 mx-auto">
-              <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-amber-500 transition-all duration-300" 
-                  style={{ width: `${loadingProgress.percent}%` }}
-                />
-              </div>
-              <p className="text-amber-400/80 text-xs font-mono mt-2">
-                {loadingProgress.percent}% — {loadingProgress.step.replace(/_/g, ' ')}
-              </p>
-            </div>
+            <p className="text-white mb-2">
+              {spatialParcelId ? 'Loading parcel...' : 'Loading map...'}
+            </p>
+            <p className="text-slate-400 text-sm">
+              {spatialParcelId 
+                ? 'Fetching parcel from database' 
+                : 'Fetching parcel boundary'}
+            </p>
           </div>
         </div>
       )}
@@ -752,6 +764,35 @@ function ViewerContent() {
               )}
             </div>
 
+            {/* Run Terrain Analysis Button (manual trigger) */}
+            {parcel && !layers && !terrainAnalysisLoading && computeStatus.terrain.state !== 'computed' && (
+              <div className="mt-3 pt-3 border-t border-slate-700">
+                <button
+                  onClick={() => {
+                    setTerrainAnalysisRequested(true);
+                    runTerrainAnalysis(parcel);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-md transition-colors"
+                >
+                  <Scan className="w-4 h-4" />
+                  Run Terrain Analysis
+                </button>
+                <p className="text-[10px] text-slate-500 mt-1 text-center">
+                  Optional - adds bedding, funnels, stands
+                </p>
+              </div>
+            )}
+            
+            {/* Terrain Analysis Loading */}
+            {terrainAnalysisLoading && (
+              <div className="mt-3 pt-3 border-t border-slate-700">
+                <div className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-700 text-slate-300 text-sm rounded-md">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-emerald-500 border-t-transparent" />
+                  Analyzing terrain...
+                </div>
+              </div>
+            )}
+
             {/* Provenance */}
             {provenance && (
               <div className="mt-4 pt-3 border-t border-slate-700">
@@ -781,11 +822,18 @@ function ViewerContent() {
             </div>
             
             <div className="space-y-3">
-              {/* Terrain Analysis Status */}
-              <ComputeIndicator
-                label="Terrain Analysis"
-                status={computeStatus.terrain}
-              />
+              {/* Terrain Analysis Status - show only if requested or computed */}
+              {(terrainAnalysisRequested || computeStatus.terrain.state !== 'idle') ? (
+                <ComputeIndicator
+                  label="Terrain Analysis"
+                  status={computeStatus.terrain}
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-slate-500 rounded-full" />
+                  <span className="text-slate-400 text-xs">Terrain: Not requested</span>
+                </div>
+              )}
               
               {/* Corridor Analysis Status - always show when active or toggled */}
               {(computeStatus.corridors.state !== 'idle' || layerVisibility.corridors) && (
@@ -793,6 +841,26 @@ function ViewerContent() {
                   label="Travel Corridors"
                   status={computeStatus.corridors}
                 />
+              )}
+              
+              {/* Spatial Corridors Status */}
+              {spatialParcelId && (
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${
+                    spatialCorridorsLoading ? 'bg-cyan-400 animate-pulse' :
+                    spatialCorridors ? 'bg-cyan-500' :
+                    spatialCorridorsAuthRequired ? 'bg-amber-500' :
+                    'bg-slate-500'
+                  }`} />
+                  <span className="text-slate-300 text-xs">
+                    DB Corridors: {
+                      spatialCorridorsLoading ? 'Loading...' :
+                      spatialCorridors ? `${spatialCorridors.count} loaded` :
+                      spatialCorridorsAuthRequired ? 'Auth required' :
+                      'None'
+                    }
+                  </span>
+                </div>
               )}
             </div>
           </div>
