@@ -52,7 +52,30 @@ export async function fetchTerrainAnalysis(
   console.log('[TerrainClient] Season:', params.seasonProfile, 'Wind:', params.prevailingWinds);
   console.log('[TerrainClient] Parcel type:', params.parcel.geometry.type);
   
-  onProgress?.('Calling terrain API...', 20);
+  onProgress?.('Connecting to terrain server...', 15);
+
+  // Progress ticker for long-running requests (Modal cold starts)
+  let progressTick = 15;
+  const progressMessages = [
+    { at: 5000, msg: 'Initializing terrain engine...', prog: 20 },
+    { at: 15000, msg: 'Processing elevation data...', prog: 30 },
+    { at: 30000, msg: 'Computing deer corridors...', prog: 40 },
+    { at: 45000, msg: 'Analyzing terrain features...', prog: 50 },
+    { at: 60000, msg: 'Still processing (server warming up)...', prog: 55 },
+    { at: 75000, msg: 'Almost there...', prog: 60 },
+    { at: 90000, msg: 'Finalizing analysis...', prog: 65 },
+    { at: 105000, msg: 'Server is responding slowly...', prog: 68 },
+  ];
+  
+  const progressInterval = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const nextMsg = progressMessages.find(p => p.at <= elapsed && p.prog > progressTick);
+    if (nextMsg) {
+      progressTick = nextMsg.prog;
+      onProgress?.(nextMsg.msg, nextMsg.prog);
+      console.log(`[TerrainClient] Progress: ${nextMsg.msg} (${elapsed}ms)`);
+    }
+  }, 2000);
 
   try {
     // Create abort controller for timeout
@@ -69,13 +92,14 @@ export async function fetchTerrainAnalysis(
       signal: controller.signal,
     });
 
+    clearInterval(progressInterval);
     clearTimeout(timeoutId);
     const fetchDuration = Date.now() - startTime;
     
     console.log('[TerrainClient] Response received in', fetchDuration, 'ms');
     console.log('[TerrainClient] Status:', response.status, response.statusText);
     
-    onProgress?.(`Response: ${response.status}`, 50);
+    onProgress?.(`Processing response...`, 70);
 
     if (!response.ok) {
       let errorMsg = `HTTP ${response.status}`;
@@ -125,18 +149,21 @@ export async function fetchTerrainAnalysis(
     };
 
   } catch (err) {
+    clearInterval(progressInterval);
     const duration = Date.now() - startTime;
     
     if (err instanceof Error && err.name === 'AbortError') {
       console.error('[TerrainClient] Request aborted (timeout)');
+      onProgress?.('Request timed out - server may be cold-starting', 0);
       return {
         success: false,
-        error: `Request timed out after ${Math.round(timeoutMs / 1000)}s. The server may be cold-starting. Try again.`,
+        error: `Request timed out after ${Math.round(timeoutMs / 1000)}s. The terrain server may be cold-starting. Please try again in 30 seconds.`,
         durationMs: duration,
       };
     }
     
     console.error('[TerrainClient] Fetch error:', err);
+    onProgress?.('Connection error', 0);
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Network error',

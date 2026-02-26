@@ -5,10 +5,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
 
 const MAX_AOI_ACRES = 5000;
-const REQUEST_TIMEOUT_MS = 60000; // 60 seconds
+const REQUEST_TIMEOUT_MS = 120_000; // 120 seconds for Modal cold starts
 
 // HARDCODED Modal v3 URL - do NOT rely on env vars for this critical path
 const GEOPROCESSOR_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/v1/terrain-analysis';
+
+// Warm-up check URL (lightweight health check)
+const HEALTH_CHECK_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/health';
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
