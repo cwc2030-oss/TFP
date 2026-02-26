@@ -169,22 +169,26 @@ export default function LeafletMap({
       console.log('[LeafletMap] Map created successfully');
 
       // Check if Leaflet CSS is loaded
-      const leafletCssLoaded = !!document.querySelector('link[href*="leaflet"]') || 
-                               !!document.querySelector('style[data-leaflet]') ||
-                               getComputedStyle(document.documentElement).getPropertyValue('--leaflet-loaded') !== '';
-      
-      // Also check for .leaflet-container styles
-      const testEl = document.createElement('div');
-      testEl.className = 'leaflet-tile';
-      document.body.appendChild(testEl);
-      const hasLeafletStyles = getComputedStyle(testEl).position !== 'static' || 
-                               document.styleSheets.length > 0;
-      document.body.removeChild(testEl);
-      
-      console.log('[LeafletMap] Leaflet CSS check:', { leafletCssLoaded, hasLeafletStyles, styleSheets: document.styleSheets.length });
+      const hasLeafletStyles = document.styleSheets.length > 0;
+      console.log('[LeafletMap] Leaflet CSS check:', { styleSheets: document.styleSheets.length });
 
-      // OpenStreetMap basemap - hardcoded URL for reliability
-      const basemapUrl = "https://" + "{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+      // Use MapTiler Satellite Hybrid (imagery + labels) if key available, else OSM
+      const mtKey = maptilerKey;
+      let basemapUrl: string;
+      let attribution: string;
+      
+      if (mtKey) {
+        // MapTiler Satellite Hybrid - satellite imagery with road/place labels
+        basemapUrl = `https://api.maptiler.com/maps/hybrid/{z}/{x}/{y}.jpg?key=${mtKey}`;
+        attribution = '© MapTiler © OpenStreetMap contributors';
+        console.log('[LeafletMap] Using MapTiler Hybrid basemap');
+      } else {
+        // Fallback to Esri World Imagery (free, no API key needed)
+        basemapUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+        attribution = '© Esri, Maxar, Earthstar Geographics';
+        console.log('[LeafletMap] Using Esri World Imagery fallback (no MapTiler key)');
+      }
+      
       console.log('[LeafletMap] Basemap URL:', basemapUrl);
       
       // Update debug state with basemap URL
@@ -194,11 +198,19 @@ export default function LeafletMap({
         leafletCssLoaded: hasLeafletStyles,
       }));
       
-      const tileLayer = L.tileLayer(basemapUrl, { 
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19,
-        subdomains: ['a', 'b', 'c'],
-      });
+      // Configure tile layer options based on provider
+      const tileOptions: L.TileLayerOptions = {
+        attribution,
+        maxZoom: 20,
+      };
+      
+      // MapTiler uses 512px tiles with zoomOffset
+      if (mtKey) {
+        tileOptions.tileSize = 512;
+        tileOptions.zoomOffset = -1;
+      }
+      
+      const tileLayer = L.tileLayer(basemapUrl, tileOptions);
       
       tileLayer.on('loading', () => {
         console.log('[LeafletMap] Tile layer: loading started');
