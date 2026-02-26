@@ -83,6 +83,17 @@ interface LeafletMapProps {
   onParcelClick?: (parcelInfo: ActiveParcelInfo) => void;
 }
 
+// Debug state interface
+interface TileDebugState {
+  basemapUrl: string;
+  loadingStartCount: number;
+  tileLoadCount: number;
+  tileErrorCount: number;
+  mapSize: { x: number; y: number } | null;
+  errorUrls: string[];
+  leafletCssLoaded: boolean;
+}
+
 export default function LeafletMap({
   center,
   parcel,
@@ -97,6 +108,18 @@ export default function LeafletMap({
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  
+  // Debug state for tile loading
+  const [tileDebug, setTileDebug] = useState<TileDebugState>({
+    basemapUrl: '',
+    loadingStartCount: 0,
+    tileLoadCount: 0,
+    tileErrorCount: 0,
+    mapSize: null,
+    errorUrls: [],
+    leafletCssLoaded: false,
+  });
+  
   const layerGroupsRef = useRef<{
     parcel: L.LayerGroup | null;
     bedding: L.LayerGroup | null;
@@ -145,9 +168,31 @@ export default function LeafletMap({
       
       console.log('[LeafletMap] Map created successfully');
 
+      // Check if Leaflet CSS is loaded
+      const leafletCssLoaded = !!document.querySelector('link[href*="leaflet"]') || 
+                               !!document.querySelector('style[data-leaflet]') ||
+                               getComputedStyle(document.documentElement).getPropertyValue('--leaflet-loaded') !== '';
+      
+      // Also check for .leaflet-container styles
+      const testEl = document.createElement('div');
+      testEl.className = 'leaflet-tile';
+      document.body.appendChild(testEl);
+      const hasLeafletStyles = getComputedStyle(testEl).position !== 'static' || 
+                               document.styleSheets.length > 0;
+      document.body.removeChild(testEl);
+      
+      console.log('[LeafletMap] Leaflet CSS check:', { leafletCssLoaded, hasLeafletStyles, styleSheets: document.styleSheets.length });
+
       // OpenStreetMap basemap - hardcoded URL for reliability
       const basemapUrl = "https://" + "{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
       console.log('[LeafletMap] Basemap URL:', basemapUrl);
+      
+      // Update debug state with basemap URL
+      setTileDebug(prev => ({ 
+        ...prev, 
+        basemapUrl,
+        leafletCssLoaded: hasLeafletStyles,
+      }));
       
       const tileLayer = L.tileLayer(basemapUrl, { 
         attribution: '© OpenStreetMap contributors',
@@ -157,14 +202,26 @@ export default function LeafletMap({
       
       tileLayer.on('loading', () => {
         console.log('[LeafletMap] Tile layer: loading started');
+        setTileDebug(prev => ({ ...prev, loadingStartCount: prev.loadingStartCount + 1 }));
       });
       
       tileLayer.on('load', () => {
         console.log('[LeafletMap] Tile layer: all tiles loaded');
+        // Update map size when tiles are loaded
+        if (map) {
+          const size = map.getSize();
+          setTileDebug(prev => ({ ...prev, mapSize: { x: size.x, y: size.y } }));
+        }
       });
       
       tileLayer.on('tileerror', (e: any) => {
-        console.error('[LeafletMap] Tile error:', e.tile?.src, e.error);
+        const errorUrl = e.tile?.src || 'unknown';
+        console.error('[LeafletMap] Tile error:', errorUrl, e.error);
+        setTileDebug(prev => ({ 
+          ...prev, 
+          tileErrorCount: prev.tileErrorCount + 1,
+          errorUrls: prev.errorUrls.length < 3 ? [...prev.errorUrls, errorUrl] : prev.errorUrls,
+        }));
       });
       
       tileLayer.on('tileload', (e: any) => {
@@ -174,10 +231,16 @@ export default function LeafletMap({
         if (window.__leafletTileCount <= 3) {
           console.log('[LeafletMap] Tile loaded:', e.tile?.src?.substring(0, 80));
         }
+        setTileDebug(prev => ({ ...prev, tileLoadCount: prev.tileLoadCount + 1 }));
       });
       
       tileLayer.addTo(map);
       console.log('[LeafletMap] Tile layer added to map');
+      
+      // Get initial map size
+      const initialSize = map.getSize();
+      setTileDebug(prev => ({ ...prev, mapSize: { x: initialSize.x, y: initialSize.y } }));
+      console.log('[LeafletMap] Initial map size:', initialSize);
 
       // Initialize layer groups (order matters for z-index - later = on top)
       layerGroupsRef.current = {
@@ -658,11 +721,108 @@ export default function LeafletMap({
     }
   }, [spatialCorridors, layerVisibility.spatialCorridors]);
 
+  // Determine debug status
+  const debugStatus = tileDebug.tileLoadCount > 0 
+    ? 'tiles-loading' 
+    : tileDebug.tileErrorCount > 0 
+      ? 'tiles-error' 
+      : 'no-tiles';
+
   return (
-    <div
-      ref={mapContainerRef}
-      className="w-full h-full"
-      style={{ minHeight: '400px' }}
-    />
+    <div className="relative w-full h-full" style={{ minHeight: '400px' }}>
+      {/* Map Container */}
+      <div
+        ref={mapContainerRef}
+        className="w-full h-full"
+        style={{ minHeight: '400px' }}
+      />
+      
+      {/* Debug Panel - Top Left */}
+      <div className="absolute top-2 left-2 z-[2000] bg-black/90 text-white text-[10px] font-mono p-2 rounded-md border border-slate-600 max-w-[320px] shadow-lg">
+        <div className="flex items-center gap-2 mb-1.5 border-b border-slate-600 pb-1">
+          <div className={`w-2 h-2 rounded-full ${
+            debugStatus === 'tiles-loading' ? 'bg-green-500' :
+            debugStatus === 'tiles-error' ? 'bg-red-500' :
+            'bg-yellow-500'
+          }`} />
+          <span className="font-bold text-amber-400">TILE DEBUG</span>
+        </div>
+        
+        <div className="space-y-0.5">
+          <div className="flex justify-between">
+            <span className="text-slate-400">basemapUrl:</span>
+            <span className="text-cyan-300 truncate max-w-[180px]" title={tileDebug.basemapUrl}>
+              {tileDebug.basemapUrl || '(not set)'}
+            </span>
+          </div>
+          
+          <div className="flex justify-between">
+            <span className="text-slate-400">loadingStart:</span>
+            <span className={tileDebug.loadingStartCount > 0 ? 'text-green-400' : 'text-red-400'}>
+              {tileDebug.loadingStartCount}
+            </span>
+          </div>
+          
+          <div className="flex justify-between">
+            <span className="text-slate-400">tileLoadCount:</span>
+            <span className={tileDebug.tileLoadCount > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+              {tileDebug.tileLoadCount}
+            </span>
+          </div>
+          
+          <div className="flex justify-between">
+            <span className="text-slate-400">tileErrorCount:</span>
+            <span className={tileDebug.tileErrorCount > 0 ? 'text-red-400 font-bold' : 'text-green-400'}>
+              {tileDebug.tileErrorCount}
+            </span>
+          </div>
+          
+          <div className="flex justify-between">
+            <span className="text-slate-400">mapSize:</span>
+            <span className={tileDebug.mapSize && tileDebug.mapSize.x > 0 ? 'text-green-400' : 'text-red-400'}>
+              {tileDebug.mapSize ? `${tileDebug.mapSize.x}×${tileDebug.mapSize.y}` : '(null)'}
+            </span>
+          </div>
+          
+          <div className="flex justify-between">
+            <span className="text-slate-400">leafletCSS:</span>
+            <span className={tileDebug.leafletCssLoaded ? 'text-green-400' : 'text-red-400'}>
+              {tileDebug.leafletCssLoaded ? 'YES' : 'NO'}
+            </span>
+          </div>
+        </div>
+        
+        {/* Error URLs */}
+        {tileDebug.errorUrls.length > 0 && (
+          <div className="mt-1.5 pt-1.5 border-t border-slate-600">
+            <div className="text-red-400 font-bold mb-0.5">Failed URLs:</div>
+            {tileDebug.errorUrls.map((url, i) => (
+              <div key={i} className="text-red-300 truncate text-[9px]" title={url}>
+                {url.substring(0, 60)}...
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Diagnosis */}
+        <div className="mt-1.5 pt-1.5 border-t border-slate-600 text-[9px]">
+          {tileDebug.tileLoadCount > 0 && (
+            <div className="text-green-300">✓ Tiles loading - check CSS/z-index/opacity</div>
+          )}
+          {tileDebug.tileErrorCount > 0 && tileDebug.tileLoadCount === 0 && (
+            <div className="text-red-300">✗ Tile errors - check URLs above</div>
+          )}
+          {tileDebug.tileLoadCount === 0 && tileDebug.tileErrorCount === 0 && tileDebug.loadingStartCount === 0 && (
+            <div className="text-yellow-300">⚠ No events fired - TileLayer not mounted?</div>
+          )}
+          {!tileDebug.leafletCssLoaded && (
+            <div className="text-red-300">✗ Leaflet CSS missing!</div>
+          )}
+          {tileDebug.mapSize && (tileDebug.mapSize.x === 0 || tileDebug.mapSize.y === 0) && (
+            <div className="text-red-300">✗ Map has zero size!</div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
