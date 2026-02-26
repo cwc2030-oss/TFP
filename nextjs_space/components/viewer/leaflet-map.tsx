@@ -11,6 +11,13 @@ import 'leaflet/dist/leaflet.css';
 import type { TerrainLayers, BeddingProperties, FunnelProperties, StandPointProperties } from '@/types/terrain';
 import type { TerrainAnalysisResponse } from '@/types/terrain';
 
+// Extend window for tile count debugging
+declare global {
+  interface Window {
+    __leafletTileCount?: number;
+  }
+}
+
 // Fix Leaflet default icon issue
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -113,9 +120,21 @@ export default function LeafletMap({
   
   // Initialize map
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    console.log('[LeafletMap] useEffect triggered - container:', !!mapContainerRef.current, 'existing map:', !!mapRef.current);
+    
+    if (!mapContainerRef.current) {
+      console.warn('[LeafletMap] No container ref - cannot init map');
+      return;
+    }
+    
+    if (mapRef.current) {
+      console.log('[LeafletMap] Map already exists, skipping init');
+      return;
+    }
 
     try {
+      console.log('[LeafletMap] Creating map with center:', center);
+      
       // Create map
       const map = L.map(mapContainerRef.current, {
         center: center,
@@ -123,10 +142,42 @@ export default function LeafletMap({
         zoomControl: true,
         attributionControl: true,
       });
+      
+      console.log('[LeafletMap] Map created successfully');
 
-      // OpenStreetMap basemap (known-good fallback)
-      const osmUrl = ['https:/', '/', '{s}.tile.openstreetmap.org', '/{z}/{x}/{y}.png'].join('');
-      L.tileLayer(osmUrl, { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
+      // OpenStreetMap basemap - hardcoded URL for reliability
+      const basemapUrl = "https://" + "{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+      console.log('[LeafletMap] Basemap URL:', basemapUrl);
+      
+      const tileLayer = L.tileLayer(basemapUrl, { 
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19,
+        subdomains: ['a', 'b', 'c'],
+      });
+      
+      tileLayer.on('loading', () => {
+        console.log('[LeafletMap] Tile layer: loading started');
+      });
+      
+      tileLayer.on('load', () => {
+        console.log('[LeafletMap] Tile layer: all tiles loaded');
+      });
+      
+      tileLayer.on('tileerror', (e: any) => {
+        console.error('[LeafletMap] Tile error:', e.tile?.src, e.error);
+      });
+      
+      tileLayer.on('tileload', (e: any) => {
+        // Log first few tile loads for debugging
+        if (!window.__leafletTileCount) window.__leafletTileCount = 0;
+        window.__leafletTileCount++;
+        if (window.__leafletTileCount <= 3) {
+          console.log('[LeafletMap] Tile loaded:', e.tile?.src?.substring(0, 80));
+        }
+      });
+      
+      tileLayer.addTo(map);
+      console.log('[LeafletMap] Tile layer added to map');
 
       // Initialize layer groups (order matters for z-index - later = on top)
       layerGroupsRef.current = {
@@ -138,19 +189,32 @@ export default function LeafletMap({
         spatialCorridors: L.layerGroup().addTo(map), // Above corridors
         stands: L.layerGroup().addTo(map), // Stands on top
       };
+      
+      console.log('[LeafletMap] Layer groups initialized');
 
       mapRef.current = map;
+      
+      // Force invalidate size after a short delay to ensure container is properly sized
+      setTimeout(() => {
+        if (mapRef.current) {
+          console.log('[LeafletMap] Invalidating map size');
+          mapRef.current.invalidateSize();
+        }
+      }, 100);
+      
       onMapReady?.();
+      console.log('[LeafletMap] Map ready callback fired');
 
       // Cleanup
       return () => {
+        console.log('[LeafletMap] Cleanup - removing map');
         map.remove();
         mapRef.current = null;
       };
     } catch (err) {
       console.error('[LeafletMap] Init error:', err);
     }
-  }, [maptilerKey, onMapReady]); // Removed center from deps - handled separately
+  }, [onMapReady]); // Minimal deps - center handled separately
 
   // Re-center map when center prop changes (for spatial parcel loading)
   useEffect(() => {
