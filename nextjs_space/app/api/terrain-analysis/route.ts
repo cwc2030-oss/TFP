@@ -46,24 +46,46 @@ export async function POST(request: NextRequest) {
 
     // Call Python geoprocessor - NO FALLBACK
     console.log('[Terrain] Calling geoprocessor:', GEOPROCESSOR_URL);
+    console.log('[Terrain] Parcel acres:', Math.round(estimatedAcres), 'timeout:', REQUEST_TIMEOUT_MS);
     
-    const response = await fetch(GEOPROCESSOR_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parcel,
-        bufferMeters: bufferMeters || 800,
-        seasonProfile: seasonProfile || 'rut',
-        prevailingWinds: prevailingWinds || ['NW'],
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    const fetchStart = Date.now();
+    let response: Response;
+    
+    try {
+      response = await fetch(GEOPROCESSOR_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcel,
+          bufferMeters: bufferMeters || 800,
+          seasonProfile: seasonProfile || 'rut',
+          prevailingWinds: prevailingWinds || ['NW'],
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      console.log('[Terrain] Geoprocessor responded in', Date.now() - fetchStart, 'ms, status:', response.status);
+    } catch (fetchErr) {
+      const elapsed = Date.now() - fetchStart;
+      console.error('[Terrain] Fetch failed after', elapsed, 'ms:', fetchErr);
+      
+      if (fetchErr instanceof Error && fetchErr.name === 'TimeoutError') {
+        return NextResponse.json(
+          { code: 'TIMEOUT', message: `Terrain server timeout after ${Math.round(elapsed/1000)}s. Please try again.` },
+          { status: 504 }
+        );
+      }
+      
+      return NextResponse.json(
+        { code: 'NETWORK_ERROR', message: 'Failed to reach terrain server' },
+        { status: 503 }
+      );
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Terrain] Geoprocessor error:', response.status, errorText);
       return NextResponse.json(
-        { code: 'SERVICE_ERROR', message: 'Terrain analysis service error' },
+        { code: 'SERVICE_ERROR', message: `Terrain service error: ${response.status}` },
         { status: 502 }
       );
     }

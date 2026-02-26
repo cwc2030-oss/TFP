@@ -57,25 +57,27 @@ export async function fetchTerrainAnalysis(
   // Progress ticker for long-running requests (Modal cold starts)
   let progressTick = 15;
   const progressMessages = [
-    { at: 5000, msg: 'Initializing terrain engine...', prog: 20 },
-    { at: 15000, msg: 'Processing elevation data...', prog: 30 },
-    { at: 30000, msg: 'Computing deer corridors...', prog: 40 },
-    { at: 45000, msg: 'Analyzing terrain features...', prog: 50 },
-    { at: 60000, msg: 'Still processing (server warming up)...', prog: 55 },
-    { at: 75000, msg: 'Almost there...', prog: 60 },
-    { at: 90000, msg: 'Finalizing analysis...', prog: 65 },
-    { at: 105000, msg: 'Server is responding slowly...', prog: 68 },
+    { at: 3000, msg: 'Initializing terrain engine...', prog: 20 },
+    { at: 8000, msg: 'Processing elevation data...', prog: 30 },
+    { at: 15000, msg: 'Computing deer corridors...', prog: 40 },
+    { at: 25000, msg: 'Analyzing terrain features...', prog: 50 },
+    { at: 40000, msg: 'Still processing (server warming up)...', prog: 55 },
+    { at: 55000, msg: 'Almost there...', prog: 60 },
+    { at: 70000, msg: 'Finalizing analysis...', prog: 65 },
+    { at: 90000, msg: 'Server is responding slowly...', prog: 68 },
   ];
   
+  console.log('[TerrainClient] Starting progress ticker');
   const progressInterval = setInterval(() => {
     const elapsed = Date.now() - startTime;
+    console.log(`[TerrainClient] Tick: ${elapsed}ms, currentProg: ${progressTick}`);
     const nextMsg = progressMessages.find(p => p.at <= elapsed && p.prog > progressTick);
     if (nextMsg) {
       progressTick = nextMsg.prog;
+      console.log(`[TerrainClient] Progress update: ${nextMsg.msg} (${nextMsg.prog}%)`);
       onProgress?.(nextMsg.msg, nextMsg.prog);
-      console.log(`[TerrainClient] Progress: ${nextMsg.msg} (${elapsed}ms)`);
     }
-  }, 2000);
+  }, 1500); // Check every 1.5 seconds for smoother updates
 
   try {
     // Create abort controller for timeout
