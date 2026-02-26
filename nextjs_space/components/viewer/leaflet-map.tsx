@@ -497,7 +497,9 @@ export default function LeafletMap({
     }
   }, [corridorData, layerVisibility.corridors]);
 
-  // Update spatial corridors layer (from Supabase - with type, score, meta.note)
+  // Update spatial corridors layer (from Supabase - DUAL-LAYER: visual + hitbox)
+  // The hitbox layer has wide, invisible lines for easy clicking
+  // The visual layer shows styled corridors that highlight on hover
   useEffect(() => {
     const group = layerGroupsRef.current.spatialCorridors;
     if (!group) return;
@@ -512,58 +514,82 @@ export default function LeafletMap({
           const scorePercent = Math.round(score * 100);
           const corridorType = props.type || 'unknown';
           const metaNote = props.meta?.note || '';
+          const corridorId = props.id || 'N/A';
           
           // Color based on score: higher = more cyan/teal
-          const color = score > 0.7 
+          const baseColor = score > 0.7 
             ? '#06b6d4' // cyan-500 for high score
             : score > 0.4 
               ? '#14b8a6' // teal-500 for medium
               : '#0d9488'; // teal-600 for lower
           
-          // Width based on score
-          const weight = Math.max(3, score * 6);
-
-          L.geoJSON(feature as GeoJSON.Feature, {
+          // Base visual width (thin)
+          const baseWeight = Math.max(3, score * 5);
+          
+          // --- VISUAL LAYER (thin, styled, non-interactive) ---
+          const visualLayer = L.geoJSON(feature as GeoJSON.Feature, {
             style: {
-              color,
-              weight,
-              opacity: 0.9,
+              color: baseColor,
+              weight: baseWeight,
+              opacity: 0.85,
               lineCap: 'round',
               lineJoin: 'round',
             },
+            interactive: false, // Visual layer is NOT interactive
+          });
+          visualLayer.addTo(group);
+          
+          // --- HITBOX LAYER (wide, invisible, interactive) ---
+          const hitboxLayer = L.geoJSON(feature as GeoJSON.Feature, {
+            style: {
+              color: baseColor,
+              weight: 24, // Wide hitbox for easy clicking
+              opacity: 0, // Invisible
+              lineCap: 'round',
+              lineJoin: 'round',
+            },
+            interactive: true,
             onEachFeature: (f, layer) => {
-              // Click popup with type, score, meta.note
+              // CLICK: Show popup with corridor details
               layer.bindPopup(`
-                <div class="font-sans min-w-[200px]">
-                  <h3 class="font-bold text-cyan-600 mb-1">🦌 Spatial Corridor</h3>
-                  <p><strong>Type:</strong> ${corridorType.replace(/_/g, ' ')}</p>
-                  <p><strong>Score:</strong> <span class="font-bold">${scorePercent}%</span></p>
-                  ${metaNote ? `<p><strong>Note:</strong> ${metaNote}</p>` : ''}
+                <div class="font-sans min-w-[220px]">
+                  <h3 class="font-bold text-cyan-600 mb-2">🦌 Travel Corridor</h3>
+                  <div class="space-y-1">
+                    <p><strong>Type:</strong> <span class="capitalize">${corridorType.replace(/_/g, ' ')}</span></p>
+                    <p><strong>Score:</strong> <span class="font-bold text-cyan-700">${scorePercent}%</span></p>
+                    ${metaNote ? `<p><strong>Note:</strong> <em class="text-gray-600">${metaNote}</em></p>` : ''}
+                  </div>
                   <hr class="my-2 border-gray-300" />
-                  <p class="text-xs text-gray-500">ID: ${props.id || 'N/A'}</p>
-                  <p class="text-xs text-gray-500">Parcel: ${props.parcel_id?.slice(0, 8) || 'N/A'}...</p>
-                  <p class="text-xs text-gray-400">Source: Supabase PostGIS</p>
-                </div>
-              `);
-
-              // Hover tooltip with type + score
-              layer.bindTooltip(`
-                <div class="font-sans text-sm">
-                  <strong>${corridorType.replace(/_/g, ' ')}</strong><br/>
-                  Score: ${scorePercent}%
-                  ${metaNote ? `<br/><em>${metaNote}</em>` : ''}
+                  <p class="text-xs text-gray-500">ID: <code>${corridorId}</code></p>
+                  <p class="text-xs text-gray-400 mt-1">Source: Supabase PostGIS</p>
                 </div>
               `, {
-                sticky: true,
-                direction: 'top',
-                offset: [0, -5],
-                className: 'corridor-tooltip',
+                className: 'corridor-popup',
+                maxWidth: 280,
+              });
+              
+              // HOVER: Highlight the visual layer
+              layer.on('mouseover', () => {
+                visualLayer.setStyle({
+                  weight: baseWeight + 4, // Thicker
+                  opacity: 1, // Full opacity
+                  color: '#22d3ee', // Brighter cyan-400
+                });
+              });
+              
+              layer.on('mouseout', () => {
+                visualLayer.setStyle({
+                  weight: baseWeight,
+                  opacity: 0.85,
+                  color: baseColor,
+                });
               });
             },
-          }).addTo(group);
+          });
+          hitboxLayer.addTo(group);
         });
         
-        console.log('[LeafletMap] Rendered', spatialCorridors.corridors.features.length, 'spatial corridors');
+        console.log('[LeafletMap] Rendered', spatialCorridors.corridors.features.length, 'spatial corridors (dual-layer)');
       } catch (err) {
         console.error('[LeafletMap] Spatial corridors render error:', err);
       }

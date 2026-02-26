@@ -432,7 +432,7 @@ function ViewerContent() {
     }
   }, [layerVisibility.corridors, corridorData, corridorLoading, loadCorridors]);
 
-  // Handle parcel click - select parcel for analysis
+  // Handle parcel click - select parcel for analysis AND auto-load corridors if authenticated
   const handleParcelClick = useCallback((parcelInfo: ActiveParcelInfo) => {
     console.log('[Viewer] Parcel selected:', parcelInfo.id);
     setActiveParcel(parcelInfo);
@@ -450,7 +450,16 @@ function ViewerContent() {
         timestamp: undefined,
       }
     }));
-  }, []);
+    
+    // Auto-load spatial corridors if authenticated and spatialParcelId is present
+    // This triggers loadSpatialCorridors which checks isAuthenticated
+    if (spatialParcelId && isAuthenticated) {
+      setSpatialCorridorsLoading(true);
+      // The loadSpatialCorridors is already called via useEffect when parcel is selected
+      // But we trigger it explicitly here for immediate feedback
+      loadSpatialCorridors();
+    }
+  }, [spatialParcelId, isAuthenticated, loadSpatialCorridors]);
 
   // Deselect parcel
   const handleDeselectParcel = useCallback(() => {
@@ -738,7 +747,7 @@ function ViewerContent() {
 
         {/* Build Stamp - Fixed Bottom Right */}
         <div className="fixed bottom-2 right-2 z-[2000] text-[10px] font-mono text-slate-500/70 bg-slate-900/60 backdrop-blur px-2 py-1 rounded select-text">
-          Build: v3.3-timeout | Corridors UI: v3.2 | Deployed: 2026-02-25T14:00
+          Build: v3.4-hitbox | Corridors UI: v5.0 | 2026-02-26
         </div>
 
         {/* Active Parcel Panel - Bottom Center */}
@@ -789,6 +798,34 @@ function ViewerContent() {
                   </div>
                 )}
               </div>
+              
+              {/* Spatial Corridors Status (when spatialParcelId present) */}
+              {spatialParcelId && (
+                <div className="mb-3 px-2 py-1.5 bg-slate-700/50 rounded-md flex items-center justify-between">
+                  <span className="text-slate-300 text-xs flex items-center gap-1.5">
+                    <Route className="w-3.5 h-3.5 text-cyan-400" />
+                    DB Corridors
+                  </span>
+                  {spatialCorridorsLoading ? (
+                    <span className="text-cyan-400 text-xs flex items-center gap-1.5">
+                      <div className="w-3 h-3 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+                      Loading...
+                    </span>
+                  ) : spatialCorridorsAuthRequired ? (
+                    <span className="text-amber-400 text-xs flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      Sign in required
+                    </span>
+                  ) : spatialCorridors ? (
+                    <span className="text-emerald-400 text-xs flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      {spatialCorridors.count} found
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 text-xs">None</span>
+                  )}
+                </div>
+              )}
 
               {/* Analysis Actions */}
               <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
