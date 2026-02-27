@@ -9,7 +9,8 @@ import {
   Target, TreePine, Wind, Calendar, ChevronLeft, ChevronRight, 
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
-  Maximize2, Minimize2, RefreshCw, Check, Bug
+  Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
+  Unlock, Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -215,7 +216,354 @@ const LAYER_COLORS = {
   standMed: '#f59e0b',
   standLow: '#6b7280',
   parcelBoundary: '#fbbf24',
+  // Edge Intelligence Layer colors
+  edgeCorridorArrow: '#db2777',    // Faded red-violet for continuation arrows
+  edgeGhostBedding: '#22c55e',     // Semi-transparent green for ghost bedding
+  edgePressureInbound: '#22c55e',  // Green for inbound pressure
+  edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
+  edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
 };
+
+// ========== EDGE INTELLIGENCE UTILITIES ==========
+
+// Calculate bearing from point A to point B (in degrees)
+function calculateBearing(from: [number, number], to: [number, number]): number {
+  const dLng = (to[0] - from[0]) * Math.PI / 180;
+  const lat1 = from[1] * Math.PI / 180;
+  const lat2 = to[1] * Math.PI / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+// Move a point in a given bearing by a distance (meters)
+function movePoint(point: [number, number], bearingDeg: number, distanceMeters: number): [number, number] {
+  const R = 6371000; // Earth radius in meters
+  const bearing = bearingDeg * Math.PI / 180;
+  const lat1 = point[1] * Math.PI / 180;
+  const lng1 = point[0] * Math.PI / 180;
+  const d = distanceMeters / R;
+  
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(bearing));
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(bearing) * Math.sin(d) * Math.cos(lat1),
+    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  
+  return [lng2 * 180 / Math.PI, lat2 * 180 / Math.PI];
+}
+
+// Calculate distance between two points in meters
+function distanceMeters(p1: [number, number], p2: [number, number]): number {
+  const R = 6371000;
+  const dLat = (p2[1] - p1[1]) * Math.PI / 180;
+  const dLng = (p2[0] - p1[0]) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(p1[1] * Math.PI / 180) * Math.cos(p2[1] * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Check if a point is inside a polygon (ray casting algorithm)
+function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
+  let inside = false;
+  const x = point[0], y = point[1];
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Find the closest point on a polygon boundary to a given point
+function closestPointOnPolygon(point: [number, number], polygon: number[][]): { point: [number, number]; segment: [number, number, number, number]; index: number } {
+  let minDist = Infinity;
+  let closestPoint: [number, number] = point;
+  let closestSegment: [number, number, number, number] = [0, 0, 0, 0];
+  let closestIndex = 0;
+  
+  for (let i = 0; i < polygon.length - 1; i++) {
+    const a = polygon[i] as [number, number];
+    const b = polygon[i + 1] as [number, number];
+    
+    // Project point onto line segment
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    
+    let t = 0;
+    if (len2 > 0) {
+      t = Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / len2));
+    }
+    
+    const proj: [number, number] = [a[0] + t * dx, a[1] + t * dy];
+    const dist = distanceMeters(point, proj);
+    
+    if (dist < minDist) {
+      minDist = dist;
+      closestPoint = proj;
+      closestSegment = [a[0], a[1], b[0], b[1]];
+      closestIndex = i;
+    }
+  }
+  
+  return { point: closestPoint, segment: closestSegment, index: closestIndex };
+}
+
+// Generate corridor continuation arrows extending beyond parcel boundary
+function generateCorridorArrows(
+  corridors: GeoJSON.FeatureCollection,
+  parcelCoords: number[][]
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  const ARROW_LENGTH = 75; // 50-100m, using 75m
+  const BOUNDARY_THRESHOLD = 30; // meters from boundary to trigger
+
+  if (!corridors?.features?.length || !parcelCoords?.length) return { type: 'FeatureCollection', features };
+
+  corridors.features.forEach((corridor, idx) => {
+    if (corridor.geometry?.type !== 'LineString') return;
+    const coords = corridor.geometry.coordinates as [number, number][];
+    if (coords.length < 2) return;
+
+    // Check both ends of the corridor
+    const endpoints = [
+      { point: coords[0], direction: calculateBearing(coords[1], coords[0]), isStart: true },
+      { point: coords[coords.length - 1], direction: calculateBearing(coords[coords.length - 2], coords[coords.length - 1]), isStart: false }
+    ];
+
+    endpoints.forEach(({ point, direction, isStart }) => {
+      const closest = closestPointOnPolygon(point, parcelCoords);
+      const distToBoundary = distanceMeters(point, closest.point);
+      
+      // If close to boundary, create arrow extending outward
+      if (distToBoundary < BOUNDARY_THRESHOLD) {
+        const arrowEnd = movePoint(closest.point, direction, ARROW_LENGTH);
+        
+        // Create arrow line with tapered width effect (we'll use two lines)
+        features.push({
+          type: 'Feature',
+          properties: {
+            type: 'corridor_continuation',
+            direction: isStart ? 'inbound' : 'outbound',
+            corridorScore: corridor.properties?.corridorScore || 0.5,
+            arrowIndex: idx
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: [closest.point, arrowEnd]
+          }
+        });
+
+        // Create arrowhead
+        const headSize = 15; // meters
+        const headLeft = movePoint(arrowEnd, (direction - 150 + 360) % 360, headSize);
+        const headRight = movePoint(arrowEnd, (direction + 150) % 360, headSize);
+        
+        features.push({
+          type: 'Feature',
+          properties: {
+            type: 'corridor_arrow_head',
+            direction: isStart ? 'inbound' : 'outbound'
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[arrowEnd, headLeft, headRight, arrowEnd]]
+          }
+        });
+      }
+    });
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
+// Generate ghost bedding silhouettes near boundaries
+function generateGhostBedding(
+  beddingAreas: GeoJSON.FeatureCollection,
+  parcelCoords: number[][]
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  const GHOST_OFFSET = 60; // meters outside boundary
+  const BOUNDARY_THRESHOLD = 50; // meters from boundary to trigger ghost
+
+  if (!beddingAreas?.features?.length || !parcelCoords?.length) return { type: 'FeatureCollection', features };
+
+  beddingAreas.features.forEach((bedding, idx) => {
+    if (!bedding.geometry || !['Polygon', 'MultiPolygon'].includes(bedding.geometry.type)) return;
+    
+    // Get centroid of bedding area
+    let centroid: [number, number] = [0, 0];
+    let count = 0;
+    
+    const processCoords = (coords: number[][]) => {
+      coords.forEach(c => {
+        centroid[0] += c[0];
+        centroid[1] += c[1];
+        count++;
+      });
+    };
+    
+    if (bedding.geometry.type === 'Polygon') {
+      processCoords((bedding.geometry as GeoJSON.Polygon).coordinates[0]);
+    } else {
+      (bedding.geometry as GeoJSON.MultiPolygon).coordinates.forEach(poly => processCoords(poly[0]));
+    }
+    
+    centroid = [centroid[0] / count, centroid[1] / count];
+    
+    // Check distance to boundary
+    const closest = closestPointOnPolygon(centroid, parcelCoords);
+    const distToBoundary = distanceMeters(centroid, closest.point);
+    
+    // If bedding is near boundary, create ghost outside
+    if (distToBoundary < BOUNDARY_THRESHOLD) {
+      // Calculate direction from centroid to boundary and extend outward
+      const bearingOut = calculateBearing(centroid, closest.point);
+      const ghostCenter = movePoint(closest.point, bearingOut, GHOST_OFFSET);
+      
+      // Create elliptical ghost shape
+      const ghostPoints: [number, number][] = [];
+      const radiusA = 25; // major axis meters
+      const radiusB = 18; // minor axis meters
+      
+      for (let angle = 0; angle < 360; angle += 30) {
+        const rad = angle * Math.PI / 180;
+        const r = (radiusA * radiusB) / Math.sqrt(
+          Math.pow(radiusB * Math.cos(rad), 2) + Math.pow(radiusA * Math.sin(rad), 2)
+        );
+        ghostPoints.push(movePoint(ghostCenter, (bearingOut + angle) % 360, r));
+      }
+      ghostPoints.push(ghostPoints[0]); // Close the ring
+      
+      features.push({
+        type: 'Feature',
+        properties: {
+          type: 'ghost_bedding',
+          influence: 'external',
+          originalBeddingIndex: idx,
+          confidence: bedding.properties?.confidence || 0.6
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [ghostPoints]
+        }
+      });
+    }
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
+// Generate pressure direction arrows based on corridor flow
+function generatePressureArrows(
+  corridors: GeoJSON.FeatureCollection,
+  parcelCoords: number[][]
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  const ARROW_LENGTH = 50;
+  const BOUNDARY_THRESHOLD = 40;
+  
+  if (!corridors?.features?.length || !parcelCoords?.length) return { type: 'FeatureCollection', features };
+
+  // Process each corridor to determine pressure direction
+  corridors.features.forEach((corridor, idx) => {
+    if (corridor.geometry?.type !== 'LineString') return;
+    const coords = corridor.geometry.coordinates as [number, number][];
+    if (coords.length < 2) return;
+
+    const score = corridor.properties?.corridorScore || 0.5;
+    if (score < 0.3) return; // Only show pressure for meaningful corridors
+
+    // Determine if corridor enters or exits the parcel
+    const start = coords[0];
+    const end = coords[coords.length - 1];
+    
+    const startInParcel = pointInPolygon(start, parcelCoords);
+    const endInParcel = pointInPolygon(end, parcelCoords);
+
+    // Create pressure indicator at boundary crossing
+    const checkEndpoint = (point: [number, number], isInbound: boolean, otherPoint: [number, number]) => {
+      const closest = closestPointOnPolygon(point, parcelCoords);
+      const distToBoundary = distanceMeters(point, closest.point);
+      
+      if (distToBoundary < BOUNDARY_THRESHOLD) {
+        const bearingToOther = calculateBearing(point, otherPoint);
+        const arrowStart = movePoint(closest.point, isInbound ? (bearingToOther + 180) % 360 : bearingToOther, ARROW_LENGTH);
+        
+        features.push({
+          type: 'Feature',
+          properties: {
+            type: 'pressure_arrow',
+            direction: isInbound ? 'inbound' : 'outbound',
+            corridorScore: score,
+            arrowIndex: idx
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: isInbound ? [arrowStart, closest.point] : [closest.point, arrowStart]
+          }
+        });
+      }
+    };
+
+    if (!startInParcel && endInParcel) {
+      // Inbound corridor
+      checkEndpoint(start, true, end);
+    } else if (startInParcel && !endInParcel) {
+      // Outbound corridor
+      checkEndpoint(end, false, start);
+    }
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
+// Identify adjacent parcel boundaries for click interaction
+function generateAdjacentParcelBoundary(parcelCoords: number[][]): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  const BUFFER_DISTANCE = 15; // meters outside boundary for clickable area
+  
+  if (!parcelCoords?.length) return { type: 'FeatureCollection', features };
+
+  // Create a buffered line along each boundary segment
+  for (let i = 0; i < parcelCoords.length - 1; i++) {
+    const a = parcelCoords[i] as [number, number];
+    const b = parcelCoords[i + 1] as [number, number];
+    
+    // Calculate perpendicular direction (outward)
+    const bearing = calculateBearing(a, b);
+    const perpBearing = (bearing + 90) % 360; // Right side = outside for counter-clockwise polygons
+    
+    // Create outer edge points
+    const a_out = movePoint(a, perpBearing, BUFFER_DISTANCE);
+    const b_out = movePoint(b, perpBearing, BUFFER_DISTANCE);
+    
+    // Calculate center point and segment info
+    const midpoint: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const segmentLength = distanceMeters(a, b);
+    
+    features.push({
+      type: 'Feature',
+      properties: {
+        type: 'adjacent_boundary',
+        segmentIndex: i,
+        bearing: bearing,
+        lengthMeters: segmentLength,
+        midpoint: midpoint
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[a, b, b_out, a_out, a]]
+      }
+    });
+  }
+
+  return { type: 'FeatureCollection', features };
+}
 
 // Empty GeoJSON for initializing sources
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -284,6 +632,20 @@ function DeerIntelContent() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
+
+  // Edge Intelligence Layer state
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [unlockModalData, setUnlockModalData] = useState<{
+    segmentBearing: number;
+    edgeType: 'corridor' | 'bedding' | 'pressure' | 'boundary';
+    lngLat: [number, number];
+  } | null>(null);
+  const [edgeIntelData, setEdgeIntelData] = useState<{
+    corridorArrows: GeoJSON.FeatureCollection;
+    ghostBedding: GeoJSON.FeatureCollection;
+    pressureArrows: GeoJSON.FeatureCollection;
+    adjacentBoundary: GeoJSON.FeatureCollection;
+  } | null>(null);
 
   // ========== GLOBAL ERROR HANDLERS ==========
   useEffect(() => {
@@ -484,6 +846,107 @@ function DeerIntelContent() {
       console.error('[MAP] Error updating sources (non-fatal):', err);
     }
   }, [layers, parcelPolygon, mapReady]);
+
+  // ========== GENERATE EDGE INTELLIGENCE DATA ==========
+  useEffect(() => {
+    if (!layers || !parcelPolygon) {
+      setEdgeIntelData(null);
+      return;
+    }
+
+    try {
+      // Extract parcel coordinates
+      let parcelCoords: number[][] = [];
+      if (parcelPolygon.geometry.type === 'Polygon') {
+        parcelCoords = parcelPolygon.geometry.coordinates[0];
+      } else if (parcelPolygon.geometry.type === 'MultiPolygon') {
+        // Use largest polygon
+        let maxLen = 0;
+        parcelPolygon.geometry.coordinates.forEach((poly) => {
+          if (poly[0].length > maxLen) {
+            maxLen = poly[0].length;
+            parcelCoords = poly[0];
+          }
+        });
+      }
+
+      if (parcelCoords.length < 3) {
+        console.warn('[EDGE INTEL] Insufficient parcel coordinates');
+        return;
+      }
+
+      // Get corridors from funnels
+      const corridorsFC: GeoJSON.FeatureCollection = layers.funnels 
+        ? {
+            type: 'FeatureCollection',
+            features: (layers.funnels.features || []).filter(
+              f => f.properties?.funnelType === 'corridor' && f.geometry?.type === 'LineString'
+            )
+          }
+        : { type: 'FeatureCollection', features: [] };
+
+      // Generate edge intelligence features
+      const corridorArrows = generateCorridorArrows(corridorsFC, parcelCoords);
+      const ghostBedding = generateGhostBedding(
+        layers.beddingPolygons || { type: 'FeatureCollection', features: [] },
+        parcelCoords
+      );
+      const pressureArrows = generatePressureArrows(corridorsFC, parcelCoords);
+      const adjacentBoundary = generateAdjacentParcelBoundary(parcelCoords);
+
+      console.log('[EDGE INTEL] Generated:', {
+        corridorArrows: corridorArrows.features.length,
+        ghostBedding: ghostBedding.features.length,
+        pressureArrows: pressureArrows.features.length,
+        adjacentBoundary: adjacentBoundary.features.length
+      });
+
+      setEdgeIntelData({
+        corridorArrows,
+        ghostBedding,
+        pressureArrows,
+        adjacentBoundary
+      });
+    } catch (err) {
+      console.error('[EDGE INTEL] Generation failed:', err);
+    }
+  }, [layers, parcelPolygon]);
+
+  // ========== UPDATE EDGE INTELLIGENCE MAP SOURCES ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current || !edgeIntelData) return;
+
+    try {
+      // Update corridor arrows source
+      const arrowsSource = map.getSource('tfp-edge-arrows') as mapboxgl.GeoJSONSource;
+      if (arrowsSource) {
+        arrowsSource.setData(edgeIntelData.corridorArrows);
+      }
+
+      // Update ghost bedding source
+      const ghostSource = map.getSource('tfp-edge-ghost') as mapboxgl.GeoJSONSource;
+      if (ghostSource) {
+        ghostSource.setData(edgeIntelData.ghostBedding);
+      }
+
+      // Update pressure arrows source
+      const pressureSource = map.getSource('tfp-edge-pressure') as mapboxgl.GeoJSONSource;
+      if (pressureSource) {
+        pressureSource.setData(edgeIntelData.pressureArrows);
+      }
+
+      // Update adjacent boundary source
+      const boundarySource = map.getSource('tfp-edge-boundary') as mapboxgl.GeoJSONSource;
+      if (boundarySource) {
+        boundarySource.setData(edgeIntelData.adjacentBoundary);
+      }
+
+      console.log('[MAP] Updated edge intelligence sources');
+    } catch (err) {
+      console.error('[MAP] Error updating edge intel sources (non-fatal):', err);
+    }
+  }, [edgeIntelData, mapReady]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
@@ -757,6 +1220,107 @@ function DeerIntelContent() {
           });
         }
         
+        // ========== EDGE INTELLIGENCE SOURCES AND LAYERS ==========
+        
+        // Corridor continuation arrows
+        if (!map.getSource('tfp-edge-arrows')) {
+          map.addSource('tfp-edge-arrows', { type: 'geojson', data: EMPTY_FC });
+          // Arrow lines (faded)
+          map.addLayer({
+            id: 'tfp-edge-arrows-lines',
+            type: 'line',
+            source: 'tfp-edge-arrows',
+            filter: ['==', ['get', 'type'], 'corridor_continuation'],
+            paint: {
+              'line-color': LAYER_COLORS.edgeCorridorArrow,
+              'line-width': 4,
+              'line-opacity': 0.5,
+              'line-dasharray': [2, 1],
+            },
+          });
+          // Arrow heads
+          map.addLayer({
+            id: 'tfp-edge-arrows-heads',
+            type: 'fill',
+            source: 'tfp-edge-arrows',
+            filter: ['==', ['get', 'type'], 'corridor_arrow_head'],
+            paint: {
+              'fill-color': LAYER_COLORS.edgeCorridorArrow,
+              'fill-opacity': 0.6,
+            },
+          });
+        }
+        
+        // Ghost bedding silhouettes
+        if (!map.getSource('tfp-edge-ghost')) {
+          map.addSource('tfp-edge-ghost', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-edge-ghost-fill',
+            type: 'fill',
+            source: 'tfp-edge-ghost',
+            paint: {
+              'fill-color': LAYER_COLORS.edgeGhostBedding,
+              'fill-opacity': 0.15,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-edge-ghost-outline',
+            type: 'line',
+            source: 'tfp-edge-ghost',
+            paint: {
+              'line-color': LAYER_COLORS.edgeGhostBedding,
+              'line-width': 2,
+              'line-opacity': 0.4,
+              'line-dasharray': [4, 2],
+            },
+          });
+        }
+        
+        // Pressure direction arrows
+        if (!map.getSource('tfp-edge-pressure')) {
+          map.addSource('tfp-edge-pressure', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-edge-pressure-lines',
+            type: 'line',
+            source: 'tfp-edge-pressure',
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'direction'], 'inbound'], LAYER_COLORS.edgePressureInbound,
+                LAYER_COLORS.edgePressureOutbound
+              ],
+              'line-width': 5,
+              'line-opacity': 0.7,
+            },
+          });
+        }
+        
+        // Adjacent parcel boundary (invisible but clickable)
+        if (!map.getSource('tfp-edge-boundary')) {
+          map.addSource('tfp-edge-boundary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-edge-boundary-fill',
+            type: 'fill',
+            source: 'tfp-edge-boundary',
+            paint: {
+              'fill-color': LAYER_COLORS.edgeBoundaryHighlight,
+              'fill-opacity': 0, // Invisible by default
+            },
+          });
+          map.addLayer({
+            id: 'tfp-edge-boundary-highlight',
+            type: 'line',
+            source: 'tfp-edge-boundary',
+            paint: {
+              'line-color': LAYER_COLORS.edgeBoundaryHighlight,
+              'line-width': 0, // Hidden by default, shows on hover
+              'line-opacity': 0.6,
+            },
+          });
+        }
+        
+        console.log('[MAP] Edge intelligence sources created');
+        
         overlaySourcesCreated.current = true;
         console.log('[MAP] Native Mapbox sources created successfully');
         
@@ -880,7 +1444,134 @@ function DeerIntelContent() {
           hoverPopup.remove();
         });
         
+        // ========== EDGE INTELLIGENCE HOVER INTERACTIONS ==========
+        
+        // Corridor continuation arrows hover
+        map.on('mouseenter', 'tfp-edge-arrows-lines', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const html = `
+              <div style="padding: 10px; font-size: 13px; max-width: 220px;">
+                <div style="font-weight: bold; color: ${LAYER_COLORS.edgeCorridorArrow}; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 16px;">→</span> Travel Continues
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  This corridor extends beyond your property line.
+                </div>
+                <div style="margin-top: 8px; padding: 6px 10px; background: ${LAYER_COLORS.edgeCorridorArrow}20; border-radius: 6px; color: #fff; font-size: 11px; font-weight: 500;">
+                  🔓 Unlock adjacent parcel to see full route
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-edge-arrows-lines', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Ghost bedding hover
+        map.on('mouseenter', 'tfp-edge-ghost-fill', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const html = `
+              <div style="padding: 10px; font-size: 13px; max-width: 220px;">
+                <div style="font-weight: bold; color: ${LAYER_COLORS.edgeGhostBedding}; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 16px;">🛏️</span> External Bedding Detected
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  Probable bedding area on adjacent property influencing deer movement on yours.
+                </div>
+                <div style="margin-top: 8px; padding: 6px 10px; background: ${LAYER_COLORS.edgeGhostBedding}20; border-radius: 6px; color: #fff; font-size: 11px; font-weight: 500;">
+                  🔓 Unlock adjacent parcel for full intel
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-edge-ghost-fill', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Pressure arrows hover
+        map.on('mouseenter', 'tfp-edge-pressure-lines', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const isInbound = props.direction === 'inbound';
+            const color = isInbound ? LAYER_COLORS.edgePressureInbound : LAYER_COLORS.edgePressureOutbound;
+            const html = `
+              <div style="padding: 10px; font-size: 13px; max-width: 220px;">
+                <div style="font-weight: bold; color: ${color}; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 16px;">${isInbound ? '↘️' : '↗️'}</span> 
+                  ${isInbound ? 'Inbound Pressure' : 'Outbound Pressure'}
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  ${isInbound 
+                    ? 'Movement likely originates from adjacent property.' 
+                    : 'Deer from your parcel likely continue to adjacent property.'
+                  }
+                </div>
+                <div style="margin-top: 8px; padding: 6px 10px; background: ${color}20; border-radius: 6px; color: #fff; font-size: 11px; font-weight: 500;">
+                  🔓 Unlock adjacent parcel for complete picture
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-edge-pressure-lines', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Adjacent boundary hover (show highlight)
+        map.on('mouseenter', 'tfp-edge-boundary-fill', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          // Show boundary highlight on hover
+          map.setPaintProperty('tfp-edge-boundary-highlight', 'line-width', 3);
+          map.setPaintProperty('tfp-edge-boundary-fill', 'fill-opacity', 0.15);
+        });
+        map.on('mouseleave', 'tfp-edge-boundary-fill', () => {
+          map.getCanvas().style.cursor = '';
+          // Hide boundary highlight
+          map.setPaintProperty('tfp-edge-boundary-highlight', 'line-width', 0);
+          map.setPaintProperty('tfp-edge-boundary-fill', 'fill-opacity', 0);
+        });
+        
         console.log('[MAP] Hover interactions registered');
+        console.log('[MAP] Edge intelligence interactions registered');
+        
+        // ========== EDGE INTELLIGENCE CLICK HANDLERS ==========
+        // These trigger the unlock modal for adjacent parcels
+        
+        const handleEdgeClick = (e: mapboxgl.MapLayerMouseEvent, edgeType: 'corridor' | 'bedding' | 'pressure' | 'boundary') => {
+          if (!e.features || !e.features[0]) return;
+          
+          const props = e.features[0].properties || {};
+          const bearing = props.bearing || props.direction === 'inbound' ? 180 : 0;
+          
+          // Store click data and show modal
+          // We'll dispatch a custom event that React can listen to
+          const detail = {
+            edgeType,
+            lngLat: [e.lngLat.lng, e.lngLat.lat] as [number, number],
+            segmentBearing: bearing
+          };
+          window.dispatchEvent(new CustomEvent('tfp-edge-click', { detail }));
+        };
+        
+        // Click handlers for each edge layer
+        map.on('click', 'tfp-edge-arrows-lines', (e) => handleEdgeClick(e, 'corridor'));
+        map.on('click', 'tfp-edge-arrows-heads', (e) => handleEdgeClick(e, 'corridor'));
+        map.on('click', 'tfp-edge-ghost-fill', (e) => handleEdgeClick(e, 'bedding'));
+        map.on('click', 'tfp-edge-pressure-lines', (e) => handleEdgeClick(e, 'pressure'));
+        map.on('click', 'tfp-edge-boundary-fill', (e) => handleEdgeClick(e, 'boundary'));
+        
+        console.log('[MAP] Edge intelligence click handlers registered');
         
       } catch (sourceErr) {
         console.error('[MAP] Source/layer setup failed (non-fatal):', sourceErr);
@@ -934,6 +1625,29 @@ function DeerIntelContent() {
   useEffect(() => {
     runAnalysis();
   }, [season, windDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ========== EDGE INTELLIGENCE CLICK EVENT LISTENER ==========
+  useEffect(() => {
+    const handleEdgeClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        edgeType: 'corridor' | 'bedding' | 'pressure' | 'boundary';
+        lngLat: [number, number];
+        segmentBearing: number;
+      }>;
+      
+      console.log('[EDGE INTEL] Click event received:', customEvent.detail);
+      
+      setUnlockModalData({
+        edgeType: customEvent.detail.edgeType,
+        lngLat: customEvent.detail.lngLat,
+        segmentBearing: customEvent.detail.segmentBearing
+      });
+      setShowUnlockModal(true);
+    };
+    
+    window.addEventListener('tfp-edge-click', handleEdgeClick);
+    return () => window.removeEventListener('tfp-edge-click', handleEdgeClick);
+  }, []);
 
   // ========== HTML STAND MARKERS (top 2 only) ==========
   useEffect(() => {
@@ -1698,6 +2412,136 @@ function DeerIntelContent() {
         <div className="absolute bottom-4 left-4 z-30 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-amber-500/30">
           <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
           <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
+        </div>
+      )}
+
+      {/* Unlock Adjacent Parcel Modal */}
+      {showUnlockModal && unlockModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div 
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowUnlockModal(false)}
+          />
+          
+          {/* Modal Content */}
+          <div className="relative bg-gray-900 border border-white/20 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            {/* Header with gradient */}
+            <div className="relative bg-gradient-to-r from-purple-600 via-pink-600 to-amber-500 px-6 py-5">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl" />
+              <div className="relative flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+                  <Lock className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">Unlock Adjacent Intel</h3>
+                  <p className="text-white/80 text-sm">Expand your strategic advantage</p>
+                </div>
+              </div>
+            </div>
+            
+            {/* Body */}
+            <div className="p-6">
+              {/* Context based on what was clicked */}
+              <div className="bg-white/5 rounded-xl p-4 mb-5 border border-white/10">
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                    unlockModalData.edgeType === 'corridor' ? 'bg-pink-500/20' :
+                    unlockModalData.edgeType === 'bedding' ? 'bg-green-500/20' :
+                    unlockModalData.edgeType === 'pressure' ? 'bg-amber-500/20' :
+                    'bg-purple-500/20'
+                  }`}>
+                    {unlockModalData.edgeType === 'corridor' && <ArrowUpRight className="w-5 h-5 text-pink-400" />}
+                    {unlockModalData.edgeType === 'bedding' && <Target className="w-5 h-5 text-green-400" />}
+                    {unlockModalData.edgeType === 'pressure' && <Wind className="w-5 h-5 text-amber-400" />}
+                    {unlockModalData.edgeType === 'boundary' && <MapPin className="w-5 h-5 text-purple-400" />}
+                  </div>
+                  <div>
+                    <p className="text-white font-medium text-sm">
+                      {unlockModalData.edgeType === 'corridor' && 'Travel corridor continues beyond your boundary'}
+                      {unlockModalData.edgeType === 'bedding' && 'External bedding influence detected'}
+                      {unlockModalData.edgeType === 'pressure' && 'Deer movement originates off-property'}
+                      {unlockModalData.edgeType === 'boundary' && 'Adjacent parcel may impact your hunt'}
+                    </p>
+                    <p className="text-white/60 text-xs mt-1">
+                      Unlock the neighboring property to see the full picture and optimize your strategy.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* What you get */}
+              <div className="space-y-3 mb-6">
+                <p className="text-xs text-white/50 uppercase tracking-wider font-medium">What You'll Unlock</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2 text-sm text-white/80">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <span>Full corridor routes</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-white/80">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <span>Bedding locations</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-white/80">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <span>Optimal stand sites</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-white/80">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <span>Pressure analysis</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Pricing */}
+              <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 rounded-xl p-4 border border-amber-500/30 mb-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-amber-400" />
+                    <span className="text-white font-semibold">Hunting Intel</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-bold text-white">$79</span>
+                    <span className="text-white/50 text-sm ml-1">one-time</span>
+                  </div>
+                </div>
+                <p className="text-amber-200/70 text-xs mt-2">
+                  Permanent unlock • Never expires • Includes all future updates
+                </p>
+              </div>
+              
+              {/* Actions */}
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1 border-white/20 text-white hover:bg-white/10"
+                  onClick={() => setShowUnlockModal(false)}
+                >
+                  Maybe Later
+                </Button>
+                <Button
+                  className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-semibold"
+                  onClick={() => {
+                    // Navigate to map with coordinates for adjacent parcel
+                    const adjacentLat = unlockModalData.lngLat[1];
+                    const adjacentLng = unlockModalData.lngLat[0];
+                    router.push(`/map?lat=${adjacentLat}&lng=${adjacentLng}&product=hunting_intel`);
+                  }}
+                >
+                  <Unlock className="w-4 h-4 mr-2" />
+                  Unlock Parcel
+                </Button>
+              </div>
+            </div>
+            
+            {/* Close button */}
+            <button
+              onClick={() => setShowUnlockModal(false)}
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/30 hover:bg-black/50 flex items-center justify-center text-white/80 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
