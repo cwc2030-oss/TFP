@@ -660,6 +660,95 @@ function DeerIntelContent() {
         
         overlaySourcesCreated.current = true;
         console.log('[MAP] Native Mapbox sources created successfully');
+        
+        // ========== HOVER INTERACTIONS FOR FEATURE INFO ==========
+        // Create a reusable popup for hover info
+        const hoverPopup = new mapboxgl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          maxWidth: '300px',
+          className: 'intel-hover-popup'
+        });
+        
+        // Bedding hover
+        map.on('mouseenter', 'tfp-bedding-fill', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const html = `
+              <div style="padding: 8px; font-size: 13px;">
+                <div style="font-weight: bold; color: #22C55E; margin-bottom: 6px;">
+                  🛏️ ${(props.type || 'Bedding Area').replace(/_/g, ' ').toUpperCase()}
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  ${props.areaAcres ? `<div>Area: <b>${Number(props.areaAcres).toFixed(2)} acres</b></div>` : ''}
+                  ${props.aspect ? `<div>Aspect: <b>${props.aspect}</b></div>` : ''}
+                  ${props.slopeRange ? `<div>Slope: <b>${props.slopeRange}°</b></div>` : ''}
+                  ${props.confidence ? `<div>Confidence: <b>${Math.round(Number(props.confidence) * 100)}%</b></div>` : ''}
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-bedding-fill', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Funnel lines hover (draws, corridors)
+        map.on('mouseenter', 'tfp-funnels-lines-line', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const typeIcon = props.funnelType === 'draw' ? '💧' : props.funnelType === 'corridor' ? '🦌' : '📍';
+            const html = `
+              <div style="padding: 8px; font-size: 13px;">
+                <div style="font-weight: bold; color: #F97316; margin-bottom: 6px;">
+                  ${typeIcon} ${(props.funnelType || 'Travel Route').toUpperCase()}
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  ${props.corridorScore ? `<div>Corridor Score: <b>${Math.round(Number(props.corridorScore) * 100)}%</b></div>` : ''}
+                  ${props.connectsBeddingToFood !== undefined ? `<div>Bedding→Food: <b>${props.connectsBeddingToFood ? 'Yes' : 'No'}</b></div>` : ''}
+                  ${props.leastCostPath !== undefined ? `<div>Primary Path: <b>${props.leastCostPath ? 'Yes' : 'No'}</b></div>` : ''}
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-funnels-lines-line', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Funnel polygons hover (saddles)
+        map.on('mouseenter', 'tfp-funnels-polys-fill', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const html = `
+              <div style="padding: 8px; font-size: 13px;">
+                <div style="font-weight: bold; color: #EA580C; margin-bottom: 6px;">
+                  🎯 ${(props.funnelType || 'Pinch Point').toUpperCase()}
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  ${props.narrowestWidthMeters ? `<div>Narrowest: <b>${Math.round(Number(props.narrowestWidthMeters))}m</b></div>` : ''}
+                  ${props.corridorScore ? `<div>Corridor Score: <b>${Math.round(Number(props.corridorScore) * 100)}%</b></div>` : ''}
+                  ${props.connectsBeddingToFood !== undefined ? `<div>Bedding→Food: <b>${props.connectsBeddingToFood ? 'Yes' : 'No'}</b></div>` : ''}
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-funnels-polys-fill', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        console.log('[MAP] Hover interactions registered');
+        
       } catch (sourceErr) {
         console.error('[MAP] Source/layer setup failed (non-fatal):', sourceErr);
         // Continue anyway - panels must render even if map overlays fail
