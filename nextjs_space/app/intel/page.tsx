@@ -193,13 +193,23 @@ const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: strin
   { value: 'late', label: 'Late Season', dates: 'Dec-Jan', icon: '❄️' },
 ];
 
-// Colors as hex (for UI and native Mapbox layers)
+// ========== V1 STYLING RULES (Deterministic) ==========
+// Corridors: Score-based 3-tier colors
+//   High (≥0.7): Bright purple #a855f7 - primary travel routes
+//   Med (0.4-0.7): Muted purple #7c3aed - secondary routes  
+//   Low (<0.4): Light purple #c4b5fd - potential routes
+// Draws: Solid blue lines (water/drainage)
+// Saddles: Orange polygons (pinch points)
+// Stands: Red (top 3) / Amber (4-7) / Gray (8-10)
+
 const LAYER_COLORS = {
   bedding: '#22c55e',
   beddingOutline: '#16a34a',
   funnelSaddle: '#f97316',
-  funnelDraw: '#3b82f6',
-  funnelCorridor: '#a855f7',
+  funnelDraw: '#3b82f6',           // Solid blue for draws
+  corridorHigh: '#a855f7',         // High score ≥0.7
+  corridorMed: '#7c3aed',          // Med score 0.4-0.7
+  corridorLow: '#c4b5fd',          // Low score <0.4
   standHigh: '#ef4444',
   standMed: '#f59e0b',
   standLow: '#6b7280',
@@ -647,16 +657,28 @@ function DeerIntelContent() {
               'line-width': 3,
             },
           });
-          // Corridors layer (purple) - the travel corridors!
+          // Corridors layer (purple dashed) - score-based 3-tier colors
           map.addLayer({
             id: 'tfp-funnels-lines-corridors',
             type: 'line',
             source: 'tfp-funnels-lines',
             filter: ['==', ['get', 'funnelType'], 'corridor'],
             paint: {
-              'line-color': LAYER_COLORS.funnelCorridor,
-              'line-width': 4,
-              'line-dasharray': [2, 1],
+              // Score-based color: High ≥0.7 (bright), Med 0.4-0.7 (muted), Low <0.4 (light)
+              'line-color': [
+                'case',
+                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], LAYER_COLORS.corridorHigh,
+                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4], LAYER_COLORS.corridorMed,
+                LAYER_COLORS.corridorLow
+              ],
+              // Wider lines for higher scores
+              'line-width': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'corridorScore'], 0.5],
+                0, 2,
+                0.5, 4,
+                1, 6
+              ],
+              'line-dasharray': [2, 1],  // Dashed = travel corridor
             },
           });
           // Fallback for any other line type
@@ -761,18 +783,21 @@ function DeerIntelContent() {
           hoverPopup.remove();
         });
         
-        // Corridor lines hover (travel corridors) - purple
+        // Corridor lines hover (travel corridors) - score-based color
         map.on('mouseenter', 'tfp-funnels-lines-corridors', (e) => {
           map.getCanvas().style.cursor = 'pointer';
           if (e.features && e.features[0]) {
             const props = e.features[0].properties || {};
+            const score = Number(props.corridorScore) || 0.5;
+            const tier = score >= 0.7 ? 'PRIMARY' : score >= 0.4 ? 'SECONDARY' : 'POTENTIAL';
+            const tierColor = score >= 0.7 ? LAYER_COLORS.corridorHigh : score >= 0.4 ? LAYER_COLORS.corridorMed : LAYER_COLORS.corridorLow;
             const html = `
               <div style="padding: 8px; font-size: 13px;">
-                <div style="font-weight: bold; color: #A855F7; margin-bottom: 6px;">
-                  🦌 TRAVEL CORRIDOR
+                <div style="font-weight: bold; color: ${tierColor}; margin-bottom: 6px;">
+                  🦌 ${tier} CORRIDOR
                 </div>
                 <div style="color: #ccc; line-height: 1.5;">
-                  ${props.corridorScore ? `<div>Corridor Score: <b>${Math.round(Number(props.corridorScore) * 100)}%</b></div>` : ''}
+                  <div>Score: <b style="color: ${tierColor}">${Math.round(score * 100)}%</b></div>
                   ${props.connectsBeddingToFood !== undefined ? `<div>Bedding→Food: <b>${props.connectsBeddingToFood ? 'Yes' : 'No'}</b></div>` : ''}
                   ${props.leastCostPath !== undefined ? `<div>Primary Path: <b>${props.leastCostPath ? 'Yes' : 'No'}</b></div>` : ''}
                 </div>
@@ -924,13 +949,49 @@ function DeerIntelContent() {
         </div>
       `;
 
+      // Hover tooltip for quick info
+      const hoverTooltip = document.createElement('div');
+      hoverTooltip.className = 'stand-hover-tooltip';
+      hoverTooltip.style.cssText = `
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(17, 24, 39, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        padding: 10px 12px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s;
+        z-index: 100;
+        margin-bottom: 8px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      `;
+      const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
+      hoverTooltip.innerHTML = `
+        <div style="font-weight: bold; color: ${props.rank <= 3 ? LAYER_COLORS.standHigh : LAYER_COLORS.standMed}; font-size: 13px; margin-bottom: 4px;">
+          Stand #${props.rank} • ${props.score}/100
+        </div>
+        <div style="color: #ccc; font-size: 12px; line-height: 1.4;">
+          <div>🌬️ Best Wind: <b style="color: #22c55e">${props.windOk.slice(0, 2).join(', ')}</b></div>
+          <div>⏰ Best Time: <b>${bestTime}</b></div>
+          <div>🦌 To Corridor: <b>${props.distToCorridorMeters}m</b></div>
+        </div>
+      `;
+      el.style.position = 'relative';
+      el.appendChild(hoverTooltip);
+
       el.onmouseenter = () => {
         (el.firstElementChild as HTMLElement).style.transform = 'scale(1.2)';
         (el.firstElementChild as HTMLElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.5)';
+        hoverTooltip.style.opacity = '1';
       };
       el.onmouseleave = () => {
         (el.firstElementChild as HTMLElement).style.transform = 'scale(1)';
         (el.firstElementChild as HTMLElement).style.boxShadow = '0 4px 12px rgba(0,0,0,0.4)';
+        hoverTooltip.style.opacity = '0';
       };
 
       const marker = new mapboxgl.Marker({ element: el })
@@ -938,6 +999,7 @@ function DeerIntelContent() {
         .addTo(map);
 
       el.onclick = () => {
+        hoverTooltip.style.opacity = '0'; // Hide tooltip on click
         setSelectedStand(props.rank);
         showStandPopup(coords, props);
         map.flyTo({ center: coords, zoom: 16 });
@@ -1004,6 +1066,42 @@ function DeerIntelContent() {
               ${props.approachRisk.toUpperCase()} approach risk
             </span>
             <span style="color: #6b7280; font-size: 12px;">Elev: ${Math.round(props.elevation)}m</span>
+          </div>
+          
+          <button
+            id="copy-coords-btn"
+            style="
+              margin-top: 12px;
+              width: 100%;
+              padding: 8px 12px;
+              background: #1f2937;
+              border: 1px solid #374151;
+              border-radius: 6px;
+              color: white;
+              font-size: 12px;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 6px;
+              transition: background 0.15s;
+            "
+            onmouseover="this.style.background='#374151'"
+            onmouseout="this.style.background='#1f2937'"
+            onclick="
+              navigator.clipboard.writeText('${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}');
+              this.innerHTML = '✓ Copied!';
+              this.style.background = '#166534';
+              setTimeout(() => {
+                this.innerHTML = '📋 Copy Coordinates';
+                this.style.background = '#1f2937';
+              }, 2000);
+            "
+          >
+            📋 Copy Coordinates
+          </button>
+          <div style="margin-top: 6px; text-align: center; color: #6b7280; font-size: 11px; font-family: monospace;">
+            ${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}
           </div>
         </div>
       `)
@@ -1343,7 +1441,7 @@ function DeerIntelContent() {
                       visibility.corridors ? 'bg-purple-500/20 border border-purple-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
                     }`}
                   >
-                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.funnelCorridor }} />
+                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.corridorHigh }} />
                     <span className="text-sm text-white/90 flex-1 text-left">Travel Corridors</span>
                     {visibility.corridors && <Check className="h-4 w-4 text-purple-400" />}
                   </button>
@@ -1360,17 +1458,31 @@ function DeerIntelContent() {
                 </div>
               </div>
 
-              {/* Top 2 Stand Sites */}
-              <div className="p-4 border-b border-white/10">
-                <h3 className="font-semibold text-white flex items-center gap-2">
-                  <Target className="h-4 w-4 text-red-500" />
-                  Top 2 Stand Sites
+              {/* Intel Summary - Top 3 Sit Locations */}
+              <div className="p-4 border-b border-white/10 bg-gradient-to-r from-amber-500/10 to-transparent">
+                <h3 className="font-bold text-white flex items-center gap-2">
+                  <Target className="h-4 w-4 text-amber-500" />
+                  Intel Summary
                 </h3>
-                <p className="text-xs text-white/50 mt-1">Click to fly to location</p>
+                <p className="text-xs text-white/60 mt-1">Top 3 sit locations for this parcel</p>
+                
+                {/* Quick Stats */}
+                {summary && (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="bg-black/30 rounded px-2 py-1.5">
+                      <div className="text-[10px] text-white/50">BEST SCORE</div>
+                      <div className="text-lg font-bold text-amber-400">{summary.topStandScore}<span className="text-xs text-white/50">/100</span></div>
+                    </div>
+                    <div className="bg-black/30 rounded px-2 py-1.5">
+                      <div className="text-[10px] text-white/50">FUNNELS</div>
+                      <div className="text-lg font-bold text-orange-400">{summary.funnelCount}</div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex-1">
-                {(layers?.standPoints?.features || []).slice(0, 2).map((feature) => {
+                {(layers?.standPoints?.features || []).slice(0, 3).map((feature) => {
                   const props = feature.properties as StandPointProperties;
                   const isSelected = selectedStand === props.rank;
                   const coords = feature.geometry.coordinates as [number, number];
@@ -1391,7 +1503,7 @@ function DeerIntelContent() {
                       <div className="flex items-center gap-3">
                         <span
                           className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-lg"
-                          style={{ background: LAYER_COLORS.standHigh }}
+                          style={{ background: props.rank <= 2 ? LAYER_COLORS.standHigh : LAYER_COLORS.standMed }}
                         >
                           {props.rank}
                         </span>
@@ -1502,8 +1614,10 @@ function DeerIntelContent() {
           <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelDraw }} />
           <span>Draw</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelCorridor }} />
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.corridorHigh }} />
+          <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.corridorMed }} />
+          <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.corridorLow }} />
           <span>Corridor</span>
         </div>
         <div className="h-4 w-px bg-white/20" />

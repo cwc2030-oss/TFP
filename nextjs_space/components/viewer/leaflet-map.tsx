@@ -733,12 +733,9 @@ export default function LeafletMap({
     }
   }, [spatialCorridors, layerVisibility.spatialCorridors]);
 
-  // Determine debug status
-  const debugStatus = tileDebug.tileLoadCount > 0 
-    ? 'tiles-loading' 
-    : tileDebug.tileErrorCount > 0 
-      ? 'tiles-error' 
-      : 'no-tiles';
+  // V1: Only show debug panel if there are actual errors
+  const hasErrors = tileDebug.tileErrorCount > 0 || 
+    (tileDebug.loadingStartCount > 0 && tileDebug.tileLoadCount === 0 && tileDebug.tileErrorCount === 0);
 
   return (
     <div className="relative w-full h-full" style={{ minHeight: '400px' }}>
@@ -749,92 +746,25 @@ export default function LeafletMap({
         style={{ minHeight: '400px' }}
       />
       
-      {/* Debug Panel - Top Left */}
-      <div className="absolute top-2 left-2 z-[2000] bg-black/90 text-white text-[10px] font-mono p-2 rounded-md border border-slate-600 max-w-[320px] shadow-lg">
-        <div className="flex items-center gap-2 mb-1.5 border-b border-slate-600 pb-1">
-          <div className={`w-2 h-2 rounded-full ${
-            debugStatus === 'tiles-loading' ? 'bg-green-500' :
-            debugStatus === 'tiles-error' ? 'bg-red-500' :
-            'bg-yellow-500'
-          }`} />
-          <span className="font-bold text-amber-400">TILE DEBUG</span>
-        </div>
-        
-        <div className="space-y-0.5">
-          <div className="flex justify-between">
-            <span className="text-slate-400">basemapUrl:</span>
-            <span className="text-cyan-300 truncate max-w-[180px]" title={tileDebug.basemapUrl}>
-              {tileDebug.basemapUrl || '(not set)'}
-            </span>
+      {/* Debug Panel - Only show if there are errors (v1 clean mode) */}
+      {hasErrors && (
+        <div className="absolute top-2 left-2 z-[2000] bg-red-950/95 text-white text-[10px] font-mono p-2 rounded-md border border-red-500/50 max-w-[300px] shadow-lg">
+          <div className="flex items-center gap-2 mb-1.5">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="font-bold text-red-300">Map Loading Issue</span>
           </div>
           
-          <div className="flex justify-between">
-            <span className="text-slate-400">loadingStart:</span>
-            <span className={tileDebug.loadingStartCount > 0 ? 'text-green-400' : 'text-red-400'}>
-              {tileDebug.loadingStartCount}
-            </span>
-          </div>
+          {tileDebug.errorUrls.length > 0 && (
+            <div className="text-red-200 text-[9px] mb-1">
+              {tileDebug.tileErrorCount} tile(s) failed to load
+            </div>
+          )}
           
-          <div className="flex justify-between">
-            <span className="text-slate-400">tileLoadCount:</span>
-            <span className={tileDebug.tileLoadCount > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-              {tileDebug.tileLoadCount}
-            </span>
-          </div>
-          
-          <div className="flex justify-between">
-            <span className="text-slate-400">tileErrorCount:</span>
-            <span className={tileDebug.tileErrorCount > 0 ? 'text-red-400 font-bold' : 'text-green-400'}>
-              {tileDebug.tileErrorCount}
-            </span>
-          </div>
-          
-          <div className="flex justify-between">
-            <span className="text-slate-400">mapSize:</span>
-            <span className={tileDebug.mapSize && tileDebug.mapSize.x > 0 ? 'text-green-400' : 'text-red-400'}>
-              {tileDebug.mapSize ? `${tileDebug.mapSize.x}×${tileDebug.mapSize.y}` : '(null)'}
-            </span>
-          </div>
-          
-          <div className="flex justify-between">
-            <span className="text-slate-400">leafletCSS:</span>
-            <span className={tileDebug.leafletCssLoaded ? 'text-green-400' : 'text-red-400'}>
-              {tileDebug.leafletCssLoaded ? 'YES' : 'NO'}
-            </span>
+          <div className="text-red-200/80 text-[9px]">
+            Try refreshing the page or check your internet connection.
           </div>
         </div>
-        
-        {/* Error URLs */}
-        {tileDebug.errorUrls.length > 0 && (
-          <div className="mt-1.5 pt-1.5 border-t border-slate-600">
-            <div className="text-red-400 font-bold mb-0.5">Failed URLs:</div>
-            {tileDebug.errorUrls.map((url, i) => (
-              <div key={i} className="text-red-300 truncate text-[9px]" title={url}>
-                {url.substring(0, 60)}...
-              </div>
-            ))}
-          </div>
-        )}
-        
-        {/* Diagnosis */}
-        <div className="mt-1.5 pt-1.5 border-t border-slate-600 text-[9px]">
-          {tileDebug.tileLoadCount > 0 && (
-            <div className="text-green-300">✓ Tiles loading - check CSS/z-index/opacity</div>
-          )}
-          {tileDebug.tileErrorCount > 0 && tileDebug.tileLoadCount === 0 && (
-            <div className="text-red-300">✗ Tile errors - check URLs above</div>
-          )}
-          {tileDebug.tileLoadCount === 0 && tileDebug.tileErrorCount === 0 && tileDebug.loadingStartCount === 0 && (
-            <div className="text-yellow-300">⚠ No events fired - TileLayer not mounted?</div>
-          )}
-          {!tileDebug.leafletCssLoaded && (
-            <div className="text-red-300">✗ Leaflet CSS missing!</div>
-          )}
-          {tileDebug.mapSize && (tileDebug.mapSize.x === 0 || tileDebug.mapSize.y === 0) && (
-            <div className="text-red-300">✗ Map has zero size!</div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
