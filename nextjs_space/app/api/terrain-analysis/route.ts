@@ -1,20 +1,20 @@
 // Terra Firma Terrain Analysis API Route
-// Proxies to Python geoprocessor on Modal - v3.2 (Feb 21, 2026)
+// Proxies to Python geoprocessor on Modal - v3.3 (Feb 27, 2026)
 
 import { NextRequest, NextResponse } from 'next/server';
 import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
 
 const MAX_AOI_ACRES = 5000;
-const REQUEST_TIMEOUT_MS = 30_000; // 30 seconds - fail fast for better UX
+const REQUEST_TIMEOUT_MS = 25_000; // 25 seconds - reduced for faster feedback
 
 // HARDCODED Modal v3 URL - do NOT rely on env vars for this critical path
 const GEOPROCESSOR_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/v1/terrain-analysis';
 
-// Warm-up check URL (lightweight health check)
-const HEALTH_CHECK_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/health';
-
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const reqId = Math.random().toString(36).substring(2, 8);
+  
+  console.log(`[Terrain:${reqId}] === REQUEST START ===`);
   
   try {
     const body = await request.json();
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
 
     // Validate parcel geometry - accept both Polygon and MultiPolygon
     if (!parcel || !parcel.geometry || (parcel.geometry.type !== 'Polygon' && parcel.geometry.type !== 'MultiPolygon')) {
+      console.log(`[Terrain:${reqId}] Invalid geometry`);
       return NextResponse.json(
         { code: 'INVALID_GEOMETRY', message: 'Valid parcel polygon or multipolygon required' },
         { status: 400 }
@@ -44,22 +45,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Call Python geoprocessor with robust error handling
-    console.log('[Terrain] Calling geoprocessor:', GEOPROCESSOR_URL);
-    console.log('[Terrain] Parcel acres:', Math.round(estimatedAcres), 'timeout:', REQUEST_TIMEOUT_MS);
+    console.log(`[Terrain:${reqId}] Acres: ${Math.round(estimatedAcres)}, timeout: ${REQUEST_TIMEOUT_MS}ms`);
     
     const fetchStart = Date.now();
+    
+    // Use AbortSignal.timeout() - modern approach that works better in edge runtime
+    const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    
+    console.log(`[Terrain:${reqId}] Fetch to Modal starting...`);
+    
     let response: Response;
-    
-    // Create AbortController for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      console.error('[Terrain] Aborting fetch after timeout');
-      controller.abort();
-    }, REQUEST_TIMEOUT_MS);
-    
     try {
-      console.log('[Terrain] Starting fetch...');
       response = await fetch(GEOPROCESSOR_URL, {
         method: 'POST',
         headers: { 
@@ -72,58 +68,65 @@ export async function POST(request: NextRequest) {
           seasonProfile: seasonProfile || 'rut',
           prevailingWinds: prevailingWinds || ['NW'],
         }),
-        signal: controller.signal,
-        // Explicitly set keepalive false to avoid connection pooling issues
-        keepalive: false,
+        signal: timeoutSignal,
+        cache: 'no-store', // Bypass any caching
       });
-      clearTimeout(timeoutId);
-      console.log('[Terrain] Geoprocessor responded in', Date.now() - fetchStart, 'ms, status:', response.status);
+      
+      const fetchDuration = Date.now() - fetchStart;
+      console.log(`[Terrain:${reqId}] Modal responded in ${fetchDuration}ms, status: ${response.status}`);
+      
     } catch (fetchErr) {
-      clearTimeout(timeoutId);
       const elapsed = Date.now() - fetchStart;
       const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       const errName = fetchErr instanceof Error ? fetchErr.name : 'Unknown';
-      console.error('[Terrain] Fetch failed after', elapsed, 'ms:', errName, errMsg);
+      console.error(`[Terrain:${reqId}] FETCH FAILED after ${elapsed}ms:`, errName, errMsg);
       
-      if (errName === 'AbortError' || errName === 'TimeoutError') {
+      // Handle timeout
+      if (errName === 'AbortError' || errName === 'TimeoutError' || errMsg.includes('timeout')) {
         return NextResponse.json(
-          { code: 'TIMEOUT', message: `Terrain server timeout after ${Math.round(elapsed/1000)}s. The analysis server may be warming up. Please try again.` },
+          { code: 'TIMEOUT', message: `Request timed out after ${Math.round(elapsed/1000)}s. Please try again.` },
           { status: 504 }
         );
       }
       
-      // Network errors - provide more detail
+      // Network errors
       return NextResponse.json(
-        { code: 'NETWORK_ERROR', message: `Failed to reach terrain server: ${errMsg}` },
+        { code: 'NETWORK_ERROR', message: `Network error: ${errMsg}` },
         { status: 503 }
       );
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[Terrain] Geoprocessor error:', response.status, errorText);
+      console.error(`[Terrain:${reqId}] Modal error:`, response.status, errorText.slice(0, 200));
       return NextResponse.json(
-        { code: 'SERVICE_ERROR', message: `Terrain service error: ${response.status}` },
+        { code: 'SERVICE_ERROR', message: `Service error: ${response.status}` },
         { status: 502 }
       );
     }
 
+    console.log(`[Terrain:${reqId}] Parsing response JSON...`);
     const result = await response.json() as TerrainAnalysisResponse;
+    const totalDuration = Date.now() - startTime;
+    
+    console.log(`[Terrain:${reqId}] === SUCCESS === Total: ${totalDuration}ms, mode: ${result.mode}`);
 
     // Update processing time to include network latency
     if (result.provenance) {
-      result.provenance.processingTimeSeconds = (Date.now() - startTime) / 1000;
+      result.provenance.processingTimeSeconds = totalDuration / 1000;
     }
 
     return NextResponse.json(result, {
       headers: {
         'X-Terrain-Mode': result.mode || 'real',
-        'X-Processing-Time-Ms': String(Date.now() - startTime),
+        'X-Processing-Time-Ms': String(totalDuration),
+        'X-Request-Id': reqId,
       },
     });
 
   } catch (error) {
-    console.error('[Terrain] Analysis error:', error);
+    const elapsed = Date.now() - startTime;
+    console.error(`[Terrain:${reqId}] UNHANDLED ERROR after ${elapsed}ms:`, error);
     
     const terrainError = error as TerrainAnalysisError;
     
@@ -134,16 +137,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for timeout
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      return NextResponse.json(
-        { code: 'TIMEOUT', message: 'Terrain analysis timed out' },
-        { status: 504 }
-      );
-    }
-
     return NextResponse.json(
-      { code: 'SERVICE_UNAVAILABLE', message: 'Terrain analysis service unavailable' },
+      { code: 'SERVICE_UNAVAILABLE', message: 'Service unavailable' },
       { status: 503 }
     );
   }
