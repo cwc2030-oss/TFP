@@ -453,6 +453,10 @@ function DeerIntelContent() {
       if (funnelLinesSource) {
         const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
         const lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
+        // Debug: log funnel types
+        const funnelTypes = lines.features.map(f => f.properties?.funnelType);
+        const typeCounts = funnelTypes.reduce((acc, t) => { acc[t || 'unknown'] = (acc[t || 'unknown'] || 0) + 1; return acc; }, {} as Record<string, number>);
+        console.log('[MAP] Funnel lines by type:', typeCounts, 'total:', lines.features.length);
         funnelLinesSource.setData(lines);
       }
 
@@ -484,9 +488,17 @@ function DeerIntelContent() {
         map.setLayoutProperty('tfp-bedding-outline', 'visibility', visibility.bedding ? 'visible' : 'none');
       }
 
-      // Funnel visibility
-      const funnelVisible = visibility.funnels || visibility.corridors;
+      // Funnel visibility - draws layer
+      if (map.getLayer('tfp-funnels-lines-draws')) {
+        map.setLayoutProperty('tfp-funnels-lines-draws', 'visibility', visibility.funnels ? 'visible' : 'none');
+      }
+      // Corridors layer (purple travel corridors)
+      if (map.getLayer('tfp-funnels-lines-corridors')) {
+        map.setLayoutProperty('tfp-funnels-lines-corridors', 'visibility', visibility.corridors ? 'visible' : 'none');
+      }
+      // Fallback layer
       if (map.getLayer('tfp-funnels-lines')) {
+        const funnelVisible = visibility.funnels || visibility.corridors;
         map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
       }
       if (map.getLayer('tfp-funnels-polys-fill')) {
@@ -621,13 +633,41 @@ function DeerIntelContent() {
           });
         }
         
-        // Funnel lines source (draws, corridors)
+        // Funnel lines source (draws, corridors) - separate by funnelType for different colors
         if (!map.getSource('tfp-funnels-lines')) {
           map.addSource('tfp-funnels-lines', { type: 'geojson', data: EMPTY_FC });
+          // Draws layer (blue)
+          map.addLayer({
+            id: 'tfp-funnels-lines-draws',
+            type: 'line',
+            source: 'tfp-funnels-lines',
+            filter: ['==', ['get', 'funnelType'], 'draw'],
+            paint: {
+              'line-color': LAYER_COLORS.funnelDraw,
+              'line-width': 3,
+            },
+          });
+          // Corridors layer (purple) - the travel corridors!
+          map.addLayer({
+            id: 'tfp-funnels-lines-corridors',
+            type: 'line',
+            source: 'tfp-funnels-lines',
+            filter: ['==', ['get', 'funnelType'], 'corridor'],
+            paint: {
+              'line-color': LAYER_COLORS.funnelCorridor,
+              'line-width': 4,
+              'line-dasharray': [2, 1],
+            },
+          });
+          // Fallback for any other line type
           map.addLayer({
             id: 'tfp-funnels-lines',
             type: 'line',
             source: 'tfp-funnels-lines',
+            filter: ['all', 
+              ['!=', ['get', 'funnelType'], 'draw'],
+              ['!=', ['get', 'funnelType'], 'corridor']
+            ],
             paint: {
               'line-color': LAYER_COLORS.funnelDraw,
               'line-width': 3,
@@ -696,16 +736,40 @@ function DeerIntelContent() {
           hoverPopup.remove();
         });
         
-        // Funnel lines hover (draws, corridors)
-        map.on('mouseenter', 'tfp-funnels-lines-line', (e) => {
+        // Funnel lines hover (draws) - blue
+        map.on('mouseenter', 'tfp-funnels-lines-draws', (e) => {
           map.getCanvas().style.cursor = 'pointer';
           if (e.features && e.features[0]) {
             const props = e.features[0].properties || {};
-            const typeIcon = props.funnelType === 'draw' ? '💧' : props.funnelType === 'corridor' ? '🦌' : '📍';
             const html = `
               <div style="padding: 8px; font-size: 13px;">
-                <div style="font-weight: bold; color: #F97316; margin-bottom: 6px;">
-                  ${typeIcon} ${(props.funnelType || 'Travel Route').toUpperCase()}
+                <div style="font-weight: bold; color: #3B82F6; margin-bottom: 6px;">
+                  💧 DRAW / DRAINAGE
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  ${props.flowAccumulation ? `<div>Flow: <b>${props.flowAccumulation}</b></div>` : ''}
+                  ${props.corridorScore ? `<div>Corridor Score: <b>${Math.round(Number(props.corridorScore) * 100)}%</b></div>` : ''}
+                  ${props.connectsBeddingToFood !== undefined ? `<div>Bedding→Food: <b>${props.connectsBeddingToFood ? 'Yes' : 'No'}</b></div>` : ''}
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-funnels-lines-draws', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Corridor lines hover (travel corridors) - purple
+        map.on('mouseenter', 'tfp-funnels-lines-corridors', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const html = `
+              <div style="padding: 8px; font-size: 13px;">
+                <div style="font-weight: bold; color: #A855F7; margin-bottom: 6px;">
+                  🦌 TRAVEL CORRIDOR
                 </div>
                 <div style="color: #ccc; line-height: 1.5;">
                   ${props.corridorScore ? `<div>Corridor Score: <b>${Math.round(Number(props.corridorScore) * 100)}%</b></div>` : ''}
@@ -717,7 +781,7 @@ function DeerIntelContent() {
             hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
           }
         });
-        map.on('mouseleave', 'tfp-funnels-lines-line', () => {
+        map.on('mouseleave', 'tfp-funnels-lines-corridors', () => {
           map.getCanvas().style.cursor = '';
           hoverPopup.remove();
         });
