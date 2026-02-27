@@ -356,7 +356,7 @@ function DeerIntelContent() {
             setProgressStep(step);
             setProgress(20 + Math.round(prog * 0.8)); // Scale 0-100 to 20-100
           },
-          120_000 // 120 second timeout
+          45_000 // 45 second timeout
         );
         
         if (!result.success) {
@@ -391,7 +391,7 @@ function DeerIntelContent() {
           setProgressStep(step);
           setProgress(20 + Math.round(prog * 0.8)); // Scale 0-100 to 20-100
         },
-        120_000 // 120 second timeout for Modal cold starts
+        45_000 // 45 second timeout
       );
 
       const totalDuration = Date.now() - startTime;

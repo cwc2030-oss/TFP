@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
 
 const MAX_AOI_ACRES = 5000;
-const REQUEST_TIMEOUT_MS = 120_000; // 120 seconds for Modal cold starts
+const REQUEST_TIMEOUT_MS = 30_000; // 30 seconds - fail fast for better UX
 
 // HARDCODED Modal v3 URL - do NOT rely on env vars for this critical path
 const GEOPROCESSOR_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/v1/terrain-analysis';
@@ -44,39 +44,57 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Call Python geoprocessor - NO FALLBACK
+    // Call Python geoprocessor with robust error handling
     console.log('[Terrain] Calling geoprocessor:', GEOPROCESSOR_URL);
     console.log('[Terrain] Parcel acres:', Math.round(estimatedAcres), 'timeout:', REQUEST_TIMEOUT_MS);
     
     const fetchStart = Date.now();
     let response: Response;
     
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.error('[Terrain] Aborting fetch after timeout');
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+    
     try {
+      console.log('[Terrain] Starting fetch...');
       response = await fetch(GEOPROCESSOR_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify({
           parcel,
           bufferMeters: bufferMeters || 800,
           seasonProfile: seasonProfile || 'rut',
           prevailingWinds: prevailingWinds || ['NW'],
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: controller.signal,
+        // Explicitly set keepalive false to avoid connection pooling issues
+        keepalive: false,
       });
+      clearTimeout(timeoutId);
       console.log('[Terrain] Geoprocessor responded in', Date.now() - fetchStart, 'ms, status:', response.status);
     } catch (fetchErr) {
+      clearTimeout(timeoutId);
       const elapsed = Date.now() - fetchStart;
-      console.error('[Terrain] Fetch failed after', elapsed, 'ms:', fetchErr);
+      const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      const errName = fetchErr instanceof Error ? fetchErr.name : 'Unknown';
+      console.error('[Terrain] Fetch failed after', elapsed, 'ms:', errName, errMsg);
       
-      if (fetchErr instanceof Error && fetchErr.name === 'TimeoutError') {
+      if (errName === 'AbortError' || errName === 'TimeoutError') {
         return NextResponse.json(
-          { code: 'TIMEOUT', message: `Terrain server timeout after ${Math.round(elapsed/1000)}s. Please try again.` },
+          { code: 'TIMEOUT', message: `Terrain server timeout after ${Math.round(elapsed/1000)}s. The analysis server may be warming up. Please try again.` },
           { status: 504 }
         );
       }
       
+      // Network errors - provide more detail
       return NextResponse.json(
-        { code: 'NETWORK_ERROR', message: 'Failed to reach terrain server' },
+        { code: 'NETWORK_ERROR', message: `Failed to reach terrain server: ${errMsg}` },
         { status: 503 }
       );
     }

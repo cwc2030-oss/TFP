@@ -24,8 +24,8 @@ export interface FetchProgressCallback {
   (step: string, progress: number): void;
 }
 
-// Default timeout: 120 seconds for Modal cold starts
-const DEFAULT_TIMEOUT_MS = 120_000;
+// Default timeout: 45 seconds - fail fast for better UX
+const DEFAULT_TIMEOUT_MS = 45_000;
 
 /**
  * Fetch terrain analysis from /api/terrain-analysis
@@ -54,30 +54,27 @@ export async function fetchTerrainAnalysis(
   
   onProgress?.('Connecting to terrain server...', 15);
 
-  // Progress ticker for long-running requests (Modal cold starts)
+  // Progress ticker for shorter timeout (45s total)
   let progressTick = 15;
   const progressMessages = [
-    { at: 3000, msg: 'Initializing terrain engine...', prog: 20 },
-    { at: 8000, msg: 'Processing elevation data...', prog: 30 },
-    { at: 15000, msg: 'Computing deer corridors...', prog: 40 },
-    { at: 25000, msg: 'Analyzing terrain features...', prog: 50 },
-    { at: 40000, msg: 'Still processing (server warming up)...', prog: 55 },
-    { at: 55000, msg: 'Almost there...', prog: 60 },
-    { at: 70000, msg: 'Finalizing analysis...', prog: 65 },
-    { at: 90000, msg: 'Server is responding slowly...', prog: 68 },
+    { at: 2000, msg: 'Initializing terrain engine...', prog: 20 },
+    { at: 5000, msg: 'Processing elevation data...', prog: 30 },
+    { at: 10000, msg: 'Computing deer corridors...', prog: 45 },
+    { at: 18000, msg: 'Analyzing terrain features...', prog: 55 },
+    { at: 28000, msg: 'Finalizing analysis...', prog: 65 },
+    { at: 38000, msg: 'Almost complete...', prog: 70 },
   ];
   
-  console.log('[TerrainClient] Starting progress ticker');
+  console.log('[TerrainClient] Starting progress ticker (timeout: ' + timeoutMs + 'ms)');
   const progressInterval = setInterval(() => {
     const elapsed = Date.now() - startTime;
-    console.log(`[TerrainClient] Tick: ${elapsed}ms, currentProg: ${progressTick}`);
     const nextMsg = progressMessages.find(p => p.at <= elapsed && p.prog > progressTick);
     if (nextMsg) {
       progressTick = nextMsg.prog;
-      console.log(`[TerrainClient] Progress update: ${nextMsg.msg} (${nextMsg.prog}%)`);
+      console.log(`[TerrainClient] Progress: ${nextMsg.msg} (${nextMsg.prog}%) at ${elapsed}ms`);
       onProgress?.(nextMsg.msg, nextMsg.prog);
     }
-  }, 1500); // Check every 1.5 seconds for smoother updates
+  }, 1000); // Check every second
 
   try {
     // Create abort controller for timeout
