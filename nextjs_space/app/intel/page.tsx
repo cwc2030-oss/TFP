@@ -193,24 +193,25 @@ const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: strin
   { value: 'late', label: 'Late Season', dates: 'Dec-Jan', icon: '❄️' },
 ];
 
-// ========== V1 STYLING RULES (Deterministic) ==========
-// Corridors: Score-based 3-tier colors
-//   High (≥0.7): Bright purple #a855f7 - primary travel routes
-//   Med (0.4-0.7): Muted purple #7c3aed - secondary routes  
-//   Low (<0.4): Light purple #c4b5fd - potential routes
+// ========== V1 STYLING RULES (Final Visual Direction) ==========
+// Corridors: Confidence-based styling
+//   High (≥0.7): SOLID bright red-violet, thick - primary travel routes
+//   Med (0.4-0.7): SOLID purple - secondary routes  
+//   Low (<0.4): DASHED light lavender - potential routes (ONLY low confidence is dashed)
 // Draws: Solid blue lines (water/drainage)
 // Saddles: Orange polygons (pinch points)
-// Stands: Red (top 3) / Amber (4-7) / Gray (8-10)
+// Stands: #1 gets gold ring (Today's Sit), #2 red
 
 const LAYER_COLORS = {
   bedding: '#22c55e',
   beddingOutline: '#16a34a',
   funnelSaddle: '#f97316',
   funnelDraw: '#3b82f6',           // Solid blue for draws
-  corridorHigh: '#a855f7',         // High score ≥0.7
-  corridorMed: '#7c3aed',          // Med score 0.4-0.7
-  corridorLow: '#c4b5fd',          // Low score <0.4
-  standHigh: '#ef4444',
+  corridorHigh: '#db2777',         // High score ≥0.7: bright red-violet (pink-600)
+  corridorMed: '#9333ea',          // Med score 0.4-0.7: solid purple (purple-600)
+  corridorLow: '#c4b5fd',          // Low score <0.4: light lavender (DASHED only)
+  standHigh: '#ef4444',            // #2+ stands: red
+  standGold: '#fbbf24',            // #1 Today's Sit: gold highlight ring
   standMed: '#f59e0b',
   standLow: '#6b7280',
   parcelBoundary: '#fbbf24',
@@ -502,7 +503,14 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-funnels-lines-draws')) {
         map.setLayoutProperty('tfp-funnels-lines-draws', 'visibility', visibility.funnels ? 'visible' : 'none');
       }
-      // Corridors layer (purple travel corridors)
+      // Corridors layers (solid for high/med, dashed for low)
+      if (map.getLayer('tfp-funnels-lines-corridors-solid')) {
+        map.setLayoutProperty('tfp-funnels-lines-corridors-solid', 'visibility', visibility.corridors ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-funnels-lines-corridors-dashed')) {
+        map.setLayoutProperty('tfp-funnels-lines-corridors-dashed', 'visibility', visibility.corridors ? 'visible' : 'none');
+      }
+      // Legacy corridors layer (for compatibility)
       if (map.getLayer('tfp-funnels-lines-corridors')) {
         map.setLayoutProperty('tfp-funnels-lines-corridors', 'visibility', visibility.corridors ? 'visible' : 'none');
       }
@@ -657,28 +665,57 @@ function DeerIntelContent() {
               'line-width': 3,
             },
           });
-          // Corridors layer (purple dashed) - score-based 3-tier colors
+          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines
+          map.addLayer({
+            id: 'tfp-funnels-lines-corridors-solid',
+            type: 'line',
+            source: 'tfp-funnels-lines',
+            filter: ['all', 
+              ['==', ['get', 'funnelType'], 'corridor'],
+              ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4]  // Med + High only
+            ],
+            paint: {
+              // Score-based color: High ≥0.7 (bright red-violet), Med 0.4-0.7 (purple)
+              'line-color': [
+                'case',
+                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], LAYER_COLORS.corridorHigh,
+                LAYER_COLORS.corridorMed
+              ],
+              // Thick lines for high confidence
+              'line-width': [
+                'case',
+                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], 6,  // High = thick
+                4  // Medium = medium
+              ],
+              // SOLID - no dash array
+            },
+          });
+          
+          // Corridors layer: LOW confidence = DASHED lines only
+          map.addLayer({
+            id: 'tfp-funnels-lines-corridors-dashed',
+            type: 'line',
+            source: 'tfp-funnels-lines',
+            filter: ['all', 
+              ['==', ['get', 'funnelType'], 'corridor'],
+              ['<', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4]  // Low only
+            ],
+            paint: {
+              'line-color': LAYER_COLORS.corridorLow,  // Light lavender
+              'line-width': 3,
+              'line-dasharray': [3, 2],  // DASHED = low confidence only
+            },
+          });
+          
+          // Legacy layer ID for compatibility (hidden, references both solid + dashed)
           map.addLayer({
             id: 'tfp-funnels-lines-corridors',
             type: 'line',
             source: 'tfp-funnels-lines',
-            filter: ['==', ['get', 'funnelType'], 'corridor'],
+            filter: ['==', ['literal', false], true],  // Never matches, just for layer existence
             paint: {
-              // Score-based color: High ≥0.7 (bright), Med 0.4-0.7 (muted), Low <0.4 (light)
-              'line-color': [
-                'case',
-                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], LAYER_COLORS.corridorHigh,
-                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4], LAYER_COLORS.corridorMed,
-                LAYER_COLORS.corridorLow
-              ],
-              // Wider lines for higher scores
-              'line-width': [
-                'interpolate', ['linear'], ['coalesce', ['get', 'corridorScore'], 0.5],
-                0, 2,
-                0.5, 4,
-                1, 6
-              ],
-              'line-dasharray': [2, 1],  // Dashed = travel corridor
+              'line-color': 'transparent',
+              'line-width': 0,
             },
           });
           // Fallback for any other line type
@@ -783,21 +820,22 @@ function DeerIntelContent() {
           hoverPopup.remove();
         });
         
-        // Corridor lines hover (travel corridors) - score-based color
-        map.on('mouseenter', 'tfp-funnels-lines-corridors', (e) => {
+        // Corridor lines hover (travel corridors) - helper function
+        const handleCorridorHover = (e: mapboxgl.MapLayerMouseEvent) => {
           map.getCanvas().style.cursor = 'pointer';
           if (e.features && e.features[0]) {
             const props = e.features[0].properties || {};
             const score = Number(props.corridorScore) || 0.5;
-            const tier = score >= 0.7 ? 'PRIMARY' : score >= 0.4 ? 'SECONDARY' : 'POTENTIAL';
+            const tier = score >= 0.7 ? 'HIGH CONFIDENCE' : score >= 0.4 ? 'MEDIUM' : 'LOW CONFIDENCE';
             const tierColor = score >= 0.7 ? LAYER_COLORS.corridorHigh : score >= 0.4 ? LAYER_COLORS.corridorMed : LAYER_COLORS.corridorLow;
+            const lineStyle = score < 0.4 ? ' (dashed)' : ' (solid)';
             const html = `
               <div style="padding: 8px; font-size: 13px;">
                 <div style="font-weight: bold; color: ${tierColor}; margin-bottom: 6px;">
-                  🦌 ${tier} CORRIDOR
+                  🦌 ${tier} CORRIDOR${lineStyle}
                 </div>
                 <div style="color: #ccc; line-height: 1.5;">
-                  <div>Score: <b style="color: ${tierColor}">${Math.round(score * 100)}%</b></div>
+                  <div>Confidence: <b style="color: ${tierColor}">${Math.round(score * 100)}%</b></div>
                   ${props.connectsBeddingToFood !== undefined ? `<div>Bedding→Food: <b>${props.connectsBeddingToFood ? 'Yes' : 'No'}</b></div>` : ''}
                   ${props.leastCostPath !== undefined ? `<div>Primary Path: <b>${props.leastCostPath ? 'Yes' : 'No'}</b></div>` : ''}
                 </div>
@@ -805,11 +843,17 @@ function DeerIntelContent() {
             `;
             hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
           }
-        });
-        map.on('mouseleave', 'tfp-funnels-lines-corridors', () => {
+        };
+        const handleCorridorLeave = () => {
           map.getCanvas().style.cursor = '';
           hoverPopup.remove();
-        });
+        };
+        
+        // Attach hover to both solid and dashed corridor layers
+        map.on('mouseenter', 'tfp-funnels-lines-corridors-solid', handleCorridorHover);
+        map.on('mouseleave', 'tfp-funnels-lines-corridors-solid', handleCorridorLeave);
+        map.on('mouseenter', 'tfp-funnels-lines-corridors-dashed', handleCorridorHover);
+        map.on('mouseleave', 'tfp-funnels-lines-corridors-dashed', handleCorridorLeave);
         
         // Funnel polygons hover (saddles)
         map.on('mouseenter', 'tfp-funnels-polys-fill', (e) => {
@@ -926,27 +970,59 @@ function DeerIntelContent() {
       const props = feature.properties as StandPointProperties;
       const coords = feature.geometry.coordinates as [number, number];
 
+      // #1 gets gold highlight ring = "Today's Sit"
+      const isTopStand = props.rank === 1;
+      const markerColor = isTopStand ? LAYER_COLORS.standHigh : LAYER_COLORS.standHigh;
+      const ringColor = isTopStand ? LAYER_COLORS.standGold : 'white';
+      const ringWidth = isTopStand ? 6 : 4;
+      const markerSize = isTopStand ? 56 : 48;
+      const fontSize = isTopStand ? 22 : 20;
+
       const el = document.createElement('div');
       el.className = 'intel-stand-marker';
       el.innerHTML = `
         <div style="
-          width: 48px;
-          height: 48px;
-          background: ${LAYER_COLORS.standHigh};
-          border: 4px solid white;
+          position: relative;
+          width: ${markerSize}px;
+          height: ${markerSize}px;
+          ${isTopStand ? `
+            background: linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b);
+            border: ${ringWidth}px solid ${LAYER_COLORS.standGold};
+            box-shadow: 0 0 20px ${LAYER_COLORS.standGold}80, 0 6px 20px rgba(0,0,0,0.5);
+          ` : `
+            background: ${markerColor};
+            border: ${ringWidth}px solid ${ringColor};
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+          `}
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
           color: white;
           font-weight: bold;
-          font-size: 20px;
-          box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+          font-size: ${fontSize}px;
           cursor: pointer;
           transition: transform 0.2s, box-shadow 0.2s;
         ">
-          ${props.rank}
+          ${isTopStand ? '⭐' : props.rank}
         </div>
+        ${isTopStand ? `
+          <div style="
+            position: absolute;
+            bottom: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b);
+            color: #1a1a1a;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          ">Today's Sit</div>
+        ` : ''}
       `;
 
       // Hover tooltip for quick info
@@ -970,9 +1046,11 @@ function DeerIntelContent() {
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
       `;
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
+      const tooltipColor = props.rank === 1 ? LAYER_COLORS.standGold : props.rank <= 3 ? LAYER_COLORS.standHigh : LAYER_COLORS.standMed;
+      const standLabel = props.rank === 1 ? "⭐ Today's Sit" : `Stand #${props.rank}`;
       hoverTooltip.innerHTML = `
-        <div style="font-weight: bold; color: ${props.rank <= 3 ? LAYER_COLORS.standHigh : LAYER_COLORS.standMed}; font-size: 13px; margin-bottom: 4px;">
-          Stand #${props.rank} • ${props.score}/100
+        <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 4px;">
+          ${standLabel} • ${props.score}/100
         </div>
         <div style="color: #ccc; font-size: 12px; line-height: 1.4;">
           <div>🌬️ Best Wind: <b style="color: #22c55e">${props.windOk.slice(0, 2).join(', ')}</b></div>
@@ -1015,19 +1093,27 @@ function DeerIntelContent() {
 
     if (popupRef.current) popupRef.current.remove();
 
+    // #1 = Today's Sit with gold styling
+    const isTodaysSit = props.rank === 1;
+    const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` : 
+      props.rank <= 3 ? LAYER_COLORS.standHigh : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow;
+    const popupBadgeLabel = isTodaysSit ? "⭐ Today's Sit" : `Stand #${props.rank}`;
+    const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
+    
     const popup = new mapboxgl.Popup({ closeButton: true, maxWidth: '340px', className: 'intel-popup' })
       .setLngLat(coords)
       .setHTML(`
         <div style="padding: 16px; font-family: system-ui, sans-serif;">
           <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
             <span style="
-              background: ${props.rank <= 3 ? LAYER_COLORS.standHigh : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow};
-              color: white;
+              background: ${popupBadgeColor};
+              color: ${badgeTextColor};
               font-weight: bold;
               padding: 6px 14px;
               border-radius: 16px;
               font-size: 15px;
-            ">Stand #${props.rank}</span>
+              ${isTodaysSit ? 'box-shadow: 0 0 12px rgba(251, 191, 36, 0.5);' : ''}
+            ">${popupBadgeLabel}</span>
             <span style="font-weight: 700; font-size: 22px;">${props.score}<span style="font-size: 14px; color: #6b7280;">/100</span></span>
           </div>
           
@@ -1438,33 +1524,33 @@ function DeerIntelContent() {
                   <button
                     onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
                     className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
-                      visibility.corridors ? 'bg-purple-500/20 border border-purple-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                      visibility.corridors ? 'bg-pink-600/20 border border-pink-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
                     }`}
                   >
                     <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.corridorHigh }} />
                     <span className="text-sm text-white/90 flex-1 text-left">Travel Corridors</span>
-                    {visibility.corridors && <Check className="h-4 w-4 text-purple-400" />}
+                    {visibility.corridors && <Check className="h-4 w-4 text-pink-400" />}
                   </button>
                   <button
                     onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
                     className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
-                      visibility.stands ? 'bg-red-500/20 border border-red-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                      visibility.stands ? 'bg-amber-500/20 border border-amber-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
                     }`}
                   >
-                    <span className="w-4 h-4 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
-                    <span className="text-sm text-white/90 flex-1 text-left">Stand Sites</span>
-                    {visibility.stands && <Check className="h-4 w-4 text-red-400" />}
+                    <span className="w-4 h-4 rounded-full" style={{ background: `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` }} />
+                    <span className="text-sm text-white/90 flex-1 text-left">Sit Locations</span>
+                    {visibility.stands && <Check className="h-4 w-4 text-amber-400" />}
                   </button>
                 </div>
               </div>
 
-              {/* Intel Summary - Top 3 Sit Locations */}
+              {/* Intel Summary - Top Sit Locations */}
               <div className="p-4 border-b border-white/10 bg-gradient-to-r from-amber-500/10 to-transparent">
                 <h3 className="font-bold text-white flex items-center gap-2">
                   <Target className="h-4 w-4 text-amber-500" />
                   Intel Summary
                 </h3>
-                <p className="text-xs text-white/60 mt-1">Top 3 sit locations for this parcel</p>
+                <p className="text-xs text-white/60 mt-1">Top sit locations for this parcel</p>
                 
                 {/* Quick Stats */}
                 {summary && (
@@ -1482,10 +1568,11 @@ function DeerIntelContent() {
               </div>
 
               <div className="flex-1">
-                {(layers?.standPoints?.features || []).slice(0, 3).map((feature) => {
+                {(layers?.standPoints?.features || []).slice(0, 2).map((feature) => {
                   const props = feature.properties as StandPointProperties;
                   const isSelected = selectedStand === props.rank;
                   const coords = feature.geometry.coordinates as [number, number];
+                  const isTodaysSit = props.rank === 1;
 
                   return (
                     <button
@@ -1497,19 +1584,33 @@ function DeerIntelContent() {
                       }}
                       className={`
                         w-full px-4 py-3 text-left transition-colors border-b border-white/5
-                        ${isSelected ? 'bg-amber-500/20' : 'hover:bg-white/5'}
+                        ${isSelected ? (isTodaysSit ? 'bg-amber-500/30' : 'bg-red-500/20') : 'hover:bg-white/5'}
                       `}
                     >
                       <div className="flex items-center gap-3">
                         <span
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-lg"
-                          style={{ background: props.rank <= 2 ? LAYER_COLORS.standHigh : LAYER_COLORS.standMed }}
+                          className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0 ${
+                            isTodaysSit ? 'text-gray-900' : 'text-white'
+                          }`}
+                          style={{ 
+                            background: isTodaysSit 
+                              ? `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` 
+                              : LAYER_COLORS.standHigh,
+                            boxShadow: isTodaysSit 
+                              ? `0 0 16px ${LAYER_COLORS.standGold}80` 
+                              : '0 4px 12px rgba(0,0,0,0.3)'
+                          }}
                         >
-                          {props.rank}
+                          {isTodaysSit ? '⭐' : props.rank}
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
-                            <span className="font-bold text-white text-lg">{props.score}<span className="text-white/50 text-sm">/100</span></span>
+                            <div className="flex items-center gap-2">
+                              <span className={`font-bold text-lg ${isTodaysSit ? 'text-amber-300' : 'text-white'}`}>
+                                {isTodaysSit ? "Today's Sit" : `Stand #${props.rank}`}
+                              </span>
+                              <span className="text-white/50 text-sm">{props.score}/100</span>
+                            </div>
                             <span className={`text-xs px-2 py-0.5 rounded font-medium ${
                               props.approachRisk === 'low' ? 'bg-green-500/30 text-green-300' :
                               props.approachRisk === 'medium' ? 'bg-amber-500/30 text-amber-300' :
@@ -1518,7 +1619,7 @@ function DeerIntelContent() {
                               {props.approachRisk} risk
                             </span>
                           </div>
-                          <p className="text-xs text-white/60 mt-1">{props.reasoning}</p>
+                          <p className="text-xs text-white/60 mt-1 line-clamp-1">{props.reasoning}</p>
                           <div className="flex gap-3 mt-2 text-xs">
                             <span className="text-green-400">✓ Wind: {props.windOk.slice(0,2).join(', ')}</span>
                           </div>
@@ -1600,8 +1701,9 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-gray-900/90 backdrop-blur rounded-lg px-4 py-2 flex items-center gap-6 text-xs text-white/70 border border-white/10">
+      {/* Legend - Premium V1 styling */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-gray-900/95 backdrop-blur rounded-xl px-5 py-3 flex items-center gap-5 text-xs text-white/80 border border-white/15 shadow-2xl">
+        {/* Terrain */}
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding }} />
           <span>Bedding</span>
@@ -1614,24 +1716,33 @@ function DeerIntelContent() {
           <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelDraw }} />
           <span>Draw</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.corridorHigh }} />
-          <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.corridorMed }} />
-          <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.corridorLow }} />
-          <span>Corridor</span>
+        
+        <div className="h-5 w-px bg-white/20" />
+        
+        {/* Corridors - Confidence based */}
+        <div className="flex items-center gap-2">
+          <span className="w-6 h-1 rounded-full" style={{ background: LAYER_COLORS.corridorHigh }} />
+          <span>High</span>
         </div>
-        <div className="h-4 w-px bg-white/20" />
+        <div className="flex items-center gap-2">
+          <span className="w-5 h-0.5 rounded-full" style={{ background: LAYER_COLORS.corridorMed }} />
+          <span>Med</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-0.5 rounded-full opacity-70" style={{ background: LAYER_COLORS.corridorLow, borderTop: '2px dashed' }} />
+          <span className="text-white/60">Low</span>
+        </div>
+        
+        <div className="h-5 w-px bg-white/20" />
+        
+        {/* Stands */}
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px]" style={{ background: `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)`, boxShadow: `0 0 8px ${LAYER_COLORS.standGold}60` }}>⭐</span>
+          <span className="text-amber-300 font-medium">#1 Sit</span>
+        </div>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
-          <span>Top 3</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standMed }} />
-          <span>4-7</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standLow }} />
-          <span>8-10</span>
+          <span>#2</span>
         </div>
       </div>
     </div>
