@@ -15,13 +15,12 @@ import {
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import {
-  computeStandScore,
   scoreStandsWithExceptional,
   shouldRecomputeWind,
-  DEFAULT_INPUTS,
   type StandInputs,
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
+import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -715,56 +714,10 @@ function DeerIntelContent() {
 
   // ========== ALIGNMENT ENGINE HELPERS ==========
   
-  // Wind direction to degrees mapping
+  // Wind direction to degrees mapping (for stability check)
   const windToDegrees: Record<WindDirection, number> = {
     N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315
   };
-
-  // Convert current season to season_fit (0-1)
-  const getSeasonFit = useCallback((currentSeason: SeasonProfile): number => {
-    // During rut, stands near corridors are best (high fit)
-    // Early/late season, bedding proximity matters more
-    switch (currentSeason) {
-      case 'rut': return 0.85;
-      case 'early': return 0.65;
-      case 'late': return 0.55;
-      default: return 0.5;
-    }
-  }, []);
-
-  // Convert time of day to time_fit (default 0.5 for now - could add time selector later)
-  const getTimeFit = useCallback((): number => {
-    return 0.5; // Conservative default
-  }, []);
-
-  // Convert StandPointProperties → StandInputs
-  const standToAlignmentInputs = useCallback((
-    props: StandPointProperties,
-    currentWind: WindDirection,
-    currentSeason: SeasonProfile
-  ): StandInputs => {
-    // Movement: derive from corridor proximity (closer = higher movement)
-    // distToCorridorMeters typically 0-500m, invert and normalize
-    const movement = Math.max(0, Math.min(1, 1 - (props.distToCorridorMeters / 400)));
-
-    // Wind overlap: check if current wind is in bad winds list
-    const windIsBad = props.windBad.includes(currentWind);
-    const windIsGood = props.windOk.includes(currentWind);
-    // 0 = clean (good wind), 1 = heavy overlap (bad wind)
-    const wind_overlap = windIsBad ? 0.9 : windIsGood ? 0.1 : 0.35;
-
-    // Intrusion: derive from approach risk
-    const intrusion = props.approachRisk === 'low' ? 0.15 :
-                      props.approachRisk === 'medium' ? 0.45 : 0.8;
-
-    return {
-      movement,
-      wind_overlap,
-      intrusion,
-      time_fit: getTimeFit(),
-      season_fit: getSeasonFit(currentSeason),
-    };
-  }, [getSeasonFit, getTimeFit]);
 
   // Compute alignment for all stands
   const computeAlignmentScores = useCallback(() => {
@@ -776,9 +729,24 @@ function DeerIntelContent() {
     }
 
     const stands = layers.standPoints.features;
-    const inputs: StandInputs[] = stands.map(f => 
-      standToAlignmentInputs(f.properties as StandPointProperties, windDirection, season)
-    );
+    const windDirDeg = windDirectionToDeg(windDirection);
+    
+    // Use smooth adapter functions for stable, defensible inputs
+    const inputs: StandInputs[] = stands.map(f => {
+      const props = f.properties as StandPointProperties;
+      return buildStandInputs(
+        {
+          distToCorridorMeters: props.distToCorridorMeters,
+          approachRisk: props.approachRisk,
+          windOk: props.windOk, // Used to derive preferred wind bearing
+        },
+        {
+          windDirDeg,
+          season,
+          // timeFit: 0.5 (default, could add time selector later)
+        }
+      );
+    });
 
     const { scores, parcelStrength: ps, exceptionalIndex: ei } = scoreStandsWithExceptional(inputs);
 
@@ -823,7 +791,7 @@ function DeerIntelContent() {
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season, highlightedStandRank, standToAlignmentInputs]);
+  }, [layers?.standPoints, windDirection, season, highlightedStandRank]);
 
   // Recompute alignment when layers, wind, or season change
   useEffect(() => {
