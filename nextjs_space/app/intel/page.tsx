@@ -14,6 +14,14 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import {
+  computeStandScore,
+  scoreStandsWithExceptional,
+  shouldRecomputeWind,
+  DEFAULT_INPUTS,
+  type StandInputs,
+  type StandScore,
+} from '@/lib/scoring/stand-alignment';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -647,6 +655,25 @@ function DeerIntelContent() {
     adjacentBoundary: GeoJSON.FeatureCollection;
   } | null>(null);
 
+  // ========== ALIGNMENT ENGINE STATE ==========
+  type AlignedStand = {
+    rank: number;
+    props: StandPointProperties;
+    inputs: StandInputs;
+    alignment: StandScore;
+    coords: [number, number];
+  };
+  const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
+  const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
+  const [exceptionalIndex, setExceptionalIndex] = useState<number | null>(null);
+  const [parcelStrength, setParcelStrength] = useState<number>(0);
+  const [prevWindDirection, setPrevWindDirection] = useState<WindDirection | null>(null);
+  const [mostAlignedHint, setMostAlignedHint] = useState<{ standRank: number; name: string } | null>(null);
+  const [alignmentPanelExpanded, setAlignmentPanelExpanded] = useState(true);
+  const [userHasInteracted, setUserHasInteracted] = useState(false);
+  const mostAlignedDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const hintFadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // ========== GLOBAL ERROR HANDLERS ==========
   useEffect(() => {
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
@@ -685,6 +712,145 @@ function DeerIntelContent() {
   const checkWebGLSupport = (): boolean => {
     return true; // Let Mapbox handle gracefully
   };
+
+  // ========== ALIGNMENT ENGINE HELPERS ==========
+  
+  // Wind direction to degrees mapping
+  const windToDegrees: Record<WindDirection, number> = {
+    N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315
+  };
+
+  // Convert current season to season_fit (0-1)
+  const getSeasonFit = useCallback((currentSeason: SeasonProfile): number => {
+    // During rut, stands near corridors are best (high fit)
+    // Early/late season, bedding proximity matters more
+    switch (currentSeason) {
+      case 'rut': return 0.85;
+      case 'early': return 0.65;
+      case 'late': return 0.55;
+      default: return 0.5;
+    }
+  }, []);
+
+  // Convert time of day to time_fit (default 0.5 for now - could add time selector later)
+  const getTimeFit = useCallback((): number => {
+    return 0.5; // Conservative default
+  }, []);
+
+  // Convert StandPointProperties → StandInputs
+  const standToAlignmentInputs = useCallback((
+    props: StandPointProperties,
+    currentWind: WindDirection,
+    currentSeason: SeasonProfile
+  ): StandInputs => {
+    // Movement: derive from corridor proximity (closer = higher movement)
+    // distToCorridorMeters typically 0-500m, invert and normalize
+    const movement = Math.max(0, Math.min(1, 1 - (props.distToCorridorMeters / 400)));
+
+    // Wind overlap: check if current wind is in bad winds list
+    const windIsBad = props.windBad.includes(currentWind);
+    const windIsGood = props.windOk.includes(currentWind);
+    // 0 = clean (good wind), 1 = heavy overlap (bad wind)
+    const wind_overlap = windIsBad ? 0.9 : windIsGood ? 0.1 : 0.35;
+
+    // Intrusion: derive from approach risk
+    const intrusion = props.approachRisk === 'low' ? 0.15 :
+                      props.approachRisk === 'medium' ? 0.45 : 0.8;
+
+    return {
+      movement,
+      wind_overlap,
+      intrusion,
+      time_fit: getTimeFit(),
+      season_fit: getSeasonFit(currentSeason),
+    };
+  }, [getSeasonFit, getTimeFit]);
+
+  // Compute alignment for all stands
+  const computeAlignmentScores = useCallback(() => {
+    if (!layers?.standPoints?.features?.length) {
+      setAlignedStands([]);
+      setExceptionalIndex(null);
+      setParcelStrength(0);
+      return;
+    }
+
+    const stands = layers.standPoints.features;
+    const inputs: StandInputs[] = stands.map(f => 
+      standToAlignmentInputs(f.properties as StandPointProperties, windDirection, season)
+    );
+
+    const { scores, parcelStrength: ps, exceptionalIndex: ei } = scoreStandsWithExceptional(inputs);
+
+    // Build aligned stands array sorted by score desc
+    const aligned: AlignedStand[] = stands.map((f, i) => ({
+      rank: (f.properties as StandPointProperties).rank,
+      props: f.properties as StandPointProperties,
+      inputs: inputs[i],
+      alignment: scores[i],
+      coords: f.geometry.coordinates as [number, number],
+    })).sort((a, b) => b.alignment.score - a.alignment.score);
+
+    setAlignedStands(aligned);
+    setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
+    setParcelStrength(ps);
+
+    // Set initial highlighted stand to top
+    if (highlightedStandRank === null && aligned.length > 0) {
+      setHighlightedStandRank(aligned[0].rank);
+    }
+
+    // Check for "most aligned" hint
+    if (highlightedStandRank !== null && aligned.length > 0) {
+      const currentHighlighted = aligned.find(s => s.rank === highlightedStandRank);
+      const newTop = aligned[0];
+      
+      if (currentHighlighted && newTop.rank !== highlightedStandRank) {
+        const scoreDiff = newTop.alignment.score - currentHighlighted.alignment.score;
+        
+        if (scoreDiff >= 5) {
+          // Start 2s debounce for hint
+          if (mostAlignedDebounceRef.current) clearTimeout(mostAlignedDebounceRef.current);
+          mostAlignedDebounceRef.current = setTimeout(() => {
+            // Verify still true
+            if (aligned[0].rank === newTop.rank && scoreDiff >= 5) {
+              setMostAlignedHint({ standRank: newTop.rank, name: `Stand #${newTop.rank}` });
+              // Auto-fade after 6s
+              if (hintFadeTimeoutRef.current) clearTimeout(hintFadeTimeoutRef.current);
+              hintFadeTimeoutRef.current = setTimeout(() => setMostAlignedHint(null), 6000);
+            }
+          }, 2000);
+        }
+      }
+    }
+  }, [layers?.standPoints, windDirection, season, highlightedStandRank, standToAlignmentInputs]);
+
+  // Recompute alignment when layers, wind, or season change
+  useEffect(() => {
+    if (!layers?.standPoints) return;
+    
+    // Check wind stability
+    if (prevWindDirection !== null) {
+      const prevDeg = windToDegrees[prevWindDirection];
+      const newDeg = windToDegrees[windDirection];
+      if (!shouldRecomputeWind(prevDeg, newDeg)) {
+        // Wind change too small, skip recompute
+        return;
+      }
+    }
+    
+    setPrevWindDirection(windDirection);
+    computeAlignmentScores();
+  }, [layers?.standPoints, windDirection, season, computeAlignmentScores, prevWindDirection]);
+
+  // Track user interaction for panel collapse
+  const handleUserInteraction = useCallback(() => {
+    if (!userHasInteracted) {
+      setUserHasInteracted(true);
+      // Collapse to single line after first interaction
+      setTimeout(() => setAlignmentPanelExpanded(false), 500);
+    }
+  }, [userHasInteracted]);
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
@@ -2258,91 +2424,156 @@ function DeerIntelContent() {
                 </div>
               </div>
 
-              {/* Intel Summary - Top Sit Locations */}
-              <div className="p-4 border-b border-white/10 bg-gradient-to-r from-amber-500/10 to-transparent">
-                <h3 className="font-bold text-white flex items-center gap-2">
-                  <Target className="h-4 w-4 text-amber-500" />
-                  Intel Summary
-                </h3>
-                <p className="text-xs text-white/60 mt-1">Top sit locations for this parcel</p>
-                
-                {/* Quick Stats */}
-                {summary && (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="bg-black/30 rounded px-2 py-1.5">
-                      <div className="text-[10px] text-white/50">BEST SCORE</div>
-                      <div className="text-lg font-bold text-amber-400">{summary.topStandScore}<span className="text-xs text-white/50">/100</span></div>
-                    </div>
-                    <div className="bg-black/30 rounded px-2 py-1.5">
-                      <div className="text-[10px] text-white/50">FUNNELS</div>
-                      <div className="text-lg font-bold text-orange-400">{summary.funnelCount}</div>
-                    </div>
+              {/* ========== ALIGNMENT PANEL ========== */}
+              <div className="border-b border-white/10">
+                {/* Header - Always visible */}
+                <button
+                  onClick={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
+                  className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Target className="h-4 w-4 text-amber-500" />
+                    <span className="font-bold text-white">
+                      {alignmentPanelExpanded ? 'Most Aligned Today' : (
+                        alignedStands.length > 0 
+                          ? `Stand #${alignedStands[0].rank} — Most Aligned` 
+                          : 'Most Aligned Today'
+                      )}
+                    </span>
+                  </div>
+                  <ChevronRight 
+                    className={`h-4 w-4 text-white/50 transition-transform duration-200 ${alignmentPanelExpanded ? 'rotate-90' : ''}`} 
+                  />
+                </button>
+
+                {/* "Now Most Aligned" Hint */}
+                {mostAlignedHint && (
+                  <button
+                    onClick={() => {
+                      setHighlightedStandRank(mostAlignedHint.standRank);
+                      setMostAlignedHint(null);
+                      const stand = alignedStands.find(s => s.rank === mostAlignedHint.standRank);
+                      if (stand) {
+                        mapRef.current?.flyTo({ center: stand.coords, zoom: 16 });
+                        showStandPopup(stand.coords, stand.props);
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-amber-500/10 border-y border-amber-500/20 text-amber-300 text-sm flex items-center gap-2 hover:bg-amber-500/20 transition-all"
+                    style={{ animation: 'fadeIn 0.2s ease-out' }}
+                  >
+                    <Compass className="h-4 w-4" />
+                    <span>{mostAlignedHint.name} now most aligned.</span>
+                  </button>
+                )}
+
+                {/* Expanded Content - Top 3 Stands */}
+                {alignmentPanelExpanded && (
+                  <div className="pb-2">
+                    {alignedStands.slice(0, 3).map((stand, idx) => {
+                      const isHighlighted = highlightedStandRank === stand.rank;
+                      const isExceptional = idx === 0 && exceptionalIndex === 0;
+                      
+                      // Earth-tone label colors
+                      const labelColors: Record<string, string> = {
+                        'Deep Moss': 'text-emerald-400',
+                        'Weathered Oak': 'text-amber-600',
+                        'Field Stone': 'text-stone-400',
+                        'Open Ground': 'text-stone-500',
+                      };
+
+                      return (
+                        <button
+                          key={stand.rank}
+                          onClick={() => {
+                            handleUserInteraction();
+                            setHighlightedStandRank(stand.rank);
+                            setSelectedStand(stand.rank);
+                            showStandPopup(stand.coords, stand.props);
+                            mapRef.current?.flyTo({ center: stand.coords, zoom: 16 });
+                          }}
+                          className={`
+                            w-full px-4 py-3 text-left transition-colors border-b border-white/5
+                            ${isHighlighted ? 'bg-stone-700/30' : 'hover:bg-white/5'}
+                          `}
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Rank Badge */}
+                            <div className="flex flex-col items-center">
+                              <span className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-white font-bold text-sm">
+                                {idx + 1}
+                              </span>
+                            </div>
+
+                            {/* Stand Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-white font-semibold">Stand #{stand.rank}</span>
+                                {/* Small understated score */}
+                                <span className="text-white/40 text-xs font-mono">{stand.alignment.score}</span>
+                              </div>
+
+                              {/* Earth-tone Label */}
+                              <div className={`text-sm font-medium ${labelColors[stand.alignment.label] || 'text-stone-400'}`}>
+                                {stand.alignment.label}
+                              </div>
+
+                              {/* Exceptional - only top stand, calm 200ms fade-in */}
+                              {isExceptional && (
+                                <div 
+                                  className="text-emerald-300/80 text-xs mt-0.5"
+                                  style={{ animation: 'fadeIn 0.2s ease-out' }}
+                                >
+                                  Exceptional
+                                </div>
+                              )}
+
+                              {/* Wind & Approach */}
+                              <div className="flex items-center gap-3 mt-2 text-xs text-white/50">
+                                <span className={stand.props.windOk.includes(windDirection) ? 'text-green-400' : 'text-white/40'}>
+                                  Wind: {stand.props.windOk.slice(0, 2).join(', ')}
+                                </span>
+                                <span className={`capitalize ${
+                                  stand.props.approachRisk === 'low' ? 'text-green-400/70' :
+                                  stand.props.approachRisk === 'high' ? 'text-stone-500' : 'text-stone-400'
+                                }`}>
+                                  {stand.props.approachRisk} approach
+                                </span>
+                              </div>
+
+                              {/* Movement indicator */}
+                              <div className="mt-1.5 flex items-center gap-2">
+                                <div className="flex-1 h-1 bg-stone-800 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-gradient-to-r from-stone-600 to-stone-500 rounded-full transition-all"
+                                    style={{ width: `${Math.round(stand.inputs.movement * 100)}%` }}
+                                  />
+                                </div>
+                                <span className="text-[10px] text-white/30">movement</span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+
+                    {/* Parcel Strength footer */}
+                    {alignedStands.length > 0 && (
+                      <div className="px-4 py-2 flex items-center justify-between text-xs text-white/40">
+                        <span>Parcel Strength</span>
+                        <span className="font-mono">{Math.round(parcelStrength)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              <div className="flex-1">
-                {(layers?.standPoints?.features || []).slice(0, 2).map((feature) => {
-                  const props = feature.properties as StandPointProperties;
-                  const isSelected = selectedStand === props.rank;
-                  const coords = feature.geometry.coordinates as [number, number];
-                  const isTodaysSit = props.rank === 1;
-
-                  return (
-                    <button
-                      key={props.rank}
-                      onClick={() => {
-                        setSelectedStand(props.rank);
-                        showStandPopup(coords, props);
-                        mapRef.current?.flyTo({ center: coords, zoom: 16 });
-                      }}
-                      className={`
-                        w-full px-4 py-3 text-left transition-colors border-b border-white/5
-                        ${isSelected ? (isTodaysSit ? 'bg-amber-500/30' : 'bg-red-500/20') : 'hover:bg-white/5'}
-                      `}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0 ${
-                            isTodaysSit ? 'text-gray-900' : 'text-white'
-                          }`}
-                          style={{ 
-                            background: isTodaysSit 
-                              ? `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` 
-                              : LAYER_COLORS.standHigh,
-                            boxShadow: isTodaysSit 
-                              ? `0 0 16px ${LAYER_COLORS.standGold}80` 
-                              : '0 4px 12px rgba(0,0,0,0.3)'
-                          }}
-                        >
-                          {isTodaysSit ? '⭐' : props.rank}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className={`font-bold text-lg ${isTodaysSit ? 'text-amber-300' : 'text-white'}`}>
-                                {isTodaysSit ? "Today's Sit" : `Stand #${props.rank}`}
-                              </span>
-                              <span className="text-white/50 text-sm">{props.score}/100</span>
-                            </div>
-                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                              props.approachRisk === 'low' ? 'bg-green-500/30 text-green-300' :
-                              props.approachRisk === 'medium' ? 'bg-amber-500/30 text-amber-300' :
-                              'bg-red-500/30 text-red-300'
-                            }`}>
-                              {props.approachRisk} risk
-                            </span>
-                          </div>
-                          <p className="text-xs text-white/60 mt-1 line-clamp-1">{props.reasoning}</p>
-                          <div className="flex gap-3 mt-2 text-xs">
-                            <span className="text-green-400">✓ Wind: {props.windOk.slice(0,2).join(', ')}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Fade-in keyframe animation */}
+              <style jsx>{`
+                @keyframes fadeIn {
+                  from { opacity: 0; transform: translateY(-4px); }
+                  to { opacity: 1; transform: translateY(0); }
+                }
+              `}</style>
             </div>
           )}
         </div>
