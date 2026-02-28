@@ -51,6 +51,17 @@ export type {
   HydroFeatures
 } from './components';
 
+// Stand Alignment Engine v1.0
+export type { StandInputs, StandScore } from './stand-alignment';
+export {
+  computeStandScore,
+  computeParcelStrength,
+  qualifiesExceptional,
+  shouldRecomputeWind,
+  scoreStandsWithExceptional,
+  DEFAULT_INPUTS
+} from './stand-alignment';
+
 export {
   calculateAllComponents,
   calculateComponent,
