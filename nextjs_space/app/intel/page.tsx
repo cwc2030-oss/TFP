@@ -16,11 +16,10 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import {
   scoreStandsWithExceptional,
-  shouldRecomputeWind,
   type StandInputs,
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
-import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
+import { buildStandInputs, windDirectionToDeg, smallestAngleDiffDeg } from '@/lib/scoring/stand-inputs';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -797,12 +796,13 @@ function DeerIntelContent() {
   useEffect(() => {
     if (!layers?.standPoints) return;
     
-    // Check wind stability
+    // Check wind stability using wrap-safe delta (handles 350° → 10° correctly)
     if (prevWindDirection !== null) {
       const prevDeg = windToDegrees[prevWindDirection];
       const newDeg = windToDegrees[windDirection];
-      if (!shouldRecomputeWind(prevDeg, newDeg)) {
-        // Wind change too small, skip recompute
+      const delta = smallestAngleDiffDeg(prevDeg, newDeg);
+      if (delta <= 10) {
+        // Wind change too small, skip recompute to prevent jitter
         return;
       }
     }
@@ -2404,7 +2404,7 @@ function DeerIntelContent() {
                     <span className="font-bold text-white">
                       {alignmentPanelExpanded ? 'Most Aligned Today' : (
                         alignedStands.length > 0 
-                          ? `Stand #${alignedStands[0].rank} — Most Aligned` 
+                          ? `Stand #${alignedStands[0].rank} — Most Aligned Today` 
                           : 'Most Aligned Today'
                       )}
                     </span>
