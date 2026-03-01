@@ -270,6 +270,50 @@ function distanceMeters(p1: [number, number], p2: [number, number]): number {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+// Convert bearing degrees to compass label (N/NE/E/SE/S/SW/W/NW)
+function degreesToCompass(deg: number): string {
+  const normalized = ((deg % 360) + 360) % 360;
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const index = Math.round(normalized / 45) % 8;
+  return directions[index];
+}
+
+// Find closest point on a LineString to a given point
+function closestPointOnLineString(
+  point: [number, number], 
+  lineCoords: [number, number][]
+): { point: [number, number]; dist: number; segIndex: number } {
+  let minDist = Infinity;
+  let closestPt: [number, number] = lineCoords[0];
+  let segIdx = 0;
+
+  for (let i = 0; i < lineCoords.length - 1; i++) {
+    const a = lineCoords[i];
+    const b = lineCoords[i + 1];
+    
+    // Project point onto line segment
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    
+    let t = 0;
+    if (len2 > 0) {
+      t = Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / len2));
+    }
+    
+    const proj: [number, number] = [a[0] + t * dx, a[1] + t * dy];
+    const dist = distanceMeters(point, proj);
+    
+    if (dist < minDist) {
+      minDist = dist;
+      closestPt = proj;
+      segIdx = i;
+    }
+  }
+  
+  return { point: closestPt, dist: minDist, segIndex: segIdx };
+}
+
 // Check if a point is inside a polygon (ray casting algorithm)
 function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
   let inside = false;
@@ -1992,6 +2036,84 @@ function DeerIntelContent() {
 
     if (popupRef.current) popupRef.current.remove();
 
+    // ========== COMPUTE FACE DIRECTION ==========
+    // v1 rule: corridor -> funnel/saddle -> parcel centroid fallback
+    let faceBearing: number | null = null;
+
+    // 1) Try corridors from layers.funnels
+    if (layers?.funnels?.features?.length) {
+      const corridors = layers.funnels.features.filter(
+        f => f.properties?.funnelType === 'corridor' && f.geometry?.type === 'LineString'
+      );
+      
+      if (corridors.length > 0) {
+        let nearestDist = Infinity;
+        let nearestPt: [number, number] | null = null;
+        
+        for (const c of corridors) {
+          const lineCoords = (c.geometry as GeoJSON.LineString).coordinates as [number, number][];
+          if (lineCoords.length >= 2) {
+            const result = closestPointOnLineString(coords, lineCoords);
+            if (result.dist < nearestDist) {
+              nearestDist = result.dist;
+              nearestPt = result.point;
+            }
+          }
+        }
+        
+        if (nearestPt) {
+          faceBearing = calculateBearing(coords, nearestPt);
+        }
+      }
+    }
+
+    // 2) Fallback: funnel/saddle hotspots (draws or saddles)
+    if (faceBearing === null && layers?.funnels?.features?.length) {
+      const hotspots = layers.funnels.features.filter(
+        f => f.properties?.funnelType && f.properties.funnelType !== 'corridor'
+      );
+      
+      if (hotspots.length > 0) {
+        let nearestDist = Infinity;
+        let nearestPt: [number, number] | null = null;
+        
+        for (const h of hotspots) {
+          let centroid: [number, number];
+          const geom = h.geometry as GeoJSON.Geometry;
+          if (geom.type === 'Point') {
+            centroid = geom.coordinates as [number, number];
+          } else if (geom.type === 'LineString') {
+            const lc = geom.coordinates as [number, number][];
+            centroid = [lc.reduce((s, c) => s + c[0], 0) / lc.length, lc.reduce((s, c) => s + c[1], 0) / lc.length];
+          } else if (geom.type === 'Polygon') {
+            const pc = (geom.coordinates as [number, number][][])[0];
+            centroid = [pc.reduce((s, c) => s + c[0], 0) / pc.length, pc.reduce((s, c) => s + c[1], 0) / pc.length];
+          } else {
+            continue;
+          }
+          
+          const dist = distanceMeters(coords, centroid);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestPt = centroid;
+          }
+        }
+        
+        if (nearestPt) {
+          faceBearing = calculateBearing(coords, nearestPt);
+        }
+      }
+    }
+
+    // 3) Final fallback: parcel centroid
+    if (faceBearing === null) {
+      const parcelCentroid: [number, number] = [lng, lat];
+      faceBearing = calculateBearing(coords, parcelCentroid);
+    }
+
+    const faceCompass = degreesToCompass(faceBearing);
+    const faceDeg = Math.round(faceBearing);
+
     // #1 = Today's Sit with gold styling
     const isTodaysSit = props.rank === 1;
     const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` : 
@@ -2020,7 +2142,11 @@ function DeerIntelContent() {
             ${props.reasoning}
           </p>
           
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 8px;">
+          <div style="margin-bottom: 8px; font-size: 11px; color: #1f2937;">
+            <span style="font-weight: 600;">Face:</span> ${faceCompass} (${faceDeg}°)
+          </div>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
             <div style="background: #f3f4f6; padding: 5px 7px; border-radius: 4px;">
               <span style="color: #6b7280; font-size: 9px; display: block;">To Corridor</span>
               <span style="font-weight: 600; font-size: 11px;">${props.distToCorridorMeters}m</span>
