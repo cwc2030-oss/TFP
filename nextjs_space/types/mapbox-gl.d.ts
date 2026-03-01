@@ -55,6 +55,15 @@ declare module 'mapbox-gl' {
     setData(data: GeoJSON.GeoJSON): void;
   }
 
+  export class LngLatBounds {
+    constructor(sw?: LngLatLike | [number, number], ne?: LngLatLike | [number, number]);
+    extend(lngLat: LngLatLike | [number, number]): this;
+    getCenter(): LngLatLike;
+    getSouthWest(): LngLatLike;
+    getNorthEast(): LngLatLike;
+    toArray(): [[number, number], [number, number]];
+  }
+
   export class Map {
     constructor(options: MapOptions);
     on(event: string, callback: (...args: any[]) => void): void;
@@ -80,6 +89,7 @@ declare module 'mapbox-gl' {
     setZoom(zoom: number): void;
     flyTo(options: any): void;
     easeTo(options: any): void;
+    fitBounds(bounds: LngLatBounds | [[number, number], [number, number]], options?: { padding?: number | { top?: number; bottom?: number; left?: number; right?: number }; duration?: number; pitch?: number; bearing?: number; maxZoom?: number; essential?: boolean }): this;
     getCanvas(): HTMLCanvasElement;
     addControl(control: any, position?: string): void;
     isStyleLoaded(): boolean;

@@ -934,6 +934,7 @@ function DeerIntelContent() {
 
   // ========== NATIVE MAPBOX SOURCES INITIALIZED FLAG ==========
   const overlaySourcesCreated = useRef(false);
+  const hasFitToParcel = useRef(false);
 
   // ========== UPDATE NATIVE MAPBOX SOURCES WHEN DATA CHANGES ==========
   useEffect(() => {
@@ -980,6 +981,38 @@ function DeerIntelContent() {
       console.error('[MAP] Error updating sources (non-fatal):', err);
     }
   }, [layers, parcelPolygon, mapReady]);
+
+  // ========== FIT TO PARCEL ON LOAD (IMMEDIATE ORIENTATION) ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !parcelPolygon || hasFitToParcel.current) return;
+    
+    try {
+      // Extract bounds from parcel geometry
+      const coords = parcelPolygon.geometry.type === 'Polygon'
+        ? parcelPolygon.geometry.coordinates[0]
+        : parcelPolygon.geometry.coordinates[0][0]; // First polygon of MultiPolygon
+      
+      if (coords && coords.length >= 3) {
+        const bounds = new mapboxgl.LngLatBounds();
+        coords.forEach((coord: number[]) => {
+          bounds.extend([coord[0], coord[1]]);
+        });
+        
+        // Immediately fit to parcel with comfortable padding
+        map.fitBounds(bounds, {
+          padding: 80,
+          duration: 800,
+          maxZoom: 16,
+        });
+        
+        hasFitToParcel.current = true;
+        console.log('[MAP] Fit to parcel bounds for immediate orientation');
+      }
+    } catch (err) {
+      console.error('[MAP] FitBounds error (non-fatal):', err);
+    }
+  }, [parcelPolygon, mapReady]);
 
   // ========== GENERATE EDGE INTELLIGENCE DATA ==========
   useEffect(() => {
@@ -1262,7 +1295,7 @@ function DeerIntelContent() {
               'line-width': 3,
             },
           });
-          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines
+          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines (reduced weight)
           map.addLayer({
             id: 'tfp-funnels-lines-corridors-solid',
             type: 'line',
@@ -1278,17 +1311,17 @@ function DeerIntelContent() {
                 ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], LAYER_COLORS.corridorHigh,
                 LAYER_COLORS.corridorMed
               ],
-              // Thick lines for high confidence
+              // Reduced line widths for visual calm
               'line-width': [
                 'case',
-                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], 6,  // High = thick
-                4  // Medium = medium
+                ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.7], 4.5,  // High (was 6)
+                3  // Medium (was 4)
               ],
               // SOLID - no dash array
             },
           });
           
-          // Corridors layer: LOW confidence = DASHED lines only
+          // Corridors layer: LOW confidence = DASHED lines only (reduced weight)
           map.addLayer({
             id: 'tfp-funnels-lines-corridors-dashed',
             type: 'line',
@@ -1299,7 +1332,7 @@ function DeerIntelContent() {
             ],
             paint: {
               'line-color': LAYER_COLORS.corridorLow,  // Light lavender
-              'line-width': 3,
+              'line-width': 2.5,  // Reduced from 3
               'line-dasharray': [3, 2],  // DASHED = low confidence only
             },
           });
@@ -1826,10 +1859,21 @@ function DeerIntelContent() {
       const markerSize = isTopStand ? 56 : 48;
       const fontSize = isTopStand ? 22 : 20;
 
+      // Create marker with invisible expanded hitbox for reliable hover
+      const hitboxSize = markerSize + 24; // 24px larger than marker for easier targeting
       const el = document.createElement('div');
       el.className = 'intel-stand-marker';
+      el.style.cssText = `
+        position: relative;
+        width: ${hitboxSize}px;
+        height: ${hitboxSize}px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      `;
       el.innerHTML = `
-        <div style="
+        <div class="stand-visual" style="
           position: relative;
           width: ${markerSize}px;
           height: ${markerSize}px;
@@ -1849,15 +1893,15 @@ function DeerIntelContent() {
           color: white;
           font-weight: bold;
           font-size: ${fontSize}px;
-          cursor: pointer;
           transition: transform 0.2s, box-shadow 0.2s;
+          pointer-events: none;
         ">
           ${isTopStand ? '⭐' : props.rank}
         </div>
         ${isTopStand ? `
           <div style="
             position: absolute;
-            bottom: -22px;
+            bottom: -10px;
             left: 50%;
             transform: translateX(-50%);
             background: linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b);
@@ -1869,6 +1913,7 @@ function DeerIntelContent() {
             white-space: nowrap;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            pointer-events: none;
           ">Today's Sit</div>
         ` : ''}
       `;
@@ -1910,13 +1955,19 @@ function DeerIntelContent() {
       el.appendChild(hoverTooltip);
 
       el.onmouseenter = () => {
-        (el.firstElementChild as HTMLElement).style.transform = 'scale(1.2)';
-        (el.firstElementChild as HTMLElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.5)';
+        const visual = el.querySelector('.stand-visual') as HTMLElement;
+        if (visual) {
+          visual.style.transform = 'scale(1.2)';
+          visual.style.boxShadow = '0 6px 20px rgba(0,0,0,0.5)';
+        }
         hoverTooltip.style.opacity = '1';
       };
       el.onmouseleave = () => {
-        (el.firstElementChild as HTMLElement).style.transform = 'scale(1)';
-        (el.firstElementChild as HTMLElement).style.boxShadow = '0 4px 12px rgba(0,0,0,0.4)';
+        const visual = el.querySelector('.stand-visual') as HTMLElement;
+        if (visual) {
+          visual.style.transform = 'scale(1)';
+          visual.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4)';
+        }
         hoverTooltip.style.opacity = '0';
       };
 

@@ -82,13 +82,14 @@ export default function Terrain3DView({
     let map: InstanceType<typeof mapboxgl.Map>;
     
     try {
+      // Start WIDE for context (adjacent land visible), then focus gently
       map = new mapboxgl.Map({
         container: mapContainerRef.current,
         style: "mapbox://styles/mapbox/satellite-streets-v12",
         center: [parcelCenter.lng, parcelCenter.lat],
-        zoom: 15,
-        pitch: 60,
-        bearing: -20,
+        zoom: 13.5, // Wide context first
+        pitch: 55,
+        bearing: -15,
         antialias: true,
       });
     } catch (err) {
@@ -169,7 +170,7 @@ export default function Terrain3DView({
           url: "mapbox://mapbox.mapbox-terrain-v2",
         });
 
-        // Index contours (100ft intervals) — bold yellow
+        // Index contours (100ft intervals) — toned-down yellow
         map.addLayer({
           id: "contour-index",
           type: "line",
@@ -178,8 +179,8 @@ export default function Terrain3DView({
           filter: ["==", ["get", "index"], 5],
           paint: {
             "line-color": "#fbbf24",
-            "line-width": 2.5,
-            "line-opacity": 0.9,
+            "line-width": 2,
+            "line-opacity": 0.65, // Reduced from 0.9
           },
         });
 
@@ -192,8 +193,8 @@ export default function Terrain3DView({
           filter: ["!=", ["get", "index"], 5],
           paint: {
             "line-color": "#d4a574",
-            "line-width": 0.8,
-            "line-opacity": 0.5,
+            "line-width": 0.6,
+            "line-opacity": 0.35, // Reduced from 0.5
           },
         });
 
@@ -218,7 +219,7 @@ export default function Terrain3DView({
           },
         });
 
-        // ═══ RIDGELINE HIGHLIGHTING — Higher elevation contours ═══
+        // ═══ RIDGELINE HIGHLIGHTING — Higher elevation contours (subtler) ═══
         map.addLayer({
           id: "ridgeline-highlight",
           type: "line",
@@ -231,8 +232,8 @@ export default function Terrain3DView({
           ],
           paint: {
             "line-color": "#fb923c",
-            "line-width": 3.5,
-            "line-opacity": 0.8,
+            "line-width": 2.5, // Reduced from 3.5
+            "line-opacity": 0.6, // Reduced from 0.8
             "line-blur": 1,
           },
         });
@@ -249,8 +250,8 @@ export default function Terrain3DView({
           ],
           paint: {
             "line-color": "#fb923c",
-            "line-width": 10,
-            "line-opacity": 0.2,
+            "line-width": 8, // Reduced from 10
+            "line-opacity": 0.15, // Reduced from 0.2
             "line-blur": 4,
           },
         }, "ridgeline-highlight");
@@ -304,6 +305,37 @@ export default function Terrain3DView({
           console.log('[Terrain3D] map.resize() skipped');
         }
       }, 200);
+      
+      // ═══ "CATCH YOUR BREATH" FOCUS ANIMATION ═══
+      // After ~2s, gently focus on the parcel (user already has context)
+      setTimeout(() => {
+        if (mapRef.current !== map) return;
+        
+        // If we have parcel bounds, use fitBounds; else zoom to center
+        if (parcelBounds && parcelBounds.length >= 3) {
+          const bounds = new mapboxgl.LngLatBounds();
+          parcelBounds.forEach(p => bounds.extend([p.lng, p.lat]));
+          
+          map.fitBounds(bounds, {
+            padding: 110,
+            duration: 2200,
+            pitch: 60,
+            bearing: -20,
+            essential: true,
+          });
+          console.log('[Terrain3D] Gentle focus animation → fitBounds');
+        } else {
+          // Fallback: zoom to center if no bounds
+          map.flyTo({
+            center: [parcelCenter.lng, parcelCenter.lat],
+            zoom: 15.5,
+            pitch: 60,
+            bearing: -20,
+            duration: 2000,
+          });
+          console.log('[Terrain3D] Gentle focus animation → flyTo center');
+        }
+      }, 2000);
     });
 
     map.on("pitchend", () => setCurrentPitch(Math.round(map.getPitch())));
@@ -361,13 +393,26 @@ export default function Terrain3DView({
   const resetView = () => {
     if (!mapRef.current) return;
     stopSpin();
-    mapRef.current.flyTo({
-      center: [parcelCenter.lng, parcelCenter.lat],
-      zoom: 15,
-      pitch: 60,
-      bearing: -20,
-      duration: 1500,
-    });
+    
+    // Reset to focused parcel view (not the wide context)
+    if (parcelBounds && parcelBounds.length >= 3) {
+      const bounds = new mapboxgl.LngLatBounds();
+      parcelBounds.forEach(p => bounds.extend([p.lng, p.lat]));
+      mapRef.current.fitBounds(bounds, {
+        padding: 110,
+        duration: 1500,
+        pitch: 60,
+        bearing: -20,
+      });
+    } else {
+      mapRef.current.flyTo({
+        center: [parcelCenter.lng, parcelCenter.lat],
+        zoom: 15.5,
+        pitch: 60,
+        bearing: -20,
+        duration: 1500,
+      });
+    }
   };
 
   const rotateView = (direction: "left" | "right") => {
@@ -456,7 +501,7 @@ export default function Terrain3DView({
                     console.log('[Terrain3D] Deer Intel clicked - stopping spin and navigating');
                     onUnlockIntel();
                   }}
-                  className="bg-red-600 hover:bg-red-500 text-white gap-1.5 text-xs font-semibold animate-pulse"
+                  className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs font-semibold"
                   title="View Deer Intel Analysis"
                 >
                   <Crosshair className="w-4 h-4" />
@@ -632,11 +677,10 @@ export default function Terrain3DView({
                         console.log('[Terrain3D] Deer Intel CTA clicked - stopping spin and navigating');
                         onUnlockIntel();
                       }}
-                      className="w-full mt-3 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-all shadow-lg"
+                      className="w-full mt-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-all shadow-lg"
                     >
                       <Crosshair className="w-5 h-5" />
                       <span className="font-semibold">View Full Deer Intel Analysis</span>
-                      <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">NEW</span>
                     </button>
                   )}
 
