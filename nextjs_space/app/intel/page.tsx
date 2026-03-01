@@ -1999,94 +1999,79 @@ function DeerIntelContent() {
     const popupBadgeLabel = isTodaysSit ? "⭐ Today's Sit" : `Stand #${props.rank}`;
     const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
     
-    const popup = new mapboxgl.Popup({ closeButton: true, maxWidth: '340px', className: 'intel-popup' })
+    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '320px', offset: 12, className: 'intel-popup' })
       .setLngLat(coords)
       .setHTML(`
-        <div style="padding: 16px; font-family: system-ui, sans-serif;">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="max-height: 240px; overflow: auto; padding: 10px 12px; font-size: 12px; line-height: 1.25; font-family: system-ui, sans-serif;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="
               background: ${popupBadgeColor};
               color: ${badgeTextColor};
-              font-weight: bold;
-              padding: 6px 14px;
-              border-radius: 16px;
-              font-size: 15px;
-              ${isTodaysSit ? 'box-shadow: 0 0 12px rgba(251, 191, 36, 0.5);' : ''}
+              font-weight: 600;
+              padding: 4px 10px;
+              border-radius: 12px;
+              font-size: 11px;
+              ${isTodaysSit ? 'box-shadow: 0 0 8px rgba(251, 191, 36, 0.4);' : ''}
             ">${popupBadgeLabel}</span>
-            <span style="font-weight: 700; font-size: 22px;">${props.score}<span style="font-size: 14px; color: #6b7280;">/100</span></span>
+            <span style="font-weight: 700; font-size: 16px;">${props.score}<span style="font-size: 11px; color: #6b7280;">/100</span></span>
           </div>
           
-          <p style="margin: 12px 0; font-size: 14px; color: #374151; line-height: 1.5;">
+          <p style="margin: 8px 0; font-size: 11px; color: #4b5563; line-height: 1.35;">
             ${props.reasoning}
           </p>
           
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px;">
-            <div style="background: #f3f4f6; padding: 8px 10px; border-radius: 6px;">
-              <span style="color: #6b7280; font-size: 11px; display: block;">To Corridor</span>
-              <span style="font-weight: 600; font-size: 14px;">${props.distToCorridorMeters}m</span>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 8px;">
+            <div style="background: #f3f4f6; padding: 5px 7px; border-radius: 4px;">
+              <span style="color: #6b7280; font-size: 9px; display: block;">To Corridor</span>
+              <span style="font-weight: 600; font-size: 11px;">${props.distToCorridorMeters}m</span>
             </div>
-            <div style="background: #f3f4f6; padding: 8px 10px; border-radius: 6px;">
-              <span style="color: #6b7280; font-size: 11px; display: block;">To Bedding</span>
-              <span style="font-weight: 600; font-size: 14px;">${props.distToBeddingMeters}m</span>
+            <div style="background: #f3f4f6; padding: 5px 7px; border-radius: 4px;">
+              <span style="color: #6b7280; font-size: 9px; display: block;">To Bedding</span>
+              <span style="font-weight: 600; font-size: 11px;">${props.distToBeddingMeters}m</span>
             </div>
-            <div style="background: #dcfce7; padding: 8px 10px; border-radius: 6px;">
-              <span style="color: #166534; font-size: 11px; display: block;">✓ Good Wind</span>
-              <span style="font-weight: 600; font-size: 14px;">${props.windOk.join(', ')}</span>
+            <div style="background: #dcfce7; padding: 5px 7px; border-radius: 4px;">
+              <span style="color: #166534; font-size: 9px; display: block;">✓ Good Wind</span>
+              <span style="font-weight: 600; font-size: 11px;">${props.windOk.join(', ')}</span>
             </div>
-            <div style="background: #fee2e2; padding: 8px 10px; border-radius: 6px;">
-              <span style="color: #991b1b; font-size: 11px; display: block;">✗ Avoid</span>
-              <span style="font-weight: 600; font-size: 14px;">${props.windBad.join(', ')}</span>
+            <div style="background: #fee2e2; padding: 5px 7px; border-radius: 4px;">
+              <span style="color: #991b1b; font-size: 9px; display: block;">✗ Avoid</span>
+              <span style="font-weight: 600; font-size: 11px;">${props.windBad.join(', ')}</span>
             </div>
           </div>
           
-          <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid #e5e7eb; display: flex; align-items: center; gap: 12px;">
+          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <span style="
-              padding: 4px 10px;
-              border-radius: 6px;
+              padding: 3px 7px;
+              border-radius: 4px;
               font-weight: 500;
-              font-size: 12px;
+              font-size: 10px;
               background: ${props.approachRisk === 'low' ? '#dcfce7' : props.approachRisk === 'medium' ? '#fef3c7' : '#fee2e2'};
               color: ${props.approachRisk === 'low' ? '#166534' : props.approachRisk === 'medium' ? '#92400e' : '#991b1b'};
             ">
-              ${props.approachRisk.toUpperCase()} approach risk
+              ${props.approachRisk.toUpperCase()} risk
             </span>
-            <span style="color: #6b7280; font-size: 12px;">Elev: ${Math.round(props.elevation)}m</span>
+            <span style="color: #6b7280; font-size: 10px;">Elev: ${Math.round(props.elevation)}m</span>
           </div>
           
-          <button
-            id="copy-coords-btn"
-            style="
-              margin-top: 12px;
-              width: 100%;
-              padding: 8px 12px;
-              background: #1f2937;
-              border: 1px solid #374151;
-              border-radius: 6px;
-              color: white;
-              font-size: 12px;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 6px;
-              transition: background 0.15s;
-            "
-            onmouseover="this.style.background='#374151'"
-            onmouseout="this.style.background='#1f2937'"
-            onclick="
-              navigator.clipboard.writeText('${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}');
-              this.innerHTML = '✓ Copied!';
-              this.style.background = '#166534';
-              setTimeout(() => {
-                this.innerHTML = '📋 Copy Coordinates';
-                this.style.background = '#1f2937';
-              }, 2000);
-            "
-          >
-            📋 Copy Coordinates
-          </button>
-          <div style="margin-top: 6px; text-align: center; color: #6b7280; font-size: 11px; font-family: monospace;">
-            ${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}
+          <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+            <button
+              id="copy-coords-btn"
+              style="
+                padding: 4px 8px;
+                background: #374151;
+                border: none;
+                border-radius: 4px;
+                color: white;
+                font-size: 10px;
+                cursor: pointer;
+              "
+              onclick="
+                navigator.clipboard.writeText('${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}');
+                this.innerHTML = '✓';
+                setTimeout(() => { this.innerHTML = '📋'; }, 1500);
+              "
+            >📋</button>
+            <span style="color: #6b7280; font-size: 10px; font-family: monospace;">${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}</span>
           </div>
         </div>
       `)
