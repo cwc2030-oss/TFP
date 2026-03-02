@@ -10,7 +10,7 @@ import {
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
-  Unlock, Sparkles
+  Unlock, Sparkles, Settings
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -668,6 +668,7 @@ function DeerIntelContent() {
   // User controls
   const [season, setSeason] = useState<SeasonProfile>('rut');
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
+  const [windLastUpdated, setWindLastUpdated] = useState<Date>(new Date());
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     bedding: true,
@@ -677,7 +678,7 @@ function DeerIntelContent() {
   });
 
   // UI state
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(true); // Left panel collapsed by default
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -700,10 +701,36 @@ function DeerIntelContent() {
   // ========== ALIGNMENT ENGINE STATE ==========
   type AlignedStand = {
     rank: number;
+    name: string; // Auto-generated or user-assigned
     props: StandPointProperties;
     inputs: StandInputs;
     alignment: StandScore;
     coords: [number, number];
+  };
+  
+  // Auto-suggest stand names based on position/features
+  const STAND_NAME_POOL = [
+    'Ridge Stand', 'Hollow Stand', 'Creek Bottom', 'Fence Line', 'Oak Flat',
+    'North Point', 'South Saddle', 'East Draw', 'West Ridge', 'Center Cut',
+    'Timber Edge', 'Field Corner', 'Road Stand', 'Crop Stand', 'Clover Edge'
+  ];
+  
+  const generateStandName = (rank: number, coords: [number, number], props: StandPointProperties): string => {
+    // If user assigned a name, use it
+    if (props.name) return props.name;
+    
+    // Auto-generate based on characteristics
+    const isHighElevation = props.elevation > 280;
+    const isLowRisk = props.approachRisk === 'low';
+    const nearCorridor = props.distToCorridorMeters < 50;
+    
+    // Simple deterministic naming based on rank + features
+    if (nearCorridor && isLowRisk) return `Corridor ${rank === 1 ? 'Prime' : 'Point'}`;
+    if (isHighElevation) return `Ridge ${rank === 1 ? 'Overlook' : 'Stand'}`;
+    if (props.distToBeddingMeters < 80) return `Bedding Edge`;
+    
+    // Fallback to pool
+    return STAND_NAME_POOL[(rank - 1) % STAND_NAME_POOL.length];
   };
   const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
   const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
@@ -711,7 +738,7 @@ function DeerIntelContent() {
   const [parcelStrength, setParcelStrength] = useState<number>(0);
   const [prevWindDirection, setPrevWindDirection] = useState<WindDirection | null>(null);
   const [mostAlignedHint, setMostAlignedHint] = useState<{ standRank: number; name: string } | null>(null);
-  const [alignmentPanelExpanded, setAlignmentPanelExpanded] = useState(true);
+  const [alignmentPanelExpanded, setAlignmentPanelExpanded] = useState(false); // Collapsed by default
   const [userHasInteracted, setUserHasInteracted] = useState(false);
   const mostAlignedDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hintFadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -794,13 +821,18 @@ function DeerIntelContent() {
     const { scores, parcelStrength: ps, exceptionalIndex: ei } = scoreStandsWithExceptional(inputs);
 
     // Build aligned stands array sorted by score desc
-    const aligned: AlignedStand[] = stands.map((f, i) => ({
-      rank: (f.properties as StandPointProperties).rank,
-      props: f.properties as StandPointProperties,
-      inputs: inputs[i],
-      alignment: scores[i],
-      coords: f.geometry.coordinates as [number, number],
-    })).sort((a, b) => b.alignment.score - a.alignment.score);
+    const aligned: AlignedStand[] = stands.map((f, i) => {
+      const props = f.properties as StandPointProperties;
+      const coords = f.geometry.coordinates as [number, number];
+      return {
+        rank: props.rank,
+        name: generateStandName(props.rank, coords, props),
+        props,
+        inputs: inputs[i],
+        alignment: scores[i],
+        coords,
+      };
+    }).sort((a, b) => b.alignment.score - a.alignment.score);
 
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
@@ -2325,11 +2357,9 @@ function DeerIntelContent() {
           </button>
 
           {panelCollapsed ? (
-            <div className="flex flex-col items-center py-4 gap-4 text-white/60">
-              <Mountain className="h-5 w-5" />
-              <Calendar className="h-5 w-5" />
-              <Wind className="h-5 w-5" />
-              <Layers className="h-5 w-5" />
+            <div className="flex flex-col items-center py-4 gap-3 text-white/50">
+              <Settings className="h-5 w-5" />
+              <span className="text-[10px] [writing-mode:vertical-rl] rotate-180">Tools</span>
             </div>
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
@@ -2373,48 +2403,6 @@ function DeerIntelContent() {
                     </button>
                   ))}
                 </div>
-              </div>
-
-              {/* Wind Selector */}
-              <div className="p-4 border-b border-white/10">
-                <div className="flex items-center gap-2 mb-3">
-                  <Wind className="h-4 w-4 text-blue-400" />
-                  <span className="text-sm font-medium text-white">Prevailing Wind</span>
-                </div>
-                <div className="relative w-40 h-40 mx-auto">
-                  {/* Compass Rose */}
-                  <div className="absolute inset-0 rounded-full border-2 border-white/20" />
-                  <div className="absolute inset-4 rounded-full border border-white/10" />
-                  <Compass className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-6 w-6 text-white/30" />
-                  
-                  {WIND_DIRECTIONS.map((dir, i) => {
-                    const angle = (i * 45 - 90) * (Math.PI / 180);
-                    const radius = 60;
-                    const x = 80 + Math.cos(angle) * radius;
-                    const y = 80 + Math.sin(angle) * radius;
-                    const isSelected = windDirection === dir;
-                    
-                    return (
-                      <button
-                        key={dir}
-                        onClick={() => {
-                          setWindDirection(dir);
-                          runAnalysis();
-                        }}
-                        style={{ left: x - 14, top: y - 14 }}
-                        className={`
-                          absolute w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all
-                          ${isSelected
-                            ? 'bg-blue-500 text-white scale-110 shadow-lg shadow-blue-500/50'
-                            : 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'}
-                        `}
-                      >
-                        {dir}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-white/50 text-center mt-2">Select your dominant wind</p>
               </div>
 
               {/* Analysis Summary */}
@@ -2499,200 +2487,205 @@ function DeerIntelContent() {
 
           {rightPanelCollapsed ? (
             <div className="flex flex-col items-center py-4 gap-3 text-white/60">
+              <Wind className="h-5 w-5" />
               <Layers className="h-5 w-5" />
-              <span className="text-xs [writing-mode:vertical-rl] rotate-180">Filters</span>
             </div>
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
+              {/* ========== WIND GAUGE (UNIFIED - RIGHT SIDE) ========== */}
+              <div className="p-3 border-b border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Wind className="h-4 w-4 text-stone-400" />
+                    <span className="text-sm font-medium text-white">Wind: {windDirection}</span>
+                  </div>
+                  <span className="text-xs text-stone-500">
+                    {Math.round((Date.now() - windLastUpdated.getTime()) / 60000)} min ago
+                  </span>
+                </div>
+                {/* Compact compass selector */}
+                <div className="flex flex-wrap gap-1 justify-center">
+                  {WIND_DIRECTIONS.map((dir) => {
+                    const isSelected = windDirection === dir;
+                    return (
+                      <button
+                        key={dir}
+                        onClick={() => {
+                          setWindDirection(dir);
+                          setWindLastUpdated(new Date());
+                        }}
+                        className={`
+                          w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-all
+                          ${isSelected
+                            ? 'bg-stone-600 text-white'
+                            : 'bg-stone-800/50 text-stone-400 hover:bg-stone-700 hover:text-white'}
+                        `}
+                      >
+                        {dir}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Layer Filters */}
-              <div className="p-4 border-b border-white/10">
-                <h3 className="font-semibold text-white flex items-center gap-2 mb-3">
-                  <Layers className="h-4 w-4 text-purple-400" />
-                  Map Layers
+              <div className="p-3 border-b border-white/10">
+                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
+                  <Layers className="h-4 w-4 text-stone-400" />
+                  Layers
                 </h3>
-                <div className="space-y-2">
+                <div className="space-y-1">
                   <button
                     onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
-                      visibility.bedding ? 'bg-green-500/20 border border-green-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.bedding ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
                     }`}
                   >
-                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.bedding }} />
-                    <span className="text-sm text-white/90 flex-1 text-left">Bedding Areas</span>
-                    {visibility.bedding && <Check className="h-4 w-4 text-green-400" />}
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
                   </button>
                   <button
                     onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
-                      visibility.funnels ? 'bg-orange-500/20 border border-orange-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.funnels ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
                     }`}
                   >
-                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.funnelSaddle }} />
-                    <span className="text-sm text-white/90 flex-1 text-left">Saddles & Draws</span>
-                    {visibility.funnels && <Check className="h-4 w-4 text-orange-400" />}
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.funnels ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.funnels ? 'text-white' : 'text-stone-500'}`}>Saddles</span>
                   </button>
                   <button
                     onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
-                      visibility.corridors ? 'bg-pink-600/20 border border-pink-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
                     }`}
                   >
-                    <span className="w-4 h-4 rounded" style={{ background: LAYER_COLORS.corridorHigh }} />
-                    <span className="text-sm text-white/90 flex-1 text-left">Travel Corridors</span>
-                    {visibility.corridors && <Check className="h-4 w-4 text-pink-400" />}
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>Corridors</span>
                   </button>
                   <button
                     onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all ${
-                      visibility.stands ? 'bg-amber-500/20 border border-amber-500/50' : 'bg-white/5 border border-transparent hover:bg-white/10'
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.stands ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
                     }`}
                   >
-                    <span className="w-4 h-4 rounded-full" style={{ background: `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` }} />
-                    <span className="text-sm text-white/90 flex-1 text-left">Sit Locations</span>
-                    {visibility.stands && <Check className="h-4 w-4 text-amber-400" />}
+                    <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standGold, opacity: visibility.stands ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>Stands</span>
                   </button>
                 </div>
               </div>
 
-              {/* ========== ALIGNMENT PANEL ========== */}
+              {/* ========== ALIGNMENT PANEL (V2 - CALM) ========== */}
               <div className="border-b border-white/10">
                 {/* Header - Always visible */}
-                <button
-                  onClick={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
-                  className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Target className="h-4 w-4 text-amber-500" />
-                    <span className="font-bold text-white">
-                      {alignmentPanelExpanded ? 'Most Aligned Today' : (
-                        alignedStands.length > 0 
-                          ? `Stand #${alignedStands[0].rank} — Most Aligned Today` 
-                          : 'Most Aligned Today'
-                      )}
-                    </span>
-                  </div>
-                  <ChevronRight 
-                    className={`h-4 w-4 text-white/50 transition-transform duration-200 ${alignmentPanelExpanded ? 'rotate-90' : ''}`} 
-                  />
-                </button>
+                {(() => {
+                  // Check if top two stands are within ≤3 pts (comparable)
+                  const isComparable = alignedStands.length >= 2 && 
+                    Math.abs(alignedStands[0].alignment.score - alignedStands[1].alignment.score) <= 3;
+                  const headerTitle = isComparable ? 'Comparable Alignment Today' : 'Stand Alignment';
+                  const collapsedSummary = alignedStands.length > 0 
+                    ? `${alignedStands[0].name}${isComparable ? ' & more' : ''}` 
+                    : 'Stand Alignment';
+                  
+                  return (
+                    <button
+                      onClick={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
+                      className="w-full p-3 flex items-center justify-between hover:bg-white/5 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Target className="h-4 w-4 text-stone-400" />
+                        <span className="font-medium text-white text-sm">
+                          {alignmentPanelExpanded ? headerTitle : collapsedSummary}
+                        </span>
+                      </div>
+                      <ChevronRight 
+                        className={`h-4 w-4 text-white/50 transition-transform duration-200 ${alignmentPanelExpanded ? 'rotate-90' : ''}`} 
+                      />
+                    </button>
+                  );
+                })()}
 
-                {/* "Now Most Aligned" Hint */}
-                {mostAlignedHint && (
-                  <button
-                    onClick={() => {
-                      setHighlightedStandRank(mostAlignedHint.standRank);
-                      setMostAlignedHint(null);
-                      const stand = alignedStands.find(s => s.rank === mostAlignedHint.standRank);
-                      if (stand) {
-                        mapRef.current?.flyTo({ center: stand.coords, zoom: 16 });
-                        showStandPopup(stand.coords, stand.props);
-                      }
-                    }}
-                    className="w-full px-4 py-2 bg-amber-500/10 border-y border-amber-500/20 text-amber-300 text-sm flex items-center gap-2 hover:bg-amber-500/20 transition-all"
-                    style={{ animation: 'fadeIn 0.2s ease-out' }}
-                  >
-                    <Compass className="h-4 w-4" />
-                    <span>{mostAlignedHint.name} now most aligned.</span>
-                  </button>
-                )}
-
-                {/* Expanded Content - Top 3 Stands */}
+                {/* Expanded Content - Top 3 Stands (Compact Tiles V2) */}
                 {alignmentPanelExpanded && (
-                  <div className="pb-2">
-                    {alignedStands.slice(0, 3).map((stand, idx) => {
+                  <div className="px-2 pb-2 space-y-1">
+                    {alignedStands.slice(0, 3).map((stand) => {
                       const isHighlighted = highlightedStandRank === stand.rank;
-                      const isExceptional = idx === 0 && exceptionalIndex === 0;
+                      const isExpanded = selectedStand === stand.rank;
                       
-                      // Earth-tone label colors
-                      const labelColors: Record<string, string> = {
-                        'Deep Moss': 'text-emerald-400',
-                        'Weathered Oak': 'text-amber-600',
-                        'Field Stone': 'text-stone-400',
-                        'Open Ground': 'text-stone-500',
+                      // Earth-tone accent colors (left bar)
+                      const accentColors: Record<string, string> = {
+                        'Deep Moss': '#4a7c59',      // muted forest green
+                        'Weathered Oak': '#8b7355',  // warm brown
+                        'Field Stone': '#708090',    // slate gray
+                        'Open Ground': '#6b7280',    // neutral gray
                       };
+                      const accentColor = accentColors[stand.alignment.label] || '#6b7280';
 
                       return (
-                        <button
+                        <div
                           key={stand.rank}
-                          onClick={() => {
-                            handleUserInteraction();
-                            setHighlightedStandRank(stand.rank);
-                            setSelectedStand(stand.rank);
-                            showStandPopup(stand.coords, stand.props);
-                            mapRef.current?.flyTo({ center: stand.coords, zoom: 16 });
-                          }}
                           className={`
-                            w-full px-4 py-3 text-left transition-colors border-b border-white/5
-                            ${isHighlighted ? 'bg-stone-700/30' : 'hover:bg-white/5'}
+                            relative rounded-lg overflow-hidden transition-all
+                            ${isHighlighted ? 'bg-stone-800/60' : 'bg-stone-900/40 hover:bg-stone-800/40'}
                           `}
                         >
-                          <div className="flex items-start gap-3">
-                            {/* Rank Badge */}
-                            <div className="flex flex-col items-center">
-                              <span className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-white font-bold text-sm">
-                                {idx + 1}
-                              </span>
+                          {/* Thin left accent bar */}
+                          <div 
+                            className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
+                            style={{ background: accentColor }}
+                          />
+                          
+                          {/* Main card content */}
+                          <button
+                            onClick={() => {
+                              handleUserInteraction();
+                              setHighlightedStandRank(stand.rank);
+                              // Toggle inline expand instead of popup
+                              setSelectedStand(selectedStand === stand.rank ? null : stand.rank);
+                              mapRef.current?.flyTo({ center: stand.coords, zoom: 16, duration: 800 });
+                            }}
+                            className="w-full pl-3 pr-2 py-2 text-left"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-white text-sm font-medium truncate block">{stand.name}</span>
+                                <span className="text-stone-400 text-xs">{stand.alignment.label}</span>
+                              </div>
+                              {/* Score - small, top-right, monospace */}
+                              <span className="text-stone-500 text-xs font-mono ml-2">{stand.alignment.score}</span>
                             </div>
-
-                            {/* Stand Info */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-baseline justify-between">
-                                <span className="text-white font-semibold">Stand #{stand.rank}</span>
-                                {/* Small understated score */}
-                                <span className="text-white/40 text-xs font-mono">{stand.alignment.score}</span>
+                          </button>
+                          
+                          {/* Inline expanded details (no popup) */}
+                          {isExpanded && (
+                            <div className="pl-3 pr-2 pb-2 pt-1 border-t border-white/5 text-xs text-stone-400 space-y-1">
+                              <div className="flex justify-between">
+                                <span>Face:</span>
+                                <span className="text-white">{stand.props.windOk[0] || 'N'}</span>
                               </div>
-
-                              {/* Earth-tone Label */}
-                              <div className={`text-sm font-medium ${labelColors[stand.alignment.label] || 'text-stone-400'}`}>
-                                {stand.alignment.label}
+                              <div className="flex justify-between">
+                                <span>Intrusion:</span>
+                                <span className="text-white capitalize">{stand.props.approachRisk}</span>
                               </div>
-
-                              {/* Exceptional - only top stand, calm 200ms fade-in */}
-                              {isExceptional && (
-                                <div 
-                                  className="text-emerald-300/80 text-xs mt-0.5"
-                                  style={{ animation: 'fadeIn 0.2s ease-out' }}
-                                >
-                                  Exceptional
+                              {stand.props.distToCorridorMeters > 0 && (
+                                <div className="flex justify-between">
+                                  <span>To corridor:</span>
+                                  <span className="text-white">{stand.props.distToCorridorMeters}m</span>
                                 </div>
                               )}
-
-                              {/* Wind & Approach */}
-                              <div className="flex items-center gap-3 mt-2 text-xs text-white/50">
-                                <span className={stand.props.windOk.includes(windDirection) ? 'text-green-400' : 'text-white/40'}>
-                                  Wind: {stand.props.windOk.slice(0, 2).join(', ')}
-                                </span>
-                                <span className={`capitalize ${
-                                  stand.props.approachRisk === 'low' ? 'text-green-400/70' :
-                                  stand.props.approachRisk === 'high' ? 'text-stone-500' : 'text-stone-400'
-                                }`}>
-                                  {stand.props.approachRisk} approach
-                                </span>
-                              </div>
-
-                              {/* Movement indicator */}
-                              <div className="mt-1.5 flex items-center gap-2">
-                                <div className="flex-1 h-1 bg-stone-800 rounded-full overflow-hidden">
-                                  <div 
-                                    className="h-full bg-gradient-to-r from-stone-600 to-stone-500 rounded-full transition-all"
-                                    style={{ width: `${Math.round(stand.inputs.movement * 100)}%` }}
-                                  />
-                                </div>
-                                <span className="text-[10px] text-white/30">movement</span>
-                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  showStandPopup(stand.coords, stand.props);
+                                }}
+                                className="w-full mt-1 py-1 text-center text-stone-500 hover:text-white transition-colors text-[10px]"
+                              >
+                                Full details →
+                              </button>
                             </div>
-                          </div>
-                        </button>
+                          )}
+                        </div>
                       );
                     })}
-
-                    {/* Parcel Strength footer */}
-                    {alignedStands.length > 0 && (
-                      <div className="px-4 py-2 flex items-center justify-between text-xs text-white/40">
-                        <span>Parcel Strength</span>
-                        <span className="font-mono">{Math.round(parcelStrength)}</span>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

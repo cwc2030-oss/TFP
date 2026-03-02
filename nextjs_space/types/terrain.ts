@@ -104,6 +104,7 @@ export interface FunnelProperties {
 export interface StandPointProperties {
   rank: number;
   score: number;                  // 0-100
+  name?: string;                  // user-assigned or auto-suggested name
   windOk: WindDirection[];        // good wind directions
   windBad: WindDirection[];       // bad wind directions
   approachRisk: ApproachRisk;
