@@ -225,6 +225,8 @@ const LAYER_COLORS = {
   // Edge Intelligence Layer colors
   edgeCorridorArrow: '#db2777',    // Faded red-violet for continuation arrows
   edgeGhostBedding: '#22c55e',     // Semi-transparent green for ghost bedding
+  edgeGhostSaddle: '#f97316',      // Semi-transparent orange for ghost saddles
+  edgeDrawExtension: '#3b82f6',    // Blue dashed for draw extensions
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
   edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
@@ -572,6 +574,142 @@ function generatePressureArrows(
   return { type: 'FeatureCollection', features };
 }
 
+// Generate ghost saddle silhouettes extending beyond parcel boundary
+function generateGhostSaddles(
+  funnels: GeoJSON.FeatureCollection,
+  parcelCoords: number[][]
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  const GHOST_OFFSET = 50; // meters outside boundary
+  const BOUNDARY_THRESHOLD = 40; // meters from boundary to trigger
+
+  if (!funnels?.features?.length || !parcelCoords?.length) return { type: 'FeatureCollection', features };
+
+  // Filter for saddles only (polygons with funnelType === 'saddle')
+  const saddles = funnels.features.filter(
+    f => f.properties?.funnelType === 'saddle' && ['Polygon', 'MultiPolygon'].includes(f.geometry?.type || '')
+  );
+
+  saddles.forEach((saddle, idx) => {
+    // Get centroid of saddle
+    let centroid: [number, number] = [0, 0];
+    let count = 0;
+
+    const processCoords = (coords: number[][]) => {
+      coords.forEach(c => {
+        centroid[0] += c[0];
+        centroid[1] += c[1];
+        count++;
+      });
+    };
+
+    if (saddle.geometry?.type === 'Polygon') {
+      processCoords((saddle.geometry as GeoJSON.Polygon).coordinates[0]);
+    } else if (saddle.geometry?.type === 'MultiPolygon') {
+      (saddle.geometry as GeoJSON.MultiPolygon).coordinates.forEach(poly => processCoords(poly[0]));
+    }
+    
+    if (count === 0) return;
+    centroid = [centroid[0] / count, centroid[1] / count];
+
+    // Check distance to boundary
+    const closest = closestPointOnPolygon(centroid, parcelCoords);
+    const distToBoundary = distanceMeters(centroid, closest.point);
+
+    // If saddle is near boundary, create ghost outside
+    if (distToBoundary < BOUNDARY_THRESHOLD) {
+      const bearingOut = calculateBearing(centroid, closest.point);
+      const ghostCenter = movePoint(closest.point, bearingOut, GHOST_OFFSET);
+
+      // Create ghost saddle shape (pinch-point style)
+      const ghostPoints: [number, number][] = [];
+      const width = saddle.properties?.narrowestWidthMeters || 30;
+      const radiusA = Math.max(15, width / 2); // major axis
+      const radiusB = Math.max(10, width / 3); // minor axis (narrower = more pinch)
+
+      for (let angle = 0; angle < 360; angle += 30) {
+        const rad = angle * Math.PI / 180;
+        const r = (radiusA * radiusB) / Math.sqrt(
+          Math.pow(radiusB * Math.cos(rad), 2) + Math.pow(radiusA * Math.sin(rad), 2)
+        );
+        ghostPoints.push(movePoint(ghostCenter, (bearingOut + angle) % 360, r));
+      }
+      ghostPoints.push(ghostPoints[0]); // Close the ring
+
+      features.push({
+        type: 'Feature',
+        properties: {
+          type: 'ghost_saddle',
+          influence: 'external',
+          originalIndex: idx,
+          corridorScore: saddle.properties?.corridorScore || 0.5,
+          narrowestWidth: saddle.properties?.narrowestWidthMeters || 30
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [ghostPoints]
+        }
+      });
+    }
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
+// Generate draw/funnel extensions beyond parcel boundary
+function generateDrawExtensions(
+  funnels: GeoJSON.FeatureCollection,
+  parcelCoords: number[][]
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  const EXTENSION_LENGTH = 60; // meters beyond boundary
+  const BOUNDARY_THRESHOLD = 35; // meters from boundary to trigger
+
+  if (!funnels?.features?.length || !parcelCoords?.length) return { type: 'FeatureCollection', features };
+
+  // Filter for draws only (lines with funnelType === 'draw')
+  const draws = funnels.features.filter(
+    f => f.properties?.funnelType === 'draw' && f.geometry?.type === 'LineString'
+  );
+
+  draws.forEach((draw, idx) => {
+    const coords = (draw.geometry as GeoJSON.LineString).coordinates as [number, number][];
+    if (coords.length < 2) return;
+
+    // Check both ends of the draw
+    const endpoints = [
+      { point: coords[0], direction: calculateBearing(coords[1], coords[0]), isStart: true },
+      { point: coords[coords.length - 1], direction: calculateBearing(coords[coords.length - 2], coords[coords.length - 1]), isStart: false }
+    ];
+
+    endpoints.forEach(({ point, direction, isStart }) => {
+      const closest = closestPointOnPolygon(point, parcelCoords);
+      const distToBoundary = distanceMeters(point, closest.point);
+
+      if (distToBoundary < BOUNDARY_THRESHOLD) {
+        const extensionEnd = movePoint(closest.point, direction, EXTENSION_LENGTH);
+
+        // Create dashed extension line
+        features.push({
+          type: 'Feature',
+          properties: {
+            type: 'draw_extension',
+            direction: isStart ? 'inbound' : 'outbound',
+            originalIndex: idx,
+            corridorScore: draw.properties?.corridorScore || 0.4
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: [closest.point, extensionEnd]
+          }
+        });
+      }
+    });
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
 // Identify adjacent parcel boundaries for click interaction
 function generateAdjacentParcelBoundary(parcelCoords: number[][]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
@@ -688,12 +826,14 @@ function DeerIntelContent() {
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [unlockModalData, setUnlockModalData] = useState<{
     segmentBearing: number;
-    edgeType: 'corridor' | 'bedding' | 'pressure' | 'boundary';
+    edgeType: 'corridor' | 'bedding' | 'saddle' | 'draw' | 'pressure' | 'boundary';
     lngLat: [number, number];
   } | null>(null);
   const [edgeIntelData, setEdgeIntelData] = useState<{
     corridorArrows: GeoJSON.FeatureCollection;
     ghostBedding: GeoJSON.FeatureCollection;
+    ghostSaddles: GeoJSON.FeatureCollection;
+    drawExtensions: GeoJSON.FeatureCollection;
     pressureArrows: GeoJSON.FeatureCollection;
     adjacentBoundary: GeoJSON.FeatureCollection;
   } | null>(null);
@@ -1134,12 +1274,17 @@ function DeerIntelContent() {
         layers.beddingPolygons || { type: 'FeatureCollection', features: [] },
         parcelCoords
       );
+      const funnelsFC = layers.funnels || { type: 'FeatureCollection', features: [] };
+      const ghostSaddles = generateGhostSaddles(funnelsFC, parcelCoords);
+      const drawExtensions = generateDrawExtensions(funnelsFC, parcelCoords);
       const pressureArrows = generatePressureArrows(corridorsFC, parcelCoords);
       const adjacentBoundary = generateAdjacentParcelBoundary(parcelCoords);
 
       console.log('[EDGE INTEL] Generated:', {
         corridorArrows: corridorArrows.features.length,
         ghostBedding: ghostBedding.features.length,
+        ghostSaddles: ghostSaddles.features.length,
+        drawExtensions: drawExtensions.features.length,
         pressureArrows: pressureArrows.features.length,
         adjacentBoundary: adjacentBoundary.features.length
       });
@@ -1147,6 +1292,8 @@ function DeerIntelContent() {
       setEdgeIntelData({
         corridorArrows,
         ghostBedding,
+        ghostSaddles,
+        drawExtensions,
         pressureArrows,
         adjacentBoundary
       });
@@ -1171,6 +1318,18 @@ function DeerIntelContent() {
       const ghostSource = map.getSource('tfp-edge-ghost') as mapboxgl.GeoJSONSource;
       if (ghostSource) {
         ghostSource.setData(edgeIntelData.ghostBedding);
+      }
+
+      // Update ghost saddles source
+      const ghostSaddleSource = map.getSource('tfp-edge-ghost-saddles') as mapboxgl.GeoJSONSource;
+      if (ghostSaddleSource) {
+        ghostSaddleSource.setData(edgeIntelData.ghostSaddles);
+      }
+
+      // Update draw extensions source
+      const drawExtSource = map.getSource('tfp-edge-draw-extensions') as mapboxgl.GeoJSONSource;
+      if (drawExtSource) {
+        drawExtSource.setData(edgeIntelData.drawExtensions);
       }
 
       // Update pressure arrows source
@@ -1519,6 +1678,47 @@ function DeerIntelContent() {
           });
         }
         
+        // Ghost saddle silhouettes (pinch points extending beyond boundary)
+        if (!map.getSource('tfp-edge-ghost-saddles')) {
+          map.addSource('tfp-edge-ghost-saddles', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-edge-ghost-saddles-fill',
+            type: 'fill',
+            source: 'tfp-edge-ghost-saddles',
+            paint: {
+              'fill-color': LAYER_COLORS.edgeGhostSaddle,
+              'fill-opacity': 0.2,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-edge-ghost-saddles-outline',
+            type: 'line',
+            source: 'tfp-edge-ghost-saddles',
+            paint: {
+              'line-color': LAYER_COLORS.edgeGhostSaddle,
+              'line-width': 2,
+              'line-opacity': 0.5,
+              'line-dasharray': [3, 2],
+            },
+          });
+        }
+        
+        // Draw extensions (drainage/terrain channels extending beyond boundary)
+        if (!map.getSource('tfp-edge-draw-extensions')) {
+          map.addSource('tfp-edge-draw-extensions', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-edge-draw-extensions-lines',
+            type: 'line',
+            source: 'tfp-edge-draw-extensions',
+            paint: {
+              'line-color': LAYER_COLORS.edgeDrawExtension,
+              'line-width': 3,
+              'line-opacity': 0.5,
+              'line-dasharray': [3, 2],
+            },
+          });
+        }
+        
         // Pressure direction arrows
         if (!map.getSource('tfp-edge-pressure')) {
           map.addSource('tfp-edge-pressure', { type: 'geojson', data: EMPTY_FC });
@@ -1739,6 +1939,63 @@ function DeerIntelContent() {
           hoverPopup.remove();
         });
         
+        // Ghost saddle hover (pinch points on adjacent property)
+        map.on('mouseenter', 'tfp-edge-ghost-saddles-fill', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const html = `
+              <div style="padding: 10px; font-size: 13px; max-width: 220px;">
+                <div style="font-weight: bold; color: ${LAYER_COLORS.edgeGhostSaddle}; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 16px;">🎯</span> External Pinch Point
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  Terrain saddle continues onto adjacent property — a natural funnel for deer movement.
+                  ${props.narrowestWidth ? `<div style="margin-top: 4px;">Est. width: ~${Math.round(props.narrowestWidth)}m</div>` : ''}
+                </div>
+                <div style="margin-top: 8px; padding: 6px 10px; background: ${LAYER_COLORS.edgeGhostSaddle}20; border-radius: 6px; color: #fff; font-size: 11px; font-weight: 500;">
+                  🔓 Unlock adjacent parcel for full saddle intel
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-edge-ghost-saddles-fill', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
+        // Draw extension hover (drainage channels extending beyond boundary)
+        map.on('mouseenter', 'tfp-edge-draw-extensions-lines', (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties || {};
+            const isInbound = props.direction === 'inbound';
+            const html = `
+              <div style="padding: 10px; font-size: 13px; max-width: 220px;">
+                <div style="font-weight: bold; color: ${LAYER_COLORS.edgeDrawExtension}; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 16px;">💧</span> Draw Continues
+                </div>
+                <div style="color: #ccc; line-height: 1.5;">
+                  ${isInbound 
+                    ? 'This terrain draw flows into your property from adjacent land — deer likely use this natural travel route.'
+                    : 'This terrain draw flows from your property to adjacent land — understanding where it leads can reveal movement patterns.'
+                  }
+                </div>
+                <div style="margin-top: 8px; padding: 6px 10px; background: ${LAYER_COLORS.edgeDrawExtension}20; border-radius: 6px; color: #fff; font-size: 11px; font-weight: 500;">
+                  🔓 Unlock adjacent parcel for complete draw mapping
+                </div>
+              </div>
+            `;
+            hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          }
+        });
+        map.on('mouseleave', 'tfp-edge-draw-extensions-lines', () => {
+          map.getCanvas().style.cursor = '';
+          hoverPopup.remove();
+        });
+        
         // Pressure arrows hover
         map.on('mouseenter', 'tfp-edge-pressure-lines', (e) => {
           map.getCanvas().style.cursor = 'pointer';
@@ -1791,7 +2048,7 @@ function DeerIntelContent() {
         // ========== EDGE INTELLIGENCE CLICK HANDLERS ==========
         // These trigger the unlock modal for adjacent parcels
         
-        const handleEdgeClick = (e: mapboxgl.MapLayerMouseEvent, edgeType: 'corridor' | 'bedding' | 'pressure' | 'boundary') => {
+        const handleEdgeClick = (e: mapboxgl.MapLayerMouseEvent, edgeType: 'corridor' | 'bedding' | 'saddle' | 'draw' | 'pressure' | 'boundary') => {
           if (!e.features || !e.features[0]) return;
           
           const props = e.features[0].properties || {};
@@ -1811,6 +2068,8 @@ function DeerIntelContent() {
         map.on('click', 'tfp-edge-arrows-lines', (e) => handleEdgeClick(e, 'corridor'));
         map.on('click', 'tfp-edge-arrows-heads', (e) => handleEdgeClick(e, 'corridor'));
         map.on('click', 'tfp-edge-ghost-fill', (e) => handleEdgeClick(e, 'bedding'));
+        map.on('click', 'tfp-edge-ghost-saddles-fill', (e) => handleEdgeClick(e, 'saddle'));
+        map.on('click', 'tfp-edge-draw-extensions-lines', (e) => handleEdgeClick(e, 'draw'));
         map.on('click', 'tfp-edge-pressure-lines', (e) => handleEdgeClick(e, 'pressure'));
         map.on('click', 'tfp-edge-boundary-fill', (e) => handleEdgeClick(e, 'boundary'));
         
@@ -2528,11 +2787,142 @@ function DeerIntelContent() {
                 </div>
               </div>
 
-              {/* Layer Filters */}
+              {/* ========== DEER MOVEMENT PANEL ========== */}
+              {(() => {
+                // Count movement features
+                const corridorCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'corridor').length || 0;
+                const saddleCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'saddle').length || 0;
+                const drawCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'draw').length || 0;
+                const totalMovement = corridorCount + saddleCount + drawCount;
+                
+                // Edge features that extend beyond parcel
+                const edgeCorridors = edgeIntelData?.corridorArrows?.features?.length || 0;
+                const edgeSaddles = edgeIntelData?.ghostSaddles?.features?.length || 0;
+                const edgeDraws = edgeIntelData?.drawExtensions?.features?.length || 0;
+                const totalEdge = edgeCorridors + edgeSaddles + edgeDraws;
+                
+                const movementVisible = visibility.corridors || visibility.funnels;
+                
+                return (
+                  <div className="p-3 border-b border-white/10">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-medium text-white flex items-center gap-2 text-sm">
+                        <Compass className="h-4 w-4 text-stone-400" />
+                        Deer Movement
+                      </h3>
+                      {totalMovement > 0 && (
+                        <span className="text-xs text-stone-500">{totalMovement} features</span>
+                      )}
+                    </div>
+                    
+                    {/* Movement feature rows */}
+                    <div className="space-y-1 mb-2">
+                      {/* Corridors */}
+                      <button
+                        onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-1 rounded-full" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>
+                          Corridors
+                        </span>
+                        <span className={`text-[10px] ${visibility.corridors ? 'text-stone-400' : 'text-stone-600'}`}>
+                          {corridorCount}
+                        </span>
+                      </button>
+                      
+                      {/* Saddles */}
+                      <button
+                        onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          visibility.funnels ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.funnels ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.funnels ? 'text-white' : 'text-stone-500'}`}>
+                          Saddles
+                        </span>
+                        <span className={`text-[10px] ${visibility.funnels ? 'text-stone-400' : 'text-stone-600'}`}>
+                          {saddleCount}
+                        </span>
+                      </button>
+                      
+                      {/* Draws */}
+                      <button
+                        onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          visibility.funnels ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-0.5 rounded-full" style={{ background: LAYER_COLORS.funnelDraw, opacity: visibility.funnels ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.funnels ? 'text-white' : 'text-stone-500'}`}>
+                          Draws
+                        </span>
+                        <span className={`text-[10px] ${visibility.funnels ? 'text-stone-400' : 'text-stone-600'}`}>
+                          {drawCount}
+                        </span>
+                      </button>
+                    </div>
+                    
+                    {/* Edge Movement Teaser (flows beyond property) */}
+                    {totalEdge > 0 && movementVisible && (
+                      <div 
+                        className="mt-2 p-2 rounded-lg bg-gradient-to-r from-pink-900/20 to-orange-900/20 border border-white/5 cursor-pointer hover:border-white/10 transition-colors"
+                        onClick={() => {
+                          // Trigger unlock modal for the first available edge type
+                          if (edgeCorridors > 0) {
+                            setUnlockModalData({ edgeType: 'corridor', lngLat: [lng, lat], segmentBearing: 0 });
+                            setShowUnlockModal(true);
+                          } else if (edgeSaddles > 0) {
+                            setUnlockModalData({ edgeType: 'saddle', lngLat: [lng, lat], segmentBearing: 0 });
+                            setShowUnlockModal(true);
+                          } else if (edgeDraws > 0) {
+                            setUnlockModalData({ edgeType: 'draw', lngLat: [lng, lat], segmentBearing: 0 });
+                            setShowUnlockModal(true);
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <Lock className="w-3 h-3 text-pink-400" />
+                          <span className="text-[10px] text-white/70 font-medium">Continues Off-Property</span>
+                        </div>
+                        <div className="flex gap-2 text-[9px] text-stone-400">
+                          {edgeCorridors > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-0.5 rounded" style={{ background: LAYER_COLORS.edgeCorridorArrow }} />
+                              {edgeCorridors} corridor{edgeCorridors > 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {edgeSaddles > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.edgeGhostSaddle, opacity: 0.6 }} />
+                              {edgeSaddles} saddle{edgeSaddles > 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {edgeDraws > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-0.5 rounded" style={{ background: LAYER_COLORS.edgeDrawExtension }} />
+                              {edgeDraws} draw{edgeDraws > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-[9px] text-pink-400/80">
+                          🔓 Tap to unlock adjacent intel
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              
+              {/* Other Layers */}
               <div className="p-3 border-b border-white/10">
                 <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
                   <Layers className="h-4 w-4 text-stone-400" />
-                  Layers
+                  Other Layers
                 </h3>
                 <div className="space-y-1">
                   <button
@@ -2543,24 +2933,6 @@ function DeerIntelContent() {
                   >
                     <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
                     <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
-                  </button>
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                      visibility.funnels ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.funnels ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.funnels ? 'text-white' : 'text-stone-500'}`}>Saddles</span>
-                  </button>
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                      visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>Corridors</span>
                   </button>
                   <button
                     onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
@@ -2802,11 +3174,15 @@ function DeerIntelContent() {
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
                     unlockModalData.edgeType === 'corridor' ? 'bg-pink-500/20' :
                     unlockModalData.edgeType === 'bedding' ? 'bg-green-500/20' :
+                    unlockModalData.edgeType === 'saddle' ? 'bg-orange-500/20' :
+                    unlockModalData.edgeType === 'draw' ? 'bg-blue-500/20' :
                     unlockModalData.edgeType === 'pressure' ? 'bg-amber-500/20' :
                     'bg-purple-500/20'
                   }`}>
                     {unlockModalData.edgeType === 'corridor' && <ArrowUpRight className="w-5 h-5 text-pink-400" />}
                     {unlockModalData.edgeType === 'bedding' && <Target className="w-5 h-5 text-green-400" />}
+                    {unlockModalData.edgeType === 'saddle' && <Mountain className="w-5 h-5 text-orange-400" />}
+                    {unlockModalData.edgeType === 'draw' && <Compass className="w-5 h-5 text-blue-400" />}
                     {unlockModalData.edgeType === 'pressure' && <Wind className="w-5 h-5 text-amber-400" />}
                     {unlockModalData.edgeType === 'boundary' && <MapPin className="w-5 h-5 text-purple-400" />}
                   </div>
@@ -2814,6 +3190,8 @@ function DeerIntelContent() {
                     <p className="text-white font-medium text-sm">
                       {unlockModalData.edgeType === 'corridor' && 'Travel corridor continues beyond your boundary'}
                       {unlockModalData.edgeType === 'bedding' && 'External bedding influence detected'}
+                      {unlockModalData.edgeType === 'saddle' && 'Terrain pinch point extends off-property'}
+                      {unlockModalData.edgeType === 'draw' && 'Natural draw continues to adjacent land'}
                       {unlockModalData.edgeType === 'pressure' && 'Deer movement originates off-property'}
                       {unlockModalData.edgeType === 'boundary' && 'Adjacent parcel may impact your hunt'}
                     </p>
