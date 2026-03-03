@@ -58,6 +58,7 @@ export default function TerrainIntelOverlay({
     funnels: true,
     stands: true,
     corridors: true,
+    ridgeSpines: true,
   });
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
   const [showLegend, setShowLegend] = useState(true);

@@ -171,6 +171,60 @@ export interface StandPointProperties {
   reasoning: string;              // human-readable explanation
 }
 
+// ============ Ridge Spine Types (Structure-First, DEM-Only) ============
+
+export type RidgeTier = 'primary' | 'secondary';
+
+export interface RidgeSpineProperties {
+  tier: RidgeTier;                  // Primary (major spines) or Secondary (shorter ridges)
+  prominenceFt: number;             // Drop on both sides in feet (>20 ft required)
+  lengthMeters: number;             // Continuous length in meters (>200m for primary)
+  avgElevationM: number;            // Average elevation along ridge
+  avgSlopeDeg: number;              // Average slope of ridge flanks
+  curvatureProfile: number;         // Profile curvature (convexity measure)
+  id: string;                       // Unique ridge identifier
+}
+
+export interface SaddleNodeProperties {
+  id: string;                       // Unique saddle identifier
+  elevationM: number;               // Elevation at saddle point
+  ridgeDropFt: number;              // Prominence drop from adjacent ridge peaks
+  adjacentRidgeIds: string[];       // IDs of ridges this saddle connects
+}
+
+export interface RidgeSpineResponse {
+  success: boolean;
+  bbox: [number, number, number, number];
+  
+  // Primary ridges: major continuous spines (>200m, >20ft prominence)
+  ridges_primary: GeoJSON.FeatureCollection<GeoJSON.LineString, RidgeSpineProperties>;
+  
+  // Secondary ridges: shorter but valid ridges (>100m, >15ft prominence)
+  ridges_secondary: GeoJSON.FeatureCollection<GeoJSON.LineString, RidgeSpineProperties>;
+  
+  // Saddle nodes: low points between ridge peaks
+  saddle_nodes: GeoJSON.FeatureCollection<GeoJSON.Point, SaddleNodeProperties>;
+  
+  metadata: RidgeSpineMetadata;
+}
+
+export interface RidgeSpineMetadata {
+  processing_time_seconds: number;
+  dem_source: string;
+  resolution_m: number;
+  thresholds: {
+    min_prominence_ft_primary: number;
+    min_prominence_ft_secondary: number;
+    min_length_m_primary: number;
+    min_length_m_secondary: number;
+  };
+  total_ridge_length_m: number;
+  ridge_count_primary: number;
+  ridge_count_secondary: number;
+  saddle_count: number;
+  fallback_reason?: string | null;
+}
+
 // ============ Error Types ============
 
 export interface TerrainAnalysisError {
@@ -199,4 +253,5 @@ export interface TerrainLayerVisibility {
   funnels: boolean;
   stands: boolean;
   corridors: boolean;
+  ridgeSpines: boolean;  // Structure-first terrain anatomy layer
 }

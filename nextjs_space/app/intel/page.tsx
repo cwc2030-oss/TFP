@@ -32,8 +32,10 @@ import type {
   SeasonProfile,
   WindDirection,
   TieredCorridorResponse,
+  RidgeSpineResponse,
 } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
+import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -246,6 +248,10 @@ const LAYER_COLORS = {
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
   edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
+  // Ridge Spine colors (structure-first, earth tones)
+  ridgePrimary: '#6B4423',        // Dark umber - major continuous spines
+  ridgeSecondary: '#8B7355',      // Warm brown - shorter valid ridges
+  saddleNode: '#9C8267',          // Warm gray - saddle markers
 };
 
 // ========== EDGE INTELLIGENCE UTILITIES ==========
@@ -829,6 +835,7 @@ function DeerIntelContent() {
     funnels: true,
     stands: true,
     corridors: true,
+    ridgeSpines: true, // ON by default - terrain anatomy before deer logic
   });
 
   // UI state
@@ -870,6 +877,20 @@ function DeerIntelContent() {
       possible_threshold: number;
       exploratory_threshold: number;
       parcel_coverage_pct: number;
+    };
+  } | null>(null);
+  
+  // Ridge Spine Data state (structure-first, DEM-only)
+  const [ridgeSpineData, setRidgeSpineData] = useState<{
+    ridges_primary: GeoJSON.FeatureCollection;
+    ridges_secondary: GeoJSON.FeatureCollection;
+    saddle_nodes: GeoJSON.FeatureCollection;
+    isSynthetic: boolean;
+    metadata?: {
+      total_ridge_length_m: number;
+      ridge_count_primary: number;
+      ridge_count_secondary: number;
+      saddle_count: number;
     };
   } | null>(null);
 
@@ -1543,6 +1564,104 @@ function DeerIntelContent() {
     }
   }, [tieredCorridorData, mapReady]);
 
+  // ========== GENERATE RIDGE SPINE DATA (Structure-First, DEM-Only) ==========
+  useEffect(() => {
+    if (!parcelPolygon) {
+      setRidgeSpineData(null);
+      return;
+    }
+
+    const generateRidgeData = async () => {
+      try {
+        // Extract parcel ID for API call
+        const parcelId = (parcelPolygon.properties as any)?.parcelId || 
+                         (parcelPolygon.properties as any)?.ll_uuid || 
+                         `synth-${Date.now().toString(36)}`;
+
+        console.log('[RIDGE] Generating ridge spine data for parcel:', parcelId);
+
+        // Fetch ridge spine data (will fall back to synthetic if API unavailable)
+        const result = await fetchRidgeSpines({
+          parcel: parcelPolygon,
+          parcel_id: parcelId,
+          bufferMeters: 300, // Smaller buffer for ridge extraction
+        });
+
+        if (result.success && result.data) {
+          console.log('[RIDGE] Generated:', {
+            primary: result.data.ridges_primary.features.length,
+            secondary: result.data.ridges_secondary.features.length,
+            saddles: result.data.saddle_nodes.features.length,
+            synthetic: result.isSynthetic,
+          });
+
+          setRidgeSpineData({
+            ridges_primary: result.data.ridges_primary,
+            ridges_secondary: result.data.ridges_secondary,
+            saddle_nodes: result.data.saddle_nodes,
+            isSynthetic: result.isSynthetic,
+            metadata: {
+              total_ridge_length_m: result.data.metadata.total_ridge_length_m,
+              ridge_count_primary: result.data.metadata.ridge_count_primary,
+              ridge_count_secondary: result.data.metadata.ridge_count_secondary,
+              saddle_count: result.data.metadata.saddle_count,
+            },
+          });
+        } else {
+          console.warn('[RIDGE] Ridge spine generation failed, using fallback');
+          // Generate synthetic as fallback
+          const synthetic = generateSyntheticRidgeSpines(parcelPolygon);
+          setRidgeSpineData({
+            ridges_primary: synthetic.ridges_primary,
+            ridges_secondary: synthetic.ridges_secondary,
+            saddle_nodes: synthetic.saddle_nodes,
+            isSynthetic: true,
+            metadata: {
+              total_ridge_length_m: synthetic.metadata.total_ridge_length_m,
+              ridge_count_primary: synthetic.metadata.ridge_count_primary,
+              ridge_count_secondary: synthetic.metadata.ridge_count_secondary,
+              saddle_count: synthetic.metadata.saddle_count,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[RIDGE] Ridge spine generation error:', err);
+      }
+    };
+
+    generateRidgeData();
+  }, [parcelPolygon]);
+
+  // ========== UPDATE RIDGE SPINE MAP SOURCES ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current || !ridgeSpineData) return;
+
+    try {
+      // Update primary ridges source
+      const primarySource = map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
+      if (primarySource) {
+        primarySource.setData(ridgeSpineData.ridges_primary);
+      }
+
+      // Update secondary ridges source
+      const secondarySource = map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
+      if (secondarySource) {
+        secondarySource.setData(ridgeSpineData.ridges_secondary);
+      }
+
+      // Update saddle nodes source
+      const saddleSource = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
+      if (saddleSource) {
+        saddleSource.setData(ridgeSpineData.saddle_nodes);
+      }
+
+      console.log('[MAP] Updated ridge spine sources');
+    } catch (err) {
+      console.error('[MAP] Error updating ridge spine sources (non-fatal):', err);
+    }
+  }, [ridgeSpineData, mapReady]);
+
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -1609,6 +1728,19 @@ function DeerIntelContent() {
       tieredFunnelLayers.forEach(layerId => {
         if (map.getLayer(layerId)) {
           map.setLayoutProperty(layerId, 'visibility', visibility.funnels ? 'visible' : 'none');
+        }
+      });
+      
+      // Ridge spine visibility (structure-first terrain anatomy)
+      const ridgeSpineLayers = [
+        'tfp-ridges-primary',
+        'tfp-ridges-secondary',
+        'tfp-saddle-nodes',
+        'tfp-saddle-nodes-outline',
+      ];
+      ridgeSpineLayers.forEach(layerId => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', visibility.ridgeSpines ? 'visible' : 'none');
         }
       });
     } catch (err) {
@@ -1989,6 +2121,65 @@ function DeerIntelContent() {
                 0.9, 0.30    // High intrusion: visible
               ],
               'line-dasharray': [1, 1],  // Hatched effect
+            },
+          });
+        }
+        
+        // ========== RIDGE SPINE SOURCES AND LAYERS (Structure-First, DEM-Only) ==========
+        
+        // Primary ridges: Major continuous spines (>200m, >20ft prominence)
+        if (!map.getSource('tfp-ridges-primary')) {
+          map.addSource('tfp-ridges-primary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-ridges-primary',
+            type: 'line',
+            source: 'tfp-ridges-primary',
+            paint: {
+              'line-color': LAYER_COLORS.ridgePrimary,
+              'line-width': 3,
+              'line-opacity': 0.75,
+            },
+          });
+        }
+        
+        // Secondary ridges: Shorter but valid ridges (>100m, >15ft prominence)
+        if (!map.getSource('tfp-ridges-secondary')) {
+          map.addSource('tfp-ridges-secondary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-ridges-secondary',
+            type: 'line',
+            source: 'tfp-ridges-secondary',
+            paint: {
+              'line-color': LAYER_COLORS.ridgeSecondary,
+              'line-width': 2,
+              'line-opacity': 0.50,
+            },
+          });
+        }
+        
+        // Saddle nodes: Low points between ridge peaks (small neutral circles)
+        if (!map.getSource('tfp-saddle-nodes')) {
+          map.addSource('tfp-saddle-nodes', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-saddle-nodes',
+            type: 'circle',
+            source: 'tfp-saddle-nodes',
+            paint: {
+              'circle-radius': 5,
+              'circle-color': LAYER_COLORS.saddleNode,
+              'circle-opacity': 0.60,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-saddle-nodes-outline',
+            type: 'circle',
+            source: 'tfp-saddle-nodes',
+            paint: {
+              'circle-radius': 6,
+              'circle-color': 'transparent',
+              'circle-stroke-color': LAYER_COLORS.saddleNode,
+              'circle-stroke-width': 1.5,
+              'circle-stroke-opacity': 0.80,
             },
           });
         }
@@ -3289,6 +3480,44 @@ function DeerIntelContent() {
                 );
               })()}
               
+              {/* Terrain Anatomy Layer (Ridge Spines - ON by default) */}
+              <div className="p-3 border-b border-white/10">
+                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
+                  <Mountain className="h-4 w-4 text-stone-400" />
+                  Terrain Anatomy
+                </h3>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, ridgeSpines: !v.ridgeSpines }))}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.ridgeSpines ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Ridge Spines</span>
+                    {ridgeSpineData?.isSynthetic && (
+                      <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">Est.</span>
+                    )}
+                  </button>
+                </div>
+                {ridgeSpineData && visibility.ridgeSpines && (
+                  <div className="mt-2 text-[10px] text-stone-500 space-y-0.5 px-1">
+                    <div className="flex justify-between">
+                      <span>Primary Ridges</span>
+                      <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_primary || 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Secondary Ridges</span>
+                      <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_secondary || 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Saddle Points</span>
+                      <span className="text-stone-400">{ridgeSpineData.metadata?.saddle_count || 0}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Other Layers */}
               <div className="p-3 border-b border-white/10">
                 <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
