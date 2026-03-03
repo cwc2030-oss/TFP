@@ -1,22 +1,26 @@
 /**
- * POST /api/corridors - Travel Corridor V1 Analysis
+ * POST /api/corridors - Travel Corridor V2 Analysis
  * 
  * Input: Parcel AOI (GeoJSON polygon), parcel_id
  * Process:
  *   1. Call Modal geoprocessor for DEM-based corridor computation
  *   2. Uses slope preference + concavity weighting
- *   3. Returns movement probability as image overlay
- * Output: Image URL + bbox metadata
+ *   3. Tiers corridors into Primary/Possible/Exploratory
+ *   4. Classifies funnels as Hard/Slight
+ *   5. Computes intrusion scores for huntability overlay
+ * Output: Tiered corridor FeatureCollections + metadata
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadToS3, getCorridorPath, fileExists, getFileUrl } from '@/lib/s3';
 import { getBucketConfig } from '@/lib/aws-config';
+import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
+import type { TieredCorridorResponse } from '@/types/terrain';
 
 const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL || 
   'https://cwc2030--terrain-brain-v3-corridors-corridors-web.modal.run/v1/corridors';
 const REQUEST_TIMEOUT_MS = 40000; // 40 seconds for corridor computation (client has 45s timeout)
-const API_VERSION = 'v3.2-timeout-2026-02-25';
+const API_VERSION = 'v4.0-tiered-2026-03-03';
 
 interface CorridorRequest {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
@@ -215,9 +219,42 @@ export async function POST(request: NextRequest) {
         processing_time: result.metadata?.processing_time_seconds,
       });
 
+      // Extract parcel coordinates for tiering
+      const parcelCoords = parcel.geometry.type === 'Polygon'
+        ? parcel.geometry.coordinates[0]
+        : parcel.geometry.coordinates[0][0];
+
+      // Apply tiering to corridor data
+      const tieredData = tierCorridorData(
+        {
+          corridors: result.corridors || { type: 'FeatureCollection', features: [] },
+          funnels: result.funnels,
+          bbox: result.bbox,
+        },
+        parcelCoords
+      );
+
+      // Update tiered metadata with DEM source info
+      tieredData.metadata.processing_time_seconds = result.metadata?.processing_time_seconds || (Date.now() - startTime) / 1000;
+      tieredData.metadata.dem_source = result.metadata?.dem_source || 'USGS_3DEP';
+      tieredData.metadata.resolution_m = result.metadata?.resolution_m || 10;
+
+      console.log('[Corridors] Tiered corridors:', {
+        primary: tieredData.corridors_primary?.features?.length || 0,
+        possible: tieredData.corridors_possible?.features?.length || 0,
+        exploratory: tieredData.corridors_exploratory?.features?.length || 0,
+        funnels_hard: tieredData.funnels_hard?.features?.length || 0,
+        funnels_slight: tieredData.funnels_slight?.features?.length || 0,
+        context_primary: tieredData.corridors_context_primary?.features?.length || 0,
+        context_possible: tieredData.corridors_context_possible?.features?.length || 0,
+      });
+
       // Ensure diagnostic fields are present in response
       const enrichedResult = {
         ...result,
+        ...tieredData,
+        // Legacy fields for backwards compatibility
+        corridors: result.corridors,
         version: result.version || API_VERSION,
         request_id: result.request_id || `modal_${Date.now().toString(36)}`,
         error_code: result.error_code || null,
@@ -280,8 +317,8 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Generate synthetic corridor data for V1 demo
- * Uses parcel geometry to create a plausible movement probability surface
+ * Generate synthetic corridor data for V2 demo
+ * Uses parcel geometry to create tiered corridor network
  */
 function generateSyntheticCorridor(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
@@ -304,7 +341,10 @@ function generateSyntheticCorridor(
     Math.max(...lats),
   ];
 
-  // Generate corridor lines as GeoJSON (simpler than raster for V1)
+  // Generate tiered corridor data using the new tiering system
+  const tieredData = generateSyntheticTieredCorridors(bbox, coords);
+
+  // Also generate legacy format for backwards compatibility
   const centerLng = (bbox[0] + bbox[2]) / 2;
   const centerLat = (bbox[1] + bbox[3]) / 2;
   const corridorFeatures = generateCorridorLines(bbox, centerLng, centerLat);
@@ -316,21 +356,21 @@ function generateSyntheticCorridor(
   // Generate local request_id if none from Modal
   const requestId = originalRequestId || `local_${Date.now().toString(36)}`;
 
+  // Update tiered metadata
+  tieredData.metadata.processing_time_seconds = (Date.now() - startTime) / 1000;
+  tieredData.metadata.dem_source = reasonText;
+  tieredData.metadata.fallback_reason = fallbackReason || null;
+
   return NextResponse.json({
-    success: true,
     mode: 'synthetic',
+    // Tiered corridor data (V2) - includes success: true
+    ...tieredData,
+    // Legacy corridor data for backwards compatibility
     corridors: {
       type: 'FeatureCollection',
       features: corridorFeatures,
     },
     bbox,
-    metadata: {
-      processing_time_seconds: (Date.now() - startTime) / 1000,
-      dem_source: reasonText,
-      resolution_m: 0,
-      weights: { slope_preference: 'moderate', concavity_weight: 0.4 },
-      fallback_reason: fallbackReason || null,
-    },
     // Diagnostic fields for UI
     request_id: requestId,
     version: `${API_VERSION}-synthetic`,

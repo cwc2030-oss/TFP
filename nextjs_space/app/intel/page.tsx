@@ -31,7 +31,9 @@ import type {
   FunnelProperties,
   SeasonProfile,
   WindDirection,
+  TieredCorridorResponse,
 } from '@/types/terrain';
+import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -200,30 +202,44 @@ const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: strin
   { value: 'late', label: 'Late Season', dates: 'Dec-Jan', icon: '❄️' },
 ];
 
-// ========== V1 STYLING RULES (Final Visual Direction) ==========
-// Corridors: Confidence-based styling
-//   High (≥0.7): SOLID bright red-violet, thick - primary travel routes
-//   Med (0.4-0.7): SOLID purple - secondary routes  
-//   Low (<0.4): DASHED light lavender - potential routes (ONLY low confidence is dashed)
-// Draws: Solid blue lines (water/drainage)
-// Saddles: Orange polygons (pinch points)
-// Stands: #1 gets gold ring (Today's Sit), #2 red
+// ========== V2 STYLING RULES (Tiered Corridors + Funnels) ==========
+// Corridors: Tiered based on relative likelihood
+//   Primary: SOLID, thick (~4px), opacity 0.85 - confirmed travel routes
+//   Possible: THINNER (~2.5px), opacity 0.45 - likely routes
+//   Exploratory: VERY THIN (~1.5px), dashed, opacity 0.25 - potential routes
+// Funnels: Compression zones
+//   Hard: Tighter patch, opacity 0.30 - strong pinch points
+//   Slight: Wider patch, opacity 0.18 - moderate compression
+// Intrusion: High intrusion segments get hatched/faded overlay
+// Context: Off-parcel continuations at reduced opacity, no interaction
+// Earth tones only: rust, sienna, umber, olive, ochre
 
 const LAYER_COLORS = {
   bedding: '#22c55e',
   beddingOutline: '#16a34a',
   funnelSaddle: '#f97316',
   funnelDraw: '#3b82f6',           // Solid blue for draws
+  // Legacy corridor colors (for backwards compatibility)
   corridorHigh: '#db2777',         // High score ≥0.7: bright red-violet (pink-600)
   corridorMed: '#9333ea',          // Med score 0.4-0.7: solid purple (purple-600)
   corridorLow: '#c4b5fd',          // Low score <0.4: light lavender (DASHED only)
+  // V2 Tiered corridor colors (earth tones)
+  corridorPrimary: '#8B4513',      // Sienna brown - primary routes (solid, thick)
+  corridorPossible: '#A0522D',     // Sienna lighter - possible routes (thinner)
+  corridorExploratory: '#D2B48C',  // Tan - exploratory lanes (very thin, dashed)
+  corridorContext: '#9C8267',      // Warm gray-brown - off-parcel context
+  // V2 Funnel colors (earth tones)
+  funnelHard: '#8B4513',           // Dark sienna - hard compression zones
+  funnelSlight: '#CD853F',         // Peru/tan - slight compression zones
+  // Intrusion overlay
+  intrusionHigh: '#DC143C',        // Crimson tint for high intrusion areas
   standHigh: '#ef4444',            // #2+ stands: red
   standGold: '#fbbf24',            // #1 Today's Sit: gold highlight ring
   standMed: '#f59e0b',
   standLow: '#6b7280',
   parcelBoundary: '#fbbf24',
   // Edge Intelligence Layer colors
-  edgeCorridorArrow: '#db2777',    // Faded red-violet for continuation arrows
+  edgeCorridorArrow: '#8B4513',    // Sienna for continuation arrows
   edgeGhostBedding: '#22c55e',     // Semi-transparent green for ghost bedding
   edgeGhostSaddle: '#f97316',      // Semi-transparent orange for ghost saddles
   edgeDrawExtension: '#3b82f6',    // Blue dashed for draw extensions
@@ -837,6 +853,25 @@ function DeerIntelContent() {
     pressureArrows: GeoJSON.FeatureCollection;
     adjacentBoundary: GeoJSON.FeatureCollection;
   } | null>(null);
+  
+  // V2 Tiered Corridor Data state
+  const [tieredCorridorData, setTieredCorridorData] = useState<{
+    corridors_primary: GeoJSON.FeatureCollection;
+    corridors_possible: GeoJSON.FeatureCollection;
+    corridors_exploratory: GeoJSON.FeatureCollection;
+    corridors_context_primary: GeoJSON.FeatureCollection;
+    corridors_context_possible: GeoJSON.FeatureCollection;
+    funnels_hard: GeoJSON.FeatureCollection;
+    funnels_slight: GeoJSON.FeatureCollection;
+    intrusion_overlay: GeoJSON.FeatureCollection;
+    metadata?: {
+      local_baseline: number;
+      primary_threshold: number;
+      possible_threshold: number;
+      exploratory_threshold: number;
+      parcel_coverage_pct: number;
+    };
+  } | null>(null);
 
   // ========== ALIGNMENT ENGINE STATE ==========
   type AlignedStand = {
@@ -1350,6 +1385,164 @@ function DeerIntelContent() {
     }
   }, [edgeIntelData, mapReady]);
 
+  // ========== COMPUTE TIERED CORRIDOR DATA ==========
+  useEffect(() => {
+    if (!layers || !parcelPolygon) {
+      setTieredCorridorData(null);
+      return;
+    }
+
+    try {
+      // Extract parcel coordinates for tiering
+      let parcelCoords: number[][] = [];
+      if (parcelPolygon.geometry.type === 'Polygon') {
+        parcelCoords = parcelPolygon.geometry.coordinates[0];
+      } else if (parcelPolygon.geometry.type === 'MultiPolygon') {
+        // Use largest polygon
+        let maxLen = 0;
+        parcelPolygon.geometry.coordinates.forEach((poly) => {
+          if (poly[0].length > maxLen) {
+            maxLen = poly[0].length;
+            parcelCoords = poly[0];
+          }
+        });
+      }
+
+      if (parcelCoords.length < 3) {
+        console.warn('[TIERED] Insufficient parcel coordinates');
+        return;
+      }
+
+      // Extract corridors from funnels
+      const corridorsFC: GeoJSON.FeatureCollection = layers.funnels 
+        ? {
+            type: 'FeatureCollection',
+            features: (layers.funnels.features || []).filter(
+              f => f.properties?.funnelType === 'corridor' && f.geometry?.type === 'LineString'
+            )
+          }
+        : { type: 'FeatureCollection', features: [] };
+
+      // Extract all funnels
+      const funnelsFC = layers.funnels || { type: 'FeatureCollection', features: [] };
+
+      // Compute bounding box
+      const lngs = parcelCoords.map((c: number[]) => c[0]);
+      const lats = parcelCoords.map((c: number[]) => c[1]);
+      const bbox: [number, number, number, number] = [
+        Math.min(...lngs),
+        Math.min(...lats),
+        Math.max(...lngs),
+        Math.max(...lats),
+      ];
+
+      // Apply tiering to corridor data
+      const tiered = tierCorridorData(
+        {
+          corridors: corridorsFC,
+          funnels: funnelsFC,
+          bbox,
+        },
+        parcelCoords
+      );
+
+      // Build intrusion overlay from high-intrusion corridor segments
+      const intrusionFeatures: GeoJSON.Feature[] = [];
+      [tiered.corridors_primary, tiered.corridors_possible].forEach(fc => {
+        fc.features.forEach(f => {
+          const intrusion = (f.properties as any)?.intrusion || 0;
+          if (intrusion >= 0.5) {
+            intrusionFeatures.push(f);
+          }
+        });
+      });
+
+      console.log('[TIERED] Computed tiered corridors:', {
+        primary: tiered.corridors_primary?.features?.length || 0,
+        possible: tiered.corridors_possible?.features?.length || 0,
+        exploratory: tiered.corridors_exploratory?.features?.length || 0,
+        funnels_hard: tiered.funnels_hard?.features?.length || 0,
+        funnels_slight: tiered.funnels_slight?.features?.length || 0,
+        context_primary: tiered.corridors_context_primary?.features?.length || 0,
+        context_possible: tiered.corridors_context_possible?.features?.length || 0,
+        intrusion_overlay: intrusionFeatures.length,
+      });
+
+      setTieredCorridorData({
+        corridors_primary: tiered.corridors_primary,
+        corridors_possible: tiered.corridors_possible,
+        corridors_exploratory: tiered.corridors_exploratory,
+        corridors_context_primary: tiered.corridors_context_primary,
+        corridors_context_possible: tiered.corridors_context_possible,
+        funnels_hard: tiered.funnels_hard,
+        funnels_slight: tiered.funnels_slight,
+        intrusion_overlay: { type: 'FeatureCollection', features: intrusionFeatures },
+        metadata: tiered.metadata?.tiering,
+      });
+    } catch (err) {
+      console.error('[TIERED] Corridor tiering failed:', err);
+    }
+  }, [layers, parcelPolygon]);
+
+  // ========== UPDATE TIERED CORRIDOR MAP SOURCES ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current || !tieredCorridorData) return;
+
+    try {
+      // Update primary corridors source
+      const primarySource = map.getSource('tfp-corridors-primary') as mapboxgl.GeoJSONSource;
+      if (primarySource) {
+        primarySource.setData(tieredCorridorData.corridors_primary);
+      }
+
+      // Update possible corridors source
+      const possibleSource = map.getSource('tfp-corridors-possible') as mapboxgl.GeoJSONSource;
+      if (possibleSource) {
+        possibleSource.setData(tieredCorridorData.corridors_possible);
+      }
+
+      // Update exploratory corridors source
+      const exploratorySource = map.getSource('tfp-corridors-exploratory') as mapboxgl.GeoJSONSource;
+      if (exploratorySource) {
+        exploratorySource.setData(tieredCorridorData.corridors_exploratory);
+      }
+
+      // Update context corridors sources
+      const contextPrimarySource = map.getSource('tfp-corridors-context-primary') as mapboxgl.GeoJSONSource;
+      if (contextPrimarySource) {
+        contextPrimarySource.setData(tieredCorridorData.corridors_context_primary);
+      }
+
+      const contextPossibleSource = map.getSource('tfp-corridors-context-possible') as mapboxgl.GeoJSONSource;
+      if (contextPossibleSource) {
+        contextPossibleSource.setData(tieredCorridorData.corridors_context_possible);
+      }
+
+      // Update hard funnels source
+      const hardFunnelSource = map.getSource('tfp-funnels-hard') as mapboxgl.GeoJSONSource;
+      if (hardFunnelSource) {
+        hardFunnelSource.setData(tieredCorridorData.funnels_hard);
+      }
+
+      // Update slight funnels source
+      const slightFunnelSource = map.getSource('tfp-funnels-slight') as mapboxgl.GeoJSONSource;
+      if (slightFunnelSource) {
+        slightFunnelSource.setData(tieredCorridorData.funnels_slight);
+      }
+
+      // Update intrusion overlay source
+      const intrusionSource = map.getSource('tfp-intrusion-overlay') as mapboxgl.GeoJSONSource;
+      if (intrusionSource) {
+        intrusionSource.setData(tieredCorridorData.intrusion_overlay);
+      }
+
+      console.log('[MAP] Updated tiered corridor sources');
+    } catch (err) {
+      console.error('[MAP] Error updating tiered corridor sources (non-fatal):', err);
+    }
+  }, [tieredCorridorData, mapReady]);
+
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -1390,6 +1583,34 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-funnels-polys-outline')) {
         map.setLayoutProperty('tfp-funnels-polys-outline', 'visibility', visibility.funnels ? 'visible' : 'none');
       }
+      
+      // V2 Tiered corridor visibility
+      const tieredCorridorLayers = [
+        'tfp-corridors-primary',
+        'tfp-corridors-possible',
+        'tfp-corridors-exploratory',
+        'tfp-corridors-context-primary',
+        'tfp-corridors-context-possible',
+        'tfp-intrusion-overlay',
+      ];
+      tieredCorridorLayers.forEach(layerId => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', visibility.corridors ? 'visible' : 'none');
+        }
+      });
+      
+      // V2 Tiered funnel visibility
+      const tieredFunnelLayers = [
+        'tfp-funnels-hard-fill',
+        'tfp-funnels-hard-outline',
+        'tfp-funnels-slight-fill',
+        'tfp-funnels-slight-outline',
+      ];
+      tieredFunnelLayers.forEach(layerId => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', visibility.funnels ? 'visible' : 'none');
+        }
+      });
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
@@ -1618,6 +1839,156 @@ function DeerIntelContent() {
             paint: {
               'line-color': '#EA580C',
               'line-width': 2,
+            },
+          });
+        }
+        
+        // ========== V2 TIERED CORRIDOR SOURCES AND LAYERS ==========
+        
+        // Primary corridors: Top band (≥0.70 OR top 10-15%)
+        if (!map.getSource('tfp-corridors-primary')) {
+          map.addSource('tfp-corridors-primary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-corridors-primary',
+            type: 'line',
+            source: 'tfp-corridors-primary',
+            paint: {
+              'line-color': LAYER_COLORS.corridorPrimary,
+              'line-width': 4,
+              'line-opacity': 0.85,
+            },
+          });
+        }
+        
+        // Possible corridors: ≥1.5× baseline OR top 15-35%
+        if (!map.getSource('tfp-corridors-possible')) {
+          map.addSource('tfp-corridors-possible', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-corridors-possible',
+            type: 'line',
+            source: 'tfp-corridors-possible',
+            paint: {
+              'line-color': LAYER_COLORS.corridorPossible,
+              'line-width': 2.5,
+              'line-opacity': 0.45,
+            },
+          });
+        }
+        
+        // Exploratory lanes: ≥1.2× baseline OR top 35-55%
+        if (!map.getSource('tfp-corridors-exploratory')) {
+          map.addSource('tfp-corridors-exploratory', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-corridors-exploratory',
+            type: 'line',
+            source: 'tfp-corridors-exploratory',
+            paint: {
+              'line-color': LAYER_COLORS.corridorExploratory,
+              'line-width': 1.5,
+              'line-opacity': 0.25,
+              'line-dasharray': [4, 3],
+            },
+          });
+        }
+        
+        // Context corridors (off-parcel) - Primary tier
+        if (!map.getSource('tfp-corridors-context-primary')) {
+          map.addSource('tfp-corridors-context-primary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-corridors-context-primary',
+            type: 'line',
+            source: 'tfp-corridors-context-primary',
+            paint: {
+              'line-color': LAYER_COLORS.corridorContext,
+              'line-width': 3,
+              'line-opacity': 0.35,
+              'line-dasharray': [3, 2],
+            },
+          });
+        }
+        
+        // Context corridors (off-parcel) - Possible tier
+        if (!map.getSource('tfp-corridors-context-possible')) {
+          map.addSource('tfp-corridors-context-possible', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-corridors-context-possible',
+            type: 'line',
+            source: 'tfp-corridors-context-possible',
+            paint: {
+              'line-color': LAYER_COLORS.corridorContext,
+              'line-width': 2,
+              'line-opacity': 0.20,
+              'line-dasharray': [3, 3],
+            },
+          });
+        }
+        
+        // Hard funnels: Strong compression zones (saddles, pinch points)
+        if (!map.getSource('tfp-funnels-hard')) {
+          map.addSource('tfp-funnels-hard', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-funnels-hard-fill',
+            type: 'fill',
+            source: 'tfp-funnels-hard',
+            paint: {
+              'fill-color': LAYER_COLORS.funnelHard,
+              'fill-opacity': 0.30,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-funnels-hard-outline',
+            type: 'line',
+            source: 'tfp-funnels-hard',
+            paint: {
+              'line-color': LAYER_COLORS.funnelHard,
+              'line-width': 2,
+              'line-opacity': 0.65,
+            },
+          });
+        }
+        
+        // Slight funnels: Moderate compression zones
+        if (!map.getSource('tfp-funnels-slight')) {
+          map.addSource('tfp-funnels-slight', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-funnels-slight-fill',
+            type: 'fill',
+            source: 'tfp-funnels-slight',
+            paint: {
+              'fill-color': LAYER_COLORS.funnelSlight,
+              'fill-opacity': 0.18,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-funnels-slight-outline',
+            type: 'line',
+            source: 'tfp-funnels-slight',
+            paint: {
+              'line-color': LAYER_COLORS.funnelSlight,
+              'line-width': 1.5,
+              'line-opacity': 0.40,
+              'line-dasharray': [4, 2],
+            },
+          });
+        }
+        
+        // Intrusion overlay: Highlights high-intrusion corridor segments
+        if (!map.getSource('tfp-intrusion-overlay')) {
+          map.addSource('tfp-intrusion-overlay', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-intrusion-overlay',
+            type: 'line',
+            source: 'tfp-intrusion-overlay',
+            paint: {
+              'line-color': LAYER_COLORS.intrusionHigh,
+              'line-width': 6,
+              'line-opacity': [
+                'interpolate', ['linear'], ['get', 'intrusion'],
+                0.5, 0,      // Low intrusion: invisible
+                0.7, 0.15,   // Medium intrusion: faint
+                0.9, 0.30    // High intrusion: visible
+              ],
+              'line-dasharray': [1, 1],  // Hatched effect
             },
           });
         }

@@ -4,6 +4,8 @@
 export type SeasonProfile = 'early' | 'rut' | 'late';
 export type WindDirection = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 export type FunnelType = 'saddle' | 'draw' | 'corridor';
+export type FunnelStrength = 'hard' | 'slight';  // Compression zone strength
+export type CorridorTier = 'primary' | 'possible' | 'exploratory';  // Movement tiers
 export type ApproachRisk = 'low' | 'medium' | 'high';
 export type TerrainMode = 'real' | 'preview';
 
@@ -99,6 +101,59 @@ export interface FunnelProperties {
   leastCostPath?: boolean;        // for corridors
   connectsBeddingToFood?: boolean;
   flowAccumulation?: number;      // for draws
+  
+  // === Enhanced tiering fields (v2+) ===
+  tier?: CorridorTier;            // Primary/Possible/Exploratory
+  strength?: FunnelStrength;      // Hard/Slight (for compression zones)
+  intrusion?: number;             // 0-1 approach intrusion score
+  isOnParcel?: boolean;           // true = on parcel, false = context (off-parcel)
+  localBaseline?: number;         // Local baseline score for relative tiering
+}
+
+// ============ Tiered Corridor Response (v2+) ============
+
+export interface TieredCorridorResponse {
+  success: boolean;
+  bbox: [number, number, number, number];
+  
+  // Primary corridors: top band (≥0.70 OR top 10-15%)
+  corridors_primary: GeoJSON.FeatureCollection<GeoJSON.LineString, FunnelProperties>;
+  
+  // Possible corridors: ≥1.5× baseline OR top 15-35%
+  corridors_possible: GeoJSON.FeatureCollection<GeoJSON.LineString, FunnelProperties>;
+  
+  // Exploratory lanes: ≥1.2× baseline OR top 35-55% (faint)
+  corridors_exploratory: GeoJSON.FeatureCollection<GeoJSON.LineString, FunnelProperties>;
+  
+  // Hard funnels: Strong compression nodes (saddles, pinch points)
+  funnels_hard: GeoJSON.FeatureCollection<GeoJSON.Polygon, FunnelProperties>;
+  
+  // Slight funnels: Moderate compression (valley benches, ridge lines)
+  funnels_slight: GeoJSON.FeatureCollection<GeoJSON.Polygon, FunnelProperties>;
+  
+  // Off-parcel context corridors (reduced opacity, no interaction)
+  corridors_context_primary: GeoJSON.FeatureCollection<GeoJSON.LineString, FunnelProperties>;
+  corridors_context_possible: GeoJSON.FeatureCollection<GeoJSON.LineString, FunnelProperties>;
+  
+  metadata: CorridorMetadata;
+}
+
+export interface CorridorMetadata {
+  processing_time_seconds: number;
+  dem_source: string;
+  resolution_m: number;
+  weights: {
+    slope_preference: string;
+    concavity_weight: number;
+  };
+  tiering: {
+    local_baseline: number;       // Local movement baseline for parcel
+    primary_threshold: number;    // Threshold for primary tier
+    possible_threshold: number;   // Threshold for possible tier
+    exploratory_threshold: number; // Threshold for exploratory tier
+    parcel_coverage_pct: number;  // % of parcel covered by corridors
+  };
+  fallback_reason?: string | null;
 }
 
 export interface StandPointProperties {
