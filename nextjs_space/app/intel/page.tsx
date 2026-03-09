@@ -812,6 +812,7 @@ function DeerIntelContent() {
   const lng = parseFloat(searchParams.get('lng') || '-94.2733');
   const address = searchParams.get('address') || 'Sample Property';
   const acreageParam = searchParams.get('acreage');
+  const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features
 
   // Analysis state
   const [isLoading, setIsLoading] = useState(true);
@@ -3496,7 +3497,8 @@ function DeerIntelContent() {
                   >
                     <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
                     <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Backbone</span>
-                    {ridgeSpineData?.isSynthetic && (
+                    {/* Est. badge hidden from public - only visible in debug mode (?debug=true) */}
+                    {debugMode && ridgeSpineData?.isSynthetic && (
                       <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">Est.</span>
                     )}
                   </button>
