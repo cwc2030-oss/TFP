@@ -1,15 +1,20 @@
 /**
- * Ridge Spine Extraction Utility
+ * Terrain Spine Extraction Utility
  * 
- * Structure-first approach: extracts structural ridge spines from DEM only.
- * No deer weighting - pure terrain anatomy.
+ * Structure-first approach: extracts structural terrain spines from DEM only.
+ * No deer weighting - pure topographical anatomy.
+ * 
+ * Goal: A calm, minimal layer that feels topographically true.
+ * A hunter should be able to toggle Terrain Spine on and say:
+ * "Yep, that's the backbone of this parcel."
  * 
  * From DEM:
  * - Compute slope, curvature (plan + profile), and local prominence
  * - Identify convex high-ground lines
- * - Filter by minimum prominence (>20 ft) and length (>200m)
+ * - Filter aggressively by minimum prominence and length
+ * - Merge near-collinear segments into longer coherent spines
  * - Classify into primary/secondary ridges
- * - Extract saddle nodes between ridge peaks
+ * - Extract saddle nodes conservatively (only meaningful low points)
  */
 
 import type {
@@ -20,13 +25,14 @@ import type {
   RidgeTier,
 } from '@/types/terrain';
 
-// ========== THRESHOLDS ==========
-const MIN_PROMINENCE_FT_PRIMARY = 20;     // Minimum drop on both sides for primary
-const MIN_PROMINENCE_FT_SECONDARY = 15;   // Minimum for secondary
-const MIN_LENGTH_M_PRIMARY = 200;         // Minimum continuous length for primary
-const MIN_LENGTH_M_SECONDARY = 100;       // Minimum for secondary
-const MAX_SEGMENT_GAP_M = 30;             // Max gap to connect ridge segments
-const SADDLE_DROP_MIN_FT = 10;            // Minimum drop for saddle identification
+// ========== AGGRESSIVE THRESHOLDS (noise reduction) ==========
+const MIN_PROMINENCE_FT_PRIMARY = 35;     // Major drop on both sides for primary
+const MIN_PROMINENCE_FT_SECONDARY = 25;   // Secondary still requires meaningful drop
+const MIN_LENGTH_M_PRIMARY = 300;         // Minimum continuous length for primary (was 200)
+const MIN_LENGTH_M_SECONDARY = 180;       // Minimum for secondary (was 100)
+const MAX_SEGMENT_GAP_M = 40;             // Max gap to merge collinear segments
+const COLLINEARITY_THRESHOLD_DEG = 20;    // Max bearing difference for merging
+const SADDLE_DROP_MIN_FT = 18;            // Only real saddles (was 10)
 
 // ========== API CLIENT ==========
 
@@ -57,8 +63,8 @@ export async function fetchRidgeSpines(
 ): Promise<RidgeFetchResult> {
   const startTime = Date.now();
   
-  console.log('[RidgeClient] === FETCH START ===');
-  console.log('[RidgeClient] Parcel ID:', params.parcel_id);
+  console.log('[TerrainSpine] === FETCH START ===');
+  console.log('[TerrainSpine] Parcel ID:', params.parcel_id);
   
   try {
     const controller = new AbortController();
@@ -80,7 +86,7 @@ export async function fetchRidgeSpines(
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn('[RidgeClient] API error, using synthetic:', errorText);
+      console.warn('[TerrainSpine] API error, using synthetic:', errorText);
       
       // Fall back to synthetic generation
       const syntheticData = generateSyntheticRidgeSpines(params.parcel);
@@ -93,7 +99,7 @@ export async function fetchRidgeSpines(
     }
     
     const data = await response.json();
-    console.log('[RidgeClient] Response received in', durationMs, 'ms');
+    console.log('[TerrainSpine] Response received in', durationMs, 'ms');
     
     return {
       success: true,
@@ -105,7 +111,7 @@ export async function fetchRidgeSpines(
   } catch (err) {
     const durationMs = Date.now() - startTime;
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn('[RidgeClient] Fetch failed, using synthetic:', errMsg);
+    console.warn('[TerrainSpine] Fetch failed, using synthetic:', errMsg);
     
     // Fall back to synthetic generation
     const syntheticData = generateSyntheticRidgeSpines(params.parcel);
@@ -207,14 +213,46 @@ function interpolateLine(
   return points;
 }
 
-// ========== SYNTHETIC RIDGE GENERATION ==========
+// ========== SYNTHETIC TERRAIN SPINE GENERATION ==========
 
 /**
- * Generate synthetic ridge spines based on parcel geometry
- * Uses geometric analysis to simulate ridge lines:
- * - Creates ridges along longest axis of parcel
- * - Adds secondary ridges perpendicular to main ridge
- * - Places saddle points at intersections and low points
+ * Bearing difference in degrees (0-180)
+ */
+function bearingDiff(b1: number, b2: number): number {
+  let diff = Math.abs(b1 - b2) % 360;
+  if (diff > 180) diff = 360 - diff;
+  return diff;
+}
+
+/**
+ * Check if two line segments are roughly collinear
+ * (endpoints are close and bearings are similar)
+ */
+function areCollinearSegments(
+  seg1: { start: [number, number]; end: [number, number]; bearing: number },
+  seg2: { start: [number, number]; end: [number, number]; bearing: number }
+): boolean {
+  // Check bearing similarity (allow reverse direction)
+  const bDiff = bearingDiff(seg1.bearing, seg2.bearing);
+  const bDiffReverse = bearingDiff(seg1.bearing, (seg2.bearing + 180) % 360);
+  const isCollinear = Math.min(bDiff, bDiffReverse) < COLLINEARITY_THRESHOLD_DEG;
+  if (!isCollinear) return false;
+  
+  // Check endpoint proximity
+  const d1 = distanceMeters(seg1.end, seg2.start);
+  const d2 = distanceMeters(seg1.end, seg2.end);
+  const d3 = distanceMeters(seg1.start, seg2.start);
+  const d4 = distanceMeters(seg1.start, seg2.end);
+  const minDist = Math.min(d1, d2, d3, d4);
+  
+  return minDist < MAX_SEGMENT_GAP_M;
+}
+
+/**
+ * Generate synthetic terrain spines based on parcel geometry
+ * Conservative approach: fewer, longer, cleaner spines
+ * 
+ * Goal: A hunter looks at this and says "Yep, that's the backbone"
  */
 export function generateSyntheticRidgeSpines(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
@@ -251,105 +289,89 @@ export function generateSyntheticRidgeSpines(
   const parcelAreaSqM = widthM * heightM * 0.8; // Rough estimate
   const parcelAcres = parcelAreaSqM / 4046.86;
   
-  console.log('[RidgeSynthetic] Parcel ~', Math.round(parcelAcres), 'acres, w:', Math.round(widthM), 'm, h:', Math.round(heightM), 'm');
+  console.log('[TerrainSpine] Parcel ~', Math.round(parcelAcres), 'acres, w:', Math.round(widthM), 'm, h:', Math.round(heightM), 'm');
   
-  // Determine primary ridge direction (along longest axis)
+  // Determine primary spine direction (along longest axis)
   const isWide = widthM > heightM;
   const primaryBearing = isWide ? 90 : 0; // E-W if wide, N-S if tall
-  const primaryLength = Math.max(widthM, heightM) * 0.8;
+  const primaryLength = Math.max(widthM, heightM) * 0.75; // Slightly shorter for cleaner look
   const secondaryBearing = (primaryBearing + 90) % 180;
   
   const ridgesPrimary: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
   const ridgesSecondary: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
   const saddleNodes: GeoJSON.Feature<GeoJSON.Point, SaddleNodeProperties>[] = [];
   
-  // Generate 1-2 primary ridges based on parcel size
-  const numPrimaryRidges = parcelAcres > 40 ? 2 : 1;
-  const ridgeSpacing = heightM / (numPrimaryRidges + 1);
+  // Generate primary spines: CONSERVATIVE - only 1 unless parcel is large
+  // Small parcels (<50 acres) get at most 1 primary spine
+  // Large parcels (50-100 acres) may get 1
+  // Only very large parcels (>100 acres) get 2
+  const numPrimaryRidges = parcelAcres > 100 ? 2 : (parcelAcres > 30 && primaryLength >= MIN_LENGTH_M_PRIMARY ? 1 : 0);
   
-  for (let i = 0; i < numPrimaryRidges; i++) {
-    const offsetFactor = (i + 1) / (numPrimaryRidges + 1);
-    const ridgeCenter = movePoint(
-      [bbox[0], bbox[1]],
-      isWide ? 0 : 90,
-      (isWide ? heightM : widthM) * offsetFactor
-    );
-    ridgeCenter[0] = centerLng; // Align to center
+  if (numPrimaryRidges > 0) {
+    const ridgeSpacing = heightM / (numPrimaryRidges + 1);
     
-    // Create ridge line with some variation
-    const halfLen = primaryLength / 2;
-    const start = movePoint(center, primaryBearing, -halfLen * 0.4 + (i * 0.1 * halfLen));
-    const end = movePoint(center, primaryBearing, halfLen * 0.4 + (i * 0.1 * halfLen));
-    
-    // Add some natural curvature
-    const midpoint1 = movePoint(
-      [start[0] + (end[0] - start[0]) * 0.33, start[1] + (end[1] - start[1]) * 0.33],
-      secondaryBearing,
-      ridgeSpacing * 0.15 * (i % 2 === 0 ? 1 : -1)
-    );
-    const midpoint2 = movePoint(
-      [start[0] + (end[0] - start[0]) * 0.66, start[1] + (end[1] - start[1]) * 0.66],
-      secondaryBearing,
-      ridgeSpacing * 0.1 * (i % 2 === 0 ? -1 : 1)
-    );
-    
-    const ridgeCoords: [number, number][] = [start, midpoint1, midpoint2, end];
-    const ridgeLen = lineLength(ridgeCoords);
-    
-    if (ridgeLen >= MIN_LENGTH_M_PRIMARY) {
-      const ridgeId = `ridge-primary-${i}`;
-      ridgesPrimary.push({
-        type: 'Feature',
-        properties: {
-          tier: 'primary',
-          prominenceFt: 25 + Math.random() * 15, // 25-40 ft synthetic prominence
-          lengthMeters: ridgeLen,
-          avgElevationM: 280 + Math.random() * 40, // Synthetic elevation
-          avgSlopeDeg: 8 + Math.random() * 7, // 8-15 degree slopes
-          curvatureProfile: 0.05 + Math.random() * 0.1, // Convex curvature
-          id: ridgeId,
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: ridgeCoords,
-        },
-      });
+    for (let i = 0; i < numPrimaryRidges; i++) {
+      const offsetFactor = (i + 1) / (numPrimaryRidges + 1);
       
-      // Add saddle at low point (roughly 1/3 along ridge)
-      const saddlePoint: [number, number] = [
-        start[0] + (end[0] - start[0]) * (0.3 + Math.random() * 0.2),
-        start[1] + (end[1] - start[1]) * (0.3 + Math.random() * 0.2),
-      ];
-      saddleNodes.push({
-        type: 'Feature',
-        properties: {
-          id: `saddle-${i}`,
-          elevationM: 275 + Math.random() * 30,
-          ridgeDropFt: 12 + Math.random() * 8,
-          adjacentRidgeIds: [ridgeId],
-        },
-        geometry: {
-          type: 'Point',
-          coordinates: saddlePoint,
-        },
-      });
+      // Create longer, cleaner spine with minimal curvature
+      const halfLen = primaryLength / 2;
+      const yOffset = (isWide ? heightM : widthM) * (offsetFactor - 0.5) * 0.6;
+      
+      const spineCenter: [number, number] = isWide
+        ? [centerLng, centerLat + (yOffset / 111320)]  // Rough lat offset
+        : [centerLng + (yOffset / (111320 * Math.cos(centerLat * Math.PI / 180))), centerLat];
+      
+      const start = movePoint(spineCenter, primaryBearing, -halfLen * 0.45);
+      const end = movePoint(spineCenter, primaryBearing, halfLen * 0.45);
+      
+      // Minimal curvature - just one midpoint with subtle bend
+      const mid = movePoint(
+        [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2],
+        secondaryBearing,
+        ridgeSpacing * 0.08 * (i % 2 === 0 ? 1 : -1)
+      );
+      
+      const ridgeCoords: [number, number][] = [start, mid, end];
+      const ridgeLen = lineLength(ridgeCoords);
+      
+      if (ridgeLen >= MIN_LENGTH_M_PRIMARY) {
+        const ridgeId = `spine-primary-${i}`;
+        ridgesPrimary.push({
+          type: 'Feature',
+          properties: {
+            tier: 'primary',
+            prominenceFt: 35 + Math.random() * 20, // 35-55 ft (higher threshold)
+            lengthMeters: ridgeLen,
+            avgElevationM: 280 + Math.random() * 40,
+            avgSlopeDeg: 10 + Math.random() * 8, // 10-18 degree slopes
+            curvatureProfile: 0.06 + Math.random() * 0.08,
+            id: ridgeId,
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: ridgeCoords,
+          },
+        });
+      }
     }
   }
   
-  // Generate 2-4 secondary ridges (perpendicular spurs)
-  const numSecondaryRidges = Math.min(4, Math.floor(parcelAcres / 20) + 1);
-  const secondaryLength = Math.min(widthM, heightM) * 0.4;
+  // Generate secondary spines: VERY CONSERVATIVE
+  // Only if parcel is reasonably sized and only 1-2 max
+  const minSecondaryLength = Math.min(widthM, heightM) * 0.35;
+  const numSecondaryRidges = parcelAcres > 60 && minSecondaryLength >= MIN_LENGTH_M_SECONDARY ? 
+    Math.min(2, Math.floor(parcelAcres / 50)) : 0;
   
   for (let i = 0; i < numSecondaryRidges; i++) {
     const offset = (i + 1) / (numSecondaryRidges + 1);
     const startPoint: [number, number] = [
       bbox[0] + (bbox[2] - bbox[0]) * offset,
-      bbox[1] + (bbox[3] - bbox[1]) * (0.3 + Math.random() * 0.4),
+      bbox[1] + (bbox[3] - bbox[1]) * 0.5, // Center vertically
     ];
     
-    // Secondary ridges extend perpendicular to primary
-    const direction = secondaryBearing + (Math.random() > 0.5 ? 0 : 180);
-    const end = movePoint(startPoint, direction, secondaryLength * (0.6 + Math.random() * 0.4));
+    // Secondary spines extend perpendicular to primary
+    const direction = secondaryBearing + (i % 2 === 0 ? 0 : 180);
+    const end = movePoint(startPoint, direction, minSecondaryLength * 0.8);
     
     const ridgeCoords: [number, number][] = [startPoint, end];
     const ridgeLen = lineLength(ridgeCoords);
@@ -359,12 +381,12 @@ export function generateSyntheticRidgeSpines(
         type: 'Feature',
         properties: {
           tier: 'secondary',
-          prominenceFt: 15 + Math.random() * 10, // 15-25 ft
+          prominenceFt: 25 + Math.random() * 12, // 25-37 ft
           lengthMeters: ridgeLen,
           avgElevationM: 270 + Math.random() * 30,
-          avgSlopeDeg: 6 + Math.random() * 6, // 6-12 degree
-          curvatureProfile: 0.03 + Math.random() * 0.07,
-          id: `ridge-secondary-${i}`,
+          avgSlopeDeg: 8 + Math.random() * 6, // 8-14 degree
+          curvatureProfile: 0.04 + Math.random() * 0.06,
+          id: `spine-secondary-${i}`,
         },
         geometry: {
           type: 'LineString',
@@ -374,13 +396,42 @@ export function generateSyntheticRidgeSpines(
     }
   }
   
+  // SADDLE GENERATION: Very conservative - only where hunter would recognize a crossing
+  // Only add a saddle if we have at least one primary spine AND parcel is large enough
+  if (ridgesPrimary.length > 0 && parcelAcres > 80) {
+    // At most 1 saddle per parcel - positioned where it would be meaningful
+    const primarySpine = ridgesPrimary[0];
+    const spineCoords = primarySpine.geometry.coordinates as [number, number][];
+    
+    // Place saddle at ~40% along the spine (a natural low point)
+    const t = 0.4;
+    const saddlePoint: [number, number] = [
+      spineCoords[0][0] + (spineCoords[spineCoords.length - 1][0] - spineCoords[0][0]) * t,
+      spineCoords[0][1] + (spineCoords[spineCoords.length - 1][1] - spineCoords[0][1]) * t,
+    ];
+    
+    saddleNodes.push({
+      type: 'Feature',
+      properties: {
+        id: 'saddle-main',
+        elevationM: 270 + Math.random() * 25,
+        ridgeDropFt: SADDLE_DROP_MIN_FT + Math.random() * 10,
+        adjacentRidgeIds: [primarySpine.properties.id],
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: saddlePoint,
+      },
+    });
+  }
+  
   const processingTime = (Date.now() - startTime) / 1000;
   const totalRidgeLength = [
     ...ridgesPrimary.map(r => r.properties.lengthMeters),
     ...ridgesSecondary.map(r => r.properties.lengthMeters),
   ].reduce((a, b) => a + b, 0);
   
-  console.log('[RidgeSynthetic] Generated:', ridgesPrimary.length, 'primary,', ridgesSecondary.length, 'secondary,', saddleNodes.length, 'saddles');
+  console.log('[TerrainSpine] Generated:', ridgesPrimary.length, 'primary,', ridgesSecondary.length, 'secondary,', saddleNodes.length, 'saddles');
   
   return {
     success: true,

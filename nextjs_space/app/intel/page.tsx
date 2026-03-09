@@ -248,10 +248,10 @@ const LAYER_COLORS = {
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
   edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
-  // Ridge Spine colors (structure-first, earth tones)
-  ridgePrimary: '#6B4423',        // Dark umber - major continuous spines
-  ridgeSecondary: '#8B7355',      // Warm brown - shorter valid ridges
-  saddleNode: '#9C8267',          // Warm gray - saddle markers
+  // Terrain Spine colors (structure-first, restrained earth tones)
+  ridgePrimary: '#5D4037',        // Deep brown - major continuous spines (restrained)
+  ridgeSecondary: '#795548',      // Medium brown - secondary spines (lighter)
+  saddleNode: '#8D6E63',          // Warm taupe - saddle markers (subtle)
 };
 
 // ========== EDGE INTELLIGENCE UTILITIES ==========
@@ -1656,9 +1656,9 @@ function DeerIntelContent() {
         saddleSource.setData(ridgeSpineData.saddle_nodes);
       }
 
-      console.log('[MAP] Updated ridge spine sources');
+      console.log('[MAP] Updated terrain spine sources');
     } catch (err) {
-      console.error('[MAP] Error updating ridge spine sources (non-fatal):', err);
+      console.error('[MAP] Error updating terrain spine sources (non-fatal):', err);
     }
   }, [ridgeSpineData, mapReady]);
 
@@ -2125,9 +2125,10 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== RIDGE SPINE SOURCES AND LAYERS (Structure-First, DEM-Only) ==========
+        // ========== TERRAIN SPINE LAYERS (Structure-First, Calm, Minimal) ==========
+        // Goal: A hunter toggles this on and says "Yep, that's the backbone"
         
-        // Primary ridges: Major continuous spines (>200m, >20ft prominence)
+        // Primary spines: Major structural ridges (>300m, >35ft prominence)
         if (!map.getSource('tfp-ridges-primary')) {
           map.addSource('tfp-ridges-primary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2136,13 +2137,13 @@ function DeerIntelContent() {
             source: 'tfp-ridges-primary',
             paint: {
               'line-color': LAYER_COLORS.ridgePrimary,
-              'line-width': 3,
-              'line-opacity': 0.75,
+              'line-width': 2.5,           // Restrained width
+              'line-opacity': 0.65,        // Not too prominent
             },
           });
         }
         
-        // Secondary ridges: Shorter but valid ridges (>100m, >15ft prominence)
+        // Secondary spines: Shorter but valid ridges (>180m, >25ft prominence)
         if (!map.getSource('tfp-ridges-secondary')) {
           map.addSource('tfp-ridges-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2151,13 +2152,13 @@ function DeerIntelContent() {
             source: 'tfp-ridges-secondary',
             paint: {
               'line-color': LAYER_COLORS.ridgeSecondary,
-              'line-width': 2,
-              'line-opacity': 0.50,
+              'line-width': 1.5,           // Thinner than primary
+              'line-opacity': 0.45,        // Subtler
             },
           });
         }
         
-        // Saddle nodes: Low points between ridge peaks (small neutral circles)
+        // Saddle nodes: Only meaningful low points (sparse, subtle)
         if (!map.getSource('tfp-saddle-nodes')) {
           map.addSource('tfp-saddle-nodes', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2165,9 +2166,9 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 5,
+              'circle-radius': 4,          // Smaller
               'circle-color': LAYER_COLORS.saddleNode,
-              'circle-opacity': 0.60,
+              'circle-opacity': 0.50,      // Subtle
             },
           });
           map.addLayer({
@@ -2175,11 +2176,11 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 6,
+              'circle-radius': 5,
               'circle-color': 'transparent',
               'circle-stroke-color': LAYER_COLORS.saddleNode,
-              'circle-stroke-width': 1.5,
-              'circle-stroke-opacity': 0.80,
+              'circle-stroke-width': 1,
+              'circle-stroke-opacity': 0.60,
             },
           });
         }
@@ -3480,11 +3481,11 @@ function DeerIntelContent() {
                 );
               })()}
               
-              {/* Terrain Anatomy Layer (Ridge Spines - ON by default) */}
+              {/* Terrain Spine Layer (Structure-First, DEM-Only - ON by default) */}
               <div className="p-3 border-b border-white/10">
                 <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
                   <Mountain className="h-4 w-4 text-stone-400" />
-                  Terrain Anatomy
+                  Terrain Spine
                 </h3>
                 <div className="space-y-1">
                   <button
@@ -3494,7 +3495,7 @@ function DeerIntelContent() {
                     }`}
                   >
                     <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Ridge Spines</span>
+                    <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Backbone</span>
                     {ridgeSpineData?.isSynthetic && (
                       <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">Est.</span>
                     )}
@@ -3503,17 +3504,21 @@ function DeerIntelContent() {
                 {ridgeSpineData && visibility.ridgeSpines && (
                   <div className="mt-2 text-[10px] text-stone-500 space-y-0.5 px-1">
                     <div className="flex justify-between">
-                      <span>Primary Ridges</span>
+                      <span>Primary Spines</span>
                       <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_primary || 0}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Secondary Ridges</span>
-                      <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_secondary || 0}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Saddle Points</span>
-                      <span className="text-stone-400">{ridgeSpineData.metadata?.saddle_count || 0}</span>
-                    </div>
+                    {(ridgeSpineData.metadata?.ridge_count_secondary || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Secondary</span>
+                        <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_secondary || 0}</span>
+                      </div>
+                    )}
+                    {(ridgeSpineData.metadata?.saddle_count || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Saddles</span>
+                        <span className="text-stone-400">{ridgeSpineData.metadata?.saddle_count || 0}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
