@@ -10,7 +10,7 @@ import {
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
-  Unlock, Sparkles, Settings
+  Unlock, Sparkles, Settings, Download, FileText
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -846,6 +846,9 @@ function DeerIntelContent() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
 
+  // Parcel-Hunt File download state
+  const [isDownloading, setIsDownloading] = useState(false);
+
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [unlockModalData, setUnlockModalData] = useState<{
@@ -1092,6 +1095,66 @@ function DeerIntelContent() {
       setTimeout(() => setAlignmentPanelExpanded(false), 500);
     }
   }, [userHasInteracted]);
+
+  // Download Parcel-Hunt File PDF
+  const handleDownloadParcelHuntFile = useCallback(async () => {
+    if (isDownloading) return;
+    
+    setIsDownloading(true);
+    try {
+      // Build stand data from alignedStands
+      const stands = alignedStands.slice(0, 3).map(s => ({
+        name: s.name,
+        tier: s.alignment.label === 'Open Ground' ? 'Field Stone' : s.alignment.label,
+        score: s.alignment.score,
+        face: s.props.windOk[0] || 'N',
+        intrusion: s.props.approachRisk,
+      }));
+
+      // Extract county/state from address if possible
+      const addressParts = address.split(',').map(p => p.trim());
+      const stateZip = addressParts[addressParts.length - 1] || '';
+      const stateMatch = stateZip.match(/^([A-Z]{2})/);
+      const state = stateMatch ? stateMatch[1] : 'MO';
+      const county = addressParts.length >= 3 ? addressParts[addressParts.length - 2].replace(' County', '') : 'Unknown';
+
+      const response = await fetch('/api/parcel-hunt-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          county,
+          state,
+          acreage: parseFloat(acreageParam || '40'),
+          address,
+          lat,
+          lng,
+          stands,
+          prevailingWind: windDirection,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate PDF');
+      }
+
+      // Download the PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') 
+        || `ParcelHuntFile_${county}${state}_${Math.round(parseFloat(acreageParam || '40'))}ac_TerraFirma.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('[ParcelHuntFile] Download error:', err);
+      setError('Failed to download Parcel-Hunt File');
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection]);
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
@@ -3663,6 +3726,36 @@ function DeerIntelContent() {
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* ========== PARCEL-HUNT FILE DOWNLOAD ========== */}
+              <div className="p-3 border-t border-white/10">
+                <button
+                  onClick={handleDownloadParcelHuntFile}
+                  disabled={isDownloading || isLoading}
+                  className={`
+                    w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                    transition-all text-sm font-medium
+                    ${isDownloading || isLoading
+                      ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                      : 'bg-stone-800 hover:bg-stone-700 text-white border border-stone-600 hover:border-stone-500'}
+                  `}
+                >
+                  {isDownloading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Generating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-4 w-4" />
+                      <span>Download Parcel-Hunt File</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-stone-500 text-center mt-1.5">
+                  5-page terrain & alignment report
+                </p>
               </div>
 
               {/* Fade-in keyframe animation */}
