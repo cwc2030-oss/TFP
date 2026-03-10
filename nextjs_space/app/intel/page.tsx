@@ -1978,7 +1978,7 @@ function DeerIntelContent() {
         
         // ========== V2 TIERED CORRIDOR SOURCES AND LAYERS ==========
         
-        // Primary corridors: Top band (≥0.70 OR top 10-15%)
+        // Primary corridors: Top band - VISUAL CALM (reduced weight)
         if (!map.getSource('tfp-corridors-primary')) {
           map.addSource('tfp-corridors-primary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -1987,13 +1987,13 @@ function DeerIntelContent() {
             source: 'tfp-corridors-primary',
             paint: {
               'line-color': LAYER_COLORS.corridorPrimary,
-              'line-width': 4,
-              'line-opacity': 0.85,
+              'line-width': 3,           // Reduced from 4
+              'line-opacity': 0.70,      // Reduced from 0.85
             },
           });
         }
         
-        // Possible corridors: ≥1.5× baseline OR top 15-35%
+        // Possible corridors - subtle
         if (!map.getSource('tfp-corridors-possible')) {
           map.addSource('tfp-corridors-possible', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2002,13 +2002,13 @@ function DeerIntelContent() {
             source: 'tfp-corridors-possible',
             paint: {
               'line-color': LAYER_COLORS.corridorPossible,
-              'line-width': 2.5,
-              'line-opacity': 0.45,
+              'line-width': 2,           // Reduced from 2.5
+              'line-opacity': 0.35,      // Reduced from 0.45
             },
           });
         }
         
-        // Exploratory lanes: ≥1.2× baseline OR top 35-55%
+        // Exploratory lanes - very faint
         if (!map.getSource('tfp-corridors-exploratory')) {
           map.addSource('tfp-corridors-exploratory', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2017,8 +2017,8 @@ function DeerIntelContent() {
             source: 'tfp-corridors-exploratory',
             paint: {
               'line-color': LAYER_COLORS.corridorExploratory,
-              'line-width': 1.5,
-              'line-opacity': 0.25,
+              'line-width': 1.2,         // Reduced from 1.5
+              'line-opacity': 0.20,      // Reduced from 0.25
               'line-dasharray': [4, 3],
             },
           });
@@ -2033,8 +2033,8 @@ function DeerIntelContent() {
             source: 'tfp-corridors-context-primary',
             paint: {
               'line-color': LAYER_COLORS.corridorContext,
-              'line-width': 3,
-              'line-opacity': 0.35,
+              'line-width': 2.5,         // Reduced from 3
+              'line-opacity': 0.30,      // Reduced from 0.35
               'line-dasharray': [3, 2],
             },
           });
@@ -2049,14 +2049,14 @@ function DeerIntelContent() {
             source: 'tfp-corridors-context-possible',
             paint: {
               'line-color': LAYER_COLORS.corridorContext,
-              'line-width': 2,
-              'line-opacity': 0.20,
+              'line-width': 1.5,         // Reduced from 2
+              'line-opacity': 0.15,      // Reduced from 0.20
               'line-dasharray': [3, 3],
             },
           });
         }
         
-        // Hard funnels: Strong compression zones (saddles, pinch points)
+        // Hard funnels: Strong compression zones - subtle
         if (!map.getSource('tfp-funnels-hard')) {
           map.addSource('tfp-funnels-hard', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2065,7 +2065,7 @@ function DeerIntelContent() {
             source: 'tfp-funnels-hard',
             paint: {
               'fill-color': LAYER_COLORS.funnelHard,
-              'fill-opacity': 0.30,
+              'fill-opacity': 0.20,     // Reduced from 0.30
             },
           });
           map.addLayer({
@@ -2074,13 +2074,13 @@ function DeerIntelContent() {
             source: 'tfp-funnels-hard',
             paint: {
               'line-color': LAYER_COLORS.funnelHard,
-              'line-width': 2,
-              'line-opacity': 0.65,
+              'line-width': 1.5,        // Reduced from 2
+              'line-opacity': 0.50,     // Reduced from 0.65
             },
           });
         }
         
-        // Slight funnels: Moderate compression zones
+        // Slight funnels: Moderate compression zones - subtle
         if (!map.getSource('tfp-funnels-slight')) {
           map.addSource('tfp-funnels-slight', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2089,7 +2089,7 @@ function DeerIntelContent() {
             source: 'tfp-funnels-slight',
             paint: {
               'fill-color': LAYER_COLORS.funnelSlight,
-              'fill-opacity': 0.18,
+              'fill-opacity': 0.12,     // Reduced from 0.18
             },
           });
           map.addLayer({
@@ -2098,8 +2098,8 @@ function DeerIntelContent() {
             source: 'tfp-funnels-slight',
             paint: {
               'line-color': LAYER_COLORS.funnelSlight,
-              'line-width': 1.5,
-              'line-opacity': 0.40,
+              'line-width': 1.2,        // Reduced from 1.5
+              'line-opacity': 0.30,     // Reduced from 0.40
               'line-dasharray': [4, 2],
             },
           });
@@ -3553,16 +3553,18 @@ function DeerIntelContent() {
                 </div>
               </div>
 
-              {/* ========== ALIGNMENT PANEL (V2 - CALM) ========== */}
+              {/* ========== ALIGNMENT PANEL (V2 - CALM, COLLAPSED DEFAULT) ========== */}
               <div className="border-b border-white/10">
-                {/* Header - Always visible */}
+                {/* Header - Always visible, NO auto-expand */}
                 {(() => {
                   // Check if top two stands are within ≤3 pts (comparable)
                   const isComparable = alignedStands.length >= 2 && 
                     Math.abs(alignedStands[0].alignment.score - alignedStands[1].alignment.score) <= 3;
+                  // When comparable: "Comparable Alignment Today" - removes "Most Aligned" entirely
                   const headerTitle = isComparable ? 'Comparable Alignment Today' : 'Stand Alignment';
+                  // Collapsed summary: just show the top stand name (no "Most Aligned" or rankings)
                   const collapsedSummary = alignedStands.length > 0 
-                    ? `${alignedStands[0].name}${isComparable ? ' & more' : ''}` 
+                    ? alignedStands[0].name
                     : 'Stand Alignment';
                   
                   return (
@@ -3583,27 +3585,28 @@ function DeerIntelContent() {
                   );
                 })()}
 
-                {/* Expanded Content - Top 3 Stands (Compact Tiles V2) */}
+                {/* Expanded Content - Top 3 Stands (Compact Tiles V2 - Equal Typography) */}
                 {alignmentPanelExpanded && (
                   <div className="px-2 pb-2 space-y-1">
                     {alignedStands.slice(0, 3).map((stand) => {
                       const isHighlighted = highlightedStandRank === stand.rank;
                       const isExpanded = selectedStand === stand.rank;
                       
-                      // Earth-tone accent colors (left bar)
+                      // 3 tiers only - earth-tone accent colors (left bar)
+                      // Open Ground maps to Field Stone for display
+                      const tierLabel = stand.alignment.label === 'Open Ground' ? 'Field Stone' : stand.alignment.label;
                       const accentColors: Record<string, string> = {
                         'Deep Moss': '#4a7c59',      // muted forest green
                         'Weathered Oak': '#8b7355',  // warm brown
                         'Field Stone': '#708090',    // slate gray
-                        'Open Ground': '#6b7280',    // neutral gray
                       };
-                      const accentColor = accentColors[stand.alignment.label] || '#6b7280';
+                      const accentColor = accentColors[tierLabel] || '#708090';
 
                       return (
                         <div
                           key={stand.rank}
                           className={`
-                            relative rounded-lg overflow-hidden transition-all
+                            relative rounded-lg overflow-hidden transition-colors
                             ${isHighlighted ? 'bg-stone-800/60' : 'bg-stone-900/40 hover:bg-stone-800/40'}
                           `}
                         >
@@ -3613,7 +3616,7 @@ function DeerIntelContent() {
                             style={{ background: accentColor }}
                           />
                           
-                          {/* Main card content */}
+                          {/* Main card content - stand NAME only (no numbering) */}
                           <button
                             onClick={() => {
                               handleUserInteraction();
@@ -3626,11 +3629,13 @@ function DeerIntelContent() {
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex-1 min-w-0">
+                                {/* Stand name - equal typography, no "best" styling */}
                                 <span className="text-white text-sm font-medium truncate block">{stand.name}</span>
-                                <span className="text-stone-400 text-xs">{stand.alignment.label}</span>
+                                {/* Tier label - equal styling across all tiers */}
+                                <span className="text-stone-500 text-xs">{tierLabel}</span>
                               </div>
-                              {/* Score - small, top-right, monospace */}
-                              <span className="text-stone-500 text-xs font-mono ml-2">{stand.alignment.score}</span>
+                              {/* Score - small, understated, monospace */}
+                              <span className="text-stone-600 text-[11px] font-mono ml-2">{stand.alignment.score}</span>
                             </div>
                           </button>
                           
@@ -3651,15 +3656,6 @@ function DeerIntelContent() {
                                   <span className="text-white">{stand.props.distToCorridorMeters}m</span>
                                 </div>
                               )}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  showStandPopup(stand.coords, stand.props);
-                                }}
-                                className="w-full mt-1 py-1 text-center text-stone-500 hover:text-white transition-colors text-[10px]"
-                              >
-                                Full details →
-                              </button>
                             </div>
                           )}
                         </div>
