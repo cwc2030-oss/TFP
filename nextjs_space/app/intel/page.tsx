@@ -831,17 +831,32 @@ function DeerIntelContent() {
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(new Date());
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
-  // TERRAIN SPINE REFINEMENT MODE:
-  // Stands and corridors are temporarily disabled while backbone detection is being refined.
-  // Rationale: hunters must trust the terrain structure before deer interpretation is layered on top.
-  const TERRAIN_SPINE_REFINEMENT_MODE = true; // Set to false once backbone is accurate
+  // ========== TERRAIN WORK MODE ==========
+  // A terrain study tool for verifying terrain anatomy before deer interpretation layers.
+  // 
+  // ENABLED LAYERS (physical terrain structure):
+  //   • Terrain Spine (Backbone) - ridge crests
+  //   • Draws - water flow channels / drainage
+  //   • Saddles - low points between ridges
+  //   • Future: contour travel zones / benches
+  //
+  // DISABLED LAYERS (deer interpretation):
+  //   • Corridors - deer movement paths
+  //   • Stands - recommended stand locations
+  //   • Alignment scoring - stand ranking
+  //
+  // Set to false once terrain structure is visually verified and ready for deer logic.
+  const TERRAIN_WORK_MODE = true;
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     bedding: true,
-    funnels: !TERRAIN_SPINE_REFINEMENT_MODE, // Disabled during refinement
-    stands: !TERRAIN_SPINE_REFINEMENT_MODE,  // Disabled during refinement
-    corridors: !TERRAIN_SPINE_REFINEMENT_MODE, // Disabled during refinement
-    ridgeSpines: true, // ON by default - terrain anatomy is the focus
+    // Physical terrain structure - SHOW in Terrain Work Mode
+    funnels: true,  // Controls draws & saddles (physical terrain)
+    // Deer interpretation - HIDE in Terrain Work Mode
+    stands: !TERRAIN_WORK_MODE,
+    corridors: !TERRAIN_WORK_MODE,
+    // Always show terrain anatomy
+    ridgeSpines: true,
   });
 
   // UI state
@@ -3428,13 +3443,16 @@ function DeerIntelContent() {
                 </div>
               </div>
 
-              {/* ========== DEER MOVEMENT PANEL ========== */}
+              {/* ========== TERRAIN STRUCTURE / DEER MOVEMENT PANEL ========== */}
               {(() => {
-                // Count movement features
+                // Count terrain structure features
                 const corridorCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'corridor').length || 0;
                 const saddleCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'saddle').length || 0;
                 const drawCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'draw').length || 0;
                 const totalMovement = corridorCount + saddleCount + drawCount;
+                
+                // In Terrain Work Mode, only count terrain structure (saddles + draws)
+                const terrainStructureCount = saddleCount + drawCount;
                 
                 // Edge features that extend beyond parcel
                 const edgeCorridors = edgeIntelData?.corridorArrows?.features?.length || 0;
@@ -3446,36 +3464,49 @@ function DeerIntelContent() {
                 
                 return (
                   <div className="p-3 border-b border-white/10">
-                    {/* Header */}
+                    {/* Header - context-aware for Terrain Work Mode */}
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="font-medium text-white flex items-center gap-2 text-sm">
-                        <Compass className="h-4 w-4 text-stone-400" />
-                        Deer Movement
+                        {TERRAIN_WORK_MODE ? (
+                          <>
+                            <Mountain className="h-4 w-4 text-stone-400" />
+                            Terrain Structure
+                          </>
+                        ) : (
+                          <>
+                            <Compass className="h-4 w-4 text-stone-400" />
+                            Deer Movement
+                          </>
+                        )}
                       </h3>
-                      {totalMovement > 0 && (
-                        <span className="text-xs text-stone-500">{totalMovement} features</span>
+                      {(TERRAIN_WORK_MODE ? terrainStructureCount : totalMovement) > 0 && (
+                        <span className="text-xs text-stone-500">
+                          {TERRAIN_WORK_MODE ? terrainStructureCount : totalMovement} features
+                        </span>
                       )}
                     </div>
                     
                     {/* Movement feature rows */}
                     <div className="space-y-1 mb-2">
-                      {/* Corridors */}
-                      <button
-                        onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-1 rounded-full" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>
-                          Corridors
-                        </span>
-                        <span className={`text-[10px] ${visibility.corridors ? 'text-stone-400' : 'text-stone-600'}`}>
-                          {corridorCount}
-                        </span>
-                      </button>
+                      {/* Corridors - Hidden in Terrain Work Mode (deer interpretation) */}
+                      {!TERRAIN_WORK_MODE && (
+                        <button
+                          onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
+                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                            visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                          }`}
+                        >
+                          <span className="w-3 h-1 rounded-full" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
+                          <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>
+                            Corridors
+                          </span>
+                          <span className={`text-[10px] ${visibility.corridors ? 'text-stone-400' : 'text-stone-600'}`}>
+                            {corridorCount}
+                          </span>
+                        </button>
+                      )}
                       
-                      {/* Saddles */}
+                      {/* Saddles - Physical terrain structure (always shown) */}
                       <button
                         onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
@@ -3491,7 +3522,7 @@ function DeerIntelContent() {
                         </span>
                       </button>
                       
-                      {/* Draws */}
+                      {/* Draws - Physical terrain structure (always shown) */}
                       <button
                         onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
@@ -3508,8 +3539,8 @@ function DeerIntelContent() {
                       </button>
                     </div>
                     
-                    {/* Edge Movement Teaser (flows beyond property) */}
-                    {totalEdge > 0 && movementVisible && (
+                    {/* Edge Movement Teaser (flows beyond property) - Hidden in Terrain Work Mode */}
+                    {!TERRAIN_WORK_MODE && totalEdge > 0 && movementVisible && (
                       <div 
                         className="mt-2 p-2 rounded-lg bg-gradient-to-r from-pink-900/20 to-orange-900/20 border border-white/5 cursor-pointer hover:border-white/10 transition-colors"
                         onClick={() => {
@@ -3611,16 +3642,26 @@ function DeerIntelContent() {
                 )}
               </div>
 
-              {/* ========== TERRAIN SPINE REFINEMENT NOTICE ========== */}
-              {TERRAIN_SPINE_REFINEMENT_MODE && (
+              {/* ========== TERRAIN WORK MODE NOTICE ========== */}
+              {TERRAIN_WORK_MODE && (
                 <div className="p-3 border-b border-amber-700/30 bg-amber-900/20">
                   <div className="flex items-start gap-2 text-xs text-amber-400/90">
-                    <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                    <Mountain className="h-4 w-4 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-medium">Terrain Structure Mode</p>
+                      <p className="font-medium">Terrain Work Mode</p>
                       <p className="text-amber-400/70 mt-1">
-                        Stand recommendations &amp; corridors are temporarily paused while backbone detection is being refined.
+                        Verifying terrain anatomy. Showing physical structure only — deer interpretation layers disabled.
                       </p>
+                      <div className="mt-2 space-y-1 text-[10px] text-amber-400/60">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-green-500/60" />
+                          <span>Backbone, Draws, Saddles</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-stone-600" />
+                          <span>Corridors, Stands, Alignment (paused)</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3643,7 +3684,7 @@ function DeerIntelContent() {
                     <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
                   </button>
                   {/* Stands toggle - disabled during terrain refinement */}
-                  {!TERRAIN_SPINE_REFINEMENT_MODE && (
+                  {!TERRAIN_WORK_MODE && (
                     <button
                       onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
@@ -3658,7 +3699,7 @@ function DeerIntelContent() {
               </div>
 
               {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
-              {!TERRAIN_SPINE_REFINEMENT_MODE && (
+              {!TERRAIN_WORK_MODE && (
               <div className="border-b border-white/10">
                 {/* Header - Always visible, NO auto-expand */}
                 {(() => {
@@ -3770,7 +3811,7 @@ function DeerIntelContent() {
                 )}
               </div>
               )}
-              {/* End of TERRAIN_SPINE_REFINEMENT_MODE conditional wrapper for Alignment Panel */}
+              {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
 
               {/* ========== PARCEL-HUNT FILE DOWNLOAD ========== */}
               <div className="p-3 border-t border-white/10">
