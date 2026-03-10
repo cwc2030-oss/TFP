@@ -831,12 +831,17 @@ function DeerIntelContent() {
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(new Date());
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
+  // TERRAIN SPINE REFINEMENT MODE:
+  // Stands and corridors are temporarily disabled while backbone detection is being refined.
+  // Rationale: hunters must trust the terrain structure before deer interpretation is layered on top.
+  const TERRAIN_SPINE_REFINEMENT_MODE = true; // Set to false once backbone is accurate
+  
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     bedding: true,
-    funnels: true,
-    stands: true,
-    corridors: true,
-    ridgeSpines: true, // ON by default - terrain anatomy before deer logic
+    funnels: !TERRAIN_SPINE_REFINEMENT_MODE, // Disabled during refinement
+    stands: !TERRAIN_SPINE_REFINEMENT_MODE,  // Disabled during refinement
+    corridors: !TERRAIN_SPINE_REFINEMENT_MODE, // Disabled during refinement
+    ridgeSpines: true, // ON by default - terrain anatomy is the focus
   });
 
   // UI state
@@ -895,6 +900,9 @@ function DeerIntelContent() {
       ridge_count_primary: number;
       ridge_count_secondary: number;
       saddle_count: number;
+      dem_source?: string;
+      backbone_confidence?: number;
+      fallback_reason?: string | null;
     };
   } | null>(null);
 
@@ -1669,6 +1677,9 @@ function DeerIntelContent() {
               ridge_count_primary: result.data.metadata.ridge_count_primary,
               ridge_count_secondary: result.data.metadata.ridge_count_secondary,
               saddle_count: result.data.metadata.saddle_count,
+              dem_source: result.data.metadata.dem_source,
+              backbone_confidence: result.data.metadata.backbone_confidence,
+              fallback_reason: result.data.metadata.fallback_reason,
             },
           });
         } else {
@@ -1685,6 +1696,9 @@ function DeerIntelContent() {
               ridge_count_primary: synthetic.metadata.ridge_count_primary,
               ridge_count_secondary: synthetic.metadata.ridge_count_secondary,
               saddle_count: synthetic.metadata.saddle_count,
+              dem_source: synthetic.metadata.dem_source,
+              backbone_confidence: synthetic.metadata.backbone_confidence,
+              fallback_reason: synthetic.metadata.fallback_reason,
             },
           });
         }
@@ -3568,25 +3582,49 @@ function DeerIntelContent() {
                 </div>
                 {ridgeSpineData && visibility.ridgeSpines && (
                   <div className="mt-2 text-[10px] text-stone-500 space-y-0.5 px-1">
-                    <div className="flex justify-between">
-                      <span>Primary Spines</span>
-                      <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_primary || 0}</span>
-                    </div>
-                    {(ridgeSpineData.metadata?.ridge_count_secondary || 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span>Secondary</span>
-                        <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_secondary || 0}</span>
+                    {/* Show backbone status - awaiting DEM or actual data */}
+                    {ridgeSpineData.metadata?.dem_source === 'AWAITING_DEM' ? (
+                      <div className="text-amber-500/80 italic">
+                        Awaiting real DEM data
                       </div>
-                    )}
-                    {(ridgeSpineData.metadata?.saddle_count || 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span>Saddles</span>
-                        <span className="text-stone-400">{ridgeSpineData.metadata?.saddle_count || 0}</span>
-                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between">
+                          <span>Primary Spines</span>
+                          <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_primary || 0}</span>
+                        </div>
+                        {(ridgeSpineData.metadata?.ridge_count_secondary || 0) > 0 && (
+                          <div className="flex justify-between">
+                            <span>Secondary</span>
+                            <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_secondary || 0}</span>
+                          </div>
+                        )}
+                        {(ridgeSpineData.metadata?.saddle_count || 0) > 0 && (
+                          <div className="flex justify-between">
+                            <span>Saddles</span>
+                            <span className="text-stone-400">{ridgeSpineData.metadata?.saddle_count || 0}</span>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
               </div>
+
+              {/* ========== TERRAIN SPINE REFINEMENT NOTICE ========== */}
+              {TERRAIN_SPINE_REFINEMENT_MODE && (
+                <div className="p-3 border-b border-amber-700/30 bg-amber-900/20">
+                  <div className="flex items-start gap-2 text-xs text-amber-400/90">
+                    <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Terrain Structure Mode</p>
+                      <p className="text-amber-400/70 mt-1">
+                        Stand recommendations &amp; corridors are temporarily paused while backbone detection is being refined.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Other Layers */}
               <div className="p-3 border-b border-white/10">
@@ -3604,19 +3642,23 @@ function DeerIntelContent() {
                     <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
                     <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
                   </button>
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                      visibility.stands ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standGold, opacity: visibility.stands ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>Stands</span>
-                  </button>
+                  {/* Stands toggle - disabled during terrain refinement */}
+                  {!TERRAIN_SPINE_REFINEMENT_MODE && (
+                    <button
+                      onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                        visibility.stands ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                      }`}
+                    >
+                      <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standGold, opacity: visibility.stands ? 1 : 0.4 }} />
+                      <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>Stands</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* ========== ALIGNMENT PANEL (V2 - CALM, COLLAPSED DEFAULT) ========== */}
+              {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
+              {!TERRAIN_SPINE_REFINEMENT_MODE && (
               <div className="border-b border-white/10">
                 {/* Header - Always visible, NO auto-expand */}
                 {(() => {
@@ -3727,6 +3769,8 @@ function DeerIntelContent() {
                   </div>
                 )}
               </div>
+              )}
+              {/* End of TERRAIN_SPINE_REFINEMENT_MODE conditional wrapper for Alignment Panel */}
 
               {/* ========== PARCEL-HUNT FILE DOWNLOAD ========== */}
               <div className="p-3 border-t border-white/10">

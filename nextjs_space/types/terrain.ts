@@ -222,6 +222,7 @@ export interface RidgeSpineMetadata {
   ridge_count_primary: number;
   ridge_count_secondary: number;
   saddle_count: number;
+  backbone_confidence?: number;  // 0-1 confidence score for backbone detection
   fallback_reason?: string | null;
 }
 

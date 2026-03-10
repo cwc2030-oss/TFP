@@ -1,20 +1,28 @@
 /**
- * Terrain Spine Extraction Utility
+ * Terrain Spine / Backbone Extraction Utility
  * 
- * Structure-first approach: extracts structural terrain spines from DEM only.
+ * Structure-first approach: extracts the structural BACKBONE from terrain.
  * No deer weighting - pure topographical anatomy.
  * 
- * Goal: A calm, minimal layer that feels topographically true.
- * A hunter should be able to toggle Terrain Spine on and say:
- * "Yep, that's the backbone of this parcel."
+ * Goal: The Backbone should represent the HIGHEST CONTINUOUS RIDGE CREST
+ * across the parcel — the actual topographic "backbone" a hunter would recognize.
  * 
- * From DEM:
- * - Compute slope, curvature (plan + profile), and local prominence
- * - Identify convex high-ground lines
- * - Filter aggressively by minimum prominence and length
- * - Merge near-collinear segments into longer coherent spines
- * - Classify into primary/secondary ridges
- * - Extract saddle nodes conservatively (only meaningful low points)
+ * CRITICAL RULES:
+ * 1. Favor ridge CREST detection over valley/slope convergence
+ *    - The algorithm should prioritize continuous local elevation maxima
+ *    - Do NOT treat slope pinch / hourglass convergence as the Backbone
+ * 
+ * 2. Use ridge-LINE logic, not flow-convergence logic
+ *    - Backbone should follow the structural HIGH ground
+ *    - It should NOT follow narrowest slope points or valley pinch geometry
+ * 
+ * 3. CONSERVATIVE output rule
+ *    - If ridge confidence is LOW, show NO Backbone rather than an incorrect one
+ *    - Better no line than a misleading one
+ * 
+ * Acceptance test:
+ * A hunter should toggle Backbone on and say: "Yep, that's the ridge."
+ * If it looks like an hourglass, slope pinch, or valley convergence, it is WRONG.
  */
 
 import type {
@@ -25,14 +33,16 @@ import type {
   RidgeTier,
 } from '@/types/terrain';
 
-// ========== AGGRESSIVE THRESHOLDS (noise reduction) ==========
-const MIN_PROMINENCE_FT_PRIMARY = 35;     // Major drop on both sides for primary
-const MIN_PROMINENCE_FT_SECONDARY = 25;   // Secondary still requires meaningful drop
-const MIN_LENGTH_M_PRIMARY = 300;         // Minimum continuous length for primary (was 200)
-const MIN_LENGTH_M_SECONDARY = 180;       // Minimum for secondary (was 100)
-const MAX_SEGMENT_GAP_M = 40;             // Max gap to merge collinear segments
-const COLLINEARITY_THRESHOLD_DEG = 20;    // Max bearing difference for merging
-const SADDLE_DROP_MIN_FT = 18;            // Only real saddles (was 10)
+// ========== CONSERVATIVE THRESHOLDS FOR BACKBONE DETECTION ==========
+// Higher thresholds = fewer but more confident ridges
+const MIN_PROMINENCE_FT_PRIMARY = 45;     // Major drop on BOTH sides for primary backbone
+const MIN_PROMINENCE_FT_SECONDARY = 35;   // Secondary still requires significant drop
+const MIN_LENGTH_M_PRIMARY = 400;         // Long, continuous backbone (not short fragments)
+const MIN_LENGTH_M_SECONDARY = 250;       // Secondary ridges also need length
+const MAX_SEGMENT_GAP_M = 30;             // Tight gap tolerance for merging
+const COLLINEARITY_THRESHOLD_DEG = 15;    // Strict bearing alignment for merging
+const SADDLE_DROP_MIN_FT = 25;            // Only very pronounced saddles
+const MIN_BACKBONE_CONFIDENCE = 0.6;      // Confidence threshold - below this, show nothing
 
 // ========== API CLIENT ==========
 
@@ -249,10 +259,102 @@ function areCollinearSegments(
 }
 
 /**
- * Generate synthetic terrain spines based on parcel geometry
- * Conservative approach: fewer, longer, cleaner spines
+ * Compute backbone confidence score
  * 
- * Goal: A hunter looks at this and says "Yep, that's the backbone"
+ * Without real DEM data, we cannot reliably determine true ridge crests.
+ * This function estimates confidence based on parcel characteristics.
+ * 
+ * LOW confidence scenarios:
+ * - Parcels too small to have meaningful ridges
+ * - Parcels with irregular shapes that confuse geometry-based detection
+ * - Without elevation data, we CANNOT distinguish ridge crests from valleys
+ */
+function computeBackboneConfidence(
+  widthM: number,
+  heightM: number,
+  parcelAcres: number,
+  aspectRatio: number,
+  coords: number[][]
+): { confidence: number; reason: string } {
+  let confidence = 0;
+  let reason = '';
+  
+  // Without DEM data, we have very low confidence in any backbone detection
+  // The geometry-based approach tends to follow parcel shape, not terrain
+  const BASE_SYNTHETIC_PENALTY = 0.4; // Major penalty for not having real elevation data
+  
+  confidence = 1.0 - BASE_SYNTHETIC_PENALTY;
+  
+  // Parcel size factor - larger parcels more likely to have meaningful ridges
+  if (parcelAcres < 20) {
+    confidence *= 0.3;
+    reason = 'Parcel too small for confident backbone detection';
+  } else if (parcelAcres < 40) {
+    confidence *= 0.5;
+    reason = 'Small parcel - backbone confidence limited';
+  } else if (parcelAcres < 80) {
+    confidence *= 0.7;
+    reason = 'Medium parcel - moderate backbone confidence';
+  } else {
+    confidence *= 0.85;
+    reason = 'Large parcel - better backbone confidence';
+  }
+  
+  // Aspect ratio - very elongated parcels have lower confidence
+  // (geometry-based detection follows parcel shape, not terrain)
+  if (aspectRatio > 4 || aspectRatio < 0.25) {
+    confidence *= 0.4;
+    reason = 'Elongated parcel shape reduces backbone confidence';
+  } else if (aspectRatio > 2.5 || aspectRatio < 0.4) {
+    confidence *= 0.6;
+    reason = 'Irregular aspect ratio - backbone may follow parcel shape not terrain';
+  }
+  
+  // Shape complexity - irregular shapes are harder to interpret
+  const expectedPerimeter = 4 * Math.sqrt(widthM * heightM);
+  let actualPerimeter = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    actualPerimeter += distanceMeters(
+      [coords[i][0], coords[i][1]] as [number, number],
+      [coords[i + 1][0], coords[i + 1][1]] as [number, number]
+    );
+  }
+  const perimeterRatio = actualPerimeter / expectedPerimeter;
+  
+  if (perimeterRatio > 1.8) {
+    confidence *= 0.5;
+    reason = 'Complex parcel boundary - backbone detection unreliable';
+  } else if (perimeterRatio > 1.4) {
+    confidence *= 0.7;
+    reason = 'Irregular boundary affects backbone confidence';
+  }
+  
+  // Final clamp
+  confidence = Math.max(0, Math.min(1, confidence));
+  
+  // Critical: without real DEM, confidence should never be high
+  if (confidence > 0.6) {
+    confidence = 0.55; // Cap synthetic confidence below threshold
+    reason = 'Synthetic backbone - awaiting real DEM data for accurate ridge detection';
+  }
+  
+  return { confidence, reason };
+}
+
+/**
+ * Generate backbone data for parcels
+ * 
+ * CONSERVATIVE APPROACH:
+ * - Without real DEM data, we CANNOT reliably detect ridge crests
+ * - The previous geometry-based approach created misleading hourglass shapes
+ * - Following the principle: "Better no line than a misleading one"
+ * 
+ * This function now returns EMPTY results for synthetic generation
+ * until real DEM-based ridge detection is available.
+ * 
+ * Acceptance test:
+ * A hunter should toggle Backbone on and say: "Yep, that's the ridge."
+ * If no backbone shows, that's better than showing a wrong one.
  */
 export function generateSyntheticRidgeSpines(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
@@ -281,167 +383,50 @@ export function generateSyntheticRidgeSpines(
   const bbox = getBbox(coords);
   const centerLng = (bbox[0] + bbox[2]) / 2;
   const centerLat = (bbox[1] + bbox[3]) / 2;
-  const center: [number, number] = [centerLng, centerLat];
   
   // Calculate parcel dimensions
   const widthM = distanceMeters([bbox[0], centerLat], [bbox[2], centerLat]);
   const heightM = distanceMeters([centerLng, bbox[1]], [centerLng, bbox[3]]);
   const parcelAreaSqM = widthM * heightM * 0.8; // Rough estimate
   const parcelAcres = parcelAreaSqM / 4046.86;
+  const aspectRatio = widthM / heightM;
   
-  console.log('[TerrainSpine] Parcel ~', Math.round(parcelAcres), 'acres, w:', Math.round(widthM), 'm, h:', Math.round(heightM), 'm');
+  console.log('[Backbone] Parcel ~', Math.round(parcelAcres), 'acres, w:', Math.round(widthM), 'm, h:', Math.round(heightM), 'm');
   
-  // Determine primary spine direction (along longest axis)
-  const isWide = widthM > heightM;
-  const primaryBearing = isWide ? 90 : 0; // E-W if wide, N-S if tall
-  const primaryLength = Math.max(widthM, heightM) * 0.75; // Slightly shorter for cleaner look
-  const secondaryBearing = (primaryBearing + 90) % 180;
+  // Compute confidence score
+  const { confidence, reason } = computeBackboneConfidence(
+    widthM, heightM, parcelAcres, aspectRatio, coords
+  );
   
-  const ridgesPrimary: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
-  const ridgesSecondary: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
-  const saddleNodes: GeoJSON.Feature<GeoJSON.Point, SaddleNodeProperties>[] = [];
+  console.log('[Backbone] Confidence:', (confidence * 100).toFixed(1) + '%', '-', reason);
   
-  // Generate primary spines: CONSERVATIVE - only 1 unless parcel is large
-  // Small parcels (<50 acres) get at most 1 primary spine
-  // Large parcels (50-100 acres) may get 1
-  // Only very large parcels (>100 acres) get 2
-  const numPrimaryRidges = parcelAcres > 100 ? 2 : (parcelAcres > 30 && primaryLength >= MIN_LENGTH_M_PRIMARY ? 1 : 0);
-  
-  if (numPrimaryRidges > 0) {
-    const ridgeSpacing = heightM / (numPrimaryRidges + 1);
-    
-    for (let i = 0; i < numPrimaryRidges; i++) {
-      const offsetFactor = (i + 1) / (numPrimaryRidges + 1);
-      
-      // Create longer, cleaner spine with minimal curvature
-      const halfLen = primaryLength / 2;
-      const yOffset = (isWide ? heightM : widthM) * (offsetFactor - 0.5) * 0.6;
-      
-      const spineCenter: [number, number] = isWide
-        ? [centerLng, centerLat + (yOffset / 111320)]  // Rough lat offset
-        : [centerLng + (yOffset / (111320 * Math.cos(centerLat * Math.PI / 180))), centerLat];
-      
-      const start = movePoint(spineCenter, primaryBearing, -halfLen * 0.45);
-      const end = movePoint(spineCenter, primaryBearing, halfLen * 0.45);
-      
-      // Minimal curvature - just one midpoint with subtle bend
-      const mid = movePoint(
-        [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2],
-        secondaryBearing,
-        ridgeSpacing * 0.08 * (i % 2 === 0 ? 1 : -1)
-      );
-      
-      const ridgeCoords: [number, number][] = [start, mid, end];
-      const ridgeLen = lineLength(ridgeCoords);
-      
-      if (ridgeLen >= MIN_LENGTH_M_PRIMARY) {
-        const ridgeId = `spine-primary-${i}`;
-        ridgesPrimary.push({
-          type: 'Feature',
-          properties: {
-            tier: 'primary',
-            prominenceFt: 35 + Math.random() * 20, // 35-55 ft (higher threshold)
-            lengthMeters: ridgeLen,
-            avgElevationM: 280 + Math.random() * 40,
-            avgSlopeDeg: 10 + Math.random() * 8, // 10-18 degree slopes
-            curvatureProfile: 0.06 + Math.random() * 0.08,
-            id: ridgeId,
-          },
-          geometry: {
-            type: 'LineString',
-            coordinates: ridgeCoords,
-          },
-        });
-      }
-    }
+  // CONSERVATIVE RULE: If confidence is below threshold, show NO backbone
+  // "Better no line than a misleading one"
+  if (confidence < MIN_BACKBONE_CONFIDENCE) {
+    console.log('[Backbone] Confidence too low (' + (confidence * 100).toFixed(1) + '% < ' + (MIN_BACKBONE_CONFIDENCE * 100) + '%), returning empty');
+    return emptyRidgeResponse(
+      `Backbone confidence too low (${(confidence * 100).toFixed(0)}%). ` +
+      `Real DEM-based ridge detection required for reliable backbone. ` +
+      `${reason}`
+    );
   }
   
-  // Generate secondary spines: VERY CONSERVATIVE
-  // Only if parcel is reasonably sized and only 1-2 max
-  const minSecondaryLength = Math.min(widthM, heightM) * 0.35;
-  const numSecondaryRidges = parcelAcres > 60 && minSecondaryLength >= MIN_LENGTH_M_SECONDARY ? 
-    Math.min(2, Math.floor(parcelAcres / 50)) : 0;
-  
-  for (let i = 0; i < numSecondaryRidges; i++) {
-    const offset = (i + 1) / (numSecondaryRidges + 1);
-    const startPoint: [number, number] = [
-      bbox[0] + (bbox[2] - bbox[0]) * offset,
-      bbox[1] + (bbox[3] - bbox[1]) * 0.5, // Center vertically
-    ];
-    
-    // Secondary spines extend perpendicular to primary
-    const direction = secondaryBearing + (i % 2 === 0 ? 0 : 180);
-    const end = movePoint(startPoint, direction, minSecondaryLength * 0.8);
-    
-    const ridgeCoords: [number, number][] = [startPoint, end];
-    const ridgeLen = lineLength(ridgeCoords);
-    
-    if (ridgeLen >= MIN_LENGTH_M_SECONDARY) {
-      ridgesSecondary.push({
-        type: 'Feature',
-        properties: {
-          tier: 'secondary',
-          prominenceFt: 25 + Math.random() * 12, // 25-37 ft
-          lengthMeters: ridgeLen,
-          avgElevationM: 270 + Math.random() * 30,
-          avgSlopeDeg: 8 + Math.random() * 6, // 8-14 degree
-          curvatureProfile: 0.04 + Math.random() * 0.06,
-          id: `spine-secondary-${i}`,
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: ridgeCoords,
-        },
-      });
-    }
-  }
-  
-  // SADDLE GENERATION: Very conservative - only where hunter would recognize a crossing
-  // Only add a saddle if we have at least one primary spine AND parcel is large enough
-  if (ridgesPrimary.length > 0 && parcelAcres > 80) {
-    // At most 1 saddle per parcel - positioned where it would be meaningful
-    const primarySpine = ridgesPrimary[0];
-    const spineCoords = primarySpine.geometry.coordinates as [number, number][];
-    
-    // Place saddle at ~40% along the spine (a natural low point)
-    const t = 0.4;
-    const saddlePoint: [number, number] = [
-      spineCoords[0][0] + (spineCoords[spineCoords.length - 1][0] - spineCoords[0][0]) * t,
-      spineCoords[0][1] + (spineCoords[spineCoords.length - 1][1] - spineCoords[0][1]) * t,
-    ];
-    
-    saddleNodes.push({
-      type: 'Feature',
-      properties: {
-        id: 'saddle-main',
-        elevationM: 270 + Math.random() * 25,
-        ridgeDropFt: SADDLE_DROP_MIN_FT + Math.random() * 10,
-        adjacentRidgeIds: [primarySpine.properties.id],
-      },
-      geometry: {
-        type: 'Point',
-        coordinates: saddlePoint,
-      },
-    });
-  }
+  // If we reach here with synthetic data, we still shouldn't generate
+  // because geometry-based detection creates misleading hourglass shapes
+  // that follow parcel boundaries, not actual ridge crests
+  console.log('[Backbone] Synthetic mode - returning empty (awaiting real DEM)');
   
   const processingTime = (Date.now() - startTime) / 1000;
-  const totalRidgeLength = [
-    ...ridgesPrimary.map(r => r.properties.lengthMeters),
-    ...ridgesSecondary.map(r => r.properties.lengthMeters),
-  ].reduce((a, b) => a + b, 0);
-  
-  console.log('[TerrainSpine] Generated:', ridgesPrimary.length, 'primary,', ridgesSecondary.length, 'secondary,', saddleNodes.length, 'saddles');
   
   return {
     success: true,
     bbox,
-    ridges_primary: { type: 'FeatureCollection', features: ridgesPrimary },
-    ridges_secondary: { type: 'FeatureCollection', features: ridgesSecondary },
-    saddle_nodes: { type: 'FeatureCollection', features: saddleNodes },
+    ridges_primary: { type: 'FeatureCollection', features: [] },
+    ridges_secondary: { type: 'FeatureCollection', features: [] },
+    saddle_nodes: { type: 'FeatureCollection', features: [] },
     metadata: {
       processing_time_seconds: processingTime,
-      dem_source: 'SYNTHETIC (geometry-based)',
+      dem_source: 'AWAITING_DEM',
       resolution_m: 0,
       thresholds: {
         min_prominence_ft_primary: MIN_PROMINENCE_FT_PRIMARY,
@@ -449,11 +434,17 @@ export function generateSyntheticRidgeSpines(
         min_length_m_primary: MIN_LENGTH_M_PRIMARY,
         min_length_m_secondary: MIN_LENGTH_M_SECONDARY,
       },
-      total_ridge_length_m: totalRidgeLength,
-      ridge_count_primary: ridgesPrimary.length,
-      ridge_count_secondary: ridgesSecondary.length,
-      saddle_count: saddleNodes.length,
-      fallback_reason: 'Synthetic generation - real DEM analysis not yet available',
+      total_ridge_length_m: 0,
+      ridge_count_primary: 0,
+      ridge_count_secondary: 0,
+      saddle_count: 0,
+      backbone_confidence: confidence,
+      fallback_reason: 
+        'Backbone detection paused. ' +
+        'Synthetic (geometry-based) detection produced misleading results ' +
+        '(hourglass/slope-convergence shapes instead of true ridge crests). ' +
+        'Real DEM-based ridge extraction required for accurate backbone display. ' +
+        reason,
     },
   };
 }
