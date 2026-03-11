@@ -1665,9 +1665,9 @@ function DeerIntelContent() {
                          (parcelPolygon.properties as any)?.ll_uuid || 
                          `synth-${Date.now().toString(36)}`;
 
-        console.log('[RIDGE] Generating ridge spine data for parcel:', parcelId);
+        console.log('[Backbone] Generating terrain spine data for parcel:', parcelId);
 
-        // Fetch ridge spine data (will fall back to synthetic if API unavailable)
+        // Fetch backbone/ridge spine data (will fall back to empty if API unavailable)
         const result = await fetchRidgeSpines({
           parcel: parcelPolygon,
           parcel_id: parcelId,
@@ -1675,10 +1675,15 @@ function DeerIntelContent() {
         });
 
         if (result.success && result.data) {
-          console.log('[RIDGE] Generated:', {
-            primary: result.data.ridges_primary.features.length,
-            secondary: result.data.ridges_secondary.features.length,
-            saddles: result.data.saddle_nodes.features.length,
+          const primaryCount = result.data.ridges_primary.features.length;
+          const secondaryCount = result.data.ridges_secondary.features.length;
+          const saddleCount = result.data.saddle_nodes.features.length;
+          console.log('[Backbone] Result:', {
+            primary: primaryCount,
+            secondary: secondaryCount,
+            saddles: saddleCount,
+            total: primaryCount + secondaryCount + saddleCount,
+            dem_source: result.data.metadata?.dem_source || 'unknown',
             synthetic: result.isSynthetic,
           });
 
@@ -1698,7 +1703,7 @@ function DeerIntelContent() {
             },
           });
         } else {
-          console.warn('[RIDGE] Ridge spine generation failed, using fallback');
+          console.warn('[Backbone] Ridge spine generation failed, using empty fallback');
           // Generate synthetic as fallback
           const synthetic = generateSyntheticRidgeSpines(parcelPolygon);
           setRidgeSpineData({
@@ -1718,7 +1723,7 @@ function DeerIntelContent() {
           });
         }
       } catch (err) {
-        console.error('[RIDGE] Ridge spine generation error:', err);
+        console.error('[Backbone] Error during terrain spine generation:', err);
       }
     };
 
@@ -1749,9 +1754,9 @@ function DeerIntelContent() {
         saddleSource.setData(ridgeSpineData.saddle_nodes);
       }
 
-      console.log('[MAP] Updated terrain spine sources');
+      console.log('[Backbone] Updated map sources');
     } catch (err) {
-      console.error('[MAP] Error updating terrain spine sources (non-fatal):', err);
+      console.error('[Backbone] Error updating map sources (non-fatal):', err);
     }
   }, [ridgeSpineData, mapReady]);
 
@@ -3629,47 +3634,91 @@ function DeerIntelContent() {
                   Terrain Spine
                 </h3>
                 <div className="space-y-1">
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, ridgeSpines: !v.ridgeSpines }))}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                      visibility.ridgeSpines ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Backbone</span>
-                    {/* Est. badge hidden from public - only visible in debug mode (?debug=true) */}
-                    {debugMode && ridgeSpineData?.isSynthetic && (
-                      <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">Est.</span>
-                    )}
-                  </button>
+                  {(() => {
+                    // Calculate backbone status
+                    const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
+                    const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
+                    const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
+                    const totalFeatures = primaryCount + secondaryCount + saddleCount;
+                    const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
+                                           ridgeSpineData?.metadata?.dem_source === 'NONE' ||
+                                           !ridgeSpineData;
+                    const hasFeatures = totalFeatures > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setVisibility(v => ({ ...v, ridgeSpines: !v.ridgeSpines }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          visibility.ridgeSpines ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Backbone</span>
+                        {/* Status badge */}
+                        {hasFeatures ? (
+                          <span className="text-[9px] text-green-400 px-1.5 py-0.5 bg-green-900/40 rounded">
+                            {primaryCount}{secondaryCount > 0 ? `+${secondaryCount}` : ''}
+                          </span>
+                        ) : isAwaitingData ? (
+                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">—</span>
+                        ) : null}
+                      </button>
+                    );
+                  })()}
                 </div>
-                {ridgeSpineData && visibility.ridgeSpines && (
-                  <div className="mt-2 text-[10px] text-stone-500 space-y-0.5 px-1">
-                    {/* Show backbone status - awaiting DEM or actual data */}
-                    {ridgeSpineData.metadata?.dem_source === 'AWAITING_DEM' ? (
-                      <div className="text-amber-500/80 italic">
-                        Awaiting real DEM data
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex justify-between">
-                          <span>Primary Spines</span>
-                          <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_primary || 0}</span>
+                
+                {/* Expanded details when toggle is on */}
+                {visibility.ridgeSpines && (
+                  <div className="mt-2 text-[10px] space-y-1 px-1">
+                    {(() => {
+                      const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
+                      const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
+                      const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
+                      const totalFeatures = primaryCount + secondaryCount + saddleCount;
+                      const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
+                                             ridgeSpineData?.metadata?.dem_source === 'NONE' ||
+                                             !ridgeSpineData;
+                      
+                      // Case 1: Features detected
+                      if (totalFeatures > 0) {
+                        return (
+                          <div className="text-stone-400 space-y-0.5">
+                            <div className="flex justify-between">
+                              <span>Primary Spines</span>
+                              <span className="text-white">{primaryCount}</span>
+                            </div>
+                            {secondaryCount > 0 && (
+                              <div className="flex justify-between">
+                                <span>Secondary</span>
+                                <span className="text-white">{secondaryCount}</span>
+                              </div>
+                            )}
+                            {saddleCount > 0 && (
+                              <div className="flex justify-between">
+                                <span>Saddles</span>
+                                <span className="text-white">{saddleCount}</span>
+                              </div>
+                            )}
+                            {ridgeSpineData?.metadata?.total_ridge_length_m && ridgeSpineData.metadata.total_ridge_length_m > 0 && (
+                              <div className="flex justify-between text-stone-500 pt-0.5 border-t border-white/5">
+                                <span>Total Length</span>
+                                <span>{Math.round(ridgeSpineData.metadata.total_ridge_length_m)}m</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      
+                      // Case 2: No features detected (clean empty state)
+                      return (
+                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
+                          <p className="italic">Not detected on this parcel</p>
+                          <p className="text-stone-600 mt-1 text-[9px]">
+                            Terrain may be too flat or uniform for distinct spine features.
+                          </p>
                         </div>
-                        {(ridgeSpineData.metadata?.ridge_count_secondary || 0) > 0 && (
-                          <div className="flex justify-between">
-                            <span>Secondary</span>
-                            <span className="text-stone-400">{ridgeSpineData.metadata?.ridge_count_secondary || 0}</span>
-                          </div>
-                        )}
-                        {(ridgeSpineData.metadata?.saddle_count || 0) > 0 && (
-                          <div className="flex justify-between">
-                            <span>Saddles</span>
-                            <span className="text-stone-400">{ridgeSpineData.metadata?.saddle_count || 0}</span>
-                          </div>
-                        )}
-                      </>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
               </div>

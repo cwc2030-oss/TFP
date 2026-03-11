@@ -73,8 +73,9 @@ export async function fetchRidgeSpines(
 ): Promise<RidgeFetchResult> {
   const startTime = Date.now();
   
-  console.log('[TerrainSpine] === FETCH START ===');
-  console.log('[TerrainSpine] Parcel ID:', params.parcel_id);
+  console.log('[Backbone] === FETCH START ===');
+  console.log('[Backbone] Parcel ID:', params.parcel_id);
+  console.log('[Backbone] Buffer:', params.bufferMeters ?? 400, 'm');
   
   try {
     const controller = new AbortController();
@@ -96,9 +97,9 @@ export async function fetchRidgeSpines(
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn('[TerrainSpine] API error, using synthetic:', errorText);
+      console.warn('[Backbone] API error, falling back to empty state:', errorText);
       
-      // Fall back to synthetic generation
+      // Fall back to synthetic generation (returns empty for now)
       const syntheticData = generateSyntheticRidgeSpines(params.parcel);
       return {
         success: true,
@@ -109,7 +110,14 @@ export async function fetchRidgeSpines(
     }
     
     const data = await response.json();
-    console.log('[TerrainSpine] Response received in', durationMs, 'ms');
+    const primaryCount = data.ridges_primary?.features?.length || 0;
+    const secondaryCount = data.ridges_secondary?.features?.length || 0;
+    console.log('[Backbone] Response received:', {
+      duration: durationMs + 'ms',
+      primary: primaryCount,
+      secondary: secondaryCount,
+      dem_source: data.metadata?.dem_source || 'unknown',
+    });
     
     return {
       success: true,
@@ -121,9 +129,9 @@ export async function fetchRidgeSpines(
   } catch (err) {
     const durationMs = Date.now() - startTime;
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn('[TerrainSpine] Fetch failed, using synthetic:', errMsg);
+    console.warn('[Backbone] Fetch failed, returning empty state:', errMsg);
     
-    // Fall back to synthetic generation
+    // Fall back to synthetic generation (returns empty - "Not detected")
     const syntheticData = generateSyntheticRidgeSpines(params.parcel);
     return {
       success: true,
