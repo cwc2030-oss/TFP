@@ -849,12 +849,12 @@ function DeerIntelContent() {
   const TERRAIN_WORK_MODE = true;
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
-    bedding: true,
+    // Deer interpretation - HIDE in Terrain Work Mode
+    bedding: !TERRAIN_WORK_MODE,   // Bedding circles = deer interpretation
+    stands: !TERRAIN_WORK_MODE,     // Stand markers = deer interpretation
+    corridors: !TERRAIN_WORK_MODE,  // Corridor lines = deer interpretation
     // Physical terrain structure - SHOW in Terrain Work Mode
     funnels: true,  // Controls draws & saddles (physical terrain)
-    // Deer interpretation - HIDE in Terrain Work Mode
-    stands: !TERRAIN_WORK_MODE,
-    corridors: !TERRAIN_WORK_MODE,
     // Always show terrain anatomy
     ridgeSpines: true,
   });
@@ -1939,13 +1939,14 @@ function DeerIntelContent() {
           });
         }
         
-        // Bedding source
+        // Bedding source - HIDE in Terrain Work Mode (deer interpretation)
         if (!map.getSource('tfp-bedding')) {
           map.addSource('tfp-bedding', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-bedding-fill',
             type: 'fill',
             source: 'tfp-bedding',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.bedding,
               'fill-opacity': 0.25,
@@ -1955,6 +1956,7 @@ function DeerIntelContent() {
             id: 'tfp-bedding-outline',
             type: 'line',
             source: 'tfp-bedding',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.beddingOutline,
               'line-width': 2,
@@ -1965,18 +1967,19 @@ function DeerIntelContent() {
         // Funnel lines source (draws, corridors) - separate by funnelType for different colors
         if (!map.getSource('tfp-funnels-lines')) {
           map.addSource('tfp-funnels-lines', { type: 'geojson', data: EMPTY_FC });
-          // Draws layer (blue)
+          // Draws layer (blue) - Physical terrain, SHOW in Terrain Work Mode
           map.addLayer({
             id: 'tfp-funnels-lines-draws',
             type: 'line',
             source: 'tfp-funnels-lines',
             filter: ['==', ['get', 'funnelType'], 'draw'],
+            layout: { visibility: 'visible' }, // Draws = terrain structure, always visible initially
             paint: {
               'line-color': LAYER_COLORS.funnelDraw,
               'line-width': 3,
             },
           });
-          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines (reduced weight)
+          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines - HIDE in Terrain Work Mode
           map.addLayer({
             id: 'tfp-funnels-lines-corridors-solid',
             type: 'line',
@@ -1985,6 +1988,7 @@ function DeerIntelContent() {
               ['==', ['get', 'funnelType'], 'corridor'],
               ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4]  // Med + High only
             ],
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               // Score-based color: High ≥0.7 (bright red-violet), Med 0.4-0.7 (purple)
               'line-color': [
@@ -2002,7 +2006,7 @@ function DeerIntelContent() {
             },
           });
           
-          // Corridors layer: LOW confidence = DASHED lines only (reduced weight)
+          // Corridors layer: LOW confidence = DASHED lines - HIDE in Terrain Work Mode
           map.addLayer({
             id: 'tfp-funnels-lines-corridors-dashed',
             type: 'line',
@@ -2011,6 +2015,7 @@ function DeerIntelContent() {
               ['==', ['get', 'funnelType'], 'corridor'],
               ['<', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4]  // Low only
             ],
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorLow,  // Light lavender
               'line-width': 2.5,  // Reduced from 3
@@ -2024,6 +2029,7 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-funnels-lines',
             filter: ['==', ['literal', false], true],  // Never matches, just for layer existence
+            layout: { visibility: 'none' },
             paint: {
               'line-color': 'transparent',
               'line-width': 0,
@@ -2038,6 +2044,7 @@ function DeerIntelContent() {
               ['!=', ['get', 'funnelType'], 'draw'],
               ['!=', ['get', 'funnelType'], 'corridor']
             ],
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.funnelDraw,
               'line-width': 3,
@@ -2069,6 +2076,7 @@ function DeerIntelContent() {
         }
         
         // ========== V2 TIERED CORRIDOR SOURCES AND LAYERS ==========
+        // ALL HIDDEN in Terrain Work Mode (deer interpretation)
         
         // Primary corridors: Top band - VISUAL CALM (reduced weight)
         if (!map.getSource('tfp-corridors-primary')) {
@@ -2077,6 +2085,7 @@ function DeerIntelContent() {
             id: 'tfp-corridors-primary',
             type: 'line',
             source: 'tfp-corridors-primary',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPrimary,
               'line-width': 3,           // Reduced from 4
@@ -2092,6 +2101,7 @@ function DeerIntelContent() {
             id: 'tfp-corridors-possible',
             type: 'line',
             source: 'tfp-corridors-possible',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPossible,
               'line-width': 2,           // Reduced from 2.5
@@ -2107,6 +2117,7 @@ function DeerIntelContent() {
             id: 'tfp-corridors-exploratory',
             type: 'line',
             source: 'tfp-corridors-exploratory',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorExploratory,
               'line-width': 1.2,         // Reduced from 1.5
@@ -2123,6 +2134,7 @@ function DeerIntelContent() {
             id: 'tfp-corridors-context-primary',
             type: 'line',
             source: 'tfp-corridors-context-primary',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorContext,
               'line-width': 2.5,         // Reduced from 3
@@ -2139,6 +2151,7 @@ function DeerIntelContent() {
             id: 'tfp-corridors-context-possible',
             type: 'line',
             source: 'tfp-corridors-context-possible',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorContext,
               'line-width': 1.5,         // Reduced from 2
@@ -2148,13 +2161,14 @@ function DeerIntelContent() {
           });
         }
         
-        // Hard funnels: Strong compression zones - subtle
+        // Hard funnels: Strong compression zones - HIDE in Terrain Work Mode
         if (!map.getSource('tfp-funnels-hard')) {
           map.addSource('tfp-funnels-hard', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-funnels-hard-fill',
             type: 'fill',
             source: 'tfp-funnels-hard',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.funnelHard,
               'fill-opacity': 0.20,     // Reduced from 0.30
@@ -2164,6 +2178,7 @@ function DeerIntelContent() {
             id: 'tfp-funnels-hard-outline',
             type: 'line',
             source: 'tfp-funnels-hard',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.funnelHard,
               'line-width': 1.5,        // Reduced from 2
@@ -2172,13 +2187,14 @@ function DeerIntelContent() {
           });
         }
         
-        // Slight funnels: Moderate compression zones - subtle
+        // Slight funnels: Moderate compression zones - HIDE in Terrain Work Mode
         if (!map.getSource('tfp-funnels-slight')) {
           map.addSource('tfp-funnels-slight', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-funnels-slight-fill',
             type: 'fill',
             source: 'tfp-funnels-slight',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.funnelSlight,
               'fill-opacity': 0.12,     // Reduced from 0.18
@@ -2188,6 +2204,7 @@ function DeerIntelContent() {
             id: 'tfp-funnels-slight-outline',
             type: 'line',
             source: 'tfp-funnels-slight',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.funnelSlight,
               'line-width': 1.2,        // Reduced from 1.5
@@ -2197,13 +2214,14 @@ function DeerIntelContent() {
           });
         }
         
-        // Intrusion overlay: Highlights high-intrusion corridor segments
+        // Intrusion overlay: Highlights high-intrusion corridor segments - HIDE in Terrain Work Mode
         if (!map.getSource('tfp-intrusion-overlay')) {
           map.addSource('tfp-intrusion-overlay', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-intrusion-overlay',
             type: 'line',
             source: 'tfp-intrusion-overlay',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.intrusionHigh,
               'line-width': 6,
@@ -2279,6 +2297,7 @@ function DeerIntelContent() {
         }
         
         // ========== EDGE INTELLIGENCE SOURCES AND LAYERS ==========
+        // ALL HIDDEN in Terrain Work Mode (deer interpretation)
         
         // Corridor continuation arrows
         if (!map.getSource('tfp-edge-arrows')) {
@@ -2289,6 +2308,7 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-edge-arrows',
             filter: ['==', ['get', 'type'], 'corridor_continuation'],
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.edgeCorridorArrow,
               'line-width': 4,
@@ -2302,6 +2322,7 @@ function DeerIntelContent() {
             type: 'fill',
             source: 'tfp-edge-arrows',
             filter: ['==', ['get', 'type'], 'corridor_arrow_head'],
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.edgeCorridorArrow,
               'fill-opacity': 0.6,
@@ -2316,6 +2337,7 @@ function DeerIntelContent() {
             id: 'tfp-edge-ghost-fill',
             type: 'fill',
             source: 'tfp-edge-ghost',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.edgeGhostBedding,
               'fill-opacity': 0.15,
@@ -2325,6 +2347,7 @@ function DeerIntelContent() {
             id: 'tfp-edge-ghost-outline',
             type: 'line',
             source: 'tfp-edge-ghost',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.edgeGhostBedding,
               'line-width': 2,
@@ -2341,6 +2364,7 @@ function DeerIntelContent() {
             id: 'tfp-edge-ghost-saddles-fill',
             type: 'fill',
             source: 'tfp-edge-ghost-saddles',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.edgeGhostSaddle,
               'fill-opacity': 0.2,
@@ -2350,6 +2374,7 @@ function DeerIntelContent() {
             id: 'tfp-edge-ghost-saddles-outline',
             type: 'line',
             source: 'tfp-edge-ghost-saddles',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.edgeGhostSaddle,
               'line-width': 2,
@@ -2366,6 +2391,7 @@ function DeerIntelContent() {
             id: 'tfp-edge-draw-extensions-lines',
             type: 'line',
             source: 'tfp-edge-draw-extensions',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.edgeDrawExtension,
               'line-width': 3,
@@ -2382,6 +2408,7 @@ function DeerIntelContent() {
             id: 'tfp-edge-pressure-lines',
             type: 'line',
             source: 'tfp-edge-pressure',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': [
                 'case',
@@ -2808,7 +2835,12 @@ function DeerIntelContent() {
   }, []);
 
   // ========== HTML STAND MARKERS (top 2 only) ==========
+  // Skip entirely in Terrain Work Mode - deer interpretation layer
   useEffect(() => {
+    if (TERRAIN_WORK_MODE) {
+      cleanupMarkers(); // Ensure no stale markers
+      return;
+    }
     if (!mapRef.current || !mapReady || !layers?.standPoints) return;
     addStandMarkers();
   }, [layers, mapReady]);
