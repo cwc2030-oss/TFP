@@ -1,29 +1,57 @@
 /**
- * POST /api/terrain-flow - Terrain Flow Analysis
+ * POST /api/terrain-flow - Terrain Flow Analysis V2 (Terrain-Driven)
  * 
  * Computes terrain-guided movement likelihood surfaces and extracts
  * flow lines, convergence zones, and opportunity areas.
  * 
  * This is terrain intelligence, not wildlife AI.
  * 
- * Input: Parcel AOI (GeoJSON polygon), parcel_id
+ * V2 CHANGES:
+ * - Uses buffered analysis extent (1km default, up to 2km)
+ * - Fetches corridor data from Modal backend for DEM-derived terrain structure
+ * - Computes weighted likelihood surface from terrain components
+ * - Extracts terrain-following flow lines (NOT parcel-aligned)
+ * - Terrain-based convergence detection (NOT endpoint clustering)
+ * - Supports debug layers for component surface visualization
+ * - Supports before/after comparison mode
+ * 
+ * Input: Parcel AOI (GeoJSON polygon), parcel_id, bufferMeters
  * Process:
- *   1. Attempt real DEM-based computation via Modal backend
- *   2. Fall back to geometry-based synthetic generation if needed
- *   3. Compute weighted likelihood surface
- *   4. Extract flow lines and convergence zones
+ *   1. Expand parcel bounds by buffer for landscape context
+ *   2. Fetch corridor data from Modal backend (with buffered extent)
+ *   3. Compute component rasters (slope, bench, saddle, spine, convergence)
+ *   4. Build weighted likelihood surface
+ *   5. Extract terrain-following flow lines
+ *   6. Identify convergence and opportunity zones
  * Output: Flow FeatureCollections + metadata
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generateSyntheticTerrainFlow, FLOW_WEIGHTS, FLOW_THRESHOLDS } from '@/lib/terrain-flow';
-import type { TerrainFlowResponse, FlowLineProperties, ConvergenceZoneProperties, OpportunityZoneProperties } from '@/types/terrain-flow';
+import { 
+  generateTerrainDrivenFlow, 
+  generateLegacySyntheticFlow,
+  FLOW_WEIGHTS, 
+  FLOW_THRESHOLDS 
+} from '@/lib/terrain-flow';
+import {
+  ANALYSIS_BUFFER_M,
+  ANALYSIS_BUFFER_MAX_M,
+  createBufferedParcel,
+  getBbox,
+  expandBbox,
+} from '@/lib/terrain-analysis';
+import type { TerrainFlowResponse } from '@/types/terrain-flow';
 
-// Modal endpoint for DEM-based terrain flow (can reuse corridor backend for DEM access)
+// Modal endpoint for DEM-based corridor computation
 const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL || 
   'https://cwc2030--terrain-brain-v3-corridors-corridors-web.modal.run/v1/corridors';
-const REQUEST_TIMEOUT_MS = 40000;
-const API_VERSION = 'v1.0-terrainflow-2026-03-11';
+
+// Ridge endpoint (if available)
+const RIDGE_API_URL = process.env.RIDGE_API_URL || 
+  'https://cwc2030--terrain-brain-v3-ridges-ridges-web.modal.run/v1/ridges';
+
+const REQUEST_TIMEOUT_MS = 50000; // 50 seconds for buffered analysis
+const API_VERSION = 'v2.0-terrain-driven-2026-03-11';
 
 interface TerrainFlowRequest {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
@@ -33,6 +61,7 @@ interface TerrainFlowRequest {
     weights?: Partial<typeof FLOW_WEIGHTS>;
     thresholds?: Partial<typeof FLOW_THRESHOLDS>;
     includeDebugLayers?: boolean;
+    mode?: 'terrain_driven' | 'synthetic'; // For comparison
   };
 }
 
@@ -42,7 +71,12 @@ export async function POST(request: NextRequest) {
   
   try {
     body = await request.json() as TerrainFlowRequest;
-    const { parcel, parcel_id, bufferMeters = 400, options = {} } = body;
+    const { 
+      parcel, 
+      parcel_id, 
+      bufferMeters = ANALYSIS_BUFFER_M,
+      options = {} 
+    } = body;
 
     // Validate input
     if (!parcel || !parcel.geometry) {
@@ -59,32 +93,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Clamp buffer to allowed range
+    const effectiveBuffer = Math.min(
+      Math.max(bufferMeters, 200), 
+      ANALYSIS_BUFFER_MAX_M
+    );
+
     console.log('[TerrainFlow] Processing for parcel:', parcel_id);
+    console.log('[TerrainFlow] Buffer:', effectiveBuffer, 'm');
+    console.log('[TerrainFlow] Mode:', options.mode || 'terrain_driven');
 
     // Merge user options with defaults
     const weights = { ...FLOW_WEIGHTS, ...options.weights };
     const thresholds = { ...FLOW_THRESHOLDS, ...options.thresholds };
 
-    // Try calling Modal backend for real DEM-based terrain flow
-    let useRealDEM = false;
-    let flowData: TerrainFlowResponse | null = null;
+    // If requesting legacy synthetic mode for comparison
+    if (options.mode === 'synthetic') {
+      console.log('[TerrainFlow] Generating LEGACY synthetic flow for comparison');
+      const syntheticData = generateLegacySyntheticFlow(parcel);
+      const processingTime = (Date.now() - startTime) / 1000;
+      syntheticData.metadata.processing_time_seconds = processingTime;
+      
+      return NextResponse.json({
+        ...syntheticData,
+        version: API_VERSION,
+        request_id: `flow_synthetic_${Date.now().toString(36)}`,
+      });
+    }
+
+    // Create buffered parcel for landscape context
+    const bufferedParcel = createBufferedParcel(parcel, effectiveBuffer);
+    
+    // Try calling Modal backend for DEM-based corridor data
+    let corridorData: any = null;
+    let ridgeData: any = null;
+    let usedRealDEM = false;
 
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-      console.log('[TerrainFlow] Attempting Modal endpoint for DEM data');
+      console.log('[TerrainFlow] Fetching corridor data from Modal with buffer');
       
-      // First, fetch corridor data which gives us DEM-derived probability surface
-      const modalResponse = await fetch(CORRIDOR_API_URL, {
+      // Fetch corridor data with buffered extent
+      const corridorResponse = await fetch(CORRIDOR_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
         },
         body: JSON.stringify({
-          parcel,
-          parcel_id,
+          parcel: bufferedParcel, // Use buffered parcel for analysis
+          parcel_id: parcel_id + '_buffered',
           state: 'mo',
           county: 'unknown',
           options: {
@@ -99,39 +159,89 @@ export async function POST(request: NextRequest) {
 
       clearTimeout(timeoutId);
 
-      if (modalResponse.ok) {
-        const corridorData = await modalResponse.json();
-        
-        // Transform corridor data into terrain flow format
-        if (corridorData.success && corridorData.corridors) {
-          flowData = transformCorridorToFlow(corridorData, parcel, weights, thresholds);
-          useRealDEM = true;
-          console.log('[TerrainFlow] Transformed corridor data to terrain flow');
+      if (corridorResponse.ok) {
+        corridorData = await corridorResponse.json();
+        if (corridorData.success && 
+            (corridorData.corridors?.features?.length > 0 || corridorData.features?.length > 0)) {
+          usedRealDEM = true;
+          console.log('[TerrainFlow] Got corridor data from Modal:', {
+            corridors: corridorData.corridors?.features?.length || corridorData.features?.length || 0,
+            dem_source: corridorData.metadata?.dem_source,
+          });
         } else {
-          console.warn('[TerrainFlow] Corridor data incomplete, falling back to synthetic');
+          console.warn('[TerrainFlow] Corridor data empty or unsuccessful');
+          corridorData = null;
         }
       } else {
-        const errorText = await modalResponse.text();
-        console.warn('[TerrainFlow] Modal returned error:', errorText);
+        const errorText = await corridorResponse.text();
+        console.warn('[TerrainFlow] Corridor API error:', errorText);
       }
-    } catch (modalErr) {
-      const errMsg = modalErr instanceof Error ? modalErr.message : String(modalErr);
-      console.warn('[TerrainFlow] Modal call failed, using synthetic:', errMsg);
+    } catch (corridorErr) {
+      const errMsg = corridorErr instanceof Error ? corridorErr.message : String(corridorErr);
+      console.warn('[TerrainFlow] Corridor fetch failed:', errMsg);
     }
 
-    // Fall back to synthetic generation if Modal not available
-    if (!flowData) {
-      console.log('[TerrainFlow] Generating synthetic terrain flow');
-      flowData = generateSyntheticTerrainFlow(parcel);
+    // Try fetching ridge data (optional)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for ridges
+
+      const ridgeResponse = await fetch(RIDGE_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
+        },
+        body: JSON.stringify({
+          parcel: bufferedParcel,
+          parcel_id: parcel_id + '_buffered',
+          bufferMeters: effectiveBuffer,
+          options: {
+            dem_source: 'USGS3DEP1m',
+            min_prominence_ft: 20,
+            min_length_m: 200,
+          },
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (ridgeResponse.ok) {
+        ridgeData = await ridgeResponse.json();
+        if (ridgeData.success) {
+          console.log('[TerrainFlow] Got ridge data:', {
+            primary: ridgeData.ridges_primary?.features?.length || 0,
+            secondary: ridgeData.ridges_secondary?.features?.length || 0,
+            saddles: ridgeData.saddle_nodes?.features?.length || 0,
+          });
+        } else {
+          ridgeData = null;
+        }
+      }
+    } catch (ridgeErr) {
+      console.warn('[TerrainFlow] Ridge fetch failed (non-critical):', 
+        ridgeErr instanceof Error ? ridgeErr.message : String(ridgeErr));
     }
+
+    // Generate terrain-driven flow
+    console.log('[TerrainFlow] Generating terrain-driven flow');
+    const flowData = generateTerrainDrivenFlow(
+      parcel,
+      corridorData,
+      ridgeData,
+      options.includeDebugLayers || false
+    );
 
     const processingTime = (Date.now() - startTime) / 1000;
     
-    // Update metadata with actual processing time
+    // Update metadata
     flowData.metadata.processing_time_seconds = processingTime;
-    if (useRealDEM) {
-      flowData.metadata.mode = 'real_dem';
-      flowData.metadata.dem_source = 'USGS_3DEP_1m';
+    flowData.metadata.buffer_m = effectiveBuffer;
+    
+    if (usedRealDEM) {
+      flowData.metadata.mode = 'terrain_driven';
+      flowData.metadata.dem_source = corridorData?.metadata?.dem_source || 'USGS_3DEP_1m';
     }
 
     console.log('[TerrainFlow] Complete:', {
@@ -141,12 +251,19 @@ export async function POST(request: NextRequest) {
       convergence: flowData.convergence_zones.features.length,
       opportunity: flowData.opportunity_zones.features.length,
       processingTime: processingTime.toFixed(2) + 's',
+      usedRealDEM,
     });
 
     return NextResponse.json({
       ...flowData,
       version: API_VERSION,
-      request_id: `flow_${Date.now().toString(36)}`,
+      request_id: `flow_terrain_${Date.now().toString(36)}`,
+    }, {
+      headers: {
+        'X-Processing-Time-Ms': String(Date.now() - startTime),
+        'X-Flow-Mode': flowData.metadata.mode,
+        'X-API-Version': API_VERSION,
+      },
     });
 
   } catch (err) {
@@ -164,214 +281,40 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * Transform corridor API response into terrain flow format
- */
-function transformCorridorToFlow(
-  corridorData: any,
-  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
-  weights: typeof FLOW_WEIGHTS,
-  thresholds: typeof FLOW_THRESHOLDS
-): TerrainFlowResponse {
-  const corridors = corridorData.corridors?.features || [];
-  const bbox = corridorData.bbox || [0, 0, 0, 0];
-  
-  // Sort corridors by probability and split into primary/secondary
-  const sorted = [...corridors].sort(
-    (a: any, b: any) => (b.properties?.probability || 0) - (a.properties?.probability || 0)
-  );
-  
-  const primaryThreshold = thresholds.primary_min * 100;
-  const secondaryThreshold = thresholds.secondary_min * 100;
-  
-  const primaryFlows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
-  const secondaryFlows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
-  
-  sorted.forEach((corridor: any, idx: number) => {
-    const prob = corridor.properties?.probability || 0;
-    const lengthM = corridor.properties?.length_m || 100;
-    
-    const flowProps: FlowLineProperties = {
-      id: `flow_${idx}`,
-      tier: prob >= primaryThreshold ? 'primary' : 'secondary',
-      likelihood: prob / 100,
-      lengthM: Math.round(lengthM),
-      avgSlope: corridor.properties?.avg_slope || 10,
-      convergenceScore: Math.min(1, prob / 80),
-    };
-    
-    const feature: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties> = {
-      type: 'Feature',
-      properties: flowProps,
-      geometry: corridor.geometry,
-    };
-    
-    if (prob >= primaryThreshold) {
-      primaryFlows.push(feature);
-    } else if (prob >= secondaryThreshold) {
-      secondaryFlows.push(feature);
-    }
-  });
-  
-  // Identify convergence zones where flows cluster
-  const convergenceZones = identifyConvergenceZones(primaryFlows, secondaryFlows, thresholds);
-  
-  // Identify opportunity zones at high-convergence areas
-  const opportunityZones = identifyOpportunityZones(convergenceZones, thresholds);
-  
-  const totalLength = [...primaryFlows, ...secondaryFlows].reduce(
-    (sum, f) => sum + (f.properties.lengthM || 0), 0
-  );
-  
-  return {
-    success: true,
-    bbox,
-    flow_primary: { type: 'FeatureCollection', features: primaryFlows },
-    flow_secondary: { type: 'FeatureCollection', features: secondaryFlows },
-    convergence_zones: { type: 'FeatureCollection', features: convergenceZones },
-    opportunity_zones: { type: 'FeatureCollection', features: opportunityZones },
-    metadata: {
-      processing_time_seconds: 0,
-      mode: 'real_dem',
-      dem_source: corridorData.metadata?.dem_source || 'USGS_3DEP',
-      resolution_m: corridorData.metadata?.resolution_m || 10,
-      weights,
-      thresholds,
-      stats: {
-        flow_count_primary: primaryFlows.length,
-        flow_count_secondary: secondaryFlows.length,
-        convergence_count: convergenceZones.length,
-        opportunity_count: opportunityZones.length,
-        total_flow_length_m: totalLength,
-        coverage_pct: 0,
+export async function GET() {
+  return NextResponse.json({
+    status: 'available',
+    version: API_VERSION,
+    description: 'Terrain Flow Analysis API V2 - Terrain-Driven',
+    features: [
+      'Buffered analysis extent (1-2km)',
+      'DEM-derived component rasters',
+      'Weighted likelihood surface',
+      'Terrain-following flow extraction',
+      'Terrain-based convergence detection',
+      'Debug layers for tuning',
+      'Comparison mode (synthetic vs terrain-driven)',
+    ],
+    endpoints: {
+      POST: {
+        input: {
+          parcel: 'GeoJSON Feature (Polygon)',
+          parcel_id: 'string',
+          bufferMeters: 'number (default: 1000, max: 2000)',
+          options: {
+            includeDebugLayers: 'boolean',
+            mode: '"terrain_driven" | "synthetic"',
+          },
+        },
+        output: {
+          flow_primary: 'FeatureCollection<LineString>',
+          flow_secondary: 'FeatureCollection<LineString>',
+          convergence_zones: 'FeatureCollection<Point>',
+          opportunity_zones: 'FeatureCollection<Point>',
+          debug_layers: 'optional component surfaces',
+          metadata: 'Processing details',
+        },
       },
-      fallback_reason: null,
     },
-  };
-}
-
-/**
- * Identify convergence zones where multiple flows come together
- */
-function identifyConvergenceZones(
-  primaryFlows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
-  secondaryFlows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
-  thresholds: typeof FLOW_THRESHOLDS
-): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
-  const zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
-  const allFlows = [...primaryFlows, ...secondaryFlows];
-  
-  if (allFlows.length < 2) return zones;
-  
-  // Check for endpoint proximity (simple convergence detection)
-  const endpoints: { coord: [number, number]; flowId: string; likelihood: number }[] = [];
-  
-  allFlows.forEach(flow => {
-    const coords = flow.geometry.coordinates;
-    if (coords.length >= 2) {
-      endpoints.push({
-        coord: coords[0] as [number, number],
-        flowId: flow.properties.id,
-        likelihood: flow.properties.likelihood,
-      });
-      endpoints.push({
-        coord: coords[coords.length - 1] as [number, number],
-        flowId: flow.properties.id,
-        likelihood: flow.properties.likelihood,
-      });
-    }
   });
-  
-  // Cluster nearby endpoints
-  const clusterRadiusM = 100;
-  const visited = new Set<number>();
-  
-  endpoints.forEach((ep, i) => {
-    if (visited.has(i)) return;
-    
-    const cluster = [ep];
-    visited.add(i);
-    
-    endpoints.forEach((other, j) => {
-      if (i === j || visited.has(j)) return;
-      if (ep.flowId === other.flowId) return; // Same flow
-      
-      const dist = haversineDistance(ep.coord, other.coord);
-      if (dist < clusterRadiusM) {
-        cluster.push(other);
-        visited.add(j);
-      }
-    });
-    
-    // If cluster has multiple flows, it's a convergence
-    const uniqueFlows = new Set(cluster.map(c => c.flowId));
-    if (uniqueFlows.size >= 2) {
-      const avgLng = cluster.reduce((s, c) => s + c.coord[0], 0) / cluster.length;
-      const avgLat = cluster.reduce((s, c) => s + c.coord[1], 0) / cluster.length;
-      const avgLikelihood = cluster.reduce((s, c) => s + c.likelihood, 0) / cluster.length;
-      
-      zones.push({
-        type: 'Feature',
-        properties: {
-          id: `conv_${zones.length}`,
-          intensity: Math.min(1, avgLikelihood + 0.1 * (uniqueFlows.size - 2)),
-          flowCount: uniqueFlows.size,
-          radiusM: 30 + uniqueFlows.size * 10,
-          type: uniqueFlows.size >= 3 ? 'pinch' : 'overlap',
-        },
-        geometry: {
-          type: 'Point',
-          coordinates: [avgLng, avgLat],
-        },
-      });
-    }
-  });
-  
-  return zones;
-}
-
-/**
- * Identify opportunity zones at high-convergence areas
- */
-function identifyOpportunityZones(
-  convergenceZones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
-  thresholds: typeof FLOW_THRESHOLDS
-): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
-  const zones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
-  
-  // Filter high-intensity convergence zones
-  const highIntensity = convergenceZones.filter(
-    z => z.properties.intensity >= thresholds.opportunity_threshold
-  );
-  
-  highIntensity.slice(0, 3).forEach((conv, i) => {
-    zones.push({
-      type: 'Feature',
-      properties: {
-        id: `opp_${i}`,
-        score: conv.properties.intensity,
-        flowIntensity: conv.properties.intensity * 0.7,
-        convergenceBonus: 0.15 * conv.properties.flowCount / 3,
-        benchBonus: 0.10,
-        saddleBonus: conv.properties.type === 'pinch' ? 0.10 : 0.05,
-        radiusM: 25,
-      },
-      geometry: conv.geometry,
-    });
-  });
-  
-  return zones;
-}
-
-/**
- * Calculate distance between two coordinates in meters
- */
-function haversineDistance(p1: [number, number], p2: [number, number]): number {
-  const R = 6371000;
-  const dLat = (p2[1] - p1[1]) * Math.PI / 180;
-  const dLng = (p2[0] - p1[0]) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(p1[1] * Math.PI / 180) * Math.cos(p2[1] * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }

@@ -36,8 +36,8 @@ import type {
 } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
-import { fetchTerrainFlow, generateSyntheticTerrainFlow } from '@/lib/terrain-flow';
-import type { TerrainFlowResponse, TerrainFlowVisibility } from '@/types/terrain-flow';
+import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
+import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState } from '@/types/terrain-flow';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -955,6 +955,22 @@ function DeerIntelContent() {
     };
   } | null>(null);
   const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
+  
+  // Terrain Flow Comparison State (before/after toggle)
+  const [flowComparisonMode, setFlowComparisonMode] = useState(false);
+  const [legacySyntheticData, setLegacySyntheticData] = useState<{
+    flow_primary: GeoJSON.FeatureCollection;
+    flow_secondary: GeoJSON.FeatureCollection;
+    convergence_zones: GeoJSON.FeatureCollection;
+    opportunity_zones: GeoJSON.FeatureCollection;
+    metadata?: {
+      flow_count_primary: number;
+      flow_count_secondary: number;
+      convergence_count: number;
+      opportunity_count: number;
+      mode?: string;
+    };
+  } | null>(null);
 
   // ========== ALIGNMENT ENGINE STATE ==========
   type AlignedStand = {
@@ -1799,6 +1815,7 @@ function DeerIntelContent() {
   useEffect(() => {
     if (!parcelPolygon) {
       setTerrainFlowData(null);
+      setLegacySyntheticData(null);
       return;
     }
 
@@ -1811,10 +1828,28 @@ function DeerIntelContent() {
 
         console.log('[TerrainFlow] Generating terrain flow data for parcel:', parcelId);
 
+        // Generate LEGACY synthetic for comparison (parcel-axis-based)
+        console.log('[TerrainFlow] Generating legacy synthetic for comparison...');
+        const legacySynthetic = generateLegacySyntheticFlow(parcelPolygon);
+        setLegacySyntheticData({
+          flow_primary: legacySynthetic.flow_primary,
+          flow_secondary: legacySynthetic.flow_secondary,
+          convergence_zones: legacySynthetic.convergence_zones,
+          opportunity_zones: legacySynthetic.opportunity_zones,
+          metadata: {
+            flow_count_primary: legacySynthetic.metadata.stats.flow_count_primary,
+            flow_count_secondary: legacySynthetic.metadata.stats.flow_count_secondary,
+            convergence_count: legacySynthetic.metadata.stats.convergence_count,
+            opportunity_count: legacySynthetic.metadata.stats.opportunity_count,
+            mode: 'synthetic',
+          },
+        });
+
+        // Generate TERRAIN-DRIVEN flow (the new V2 approach)
         const result = await fetchTerrainFlow({
           parcel: parcelPolygon,
           parcel_id: parcelId,
-          bufferMeters: 400,
+          bufferMeters: 1000, // 1km buffer for landscape context
         });
 
         if (result.success && result.data) {
@@ -1829,6 +1864,7 @@ function DeerIntelContent() {
             convergence: convergenceCount,
             opportunity: opportunityCount,
             mode: result.data.metadata?.mode || 'unknown',
+            buffer_m: result.data.metadata?.buffer_m || 1000,
             synthetic: result.isSynthetic,
           });
 
@@ -1850,7 +1886,7 @@ function DeerIntelContent() {
             },
           });
         } else {
-          console.warn('[TerrainFlow] Flow generation failed, using synthetic');
+          console.warn('[TerrainFlow] Flow generation failed, using terrain-driven fallback');
           const synthetic = generateSyntheticTerrainFlow(parcelPolygon);
           setTerrainFlowData({
             flow_primary: synthetic.flow_primary,
@@ -1883,38 +1919,45 @@ function DeerIntelContent() {
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || !overlaySourcesCreated.current || !terrainFlowData) return;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+    
+    // Select data source based on comparison mode
+    const flowData = flowComparisonMode && legacySyntheticData 
+      ? legacySyntheticData 
+      : terrainFlowData;
+    
+    if (!flowData) return;
 
     try {
       // Update primary flow source
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(terrainFlowData.flow_primary);
+        primarySource.setData(flowData.flow_primary);
       }
 
       // Update secondary flow source
       const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(terrainFlowData.flow_secondary);
+        secondarySource.setData(flowData.flow_secondary);
       }
 
       // Update convergence zones source
       const convergenceSource = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
       if (convergenceSource) {
-        convergenceSource.setData(terrainFlowData.convergence_zones);
+        convergenceSource.setData(flowData.convergence_zones);
       }
 
       // Update opportunity zones source
       const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
       if (opportunitySource) {
-        opportunitySource.setData(terrainFlowData.opportunity_zones);
+        opportunitySource.setData(flowData.opportunity_zones);
       }
 
-      console.log('[TerrainFlow] Updated map sources');
+      console.log('[TerrainFlow] Updated map sources', flowComparisonMode ? '(LEGACY comparison)' : '(terrain-driven)');
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
-  }, [terrainFlowData, mapReady]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
@@ -4004,7 +4047,42 @@ function DeerIntelContent() {
                   {terrainFlowLoading && (
                     <Loader2 className="h-3 w-3 animate-spin text-cyan-400/60" />
                   )}
+                  {/* V2 Badge */}
+                  {!flowComparisonMode && !terrainFlowLoading && (
+                    <span className="text-[8px] text-cyan-500 bg-cyan-950 px-1 py-0.5 rounded">V2</span>
+                  )}
                 </h3>
+                
+                {/* Before/After Comparison Toggle */}
+                {legacySyntheticData && (
+                  <div className="mb-2 p-2 bg-stone-800/40 rounded-lg">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className={flowComparisonMode ? 'text-stone-500' : 'text-cyan-400 font-medium'}>
+                        Terrain-Driven (V2)
+                      </span>
+                      <button
+                        onClick={() => setFlowComparisonMode(!flowComparisonMode)}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${
+                          flowComparisonMode ? 'bg-amber-700' : 'bg-cyan-700'
+                        }`}
+                        title="Toggle between terrain-driven (V2) and legacy synthetic flow"
+                      >
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                          flowComparisonMode ? 'translate-x-5' : 'translate-x-0.5'
+                        }`} />
+                      </button>
+                      <span className={flowComparisonMode ? 'text-amber-400 font-medium' : 'text-stone-500'}>
+                        Legacy (V1)
+                      </span>
+                    </div>
+                    {flowComparisonMode && (
+                      <div className="mt-1.5 text-[9px] text-amber-400/80 bg-amber-900/30 rounded p-1.5">
+                        <span className="font-medium">⚠️ LEGACY MODE:</span> Showing old parcel-axis-based flow for comparison. 
+                        Lines follow property shape, not terrain.
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-1">
                   {/* Primary Flow Toggle */}
                   {(() => {

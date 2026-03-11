@@ -3,11 +3,13 @@
  * 
  * Types for terrain-guided movement likelihood surfaces,
  * flow lines, convergence zones, and opportunity areas.
+ * 
+ * V2: Added debug layers and mode tracking for terrain-driven analysis
  */
 
 export type FlowTier = 'primary' | 'secondary';
 export type ConvergenceType = 'pinch' | 'overlap' | 'saddle';
-export type FlowMode = 'real_dem' | 'synthetic' | 'error';
+export type FlowMode = 'real_dem' | 'terrain_driven' | 'synthetic' | 'error';
 
 // ========== Feature Properties ==========
 
@@ -38,6 +40,24 @@ export interface OpportunityZoneProperties {
   radiusM: number;               // Display radius
 }
 
+// ========== Debug Layer Types ==========
+
+export interface DebugGridPoint {
+  value: number;
+  layer: string;
+}
+
+export interface DebugLayers {
+  slope_preference?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  bench_likelihood?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  saddle_proximity?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  spine_proximity?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  terrain_convergence?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  extreme_slope_penalty?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  cut_penalty?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  flow_likelihood?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+}
+
 // ========== Response Types ==========
 
 export interface TerrainFlowResponse {
@@ -57,13 +77,7 @@ export interface TerrainFlowResponse {
   opportunity_zones: GeoJSON.FeatureCollection<GeoJSON.Point, OpportunityZoneProperties>;
   
   // Debug layers (optional, for dev tuning)
-  debug_layers?: {
-    bench_likelihood?: GeoJSON.FeatureCollection;
-    saddle_influence?: GeoJSON.FeatureCollection;
-    spine_influence?: GeoJSON.FeatureCollection;
-    convergence_surface?: GeoJSON.FeatureCollection;
-    slope_preference?: GeoJSON.FeatureCollection;
-  };
+  debug_layers?: DebugLayers;
   
   metadata: TerrainFlowMetadata;
 }
@@ -73,12 +87,15 @@ export interface TerrainFlowMetadata {
   mode: FlowMode;
   dem_source: string;
   resolution_m: number;
+  buffer_m: number;              // Analysis buffer size
   weights: {
     bench_likelihood: number;
     saddle_proximity: number;
     spine_proximity: number;
     terrain_convergence: number;
     moderate_slope: number;
+    extreme_slope_penalty?: number;
+    cut_penalty?: number;
   };
   thresholds: {
     primary_min: number;
@@ -97,6 +114,10 @@ export interface TerrainFlowMetadata {
     coverage_pct: number;
   };
   fallback_reason?: string | null;
+  analysis_extent?: {
+    parcel_bbox: [number, number, number, number];
+    buffered_bbox: [number, number, number, number];
+  };
 }
 
 // ========== UI State Types ==========
@@ -113,4 +134,13 @@ export interface TerrainFlowVisibility {
   flowSecondary: boolean;
   convergenceZones: boolean;
   opportunityZones: boolean;
+}
+
+// ========== Comparison Mode ==========
+
+export interface FlowComparisonState {
+  showSynthetic: boolean;        // Show old synthetic flow
+  showTerrainDriven: boolean;    // Show new terrain-driven flow
+  syntheticData: TerrainFlowResponse | null;
+  terrainDrivenData: TerrainFlowResponse | null;
 }

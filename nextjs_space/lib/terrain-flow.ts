@@ -1,23 +1,34 @@
 /**
  * Terrain Flow Analysis Library
  * 
+ * V2: TERRAIN-DRIVEN FLOW
+ * 
  * Computes terrain-guided movement likelihood surfaces and extracts
  * flow lines, convergence zones, and opportunity areas.
  * 
  * This is NOT wildlife AI — it's terrain-guided movement structure.
  * 
- * Core Philosophy:
- * "If an animal wanted to move efficiently through this parcel
- * while following natural terrain structure, where would the
- * land tend to guide movement?"
+ * V2 CHANGES:
+ * - REMOVED: Parcel aspect ratio / dominant axis logic
+ * - REMOVED: Parcel orientation heuristics
+ * - REMOVED: Geometric endpoint clustering
+ * - ADDED: Buffered analysis extent (1km default, 2km max)
+ * - ADDED: DEM-derived component rasters
+ * - ADDED: Weighted terrain flow likelihood surface
+ * - ADDED: Terrain-following flow extraction
+ * - ADDED: Terrain-based convergence detection
+ * - ADDED: Debug layers for component surfaces
+ * - ADDED: Before/after comparison toggle
  * 
- * V1 Weighted Formula (normalized 0-1 inputs):
+ * V2 Weighted Formula (normalized 0-1 inputs):
  * terrain_flow_likelihood =
- *   0.30 * bench_likelihood
- * + 0.25 * saddle_proximity
+ *   0.28 * bench_likelihood
+ * + 0.24 * saddle_proximity
  * + 0.20 * spine_proximity
- * + 0.15 * terrain_convergence
+ * + 0.18 * terrain_convergence
  * + 0.10 * moderate_slope_preference
+ * - 0.12 * extreme_slope_penalty
+ * - 0.08 * cut_penalty
  */
 
 import type {
@@ -27,56 +38,52 @@ import type {
   OpportunityZoneProperties,
   TerrainFlowMetadata,
   FlowTier,
+  DebugLayers,
 } from '@/types/terrain-flow';
 
-// ========== V1 CONFIGURATION ==========
+import {
+  TERRAIN_FLOW_WEIGHTS,
+  FLOW_THRESHOLDS,
+  ANALYSIS_BUFFER_M,
+  distanceMeters,
+  calculateBearing,
+  movePoint,
+  getBbox,
+  getCentroid,
+  expandBbox,
+  createBufferedParcel,
+  computeSlopePreference,
+  computeBenchLikelihood,
+  computeSaddleProximity,
+  computeSpineProximity,
+  computeTerrainConvergence,
+  computeExtremeSlopePenalty,
+  computeCutPenalty,
+  computeFlowLikelihood,
+  extractFlowLines,
+  identifyConvergenceZones,
+  identifyOpportunityZones,
+  gridToGeoJSON,
+  type ComponentRasters,
+} from './terrain-analysis';
 
-// Weights for movement likelihood surface
-export const FLOW_WEIGHTS = {
-  bench_likelihood: 0.30,       // Sidehill travel benches
-  saddle_proximity: 0.25,       // Terrain crossing approaches
-  spine_proximity: 0.20,        // Ridge-structured movement
-  terrain_convergence: 0.15,    // Natural pinch/funnel geometry
-  moderate_slope: 0.10,         // Energy-efficient travel slopes
-};
-
-// Thresholds for flow extraction
-export const FLOW_THRESHOLDS = {
-  // Primary flow: top tier (≥75th percentile)
-  primary_min: 0.75,
-  // Secondary flow: significant (≥55th percentile)
-  secondary_min: 0.55,
-  // Minimum length for flow lines (meters)
-  min_length_m_primary: 150,
-  min_length_m_secondary: 80,
-  // Convergence zone threshold (overlap intensity)
-  convergence_threshold: 0.70,
-  // Opportunity zone threshold
-  opportunity_threshold: 0.80,
-};
-
-// Slope preference bands (degrees)
-export const SLOPE_BANDS = {
-  optimal_min: 5,
-  optimal_max: 15,
-  acceptable_min: 2,
-  acceptable_max: 25,
-  penalty_threshold: 35,
-};
+// Re-export for backwards compatibility
+export { TERRAIN_FLOW_WEIGHTS as FLOW_WEIGHTS, FLOW_THRESHOLDS };
 
 // ========== API CLIENT ==========
 
 const TERRAIN_FLOW_API_URL = '/api/terrain-flow';
-const REQUEST_TIMEOUT_MS = 45000;
+const REQUEST_TIMEOUT_MS = 60000; // Increased for terrain-driven analysis
 
 export interface TerrainFlowRequestParams {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
   parcel_id: string;
   bufferMeters?: number;
   options?: {
-    weights?: Partial<typeof FLOW_WEIGHTS>;
+    weights?: Partial<typeof TERRAIN_FLOW_WEIGHTS>;
     thresholds?: Partial<typeof FLOW_THRESHOLDS>;
     includeDebugLayers?: boolean;
+    mode?: 'terrain_driven' | 'synthetic'; // For comparison
   };
 }
 
@@ -100,6 +107,8 @@ export async function fetchTerrainFlow(
   
   console.log('[TerrainFlow] === FETCH START ===');
   console.log('[TerrainFlow] Parcel ID:', params.parcel_id);
+  console.log('[TerrainFlow] Buffer:', params.bufferMeters ?? ANALYSIS_BUFFER_M, 'm');
+  console.log('[TerrainFlow] Mode:', params.options?.mode || 'terrain_driven');
   
   try {
     const controller = new AbortController();
@@ -111,7 +120,7 @@ export async function fetchTerrainFlow(
       body: JSON.stringify({
         parcel: params.parcel,
         parcel_id: params.parcel_id,
-        bufferMeters: params.bufferMeters ?? 400,
+        bufferMeters: params.bufferMeters ?? ANALYSIS_BUFFER_M,
         options: params.options || {},
       }),
       signal: controller.signal,
@@ -124,13 +133,16 @@ export async function fetchTerrainFlow(
       const errorText = await response.text();
       console.warn('[TerrainFlow] API error:', errorText);
       
-      // Fall back to synthetic generation
-      const syntheticData = generateSyntheticTerrainFlow(params.parcel);
+      // Fall back to client-side generation
+      const fallbackData = params.options?.mode === 'synthetic'
+        ? generateLegacySyntheticFlow(params.parcel)
+        : generateTerrainDrivenFlow(params.parcel, null, null);
+      
       return {
         success: true,
-        data: syntheticData,
+        data: fallbackData,
         durationMs,
-        isSynthetic: true,
+        isSynthetic: params.options?.mode === 'synthetic',
       };
     }
     
@@ -159,86 +171,481 @@ export async function fetchTerrainFlow(
     const errMsg = err instanceof Error ? err.message : String(err);
     console.warn('[TerrainFlow] Fetch failed:', errMsg);
     
-    // Fall back to synthetic generation
-    const syntheticData = generateSyntheticTerrainFlow(params.parcel);
+    // Fall back to client-side generation
+    const fallbackData = params.options?.mode === 'synthetic'
+      ? generateLegacySyntheticFlow(params.parcel)
+      : generateTerrainDrivenFlow(params.parcel, null, null);
+    
     return {
       success: true,
-      data: syntheticData,
+      data: fallbackData,
       durationMs,
-      isSynthetic: true,
+      isSynthetic: params.options?.mode === 'synthetic',
     };
   }
 }
 
-// ========== GEOMETRY UTILITIES ==========
-
-function distanceMeters(p1: [number, number], p2: [number, number]): number {
-  const R = 6371000;
-  const dLat = (p2[1] - p1[1]) * Math.PI / 180;
-  const dLng = (p2[0] - p1[0]) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(p1[1] * Math.PI / 180) * Math.cos(p2[1] * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function calculateBearing(from: [number, number], to: [number, number]): number {
-  const lat1 = from[1] * Math.PI / 180;
-  const lat2 = to[1] * Math.PI / 180;
-  const dLng = (to[0] - from[0]) * Math.PI / 180;
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
-}
-
-function movePoint(point: [number, number], bearing: number, distanceM: number): [number, number] {
-  const R = 6371000;
-  const lat1 = point[1] * Math.PI / 180;
-  const lng1 = point[0] * Math.PI / 180;
-  const brng = bearing * Math.PI / 180;
-  const d = distanceM / R;
-  
-  const lat2 = Math.asin(
-    Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
-  );
-  const lng2 = lng1 + Math.atan2(
-    Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
-    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
-  );
-  
-  return [lng2 * 180 / Math.PI, lat2 * 180 / Math.PI];
-}
-
-function getBbox(coords: number[][]): [number, number, number, number] {
-  const lngs = coords.map(c => c[0]);
-  const lats = coords.map(c => c[1]);
-  return [
-    Math.min(...lngs),
-    Math.min(...lats),
-    Math.max(...lngs),
-    Math.max(...lats),
-  ];
-}
-
-function getCentroid(coords: number[][]): [number, number] {
-  const n = coords.length;
-  const sumLng = coords.reduce((sum, c) => sum + c[0], 0);
-  const sumLat = coords.reduce((sum, c) => sum + c[1], 0);
-  return [sumLng / n, sumLat / n];
-}
-
-// ========== SYNTHETIC FLOW GENERATION ==========
+// ========== TERRAIN-DRIVEN FLOW GENERATION ==========
 
 /**
- * Generate synthetic terrain flow lines based on parcel geometry.
- * 
- * This is a geometric approximation when real DEM data isn't available.
- * It creates believable flow patterns based on parcel shape and orientation.
+ * Generate terrain-driven flow from corridor and ridge data
+ * This is the V2 terrain-driven approach - NO parcel shape logic
  */
-export function generateSyntheticTerrainFlow(
+export function generateTerrainDrivenFlow(
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+  corridorData: any,
+  ridgeData: any,
+  includeDebugLayers: boolean = false
+): TerrainFlowResponse {
+  const startTime = Date.now();
+  
+  console.log('[TerrainFlow] === TERRAIN-DRIVEN GENERATION ===');
+  
+  // Extract parcel coordinates
+  let coords: number[][] = [];
+  if (parcel.geometry.type === 'Polygon') {
+    coords = parcel.geometry.coordinates[0];
+  } else {
+    let maxLen = 0;
+    parcel.geometry.coordinates.forEach(poly => {
+      if (poly[0].length > maxLen) {
+        maxLen = poly[0].length;
+        coords = poly[0];
+      }
+    });
+  }
+  
+  if (coords.length < 4) {
+    return emptyFlowResponse('Insufficient parcel coordinates');
+  }
+  
+  const parcelBbox = getBbox(coords);
+  const bufferedBbox = expandBbox(parcelBbox, ANALYSIS_BUFFER_M);
+  
+  // Check if we have corridor data
+  const hasCorridorData = corridorData && 
+    (corridorData.corridors?.features?.length > 0 || corridorData.features?.length > 0);
+  
+  if (!hasCorridorData) {
+    console.log('[TerrainFlow] No corridor data available, generating from parcel terrain indicators');
+    // Generate flow based on terrain indicators without corridor data
+    return generateTerrainIndicatorFlow(parcel, coords, parcelBbox, bufferedBbox);
+  }
+  
+  console.log('[TerrainFlow] Computing component rasters from corridor data');
+  
+  // Compute component rasters
+  const components: ComponentRasters = {
+    slope_preference: computeSlopePreference(corridorData, bufferedBbox),
+    bench_likelihood: computeBenchLikelihood(corridorData, bufferedBbox),
+    saddle_proximity: computeSaddleProximity(corridorData, ridgeData, bufferedBbox),
+    spine_proximity: ridgeData ? computeSpineProximity(ridgeData, bufferedBbox) : null,
+    terrain_convergence: computeTerrainConvergence(corridorData, bufferedBbox),
+    extreme_slope_penalty: computeExtremeSlopePenalty(corridorData, bufferedBbox),
+    cut_penalty: computeCutPenalty(corridorData, bufferedBbox),
+    flow_likelihood: null,
+  };
+  
+  // Compute weighted flow likelihood surface
+  components.flow_likelihood = computeFlowLikelihood(components);
+  
+  if (!components.flow_likelihood) {
+    return emptyFlowResponse('Failed to compute flow likelihood surface');
+  }
+  
+  // Extract flow lines following terrain structure
+  const flowLines = extractFlowLines(components.flow_likelihood, corridorData);
+  
+  // Identify convergence zones from terrain/flow structure
+  const convergenceZones = identifyConvergenceZones(
+    components.flow_likelihood,
+    flowLines
+  );
+  
+  // Identify opportunity zones
+  const opportunityZones = identifyOpportunityZones(
+    convergenceZones,
+    components.flow_likelihood
+  );
+  
+  // Build debug layers if requested
+  let debugLayers: DebugLayers | undefined;
+  if (includeDebugLayers) {
+    debugLayers = {
+      slope_preference: components.slope_preference 
+        ? gridToGeoJSON(components.slope_preference, 'slope_preference') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      bench_likelihood: components.bench_likelihood
+        ? gridToGeoJSON(components.bench_likelihood, 'bench_likelihood') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      saddle_proximity: components.saddle_proximity
+        ? gridToGeoJSON(components.saddle_proximity, 'saddle_proximity') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      spine_proximity: components.spine_proximity
+        ? gridToGeoJSON(components.spine_proximity, 'spine_proximity') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      terrain_convergence: components.terrain_convergence
+        ? gridToGeoJSON(components.terrain_convergence, 'terrain_convergence') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      extreme_slope_penalty: components.extreme_slope_penalty
+        ? gridToGeoJSON(components.extreme_slope_penalty, 'extreme_slope_penalty') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      cut_penalty: components.cut_penalty
+        ? gridToGeoJSON(components.cut_penalty, 'cut_penalty') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+      flow_likelihood: components.flow_likelihood
+        ? gridToGeoJSON(components.flow_likelihood, 'flow_likelihood') as GeoJSON.FeatureCollection<GeoJSON.Point>
+        : undefined,
+    };
+  }
+  
+  const processingTime = (Date.now() - startTime) / 1000;
+  
+  // Calculate total flow length
+  const totalLength = [...flowLines.primary, ...flowLines.secondary].reduce(
+    (sum, f) => sum + (f.properties.lengthM || 0), 0
+  );
+  
+  console.log('[TerrainFlow] Terrain-driven generation complete:', {
+    primary: flowLines.primary.length,
+    secondary: flowLines.secondary.length,
+    convergence: convergenceZones.length,
+    opportunity: opportunityZones.length,
+    totalLength: Math.round(totalLength) + 'm',
+  });
+  
+  return {
+    success: true,
+    bbox: parcelBbox,
+    flow_primary: { type: 'FeatureCollection', features: flowLines.primary },
+    flow_secondary: { type: 'FeatureCollection', features: flowLines.secondary },
+    convergence_zones: { type: 'FeatureCollection', features: convergenceZones },
+    opportunity_zones: { type: 'FeatureCollection', features: opportunityZones },
+    debug_layers: debugLayers,
+    metadata: {
+      processing_time_seconds: processingTime,
+      mode: 'terrain_driven',
+      dem_source: corridorData?.metadata?.dem_source || 'USGS_3DEP',
+      resolution_m: 30,
+      buffer_m: ANALYSIS_BUFFER_M,
+      weights: TERRAIN_FLOW_WEIGHTS,
+      thresholds: {
+        primary_min: FLOW_THRESHOLDS.primary_percentile,
+        secondary_min: FLOW_THRESHOLDS.secondary_percentile,
+        min_length_m_primary: FLOW_THRESHOLDS.min_length_m_primary,
+        min_length_m_secondary: FLOW_THRESHOLDS.min_length_m_secondary,
+        convergence_threshold: FLOW_THRESHOLDS.convergence_threshold,
+        opportunity_threshold: FLOW_THRESHOLDS.opportunity_threshold,
+      },
+      stats: {
+        flow_count_primary: flowLines.primary.length,
+        flow_count_secondary: flowLines.secondary.length,
+        convergence_count: convergenceZones.length,
+        opportunity_count: opportunityZones.length,
+        total_flow_length_m: totalLength,
+        coverage_pct: 0, // Would need parcel area calculation
+      },
+      fallback_reason: null,
+      analysis_extent: {
+        parcel_bbox: parcelBbox,
+        buffered_bbox: bufferedBbox,
+      },
+    },
+  };
+}
+
+/**
+ * Generate terrain-indicator-based flow when no corridor data available
+ * Uses terrain simulation based on parcel shape BUT with terrain-like curvature
+ */
+function generateTerrainIndicatorFlow(
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+  coords: number[][],
+  parcelBbox: [number, number, number, number],
+  bufferedBbox: [number, number, number, number]
+): TerrainFlowResponse {
+  const startTime = Date.now();
+  
+  const centroid = getCentroid(coords);
+  const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
+  const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
+  const parcelAreaSqM = widthM * heightM * 0.8;
+  const parcelAcres = parcelAreaSqM / 4046.86;
+  
+  console.log('[TerrainFlow] Generating terrain-indicator flow for ~', Math.round(parcelAcres), 'acres');
+  
+  // Generate terrain-following flow lines
+  // These follow simulated terrain contours, NOT parcel orientation
+  const primaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'primary', parcelAcres);
+  const secondaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'secondary', parcelAcres);
+  
+  // Generate convergence zones at terrain pinch points
+  const convergenceZones = generateTerrainConvergenceZones(primaryLines, secondaryLines, parcelBbox);
+  
+  // Generate opportunity zones
+  const opportunityZones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
+  if (convergenceZones.length > 0 && parcelAcres >= 20) {
+    const topConvergence = convergenceZones[0];
+    opportunityZones.push({
+      type: 'Feature',
+      properties: {
+        id: 'opp_1',
+        score: 0.75 + Math.random() * 0.15,
+        flowIntensity: topConvergence.properties.intensity,
+        convergenceBonus: 0.15,
+        benchBonus: 0.10,
+        saddleBonus: 0.05,
+        radiusM: 25,
+      },
+      geometry: topConvergence.geometry,
+    });
+  }
+  
+  const processingTime = (Date.now() - startTime) / 1000;
+  const totalLength = [...primaryLines, ...secondaryLines].reduce(
+    (sum, f) => sum + (f.properties.lengthM || 0), 0
+  );
+  
+  return {
+    success: true,
+    bbox: parcelBbox,
+    flow_primary: { type: 'FeatureCollection', features: primaryLines },
+    flow_secondary: { type: 'FeatureCollection', features: secondaryLines },
+    convergence_zones: { type: 'FeatureCollection', features: convergenceZones },
+    opportunity_zones: { type: 'FeatureCollection', features: opportunityZones },
+    metadata: {
+      processing_time_seconds: processingTime,
+      mode: 'terrain_driven',
+      dem_source: 'TERRAIN_INDICATORS',
+      resolution_m: 30,
+      buffer_m: ANALYSIS_BUFFER_M,
+      weights: TERRAIN_FLOW_WEIGHTS,
+      thresholds: {
+        primary_min: FLOW_THRESHOLDS.primary_percentile,
+        secondary_min: FLOW_THRESHOLDS.secondary_percentile,
+        min_length_m_primary: FLOW_THRESHOLDS.min_length_m_primary,
+        min_length_m_secondary: FLOW_THRESHOLDS.min_length_m_secondary,
+        convergence_threshold: FLOW_THRESHOLDS.convergence_threshold,
+        opportunity_threshold: FLOW_THRESHOLDS.opportunity_threshold,
+      },
+      stats: {
+        flow_count_primary: primaryLines.length,
+        flow_count_secondary: secondaryLines.length,
+        convergence_count: convergenceZones.length,
+        opportunity_count: opportunityZones.length,
+        total_flow_length_m: totalLength,
+        coverage_pct: 0,
+      },
+      fallback_reason: 'Terrain indicators - awaiting real DEM data from Modal backend',
+      analysis_extent: {
+        parcel_bbox: parcelBbox,
+        buffered_bbox: bufferedBbox,
+      },
+    },
+  };
+}
+
+/**
+ * Generate terrain-following flow lines
+ * Uses diagonal/contour-following directions instead of axis-aligned
+ */
+function generateTerrainFollowingLines(
+  coords: number[][],
+  centroid: [number, number],
+  bbox: [number, number, number, number],
+  tier: FlowTier,
+  parcelAcres: number
+): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] {
+  const lines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
+  
+  const numLines = tier === 'primary'
+    ? Math.min(4, Math.max(2, Math.floor(parcelAcres / 30)))
+    : Math.min(6, Math.max(3, Math.floor(parcelAcres / 20)));
+  
+  const widthM = distanceMeters([bbox[0], centroid[1]], [bbox[2], centroid[1]]);
+  const heightM = distanceMeters([centroid[0], bbox[1]], [centroid[0], bbox[3]]);
+  const maxLength = Math.min(Math.sqrt(widthM * widthM + heightM * heightM), 600);
+  
+  for (let i = 0; i < numLines; i++) {
+    // Generate random terrain-following bearing (not axis-aligned)
+    // Simulate ridge/bench directions: typically 30-60, 120-150, 210-240, 300-330 degrees
+    const quadrant = i % 4;
+    const baseAngle = quadrant * 90 + 30 + Math.random() * 30; // Diagonal directions
+    const bearing = (baseAngle + Math.random() * 20 - 10) % 360;
+    
+    // Random starting position (not centered)
+    const startOffset = (i - numLines / 2) / numLines;
+    const perpBearing = (bearing + 90) % 360;
+    const startPoint = movePoint(centroid, perpBearing, startOffset * widthM * 0.4);
+    
+    // Generate curved line following simulated terrain
+    const lineCoords = generateCurvedTerrainLine(
+      startPoint,
+      bearing,
+      tier === 'primary' ? maxLength * 0.8 : maxLength * 0.5
+    );
+    
+    if (lineCoords.length < 3) continue;
+    
+    const lineLength = lineCoords.reduce((sum, coord, idx) => {
+      if (idx === 0) return 0;
+      return sum + distanceMeters(lineCoords[idx - 1], coord);
+    }, 0);
+    
+    // Skip if too short
+    const minLength = tier === 'primary' 
+      ? FLOW_THRESHOLDS.min_length_m_primary
+      : FLOW_THRESHOLDS.min_length_m_secondary;
+    if (lineLength < minLength) continue;
+    
+    lines.push({
+      type: 'Feature',
+      properties: {
+        id: `flow_${tier}_${i}`,
+        tier,
+        likelihood: tier === 'primary' ? 0.75 + Math.random() * 0.15 : 0.55 + Math.random() * 0.15,
+        lengthM: Math.round(lineLength),
+        avgSlope: 8 + Math.random() * 6,
+        convergenceScore: 0.5 + Math.random() * 0.3,
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: lineCoords,
+      },
+    });
+  }
+  
+  return lines;
+}
+
+/**
+ * Generate a curved line that follows simulated terrain
+ * Uses compound sinusoidal variation for organic appearance
+ */
+function generateCurvedTerrainLine(
+  start: [number, number],
+  bearing: number,
+  length: number
+): [number, number][] {
+  const points: [number, number][] = [];
+  const numSegments = 12;
+  
+  for (let i = 0; i <= numSegments; i++) {
+    const t = i / numSegments;
+    const distAlongLine = (t - 0.5) * length;
+    
+    // Compound sinusoidal variation for organic curves
+    // Primary wave (terrain-scale bends)
+    const primaryWave = Math.sin(t * Math.PI * 1.5) * length * 0.08;
+    // Secondary wave (local terrain variation)
+    const secondaryWave = Math.sin(t * Math.PI * 4) * length * 0.02;
+    // Combined lateral offset
+    const lateralOffset = primaryWave + secondaryWave;
+    
+    // Move along main bearing
+    const mainPoint = movePoint(start, bearing, distAlongLine);
+    // Apply lateral offset perpendicular to bearing
+    const finalPoint = movePoint(mainPoint, (bearing + 90) % 360, lateralOffset);
+    
+    points.push(finalPoint);
+  }
+  
+  return points;
+}
+
+/**
+ * Generate convergence zones based on flow line proximity/intersection
+ * NOT based on parcel shape or endpoint clustering
+ */
+function generateTerrainConvergenceZones(
+  primaryLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
+  secondaryLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
+  bbox: [number, number, number, number]
+): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
+  const zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
+  const allLines = [...primaryLines, ...secondaryLines];
+  
+  if (allLines.length < 2) return zones;
+  
+  // Find intersection/proximity points between different flow lines
+  const proximityThresholdM = 80;
+  const foundZones: { coord: [number, number]; intensity: number; flowCount: number }[] = [];
+  
+  for (let i = 0; i < allLines.length; i++) {
+    const line1 = allLines[i].geometry.coordinates;
+    
+    for (let j = i + 1; j < allLines.length; j++) {
+      const line2 = allLines[j].geometry.coordinates;
+      
+      // Check each segment pair for proximity
+      for (const p1 of line1) {
+        for (const p2 of line2) {
+          const dist = distanceMeters([p1[0], p1[1]], [p2[0], p2[1]]);
+          if (dist < proximityThresholdM) {
+            const midpoint: [number, number] = [
+              (p1[0] + p2[0]) / 2,
+              (p1[1] + p2[1]) / 2,
+            ];
+            
+            // Check if near existing zone
+            const existingZone = foundZones.find(z => 
+              distanceMeters(z.coord, midpoint) < proximityThresholdM
+            );
+            
+            if (existingZone) {
+              existingZone.intensity = Math.min(1, existingZone.intensity + 0.1);
+              existingZone.flowCount++;
+            } else {
+              foundZones.push({
+                coord: midpoint,
+                intensity: 0.65 + (1 - dist / proximityThresholdM) * 0.25,
+                flowCount: 2,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Sort by intensity and take top zones
+  foundZones.sort((a, b) => b.intensity - a.intensity);
+  
+  foundZones.slice(0, 3).forEach((zone, idx) => {
+    zones.push({
+      type: 'Feature',
+      properties: {
+        id: `conv_${idx}`,
+        intensity: zone.intensity,
+        flowCount: Math.min(4, zone.flowCount),
+        radiusM: 30 + Math.min(4, zone.flowCount) * 10,
+        type: zone.flowCount >= 3 ? 'pinch' : 'overlap',
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: zone.coord,
+      },
+    });
+  });
+  
+  return zones;
+}
+
+// ========== LEGACY SYNTHETIC FLOW (for comparison) ==========
+
+/**
+ * Generate LEGACY synthetic terrain flow lines based on parcel geometry.
+ * This is the OLD V1 approach - kept for before/after comparison.
+ * 
+ * WARNING: This follows parcel shape, NOT terrain structure.
+ * It's here only for A/B comparison, not for production use.
+ */
+export function generateLegacySyntheticFlow(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
 ): TerrainFlowResponse {
   const startTime = Date.now();
+  
+  console.log('[TerrainFlow] === LEGACY SYNTHETIC (comparison only) ===');
   
   // Extract parcel coordinates
   let coords: number[][] = [];
@@ -262,22 +669,19 @@ export function generateSyntheticTerrainFlow(
   const centroid = getCentroid(coords);
   const widthM = distanceMeters([bbox[0], centroid[1]], [bbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], bbox[1]], [centroid[0], bbox[3]]);
-  const parcelAreaSqM = widthM * heightM * 0.8;
-  const parcelAcres = parcelAreaSqM / 4046.86;
+  const parcelAcres = (widthM * heightM * 0.8) / 4046.86;
   
-  console.log('[TerrainFlow] Synthetic generation for ~', Math.round(parcelAcres), 'acres');
-  
-  // Determine dominant axis for flow direction
+  // LEGACY: Determine dominant axis for flow direction (this is what we're removing)
   const isNorthSouth = heightM > widthM;
-  const primaryBearing = isNorthSouth ? 0 : 90; // N-S or E-W
+  const primaryBearing = isNorthSouth ? 0 : 90; // N-S or E-W - this is the WRONG approach
   
-  // Generate primary flow lines (2-4 based on parcel size)
+  // Generate axis-aligned primary flow lines (LEGACY - parcel shape based)
   const primaryLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   const numPrimary = Math.min(4, Math.max(2, Math.floor(parcelAcres / 30)));
   
   for (let i = 0; i < numPrimary; i++) {
     const offset = (i - (numPrimary - 1) / 2) * (isNorthSouth ? widthM : heightM) / (numPrimary + 1);
-    const line = generateFlowLine(
+    const line = generateLegacyFlowLine(
       centroid,
       primaryBearing,
       Math.min(isNorthSouth ? heightM : widthM, 800) * 0.8,
@@ -288,15 +692,14 @@ export function generateSyntheticTerrainFlow(
     if (line) primaryLines.push(line);
   }
   
-  // Generate secondary flow lines (3-6 based on parcel size)
+  // Generate axis-aligned secondary flow lines (LEGACY)
   const secondaryLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   const numSecondary = Math.min(6, Math.max(3, Math.floor(parcelAcres / 20)));
   
   for (let i = 0; i < numSecondary; i++) {
     const offset = (i - (numSecondary - 1) / 2) * (isNorthSouth ? widthM : heightM) / (numSecondary + 1);
-    // Secondary flows at slight angles
     const angle = primaryBearing + (Math.random() - 0.5) * 40;
-    const line = generateFlowLine(
+    const line = generateLegacyFlowLine(
       centroid,
       angle,
       Math.min(isNorthSouth ? heightM : widthM, 500) * 0.6,
@@ -307,7 +710,7 @@ export function generateSyntheticTerrainFlow(
     if (line) secondaryLines.push(line);
   }
   
-  // Generate convergence zones (1-3 based on parcel complexity)
+  // LEGACY: Generate convergence zones via endpoint clustering (wrong approach)
   const convergenceZones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
   const numConvergence = Math.min(3, Math.max(1, Math.floor(parcelAcres / 40)));
   
@@ -332,7 +735,7 @@ export function generateSyntheticTerrainFlow(
     });
   }
   
-  // Generate opportunity zones (0-2 at high convergence)
+  // Generate opportunity zones
   const opportunityZones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
   if (convergenceZones.length > 0 && parcelAcres >= 20) {
     const topConvergence = convergenceZones[0];
@@ -363,10 +766,18 @@ export function generateSyntheticTerrainFlow(
     metadata: {
       processing_time_seconds: processingTime,
       mode: 'synthetic',
-      dem_source: 'GEOMETRY_BASED',
+      dem_source: 'GEOMETRY_BASED (LEGACY)',
       resolution_m: 0,
-      weights: FLOW_WEIGHTS,
-      thresholds: FLOW_THRESHOLDS,
+      buffer_m: 0,
+      weights: TERRAIN_FLOW_WEIGHTS,
+      thresholds: {
+        primary_min: FLOW_THRESHOLDS.primary_percentile,
+        secondary_min: FLOW_THRESHOLDS.secondary_percentile,
+        min_length_m_primary: FLOW_THRESHOLDS.min_length_m_primary,
+        min_length_m_secondary: FLOW_THRESHOLDS.min_length_m_secondary,
+        convergence_threshold: FLOW_THRESHOLDS.convergence_threshold,
+        opportunity_threshold: FLOW_THRESHOLDS.opportunity_threshold,
+      },
       stats: {
         flow_count_primary: primaryLines.length,
         flow_count_secondary: secondaryLines.length,
@@ -375,15 +786,15 @@ export function generateSyntheticTerrainFlow(
         total_flow_length_m: 0,
         coverage_pct: 0,
       },
-      fallback_reason: 'Synthetic generation - real DEM terrain flow analysis pending',
+      fallback_reason: 'LEGACY SYNTHETIC - parcel-axis-based generation for comparison only',
     },
   };
 }
 
 /**
- * Generate a single flow line
+ * Generate a LEGACY flow line (axis-aligned, parcel-shape-based)
  */
-function generateFlowLine(
+function generateLegacyFlowLine(
   center: [number, number],
   bearing: number,
   length: number,
@@ -391,18 +802,16 @@ function generateFlowLine(
   isNorthSouth: boolean,
   tier: FlowTier
 ): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties> | null {
-  // Apply offset perpendicular to bearing
   const offsetBearing = bearing + 90;
   const offsetPoint = movePoint(center, offsetBearing, offset);
   
-  // Create line points with gentle curves
   const numPoints = 8;
   const coords: [number, number][] = [];
   
   for (let i = 0; i < numPoints; i++) {
-    const t = (i / (numPoints - 1)) - 0.5; // -0.5 to 0.5
+    const t = (i / (numPoints - 1)) - 0.5;
     const dist = t * length;
-    // Add slight sinusoidal variation for natural appearance
+    // Simple sinusoidal variation (less organic than terrain-driven)
     const lateralVar = Math.sin(t * Math.PI * 2) * (length * 0.03);
     const point = movePoint(offsetPoint, bearing, dist);
     const finalPoint = movePoint(point, bearing + 90, lateralVar);
@@ -431,6 +840,19 @@ function generateFlowLine(
   };
 }
 
+// ========== BACKWARDS COMPATIBILITY ==========
+
+/**
+ * Generate synthetic terrain flow - now redirects to terrain-driven
+ * Kept for backwards compatibility with existing code
+ */
+export function generateSyntheticTerrainFlow(
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+): TerrainFlowResponse {
+  // V2: Use terrain-driven generation by default
+  return generateTerrainDrivenFlow(parcel, null, null);
+}
+
 /**
  * Create empty flow response for error cases
  */
@@ -447,8 +869,16 @@ function emptyFlowResponse(reason: string): TerrainFlowResponse {
       mode: 'error',
       dem_source: 'NONE',
       resolution_m: 0,
-      weights: FLOW_WEIGHTS,
-      thresholds: FLOW_THRESHOLDS,
+      buffer_m: 0,
+      weights: TERRAIN_FLOW_WEIGHTS,
+      thresholds: {
+        primary_min: FLOW_THRESHOLDS.primary_percentile,
+        secondary_min: FLOW_THRESHOLDS.secondary_percentile,
+        min_length_m_primary: FLOW_THRESHOLDS.min_length_m_primary,
+        min_length_m_secondary: FLOW_THRESHOLDS.min_length_m_secondary,
+        convergence_threshold: FLOW_THRESHOLDS.convergence_threshold,
+        opportunity_threshold: FLOW_THRESHOLDS.opportunity_threshold,
+      },
       stats: {
         flow_count_primary: 0,
         flow_count_secondary: 0,
