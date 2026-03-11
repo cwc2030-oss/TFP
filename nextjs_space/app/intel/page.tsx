@@ -36,6 +36,8 @@ import type {
 } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
+import { fetchTerrainFlow, generateSyntheticTerrainFlow } from '@/lib/terrain-flow';
+import type { TerrainFlowResponse, TerrainFlowVisibility } from '@/types/terrain-flow';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -252,6 +254,11 @@ const LAYER_COLORS = {
   ridgePrimary: '#5D4037',        // Deep brown - major continuous spines (restrained)
   ridgeSecondary: '#795548',      // Medium brown - secondary spines (lighter)
   saddleNode: '#8D6E63',          // Warm taupe - saddle markers (subtle)
+  // Terrain Flow colors (movement likelihood - blue/teal palette)
+  flowPrimary: '#0891b2',         // Cyan-600: primary flow lines (bold, readable)
+  flowSecondary: '#67e8f9',       // Cyan-300: secondary flow lines (lighter)
+  flowConvergence: '#f59e0b',     // Amber-500: convergence zone markers
+  flowOpportunity: '#fbbf24',     // Amber-400: opportunity zone markers (gold)
 };
 
 // ========== EDGE INTELLIGENCE UTILITIES ==========
@@ -858,6 +865,14 @@ function DeerIntelContent() {
     // Always show terrain anatomy
     ridgeSpines: true,
   });
+  
+  // Terrain Flow visibility (separate from main visibility for cleaner control)
+  const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
+    flowPrimary: true,      // Primary terrain flow lines
+    flowSecondary: true,    // Secondary terrain flow lines
+    convergenceZones: true, // Convergence zone markers
+    opportunityZones: true, // Opportunity zone markers
+  });
 
   // UI state
   const [panelCollapsed, setPanelCollapsed] = useState(true); // Left panel collapsed by default
@@ -920,6 +935,26 @@ function DeerIntelContent() {
       fallback_reason?: string | null;
     };
   } | null>(null);
+  
+  // Terrain Flow Data state (movement likelihood surface)
+  const [terrainFlowData, setTerrainFlowData] = useState<{
+    flow_primary: GeoJSON.FeatureCollection;
+    flow_secondary: GeoJSON.FeatureCollection;
+    convergence_zones: GeoJSON.FeatureCollection;
+    opportunity_zones: GeoJSON.FeatureCollection;
+    isSynthetic: boolean;
+    metadata?: {
+      flow_count_primary: number;
+      flow_count_secondary: number;
+      convergence_count: number;
+      opportunity_count: number;
+      total_flow_length_m: number;
+      mode?: string;
+      dem_source?: string;
+      fallback_reason?: string | null;
+    };
+  } | null>(null);
+  const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
 
   // ========== ALIGNMENT ENGINE STATE ==========
   type AlignedStand = {
@@ -1760,6 +1795,127 @@ function DeerIntelContent() {
     }
   }, [ridgeSpineData, mapReady]);
 
+  // ========== TERRAIN FLOW DATA GENERATION ==========
+  useEffect(() => {
+    if (!parcelPolygon) {
+      setTerrainFlowData(null);
+      return;
+    }
+
+    const generateFlowData = async () => {
+      setTerrainFlowLoading(true);
+      try {
+        const parcelId = (parcelPolygon.properties as any)?.parcelId || 
+                         (parcelPolygon.properties as any)?.ll_uuid || 
+                         `synth-${Date.now().toString(36)}`;
+
+        console.log('[TerrainFlow] Generating terrain flow data for parcel:', parcelId);
+
+        const result = await fetchTerrainFlow({
+          parcel: parcelPolygon,
+          parcel_id: parcelId,
+          bufferMeters: 400,
+        });
+
+        if (result.success && result.data) {
+          const primaryCount = result.data.flow_primary.features.length;
+          const secondaryCount = result.data.flow_secondary.features.length;
+          const convergenceCount = result.data.convergence_zones.features.length;
+          const opportunityCount = result.data.opportunity_zones.features.length;
+          
+          console.log('[TerrainFlow] Result:', {
+            primary: primaryCount,
+            secondary: secondaryCount,
+            convergence: convergenceCount,
+            opportunity: opportunityCount,
+            mode: result.data.metadata?.mode || 'unknown',
+            synthetic: result.isSynthetic,
+          });
+
+          setTerrainFlowData({
+            flow_primary: result.data.flow_primary,
+            flow_secondary: result.data.flow_secondary,
+            convergence_zones: result.data.convergence_zones,
+            opportunity_zones: result.data.opportunity_zones,
+            isSynthetic: result.isSynthetic,
+            metadata: {
+              flow_count_primary: result.data.metadata.stats.flow_count_primary,
+              flow_count_secondary: result.data.metadata.stats.flow_count_secondary,
+              convergence_count: result.data.metadata.stats.convergence_count,
+              opportunity_count: result.data.metadata.stats.opportunity_count,
+              total_flow_length_m: result.data.metadata.stats.total_flow_length_m,
+              mode: result.data.metadata.mode,
+              dem_source: result.data.metadata.dem_source,
+              fallback_reason: result.data.metadata.fallback_reason,
+            },
+          });
+        } else {
+          console.warn('[TerrainFlow] Flow generation failed, using synthetic');
+          const synthetic = generateSyntheticTerrainFlow(parcelPolygon);
+          setTerrainFlowData({
+            flow_primary: synthetic.flow_primary,
+            flow_secondary: synthetic.flow_secondary,
+            convergence_zones: synthetic.convergence_zones,
+            opportunity_zones: synthetic.opportunity_zones,
+            isSynthetic: true,
+            metadata: {
+              flow_count_primary: synthetic.metadata.stats.flow_count_primary,
+              flow_count_secondary: synthetic.metadata.stats.flow_count_secondary,
+              convergence_count: synthetic.metadata.stats.convergence_count,
+              opportunity_count: synthetic.metadata.stats.opportunity_count,
+              total_flow_length_m: synthetic.metadata.stats.total_flow_length_m,
+              mode: synthetic.metadata.mode,
+              dem_source: synthetic.metadata.dem_source,
+              fallback_reason: synthetic.metadata.fallback_reason,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[TerrainFlow] Error during flow generation:', err);
+      } finally {
+        setTerrainFlowLoading(false);
+      }
+    };
+
+    generateFlowData();
+  }, [parcelPolygon]);
+
+  // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current || !terrainFlowData) return;
+
+    try {
+      // Update primary flow source
+      const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
+      if (primarySource) {
+        primarySource.setData(terrainFlowData.flow_primary);
+      }
+
+      // Update secondary flow source
+      const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
+      if (secondarySource) {
+        secondarySource.setData(terrainFlowData.flow_secondary);
+      }
+
+      // Update convergence zones source
+      const convergenceSource = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
+      if (convergenceSource) {
+        convergenceSource.setData(terrainFlowData.convergence_zones);
+      }
+
+      // Update opportunity zones source
+      const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
+      if (opportunitySource) {
+        opportunitySource.setData(terrainFlowData.opportunity_zones);
+      }
+
+      console.log('[TerrainFlow] Updated map sources');
+    } catch (err) {
+      console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
+    }
+  }, [terrainFlowData, mapReady]);
+
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -1841,10 +1997,30 @@ function DeerIntelContent() {
           map.setLayoutProperty(layerId, 'visibility', visibility.ridgeSpines ? 'visible' : 'none');
         }
       });
+      
+      // Terrain Flow visibility (movement likelihood layers)
+      if (map.getLayer('tfp-flow-primary')) {
+        map.setLayoutProperty('tfp-flow-primary', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-flow-secondary')) {
+        map.setLayoutProperty('tfp-flow-secondary', 'visibility', flowVisibility.flowSecondary ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-flow-convergence')) {
+        map.setLayoutProperty('tfp-flow-convergence', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-flow-convergence-pulse')) {
+        map.setLayoutProperty('tfp-flow-convergence-pulse', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-flow-opportunity')) {
+        map.setLayoutProperty('tfp-flow-opportunity', 'visibility', flowVisibility.opportunityZones ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-flow-opportunity-glow')) {
+        map.setLayoutProperty('tfp-flow-opportunity-glow', 'visibility', flowVisibility.opportunityZones ? 'visible' : 'none');
+      }
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, mapReady]);
+  }, [visibility, flowVisibility, mapReady]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -2297,6 +2473,103 @@ function DeerIntelContent() {
               'circle-stroke-color': LAYER_COLORS.saddleNode,
               'circle-stroke-width': 1,
               'circle-stroke-opacity': 0.60,
+            },
+          });
+        }
+        
+        // ========== TERRAIN FLOW LAYERS (Movement Likelihood Surface) ==========
+        // Visualizes terrain-guided movement structure - NOT wildlife AI
+        
+        // Primary flow lines: high-likelihood terrain-guided movement
+        if (!map.getSource('tfp-flow-primary')) {
+          map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-flow-primary',
+            type: 'line',
+            source: 'tfp-flow-primary',
+            paint: {
+              'line-color': LAYER_COLORS.flowPrimary,
+              'line-width': 3.5,
+              'line-opacity': 0.85,
+              'line-blur': 0.5,
+            },
+          });
+        }
+        
+        // Secondary flow lines: supporting movement patterns
+        if (!map.getSource('tfp-flow-secondary')) {
+          map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-flow-secondary',
+            type: 'line',
+            source: 'tfp-flow-secondary',
+            paint: {
+              'line-color': LAYER_COLORS.flowSecondary,
+              'line-width': 2,
+              'line-opacity': 0.60,
+              'line-dasharray': [4, 2],
+            },
+          });
+        }
+        
+        // Convergence zones: where flows overlap or pinch
+        if (!map.getSource('tfp-flow-convergence')) {
+          map.addSource('tfp-flow-convergence', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow/pulse effect
+          map.addLayer({
+            id: 'tfp-flow-convergence-pulse',
+            type: 'circle',
+            source: 'tfp-flow-convergence',
+            paint: {
+              'circle-radius': ['*', ['get', 'radiusM'], 0.8],
+              'circle-color': LAYER_COLORS.flowConvergence,
+              'circle-opacity': 0.20,
+              'circle-blur': 0.8,
+            },
+          });
+          // Inner marker
+          map.addLayer({
+            id: 'tfp-flow-convergence',
+            type: 'circle',
+            source: 'tfp-flow-convergence',
+            paint: {
+              'circle-radius': 8,
+              'circle-color': LAYER_COLORS.flowConvergence,
+              'circle-opacity': 0.70,
+              'circle-stroke-color': '#fff',
+              'circle-stroke-width': 2,
+              'circle-stroke-opacity': 0.80,
+            },
+          });
+        }
+        
+        // Opportunity zones: high-value strategic locations
+        if (!map.getSource('tfp-flow-opportunity')) {
+          map.addSource('tfp-flow-opportunity', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow
+          map.addLayer({
+            id: 'tfp-flow-opportunity-glow',
+            type: 'circle',
+            source: 'tfp-flow-opportunity',
+            paint: {
+              'circle-radius': 18,
+              'circle-color': LAYER_COLORS.flowOpportunity,
+              'circle-opacity': 0.25,
+              'circle-blur': 1,
+            },
+          });
+          // Inner star marker
+          map.addLayer({
+            id: 'tfp-flow-opportunity',
+            type: 'circle',
+            source: 'tfp-flow-opportunity',
+            paint: {
+              'circle-radius': 10,
+              'circle-color': LAYER_COLORS.flowOpportunity,
+              'circle-opacity': 0.90,
+              'circle-stroke-color': '#fff',
+              'circle-stroke-width': 2.5,
+              'circle-stroke-opacity': 0.95,
             },
           });
         }
@@ -3722,6 +3995,180 @@ function DeerIntelContent() {
                   </div>
                 )}
               </div>
+              
+              {/* ========== TERRAIN FLOW LAYER (Movement Likelihood) ========== */}
+              <div className="p-3 border-b border-white/10">
+                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
+                  <Compass className="h-4 w-4 text-cyan-400" />
+                  Terrain Flow
+                  {terrainFlowLoading && (
+                    <Loader2 className="h-3 w-3 animate-spin text-cyan-400/60" />
+                  )}
+                </h3>
+                <div className="space-y-1">
+                  {/* Primary Flow Toggle */}
+                  {(() => {
+                    const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
+                    const hasData = primaryCount > 0;
+                    const isLoading = terrainFlowLoading;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, flowPrimary: !v.flowPrimary }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          flowVisibility.flowPrimary ? 'bg-cyan-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.flowPrimary, opacity: flowVisibility.flowPrimary ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-white' : 'text-stone-500'}`}>Primary Flow</span>
+                        {hasData ? (
+                          <span className="text-[9px] text-cyan-400 px-1.5 py-0.5 bg-cyan-900/40 rounded">
+                            {primaryCount}
+                          </span>
+                        ) : isLoading ? (
+                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">...</span>
+                        ) : (
+                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">—</span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  
+                  {/* Secondary Flow Toggle */}
+                  {(() => {
+                    const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
+                    const hasData = secondaryCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, flowSecondary: !v.flowSecondary }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          flowVisibility.flowSecondary ? 'bg-cyan-900/20' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.flowSecondary, opacity: flowVisibility.flowSecondary ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.flowSecondary ? 'text-white' : 'text-stone-500'}`}>Secondary Flow</span>
+                        {hasData && (
+                          <span className="text-[9px] text-cyan-300 px-1.5 py-0.5 bg-cyan-900/30 rounded">
+                            {secondaryCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  
+                  {/* Convergence Zones Toggle */}
+                  {(() => {
+                    const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
+                    const hasData = convergenceCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, convergenceZones: !v.convergenceZones }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          flowVisibility.convergenceZones ? 'bg-amber-900/20' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowConvergence, opacity: flowVisibility.convergenceZones ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.convergenceZones ? 'text-white' : 'text-stone-500'}`}>Convergence</span>
+                        {hasData && (
+                          <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/30 rounded">
+                            {convergenceCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  
+                  {/* Opportunity Zones Toggle */}
+                  {(() => {
+                    const opportunityCount = terrainFlowData?.metadata?.opportunity_count || 0;
+                    const hasData = opportunityCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, opportunityZones: !v.opportunityZones }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          flowVisibility.opportunityZones ? 'bg-amber-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowOpportunity, opacity: flowVisibility.opportunityZones ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.opportunityZones ? 'text-white' : 'text-stone-500'}`}>Opportunity Zones</span>
+                        {hasData && (
+                          <span className="text-[9px] text-amber-300 px-1.5 py-0.5 bg-amber-800/40 rounded">
+                            {opportunityCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                </div>
+                
+                {/* Expanded details when any flow toggle is on */}
+                {(flowVisibility.flowPrimary || flowVisibility.flowSecondary || flowVisibility.convergenceZones || flowVisibility.opportunityZones) && (
+                  <div className="mt-2 text-[10px] space-y-1 px-1">
+                    {(() => {
+                      const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
+                      const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
+                      const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
+                      const opportunityCount = terrainFlowData?.metadata?.opportunity_count || 0;
+                      const totalFlowLength = terrainFlowData?.metadata?.total_flow_length_m || 0;
+                      const totalFeatures = primaryCount + secondaryCount + convergenceCount + opportunityCount;
+                      const isSynthetic = terrainFlowData?.isSynthetic || false;
+                      const mode = terrainFlowData?.metadata?.mode || 'unknown';
+                      
+                      if (terrainFlowLoading) {
+                        return (
+                          <div className="text-stone-500 bg-stone-800/30 rounded p-2 flex items-center gap-2">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>Analyzing terrain flow...</span>
+                          </div>
+                        );
+                      }
+                      
+                      if (totalFeatures > 0) {
+                        return (
+                          <div className="text-stone-400 space-y-0.5">
+                            {totalFlowLength > 0 && (
+                              <div className="flex justify-between">
+                                <span>Total Flow Length</span>
+                                <span className="text-white">{Math.round(totalFlowLength)}m</span>
+                              </div>
+                            )}
+                            {convergenceCount > 0 && (
+                              <div className="flex justify-between">
+                                <span>Flow Convergences</span>
+                                <span className="text-amber-400">{convergenceCount}</span>
+                              </div>
+                            )}
+                            {opportunityCount > 0 && (
+                              <div className="flex justify-between">
+                                <span>Opportunity Zones</span>
+                                <span className="text-amber-300">{opportunityCount}</span>
+                              </div>
+                            )}
+                            {debugMode && (
+                              <div className="flex justify-between text-stone-600 pt-0.5 border-t border-white/5">
+                                <span>Mode</span>
+                                <span>{mode}{isSynthetic ? ' (Est.)' : ''}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
+                          <p className="italic">Not detected on this parcel</p>
+                          <p className="text-stone-600 mt-1 text-[9px]">
+                            Terrain may be too flat or uniform for distinct flow patterns.
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
 
               {/* ========== TERRAIN WORK MODE NOTICE ========== */}
               {TERRAIN_WORK_MODE && (
@@ -3736,7 +4183,7 @@ function DeerIntelContent() {
                       <div className="mt-2 space-y-1 text-[10px] text-amber-400/60">
                         <div className="flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-green-500/60" />
-                          <span>Backbone, Draws, Saddles</span>
+                          <span>Backbone, Draws, Saddles, Flow</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-stone-600" />
