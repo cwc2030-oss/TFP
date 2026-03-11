@@ -41,6 +41,7 @@ import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, F
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
 import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-badge';
+import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -886,6 +887,12 @@ function DeerIntelContent() {
 
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // Inspect Mode state (visual indicator that flow segments are clickable)
+  const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
+  
+  // Export/Screenshot Mode state (clean map for broker demos)
+  const [exportMode, setExportMode] = useState(false);
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -2541,7 +2548,8 @@ function DeerIntelContent() {
         // Visualizes terrain-guided movement structure - NOT wildlife AI
         
         // Primary flow lines: high-likelihood terrain-guided movement
-        // Color varies by likelihood: Strong (green) > Moderate (cyan) > Weak (blue)
+        // Color varies by likelihood: Strong (green) > Moderate (cyan) > Weak (blue-muted)
+        // Weak flows are visually less dominant (thinner, more transparent)
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2553,20 +2561,24 @@ function DeerIntelContent() {
               'line-color': [
                 'case',
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.7],
-                '#10b981', // Strong = emerald-500
+                '#10b981', // Strong = emerald-500 (bold)
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.5],
                 '#22d3ee', // Moderate = cyan-400
-                '#60a5fa'  // Weak = blue-400
+                '#94a3b8'  // Weak = slate-400 (muted, not bright blue)
               ],
+              // Weak flow is significantly thinner
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 2.5,
-                0.7, 4
+                0.3, 1.5,   // Weak: thin (was 2.5)
+                0.5, 2.5,   // Moderate: medium
+                0.7, 4      // Strong: bold
               ],
+              // Weak flow is more transparent
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 0.6,
-                0.7, 0.9
+                0.3, 0.35,  // Weak: quite faded (was 0.6)
+                0.5, 0.65,  // Moderate: visible
+                0.7, 0.9    // Strong: prominent
               ],
               'line-blur': 0.5,
             },
@@ -2574,7 +2586,7 @@ function DeerIntelContent() {
         }
         
         // Secondary flow lines: supporting movement patterns
-        // Also data-driven color based on likelihood
+        // Weak secondary flows are even more subtle
         if (!map.getSource('tfp-flow-secondary')) {
           map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2586,10 +2598,18 @@ function DeerIntelContent() {
                 'case',
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.4], 0.6],
                 '#67e8f9', // Moderate+ = cyan-300
-                '#94a3b8'  // Weak = slate-400
+                '#6b7280'  // Weak = gray-500 (more muted)
               ],
-              'line-width': 2,
-              'line-opacity': 0.55,
+              'line-width': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.4],
+                0.3, 1.2,   // Weak: very thin
+                0.6, 2      // Moderate+: normal
+              ],
+              'line-opacity': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.4],
+                0.3, 0.3,   // Weak: faded
+                0.6, 0.55   // Moderate+: visible
+              ],
               'line-dasharray': [4, 2],
             },
           });
@@ -3748,8 +3768,8 @@ function DeerIntelContent() {
       {/* Map Container - z-0 ensures it's behind UI but visible */}
       <div ref={mapContainerRef} className="absolute inset-0 z-0" style={{ minHeight: '100vh', minWidth: '100vw' }} />
 
-      {/* BUILD STAMP - visible debug marker */}
-      <div className="absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg">
+      {/* BUILD STAMP - visible debug marker (hidden in export mode) */}
+      <div className={`absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg transition-opacity duration-300 ${exportMode ? 'opacity-0' : 'opacity-100'}`}>
         BUILD: {BUILD_STAMP}
       </div>
 
@@ -3791,14 +3811,108 @@ function DeerIntelContent() {
               <Crosshair className="h-4 w-4 mr-1" />
               Re-center
             </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`${exportMode 
+                ? 'bg-emerald-600/30 text-emerald-400 border border-emerald-500/50' 
+                : 'text-white/80 hover:text-white hover:bg-white/10'
+              }`}
+              onClick={() => setExportMode(!exportMode)}
+              title="Export Mode - Clean map view for screenshots/demos"
+            >
+              <Download className="h-4 w-4 mr-1" />
+              {exportMode ? 'Exit Export' : 'Export'}
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Left Panel - Controls */}
+      {/* ========== EXPORT MODE OVERLAY ========== */}
+      {exportMode && (
+        <>
+          {/* Export Mode Title Bar */}
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-gray-900/95 backdrop-blur rounded-xl px-6 py-3 border border-emerald-500/40 shadow-2xl">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Target className="h-5 w-5 text-emerald-500" />
+                <span className="text-lg font-bold text-white">Terrain Intelligence</span>
+              </div>
+              <div className="h-5 w-px bg-white/20" />
+              <div className="text-sm text-white/70">
+                {address || 'Property Analysis'}
+              </div>
+            </div>
+          </div>
+
+          {/* Export Mode Legend */}
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 bg-gray-900/95 backdrop-blur rounded-xl px-6 py-4 border border-white/15 shadow-2xl">
+            <div className="flex items-center gap-6">
+              {/* Flow Confidence */}
+              <div className="space-y-2">
+                <div className="text-[10px] text-stone-400 uppercase tracking-wider font-medium">Flow Confidence</div>
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-6 h-1 rounded-full bg-emerald-500" />
+                    <span className="text-emerald-400">Strong</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-5 h-0.5 rounded-full bg-cyan-400" />
+                    <span className="text-cyan-400">Moderate</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-4 h-0.5 rounded-full bg-slate-400 opacity-50" />
+                    <span className="text-slate-400">Weak</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="h-10 w-px bg-white/20" />
+
+              {/* Terrain Features */}
+              <div className="space-y-2">
+                <div className="text-[10px] text-stone-400 uppercase tracking-wider font-medium">Terrain Features</div>
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle }} />
+                    <span className="text-white/80">Saddle</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelDraw }} />
+                    <span className="text-white/80">Draw</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowOpportunity }} />
+                    <span className="text-amber-300">Opportunity</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="h-10 w-px bg-white/20" />
+
+              {/* Analysis Quality */}
+              <div className="space-y-2">
+                <div className="text-[10px] text-stone-400 uppercase tracking-wider font-medium">Analysis</div>
+                <AnalysisQualityBadge 
+                  mode={(terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode}
+                  compact={true}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Screenshot instruction */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 text-stone-500 text-xs">
+            Press <kbd className="px-1.5 py-0.5 bg-stone-800 rounded text-stone-400">Cmd/Ctrl + Shift + 4</kbd> to screenshot • Click "Exit Export" when done
+          </div>
+        </>
+      )}
+
+      {/* Left Panel - Controls (hidden in export mode) */}
       <div className={`
         absolute top-16 bottom-4 left-4 z-10 transition-all duration-300
         ${panelCollapsed ? 'w-12' : 'w-80'}
+        ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}
       `}>
         <div className="h-full bg-gray-900/95 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden flex flex-col shadow-2xl">
           {/* Collapse Toggle */}
@@ -3924,10 +4038,11 @@ function DeerIntelContent() {
         </div>
       </div>
 
-      {/* Right Panel - Layer Filters + Top 2 Stands */}
+      {/* Right Panel - Layer Filters + Top 2 Stands (hidden in export mode) */}
       <div className={`
         absolute top-16 bottom-4 right-4 z-10 transition-all duration-300
         ${rightPanelCollapsed ? 'w-12' : 'w-72'}
+        ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}
       `}>
         <div className="h-full bg-gray-900/95 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden flex flex-col shadow-2xl">
           {/* Collapse Toggle */}
@@ -4226,17 +4341,42 @@ function DeerIntelContent() {
               
               {/* ========== TERRAIN FLOW LAYER (Movement Likelihood) ========== */}
               <div className="p-3 border-b border-white/10">
-                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
-                  <Compass className="h-4 w-4 text-cyan-400" />
-                  Terrain Flow
-                  {terrainFlowLoading && (
-                    <Loader2 className="h-3 w-3 animate-spin text-cyan-400/60" />
-                  )}
-                  {/* V2 Badge */}
-                  {!flowComparisonMode && !terrainFlowLoading && (
-                    <span className="text-[8px] text-cyan-500 bg-cyan-950 px-1 py-0.5 rounded">V2</span>
-                  )}
-                </h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-medium text-white flex items-center gap-2 text-sm">
+                    <Compass className="h-4 w-4 text-cyan-400" />
+                    Terrain Flow
+                    {terrainFlowLoading && (
+                      <Loader2 className="h-3 w-3 animate-spin text-cyan-400/60" />
+                    )}
+                    {/* V2 Badge */}
+                    {!flowComparisonMode && !terrainFlowLoading && (
+                      <span className="text-[8px] text-cyan-500 bg-cyan-950 px-1 py-0.5 rounded">V2</span>
+                    )}
+                  </h3>
+                  {/* Inspect Mode Toggle */}
+                  <button
+                    onClick={() => setInspectModeEnabled(!inspectModeEnabled)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] transition-all ${
+                      inspectModeEnabled 
+                        ? 'bg-amber-900/50 text-amber-400 border border-amber-700/50' 
+                        : 'bg-stone-800/50 text-stone-500 hover:bg-stone-700/50 hover:text-stone-400'
+                    }`}
+                    title="Enable inspect mode to click flow segments for detailed analysis"
+                  >
+                    <Crosshair className="h-3 w-3" />
+                    <span>{inspectModeEnabled ? 'Inspecting' : 'Inspect'}</span>
+                  </button>
+                </div>
+                
+                {/* Analysis Quality Badge - compact inline version */}
+                {!terrainFlowLoading && terrainFlowData && (
+                  <div className="mb-2">
+                    <AnalysisQualityBadge 
+                      mode={(terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode}
+                      compact={true}
+                    />
+                  </div>
+                )}
                 
                 {/* Before/After Comparison Toggle */}
                 {legacySyntheticData && (
@@ -4472,9 +4612,18 @@ function DeerIntelContent() {
                               )}
                             </div>
                             
-                            {/* Click instruction */}
-                            <div className="text-[9px] text-stone-600 text-center pt-1 border-t border-white/5">
-                              Click any flow line for detailed analysis
+                            {/* Click instruction - highlighted when inspect mode is on */}
+                            <div className={`text-[9px] text-center pt-1 border-t border-white/5 ${
+                              inspectModeEnabled ? 'text-amber-400 bg-amber-900/20 -mx-2 px-2 py-1 rounded' : 'text-stone-600'
+                            }`}>
+                              {inspectModeEnabled ? (
+                                <span className="flex items-center justify-center gap-1">
+                                  <Crosshair className="h-3 w-3" />
+                                  Inspect mode ON — click any flow or zone
+                                </span>
+                              ) : (
+                                'Click any flow line for detailed analysis'
+                              )}
                             </div>
                           </>
                         );
@@ -4935,8 +5084,8 @@ function DeerIntelContent() {
         />
       )}
 
-      {/* Legend - Premium V1 styling */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-gray-900/95 backdrop-blur rounded-xl px-5 py-3 flex items-center gap-5 text-xs text-white/80 border border-white/15 shadow-2xl">
+      {/* Legend - Premium V1 styling (hidden in export mode - replaced by export legend) */}
+      <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-gray-900/95 backdrop-blur rounded-xl px-5 py-3 flex items-center gap-5 text-xs text-white/80 border border-white/15 shadow-2xl transition-opacity duration-300 ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         {/* Terrain */}
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding }} />
