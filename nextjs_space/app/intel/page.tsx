@@ -42,6 +42,7 @@ import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
 import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-badge';
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
+import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -893,6 +894,13 @@ function DeerIntelContent() {
   
   // Export/Screenshot Mode state (clean map for broker demos)
   const [exportMode, setExportMode] = useState(false);
+
+  // ========== QA PARCEL LOOKUP STATE (KS/MO validation) ==========
+  const [qaParcelLookupMode, setQaParcelLookupMode] = useState(false); // Enable click-to-lookup
+  const [qaParcelLoading, setQaParcelLoading] = useState(false);
+  const [qaParcel, setQaParcel] = useState<LookupParcel | null>(null);
+  const [qaParcelError, setQaParcelError] = useState<string | null>(null);
+  const [qaParcelAnalyzing, setQaParcelAnalyzing] = useState(false);
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -2187,6 +2195,41 @@ function DeerIntelContent() {
           });
         }
         
+        // QA Parcel boundary source (for KS/MO validation workflow)
+        if (!map.getSource('tfp-qa-parcel')) {
+          map.addSource('tfp-qa-parcel', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-qa-parcel-fill',
+            type: 'fill',
+            source: 'tfp-qa-parcel',
+            paint: {
+              'fill-color': '#22d3ee', // Cyan-400
+              'fill-opacity': 0.08,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-qa-parcel-outline',
+            type: 'line',
+            source: 'tfp-qa-parcel',
+            paint: {
+              'line-color': '#06b6d4', // Cyan-500
+              'line-width': 3,
+              'line-opacity': 0.9,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-qa-parcel-outline-glow',
+            type: 'line',
+            source: 'tfp-qa-parcel',
+            paint: {
+              'line-color': '#22d3ee', // Cyan-400
+              'line-width': 8,
+              'line-opacity': 0.25,
+              'line-blur': 4,
+            },
+          }, 'tfp-qa-parcel-outline'); // Insert below the main outline
+        }
+        
         // Bedding source - HIDE in Terrain Work Mode (deer interpretation)
         if (!map.getSource('tfp-bedding')) {
           map.addSource('tfp-bedding', { type: 'geojson', data: EMPTY_FC });
@@ -3278,6 +3321,180 @@ function DeerIntelContent() {
     return () => window.removeEventListener('tfp-edge-click', handleEdgeClick);
   }, []);
 
+  // ========== QA PARCEL LOOKUP HANDLERS ==========
+  const handleQaParcelLookup = useCallback(async (clickLng: number, clickLat: number) => {
+    if (qaParcelLoading) return;
+    
+    setQaParcelLoading(true);
+    setQaParcelError(null);
+    setQaParcel(null);
+    
+    try {
+      const response = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
+      const data = await response.json();
+      
+      if (!data.found) {
+        setQaParcelError(data.error || 'No parcel found at this location');
+        return;
+      }
+      
+      if (data.parcel) {
+        setQaParcel(data.parcel);
+        console.log('[QA PARCEL] Found:', data.parcel.parcelId, data.parcel.acreage, 'ac');
+        
+        // Update map to show parcel boundary
+        const map = mapRef.current;
+        if (map && data.parcel.coordinates) {
+          // Create closed polygon for display
+          const coords = [...data.parcel.coordinates];
+          if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+            coords.push(coords[0]);
+          }
+          
+          // Update QA parcel source
+          const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
+          if (qaSource) {
+            qaSource.setData({
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'Polygon',
+                coordinates: [coords]
+              }
+            });
+          }
+          
+          // Fit bounds to parcel
+          if (data.parcel.bounds) {
+            map.fitBounds(data.parcel.bounds, {
+              padding: 100,
+              duration: 800,
+              maxZoom: 16,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[QA PARCEL] Lookup error:', err);
+      setQaParcelError('Failed to lookup parcel');
+    } finally {
+      setQaParcelLoading(false);
+    }
+  }, [qaParcelLoading]);
+
+  const handleQaParcelAnalyze = useCallback(async () => {
+    if (!qaParcel || qaParcelAnalyzing) return;
+    
+    setQaParcelAnalyzing(true);
+    console.log('[QA PARCEL] Analyzing:', qaParcel.parcelId);
+    
+    try {
+      // Create parcel polygon feature for terrain flow
+      const coords = [...qaParcel.coordinates];
+      if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+        coords.push(coords[0]);
+      }
+      
+      const parcelFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
+        type: 'Feature',
+        properties: {
+          parcelId: qaParcel.parcelId,
+          address: qaParcel.address,
+          acreage: qaParcel.acreage,
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [coords]
+        }
+      };
+      
+      // Update the parcelPolygon state - this triggers terrain flow analysis
+      setParcelPolygon(parcelFeature);
+      
+      // Reset terrain flow data to trigger re-fetch
+      setTerrainFlowData(null);
+      setTerrainFlowLoading(true);
+      
+      console.log('[QA PARCEL] Analysis triggered for', qaParcel.address);
+    } catch (err) {
+      console.error('[QA PARCEL] Analysis error:', err);
+      setQaParcelError('Failed to analyze parcel');
+    } finally {
+      setQaParcelAnalyzing(false);
+    }
+  }, [qaParcel, qaParcelAnalyzing]);
+
+  const handleQaParcelClear = useCallback(() => {
+    setQaParcel(null);
+    setQaParcelError(null);
+    
+    // Clear map layer
+    const map = mapRef.current;
+    if (map) {
+      const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
+      if (qaSource) {
+        qaSource.setData({ type: 'FeatureCollection', features: [] });
+      }
+    }
+  }, []);
+
+  const handleQaParcelCopyInfo = useCallback(() => {
+    if (!qaParcel) return;
+    
+    const info = [
+      `Address: ${qaParcel.address}`,
+      `Parcel ID: ${qaParcel.parcelId}`,
+      `County: ${qaParcel.county}, ${qaParcel.state}`,
+      `Acreage: ${qaParcel.acreage.toFixed(2)} ac`,
+      `Owner: ${qaParcel.owner}`,
+      `Zoning: ${qaParcel.zoning}`,
+      qaParcel.plss ? `PLSS: ${qaParcel.plss}` : '',
+      `Center: ${qaParcel.centroid[1].toFixed(6)}, ${qaParcel.centroid[0].toFixed(6)}`,
+    ].filter(Boolean).join('\n');
+    
+    navigator.clipboard.writeText(info);
+  }, [qaParcel]);
+
+  // Register map click handler for QA parcel lookup
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !qaParcelLookupMode) return;
+    
+    const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
+      // Don't trigger if clicking on existing features
+      const features = map.queryRenderedFeatures(e.point, {
+        layers: [
+          'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-opportunity',
+          'tfp-bedding-fill', 'tfp-funnels-lines-draws', 'tfp-funnels-polys-fill'
+        ].filter(l => map.getLayer(l))
+      });
+      
+      if (features && features.length > 0) return; // Let existing handlers take over
+      
+      handleQaParcelLookup(e.lngLat.lng, e.lngLat.lat);
+    };
+    
+    map.on('click', handleMapClick);
+    console.log('[QA PARCEL] Click handler registered');
+    
+    return () => {
+      map.off('click', handleMapClick);
+      console.log('[QA PARCEL] Click handler removed');
+    };
+  }, [mapReady, qaParcelLookupMode, handleQaParcelLookup]);
+
+  // Keyboard handler for Esc to clear QA parcel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && qaParcel) {
+        handleQaParcelClear();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [qaParcel, handleQaParcelClear]);
+
   // ========== TERRAIN FLOW CLICK EVENT LISTENERS ==========
   useEffect(() => {
     // Flow segment click handler
@@ -3802,6 +4019,26 @@ function DeerIntelContent() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* QA Parcel Lookup Toggle */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`${qaParcelLookupMode 
+                ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50' 
+                : 'text-white/80 hover:text-white hover:bg-white/10'
+              }`}
+              onClick={() => {
+                setQaParcelLookupMode(!qaParcelLookupMode);
+                if (qaParcelLookupMode) {
+                  // Turning off - clear any selected parcel
+                  handleQaParcelClear();
+                }
+              }}
+              title="QA Mode - Click anywhere in KS/MO to lookup parcels"
+            >
+              <Layers className="h-4 w-4 mr-1" />
+              {qaParcelLookupMode ? 'QA Mode ON' : 'QA Mode'}
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -3827,6 +4064,45 @@ function DeerIntelContent() {
           </div>
         </div>
       </div>
+
+      {/* ========== QA PARCEL LOOKUP UI ========== */}
+      {qaParcelLookupMode && (
+        <>
+          {/* Loading State */}
+          {qaParcelLoading && <ParcelLookupLoading />}
+          
+          {/* Error State */}
+          {qaParcelError && !qaParcel && (
+            <ParcelLookupError 
+              message={qaParcelError} 
+              onDismiss={() => setQaParcelError(null)} 
+            />
+          )}
+          
+          {/* Parcel Card */}
+          {qaParcel && (
+            <ParcelLookupCard
+              parcel={qaParcel}
+              isLoading={qaParcelLoading}
+              isAnalyzing={qaParcelAnalyzing}
+              onAnalyze={handleQaParcelAnalyze}
+              onClear={handleQaParcelClear}
+              onCopyInfo={handleQaParcelCopyInfo}
+              error={qaParcelError}
+            />
+          )}
+          
+          {/* Instruction Banner (when no parcel selected) */}
+          {!qaParcel && !qaParcelLoading && !qaParcelError && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-cyan-900/90 backdrop-blur rounded-lg px-4 py-2 border border-cyan-500/40 shadow-lg">
+              <div className="flex items-center gap-2 text-sm text-cyan-100">
+                <MapPin className="h-4 w-4 text-cyan-400" />
+                <span>Click anywhere in <strong>Kansas</strong> or <strong>Missouri</strong> to lookup a parcel</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* ========== EXPORT MODE OVERLAY ========== */}
       {exportMode && (
