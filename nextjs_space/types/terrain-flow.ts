@@ -5,11 +5,13 @@
  * flow lines, convergence zones, and opportunity areas.
  * 
  * V2: Added debug layers and mode tracking for terrain-driven analysis
+ * V2.1: Added flow segment scoring for click-to-explain functionality
  */
 
 export type FlowTier = 'primary' | 'secondary';
 export type ConvergenceType = 'pinch' | 'overlap' | 'saddle';
 export type FlowMode = 'real_dem' | 'terrain_driven' | 'synthetic' | 'error';
+export type TerrainFeatureType = 'ridge' | 'saddle' | 'bench' | 'drainage';
 
 // ========== Feature Properties ==========
 
@@ -143,4 +145,89 @@ export interface FlowComparisonState {
   showTerrainDriven: boolean;    // Show new terrain-driven flow
   syntheticData: TerrainFlowResponse | null;
   terrainDrivenData: TerrainFlowResponse | null;
+}
+
+// ========== Flow Segment Scoring (Click-to-Explain) ==========
+
+export interface FlowSegmentComponentScores {
+  slope_preference: number;      // 0-1 slope favorability
+  bench_likelihood: number;      // 0-1 bench detection
+  saddle_proximity: number;      // 0-1 proximity to saddles
+  spine_proximity: number;       // 0-1 proximity to ridges
+  terrain_convergence: number;   // 0-1 flow convergence
+  extreme_slope_penalty: number; // 0-1 steep slope penalty
+  cut_penalty: number;           // 0-1 drainage penalty
+  total_likelihood: number;      // Combined weighted score
+}
+
+export interface FlowSegmentPointScore {
+  coord: [number, number];       // Geographic coordinate
+  slope_deg: number;             // Raw slope in degrees
+  profile_curv: number;          // Profile curvature (-1 to 1)
+  plan_curv: number;             // Plan curvature (-1 to 1)
+  bench: number;                 // Bench score
+  saddle: number;                // Saddle proximity
+  spine: number;                 // Ridge/spine proximity
+  convergence: number;           // Convergence score
+  penalty: number;               // Combined penalties
+  likelihood: number;            // Final likelihood
+}
+
+export interface FlowSegmentScoreResponse {
+  segmentId: string;
+  coordinates: [number, number][];
+  scores: FlowSegmentComponentScores;
+  pointScores: FlowSegmentPointScore[];
+  explanation: string;           // Human-readable explanation
+}
+
+// ========== Enhanced Debug Layers ==========
+
+export interface EnhancedDebugLayers extends DebugLayers {
+  // Raw DEM-derived surfaces
+  slope_deg?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  aspect_deg?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  profile_curvature?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  plan_curvature?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  // Feature detection
+  ridge_likelihood?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  saddle_likelihood?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  drainage_likelihood?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  // Detected feature points
+  ridge_points?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+  saddle_points?: GeoJSON.FeatureCollection<GeoJSON.Point>;
+}
+
+// ========== Terrain Feature Points ==========
+
+export interface TerrainFeaturePointProperties {
+  type: TerrainFeatureType;
+  confidence: number;            // 0-1 detection confidence
+  elevation_m?: number;          // Elevation at point
+  slope_deg?: number;            // Slope at point
+  curvature?: number;            // Relevant curvature value
+}
+
+// ========== Extended Response with DEM Analysis ==========
+
+export interface TerrainFlowResponseV2 extends TerrainFlowResponse {
+  // DEM analysis metadata
+  dem_analysis?: {
+    source: string;
+    resolution_m: number;
+    coverage_pct: number;
+    features_detected: {
+      ridges: number;
+      saddles: number;
+      benches: number;
+      drainages: number;
+    };
+  };
+  // Enhanced debug layers
+  debug_layers?: EnhancedDebugLayers;
+  // Detected terrain features as GeoJSON
+  terrain_features?: {
+    ridges?: GeoJSON.FeatureCollection<GeoJSON.Point, TerrainFeaturePointProperties>;
+    saddles?: GeoJSON.FeatureCollection<GeoJSON.Point, TerrainFeaturePointProperties>;
+  };
 }
