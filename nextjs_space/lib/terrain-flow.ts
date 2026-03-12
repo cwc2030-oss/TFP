@@ -139,13 +139,13 @@ function lineParcelOverlapPercent(
 
 /**
  * Clip flow lines to parcel boundary
- * Keeps lines that have significant overlap (>30%) with the parcel
+ * Keeps lines that have significant overlap (>=40%) with the parcel
  * Returns new FeatureCollection with clipped/filtered lines
  */
 function clipFlowLinesToParcel(
   flowLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
   parcelCoords: number[][],
-  minOverlapPercent: number = 0.30
+  minOverlapPercent: number = 0.40
 ): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] {
   return flowLines.filter(feature => {
     const coords = feature.geometry.coordinates as [number, number][];
@@ -442,8 +442,8 @@ export function generateTerrainDrivenFlow(
     rawFlowLines.primary.length, rawFlowLines.secondary.length, 
     rawConvergenceZones.length, rawOpportunityZones.length);
   
-  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, coords, 0.25);
-  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, coords, 0.25);
+  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, coords, 0.40);
+  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, coords, 0.40);
   const clippedConvergence = filterConvergenceZonesToParcel(rawConvergenceZones, coords);
   const clippedOpportunity = filterOpportunityZonesToParcel(rawOpportunityZones, coords);
   
@@ -689,8 +689,8 @@ function generateTerrainIndicatorFlow(
     rawPrimaryLines.length, rawSecondaryLines.length, 
     rawConvergenceZones.length, rawOpportunityZones.length);
   
-  const primaryLines = clipFlowLinesToParcel(rawPrimaryLines, coords, 0.25);
-  const secondaryLines = clipFlowLinesToParcel(rawSecondaryLines, coords, 0.25);
+  const primaryLines = clipFlowLinesToParcel(rawPrimaryLines, coords, 0.40);
+  const secondaryLines = clipFlowLinesToParcel(rawSecondaryLines, coords, 0.40);
   const convergenceZones = filterConvergenceZonesToParcel(rawConvergenceZones, coords);
   const opportunityZones = filterOpportunityZonesToParcel(rawOpportunityZones, coords);
   
