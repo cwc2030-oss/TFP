@@ -44,6 +44,8 @@ import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
+import TerrainStoryPanel, { TerrainStoryExportLegend, StructuralDriversGrid } from '@/components/terrain/terrain-story-panel';
+import { generateTerrainStory, computeStructuralDrivers, type TerrainStorySummary } from '@/lib/terrain-story';
 import { computeBrokerScore, type BrokerScoreResult, type BrokerScoreInput } from '@/lib/broker-scoring';
 import { 
   createGeometryTrace, 
@@ -1027,6 +1029,9 @@ function DeerIntelContent() {
   const [selectedOpportunityZone, setSelectedOpportunityZone] = useState<OpportunityZoneProperties | null>(null);
   const [opportunityZonePosition, setOpportunityZonePosition] = useState<{ x: number; y: number } | null>(null);
 
+  // Terrain Story State (structural narrative)
+  const [terrainStory, setTerrainStory] = useState<TerrainStorySummary | null>(null);
+
   // ========== ALIGNMENT ENGINE STATE ==========
   type AlignedStand = {
     rank: number;
@@ -1885,6 +1890,7 @@ function DeerIntelContent() {
     if (!parcelPolygon) {
       setTerrainFlowData(null);
       setLegacySyntheticData(null);
+      setTerrainStory(null);
       return;
     }
 
@@ -1954,6 +1960,15 @@ function DeerIntelContent() {
               fallback_reason: result.data.metadata.fallback_reason,
             },
           });
+          // Generate terrain story from flow data
+          const storyAcreage = qaParcel?.acreage || 
+                              (parcelPolygon?.properties as any)?.ll_gisacre ||
+                              (parcelPolygon?.properties as any)?.acreage ||
+                              undefined;
+          const storyAddress = qaParcel?.address || address || undefined;
+          const story = generateTerrainStory(result.data, storyAcreage, storyAddress);
+          setTerrainStory(story);
+          console.log('[TerrainStory] Generated:', story.headline);
         } else {
           console.warn('[TerrainFlow] Flow generation failed, using terrain-driven fallback');
           const synthetic = generateSyntheticTerrainFlow(parcelPolygon);
@@ -1974,6 +1989,15 @@ function DeerIntelContent() {
               fallback_reason: synthetic.metadata.fallback_reason,
             },
           });
+          // Generate terrain story from synthetic data
+          const synthAcreage = qaParcel?.acreage || 
+                              (parcelPolygon?.properties as any)?.ll_gisacre ||
+                              (parcelPolygon?.properties as any)?.acreage ||
+                              undefined;
+          const synthAddress = qaParcel?.address || address || undefined;
+          const syntheticStory = generateTerrainStory(synthetic, synthAcreage, synthAddress);
+          setTerrainStory(syntheticStory);
+          console.log('[TerrainStory] Generated (synthetic):', syntheticStory.headline);
         }
       } catch (err) {
         console.error('[TerrainFlow] Error during flow generation:', err);
@@ -3722,6 +3746,7 @@ function DeerIntelContent() {
       // Reset terrain flow data to trigger re-fetch (sources will be cleared by effect)
       setTerrainFlowData(null);
       setTerrainFlowLoading(true);
+      setTerrainStory(null);
       
       // Also clear ridge spine data for clean slate
       setRidgeSpineData(null);
@@ -3759,6 +3784,7 @@ function DeerIntelContent() {
     
     // Clear all terrain analysis data
     setTerrainFlowData(null);
+    setTerrainStory(null);
     setRidgeSpineData(null);
     setTieredCorridorData(null);
     setEdgeIntelData(null);
@@ -4736,8 +4762,8 @@ function DeerIntelContent() {
             </div>
           </div>
 
-          {/* Export Mode Legend */}
-          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 bg-gray-900/95 backdrop-blur rounded-xl px-6 py-4 border border-white/15 shadow-2xl">
+          {/* Export Mode Legend - Main Row */}
+          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-30 bg-gray-900/95 backdrop-blur rounded-xl px-6 py-4 border border-white/15 shadow-2xl">
             <div className="flex items-center gap-6">
               {/* Flow Confidence */}
               <div className="space-y-2">
@@ -4791,6 +4817,13 @@ function DeerIntelContent() {
               </div>
             </div>
           </div>
+          
+          {/* Export Mode - Terrain Story Panel */}
+          {terrainStory && (
+            <div className="absolute bottom-28 right-4 z-30">
+              <TerrainStoryExportLegend story={terrainStory} />
+            </div>
+          )}
 
           {/* Screenshot instruction */}
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 text-stone-500 text-xs">
@@ -5532,6 +5565,19 @@ function DeerIntelContent() {
                   </div>
                 )}
               </div>
+
+              {/* ========== TERRAIN STORY PANEL ========== */}
+              {(terrainStory || terrainFlowLoading) && !exportMode && (
+                <div className="p-3 border-b border-white/10">
+                  <TerrainStoryPanel 
+                    story={terrainStory}
+                    isLoading={terrainFlowLoading}
+                    defaultExpanded={false}
+                    showNarrative={true}
+                    compact={false}
+                  />
+                </div>
+              )}
 
               {/* ========== TERRAIN WORK MODE NOTICE ========== */}
               {TERRAIN_WORK_MODE && (

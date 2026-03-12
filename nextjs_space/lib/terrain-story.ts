@@ -1,0 +1,537 @@
+/**
+ * Terrain Story Generator
+ * 
+ * Analyzes terrain flow data to generate human-readable narratives
+ * explaining the structural drivers and key opportunities on a parcel.
+ * 
+ * Used to help brokers and buyers quickly understand "why this land matters"
+ */
+
+import type { TerrainFlowResponse, OpportunityZoneProperties } from '@/types/terrain-flow';
+
+// ========== TYPES ==========
+
+export interface StructuralDriverScore {
+  score: number;           // 0-1 normalized score
+  label: string;           // Human-readable label
+  shortLabel: string;      // 2-3 word label for badges
+  description: string;     // One sentence explanation
+  icon: 'bench' | 'saddle' | 'ridge' | 'convergence';
+}
+
+export interface StructuralDrivers {
+  benchSupport: StructuralDriverScore;
+  saddleInfluence: StructuralDriverScore;
+  ridgeSpineSupport: StructuralDriverScore;
+  convergenceDensity: StructuralDriverScore;
+}
+
+export type MovementDriver = 
+  | 'ridge-to-saddle-compression'
+  | 'sidehill-bench-travel'
+  | 'draw-funneling'
+  | 'terrain-pinch'
+  | 'parallel-ridge-travel'
+  | 'saddle-crossing'
+  | 'bench-contour-travel'
+  | 'mixed-terrain';
+
+export interface TerrainStorySummary {
+  // Core narrative elements
+  primaryDriver: {
+    type: MovementDriver;
+    label: string;
+    confidence: number;
+  };
+  secondaryDriver: {
+    type: MovementDriver;
+    label: string;
+    confidence: number;
+  } | null;
+  keyOpportunity: {
+    location: string;          // e.g., "southwest convergence zone"
+    reason: string;            // e.g., "Multiple flows meet at saddle"
+    score: number;
+  } | null;
+  
+  // Structural drivers breakdown
+  drivers: StructuralDrivers;
+  
+  // One-liner summary
+  headline: string;
+  
+  // Extended narrative (2-3 sentences)
+  narrative: string;
+  
+  // Confidence in the overall story
+  confidence: 'high' | 'medium' | 'low';
+}
+
+// ========== DRIVER LABELS ==========
+
+const MOVEMENT_DRIVER_LABELS: Record<MovementDriver, string> = {
+  'ridge-to-saddle-compression': 'Ridge-to-Saddle Compression',
+  'sidehill-bench-travel': 'Sidehill Bench Travel',
+  'draw-funneling': 'Draw Funneling',
+  'terrain-pinch': 'Terrain Pinch Point',
+  'parallel-ridge-travel': 'Parallel Ridge Travel',
+  'saddle-crossing': 'Saddle Crossing',
+  'bench-contour-travel': 'Bench Contour Travel',
+  'mixed-terrain': 'Mixed Terrain Influence',
+};
+
+// ========== STORY GENERATION ==========
+
+/**
+ * Compute structural driver scores from terrain flow data
+ */
+export function computeStructuralDrivers(
+  flowData: TerrainFlowResponse | null
+): StructuralDrivers {
+  if (!flowData) {
+    return getEmptyDrivers();
+  }
+  
+  const { metadata, opportunity_zones, convergence_zones, flow_primary, flow_secondary } = flowData;
+  
+  // Extract weights used in analysis
+  const weights = metadata.weights || {};
+  
+  // Calculate bench support from opportunity zones
+  const benchScores = opportunity_zones.features.map(f => f.properties.benchBonus || 0);
+  const avgBench = benchScores.length > 0 
+    ? benchScores.reduce((a, b) => a + b, 0) / benchScores.length 
+    : 0;
+  const maxBench = Math.max(...benchScores, 0);
+  const benchSupport = Math.min(1, (avgBench * 0.6 + maxBench * 0.4) * 2.5);
+  
+  // Calculate saddle influence
+  const saddleScores = opportunity_zones.features.map(f => f.properties.saddleBonus || 0);
+  const avgSaddle = saddleScores.length > 0
+    ? saddleScores.reduce((a, b) => a + b, 0) / saddleScores.length
+    : 0;
+  const maxSaddle = Math.max(...saddleScores, 0);
+  const saddleInfluence = Math.min(1, (avgSaddle * 0.6 + maxSaddle * 0.4) * 2.5);
+  
+  // Calculate ridge/spine support from flow metadata
+  const spineWeight = weights.spine_proximity || 0.25;
+  const primaryFlowCount = flow_primary.features.length;
+  const secondaryFlowCount = flow_secondary.features.length;
+  const totalFlowLength = metadata.stats.total_flow_length_m || 0;
+  const ridgeSpineSupport = Math.min(1, (
+    spineWeight * 1.5 +
+    (primaryFlowCount > 3 ? 0.3 : primaryFlowCount * 0.1) +
+    (totalFlowLength > 500 ? 0.2 : totalFlowLength / 2500)
+  ));
+  
+  // Calculate convergence density
+  const convergenceCount = convergence_zones.features.length;
+  const convergenceIntensities = convergence_zones.features.map(f => f.properties.intensity || 0.5);
+  const avgConvergence = convergenceIntensities.length > 0
+    ? convergenceIntensities.reduce((a, b) => a + b, 0) / convergenceIntensities.length
+    : 0;
+  const convergenceDensity = Math.min(1, (
+    (convergenceCount / 5) * 0.5 +
+    avgConvergence * 0.5
+  ));
+  
+  return {
+    benchSupport: {
+      score: benchSupport,
+      label: getBenchLabel(benchSupport),
+      shortLabel: 'Bench',
+      description: getBenchDescription(benchSupport),
+      icon: 'bench',
+    },
+    saddleInfluence: {
+      score: saddleInfluence,
+      label: getSaddleLabel(saddleInfluence),
+      shortLabel: 'Saddle',
+      description: getSaddleDescription(saddleInfluence),
+      icon: 'saddle',
+    },
+    ridgeSpineSupport: {
+      score: ridgeSpineSupport,
+      label: getRidgeLabel(ridgeSpineSupport),
+      shortLabel: 'Ridge',
+      description: getRidgeDescription(ridgeSpineSupport),
+      icon: 'ridge',
+    },
+    convergenceDensity: {
+      score: convergenceDensity,
+      label: getConvergenceLabel(convergenceDensity),
+      shortLabel: 'Convergence',
+      description: getConvergenceDescription(convergenceDensity),
+      icon: 'convergence',
+    },
+  };
+}
+
+/**
+ * Generate the complete terrain story from flow data
+ */
+export function generateTerrainStory(
+  flowData: TerrainFlowResponse | null,
+  parcelAcreage?: number,
+  parcelAddress?: string
+): TerrainStorySummary {
+  if (!flowData) {
+    return getEmptyStory();
+  }
+  
+  const drivers = computeStructuralDrivers(flowData);
+  
+  // Determine primary and secondary movement drivers
+  const { primaryDriver, secondaryDriver } = determineMovementDrivers(drivers, flowData);
+  
+  // Find key opportunity zone
+  const keyOpportunity = findKeyOpportunity(flowData);
+  
+  // Generate headline
+  const headline = generateHeadline(primaryDriver, secondaryDriver, drivers);
+  
+  // Generate narrative
+  const narrative = generateNarrative(drivers, primaryDriver, secondaryDriver, keyOpportunity, parcelAcreage);
+  
+  // Determine confidence
+  const confidence = determineConfidence(drivers, flowData);
+  
+  return {
+    primaryDriver,
+    secondaryDriver,
+    keyOpportunity,
+    drivers,
+    headline,
+    narrative,
+    confidence,
+  };
+}
+
+// ========== HELPER FUNCTIONS ==========
+
+function getEmptyDrivers(): StructuralDrivers {
+  return {
+    benchSupport: { score: 0, label: 'Not detected', shortLabel: 'Bench', description: 'No bench terrain identified', icon: 'bench' },
+    saddleInfluence: { score: 0, label: 'Not detected', shortLabel: 'Saddle', description: 'No saddle influence identified', icon: 'saddle' },
+    ridgeSpineSupport: { score: 0, label: 'Not detected', shortLabel: 'Ridge', description: 'No ridge structure identified', icon: 'ridge' },
+    convergenceDensity: { score: 0, label: 'Not detected', shortLabel: 'Convergence', description: 'No flow convergence detected', icon: 'convergence' },
+  };
+}
+
+function getEmptyStory(): TerrainStorySummary {
+  return {
+    primaryDriver: { type: 'mixed-terrain', label: 'Mixed Terrain Influence', confidence: 0.3 },
+    secondaryDriver: null,
+    keyOpportunity: null,
+    drivers: getEmptyDrivers(),
+    headline: 'Terrain analysis incomplete',
+    narrative: 'Run terrain flow analysis to reveal movement patterns and opportunity zones.',
+    confidence: 'low',
+  };
+}
+
+function getBenchLabel(score: number): string {
+  if (score >= 0.7) return 'Strong bench support';
+  if (score >= 0.4) return 'Moderate bench influence';
+  if (score > 0.1) return 'Light bench presence';
+  return 'Minimal bench terrain';
+}
+
+function getBenchDescription(score: number): string {
+  if (score >= 0.7) return 'Prominent benches provide preferred travel corridors along contours';
+  if (score >= 0.4) return 'Some bench terrain offers sidehill travel routes';
+  if (score > 0.1) return 'Limited bench features may influence movement';
+  return 'Terrain lacks significant bench structure';
+}
+
+function getSaddleLabel(score: number): string {
+  if (score >= 0.7) return 'Strong saddle influence';
+  if (score >= 0.4) return 'Moderate saddle presence';
+  if (score > 0.1) return 'Light saddle influence';
+  return 'Minimal saddle terrain';
+}
+
+function getSaddleDescription(score: number): string {
+  if (score >= 0.7) return 'Prominent saddles act as natural crossing points and funnels';
+  if (score >= 0.4) return 'Saddle terrain concentrates movement at key points';
+  if (score > 0.1) return 'Some saddle features may channel movement';
+  return 'Terrain lacks significant saddle crossings';
+}
+
+function getRidgeLabel(score: number): string {
+  if (score >= 0.7) return 'Strong ridge/spine structure';
+  if (score >= 0.4) return 'Moderate ridge presence';
+  if (score > 0.1) return 'Light ridge influence';
+  return 'Minimal ridge structure';
+}
+
+function getRidgeDescription(score: number): string {
+  if (score >= 0.7) return 'Well-defined ridges create travel corridors and visual barriers';
+  if (score >= 0.4) return 'Ridge lines guide movement patterns along high ground';
+  if (score > 0.1) return 'Some ridge features influence travel routes';
+  return 'Terrain lacks dominant ridge structure';
+}
+
+function getConvergenceLabel(score: number): string {
+  if (score >= 0.7) return 'High convergence density';
+  if (score >= 0.4) return 'Moderate convergence';
+  if (score > 0.1) return 'Light convergence';
+  return 'Minimal convergence';
+}
+
+function getConvergenceDescription(score: number): string {
+  if (score >= 0.7) return 'Multiple flow paths converge, creating high-value pinch points';
+  if (score >= 0.4) return 'Several flows meet at strategic locations';
+  if (score > 0.1) return 'Some flow convergence at isolated points';
+  return 'Flow paths remain largely independent';
+}
+
+function determineMovementDrivers(
+  drivers: StructuralDrivers,
+  flowData: TerrainFlowResponse
+): { 
+  primaryDriver: TerrainStorySummary['primaryDriver']; 
+  secondaryDriver: TerrainStorySummary['secondaryDriver'];
+} {
+  // Score each movement pattern based on driver combinations
+  const patterns: { type: MovementDriver; score: number }[] = [
+    {
+      type: 'ridge-to-saddle-compression',
+      score: drivers.ridgeSpineSupport.score * 0.5 + drivers.saddleInfluence.score * 0.5,
+    },
+    {
+      type: 'sidehill-bench-travel',
+      score: drivers.benchSupport.score * 0.8 + drivers.ridgeSpineSupport.score * 0.2,
+    },
+    {
+      type: 'draw-funneling',
+      score: drivers.convergenceDensity.score * 0.6 + (1 - drivers.ridgeSpineSupport.score) * 0.4,
+    },
+    {
+      type: 'terrain-pinch',
+      score: drivers.convergenceDensity.score * 0.5 + drivers.saddleInfluence.score * 0.5,
+    },
+    {
+      type: 'parallel-ridge-travel',
+      score: drivers.ridgeSpineSupport.score * 0.7 + (1 - drivers.saddleInfluence.score) * 0.3,
+    },
+    {
+      type: 'saddle-crossing',
+      score: drivers.saddleInfluence.score * 0.8 + drivers.convergenceDensity.score * 0.2,
+    },
+    {
+      type: 'bench-contour-travel',
+      score: drivers.benchSupport.score * 0.9 + (1 - drivers.convergenceDensity.score) * 0.1,
+    },
+  ];
+  
+  // Sort by score
+  patterns.sort((a, b) => b.score - a.score);
+  
+  const primary = patterns[0];
+  const secondary = patterns[1];
+  
+  return {
+    primaryDriver: {
+      type: primary.type,
+      label: MOVEMENT_DRIVER_LABELS[primary.type],
+      confidence: primary.score,
+    },
+    secondaryDriver: secondary.score > 0.25 ? {
+      type: secondary.type,
+      label: MOVEMENT_DRIVER_LABELS[secondary.type],
+      confidence: secondary.score,
+    } : null,
+  };
+}
+
+function findKeyOpportunity(
+  flowData: TerrainFlowResponse
+): TerrainStorySummary['keyOpportunity'] {
+  const opportunities = flowData.opportunity_zones.features;
+  
+  if (opportunities.length === 0) {
+    return null;
+  }
+  
+  // Find highest-scoring opportunity
+  const best = opportunities.reduce((prev, curr) => 
+    (curr.properties.score > prev.properties.score) ? curr : prev
+  );
+  
+  const props = best.properties;
+  const coords = best.geometry.coordinates as [number, number];
+  
+  // Determine location description
+  const bbox = flowData.bbox;
+  const centerLng = (bbox[0] + bbox[2]) / 2;
+  const centerLat = (bbox[1] + bbox[3]) / 2;
+  
+  let nsDir = '';
+  let ewDir = '';
+  
+  if (coords[1] > centerLat + 0.0005) nsDir = 'north';
+  else if (coords[1] < centerLat - 0.0005) nsDir = 'south';
+  
+  if (coords[0] > centerLng + 0.0005) ewDir = 'east';
+  else if (coords[0] < centerLng - 0.0005) ewDir = 'west';
+  
+  const location = nsDir && ewDir 
+    ? `${nsDir}${ewDir} convergence zone`
+    : nsDir ? `${nsDir} convergence zone`
+    : ewDir ? `${ewDir} convergence zone`
+    : 'central convergence zone';
+  
+  // Determine reason
+  let reason = 'Multiple terrain factors combine here';
+  if (props.convergenceBonus > 0.3 && props.saddleBonus > 0.2) {
+    reason = 'Multiple flows meet at saddle crossing';
+  } else if (props.benchBonus > 0.3) {
+    reason = 'Bench terrain concentrates travel';
+  } else if (props.convergenceBonus > 0.3) {
+    reason = 'Flow paths converge at pinch point';
+  } else if (props.saddleBonus > 0.2) {
+    reason = 'Saddle creates natural crossing';
+  } else if (props.flowIntensity > 0.6) {
+    reason = 'High-intensity flow corridor';
+  }
+  
+  return {
+    location,
+    reason,
+    score: props.score,
+  };
+}
+
+function generateHeadline(
+  primary: TerrainStorySummary['primaryDriver'],
+  secondary: TerrainStorySummary['secondaryDriver'],
+  drivers: StructuralDrivers
+): string {
+  // Get the dominant driver
+  const driverScores = [
+    { name: 'bench', score: drivers.benchSupport.score },
+    { name: 'saddle', score: drivers.saddleInfluence.score },
+    { name: 'ridge', score: drivers.ridgeSpineSupport.score },
+    { name: 'convergence', score: drivers.convergenceDensity.score },
+  ].sort((a, b) => b.score - a.score);
+  
+  const dominant = driverScores[0];
+  
+  if (dominant.score < 0.3) {
+    return 'Gentle terrain with distributed movement patterns';
+  }
+  
+  switch (dominant.name) {
+    case 'ridge':
+      return drivers.saddleInfluence.score > 0.4
+        ? 'Ridge-driven terrain with saddle crossings'
+        : 'Ridge-spine controlled movement corridors';
+    case 'saddle':
+      return drivers.convergenceDensity.score > 0.4
+        ? 'Saddle-focused terrain with strong convergence'
+        : 'Saddle-dominated crossing terrain';
+    case 'bench':
+      return drivers.ridgeSpineSupport.score > 0.4
+        ? 'Bench travel along ridge structure'
+        : 'Sidehill bench-controlled movement';
+    case 'convergence':
+      return 'High-convergence terrain with multiple pinch points';
+    default:
+      return 'Mixed terrain influence pattern';
+  }
+}
+
+function generateNarrative(
+  drivers: StructuralDrivers,
+  primary: TerrainStorySummary['primaryDriver'],
+  secondary: TerrainStorySummary['secondaryDriver'],
+  keyOpp: TerrainStorySummary['keyOpportunity'],
+  acreage?: number
+): string {
+  const parts: string[] = [];
+  
+  // First sentence: primary driver
+  parts.push(`Movement on this parcel is primarily driven by ${primary.label.toLowerCase()}.`);
+  
+  // Second sentence: supporting features
+  const strongFeatures = [
+    drivers.benchSupport.score >= 0.5 ? 'bench terrain' : null,
+    drivers.saddleInfluence.score >= 0.5 ? 'saddle crossings' : null,
+    drivers.ridgeSpineSupport.score >= 0.5 ? 'ridge structure' : null,
+    drivers.convergenceDensity.score >= 0.5 ? 'flow convergence' : null,
+  ].filter(Boolean);
+  
+  if (strongFeatures.length >= 2) {
+    parts.push(`Key structural features include ${strongFeatures.slice(0, -1).join(', ')} and ${strongFeatures.slice(-1)[0]}.`);
+  } else if (secondary) {
+    parts.push(`Secondary patterns show ${secondary.label.toLowerCase()}.`);
+  }
+  
+  // Third sentence: key opportunity
+  if (keyOpp) {
+    parts.push(`The ${keyOpp.location} offers a prime setup location where ${keyOpp.reason.toLowerCase()}.`);
+  }
+  
+  return parts.join(' ');
+}
+
+function determineConfidence(
+  drivers: StructuralDrivers,
+  flowData: TerrainFlowResponse
+): 'high' | 'medium' | 'low' {
+  const avgDriverScore = (
+    drivers.benchSupport.score +
+    drivers.saddleInfluence.score +
+    drivers.ridgeSpineSupport.score +
+    drivers.convergenceDensity.score
+  ) / 4;
+  
+  const hasStrongFeature = Object.values(drivers).some(d => d.score >= 0.6);
+  const flowCount = flowData.flow_primary.features.length + flowData.flow_secondary.features.length;
+  const mode = flowData.metadata.mode;
+  
+  if (mode === 'real_dem' && hasStrongFeature && flowCount >= 3) {
+    return 'high';
+  } else if ((mode === 'terrain_driven' || mode === 'real_dem') && avgDriverScore >= 0.35) {
+    return 'medium';
+  }
+  
+  return 'low';
+}
+
+// ========== EXPORT UTILITIES ==========
+
+/**
+ * Get top N drivers sorted by score
+ */
+export function getTopDrivers(
+  drivers: StructuralDrivers,
+  n: number = 4
+): { key: keyof StructuralDrivers; driver: StructuralDriverScore }[] {
+  const entries: { key: keyof StructuralDrivers; driver: StructuralDriverScore }[] = [
+    { key: 'benchSupport', driver: drivers.benchSupport },
+    { key: 'saddleInfluence', driver: drivers.saddleInfluence },
+    { key: 'ridgeSpineSupport', driver: drivers.ridgeSpineSupport },
+    { key: 'convergenceDensity', driver: drivers.convergenceDensity },
+  ];
+  
+  return entries.sort((a, b) => b.driver.score - a.driver.score).slice(0, n);
+}
+
+/**
+ * Get driver icon color based on score
+ */
+export function getDriverColor(score: number): string {
+  if (score >= 0.7) return '#10b981'; // Emerald
+  if (score >= 0.4) return '#f59e0b'; // Amber
+  if (score > 0.1) return '#64748b'; // Slate
+  return '#374151';                   // Gray
+}
+
+/**
+ * Format score as percentage string
+ */
+export function formatDriverScore(score: number): string {
+  return `${Math.round(score * 100)}%`;
+}
