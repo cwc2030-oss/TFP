@@ -120,6 +120,12 @@ export interface TerrainFlowMetadata {
     parcel_bbox: [number, number, number, number];
     buffered_bbox: [number, number, number, number];
   };
+  // Parcel-adaptive scaling metrics
+  parcel_scale?: {
+    diagonal_m: number;         // Parcel diagonal in meters
+    scale_factor: number;       // Scale factor (1.0 = reference 40-acre)
+    acres: number;              // Approximate acreage
+  };
 }
 
 // ========== UI State Types ==========

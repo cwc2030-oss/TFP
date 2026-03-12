@@ -65,6 +65,11 @@ import {
   identifyOpportunityZones,
   gridToGeoJSON,
   type ComponentRasters,
+  // Parcel-adaptive scaling
+  computeParcelScale,
+  getScaledFlowThresholds,
+  type ParcelScaleMetrics,
+  type ZoneScalingOptions,
 } from './terrain-analysis';
 
 import {
@@ -352,17 +357,37 @@ export function generateTerrainDrivenFlow(
   const parcelBbox = getBbox(coords);
   const bufferedBbox = expandBbox(parcelBbox, ANALYSIS_BUFFER_M);
   
-  // Calculate parcel area for debug logging
+  // Calculate parcel dimensions and adaptive scaling
   const centroid = getCentroid(coords);
   const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
-  const approxAcres = (widthM * heightM * 0.8) / 4046.86;
+  
+  // ========== PARCEL-ADAPTIVE SCALING ==========
+  // Compute scale metrics based on parcel dimensions
+  const parcelScale = computeParcelScale(widthM, heightM);
+  const scaledThresholds = getScaledFlowThresholds(parcelScale);
+  
+  // Build zone scaling options from parcel scale
+  const zoneScaling: ZoneScalingOptions = {
+    searchRadius: parcelScale.convergenceSearchRadius,
+    baseRadius: parcelScale.convergenceBaseRadius,
+    maxZones: parcelScale.maxConvergenceZones,
+    smoothingCells: parcelScale.gaussianSmoothCells,
+    opportunityRadius: parcelScale.opportunityRadius,
+    maxOpportunityZones: parcelScale.maxOpportunityZones,
+  };
   
   console.log('[TerrainFlow] Parcel extent: %d x %d m (~%d acres)', 
-    Math.round(widthM), Math.round(heightM), Math.round(approxAcres));
+    Math.round(widthM), Math.round(heightM), Math.round(parcelScale.areaAcres));
+  console.log('[TerrainFlow] Parcel diagonal: %dm, Scale Factor: %.2f', 
+    Math.round(parcelScale.diagonalM), parcelScale.scaleFactor);
+  console.log('[TerrainFlow] Scaled params: minLenPrimary=%dm, minLenSecondary=%dm, convRadius=%dm, oppRadius=%dm',
+    parcelScale.minLengthPrimary, parcelScale.minLengthSecondary, 
+    parcelScale.convergenceSearchRadius, parcelScale.opportunityRadius);
+  console.log('[TerrainFlow] Scaled zone counts: maxConv=%d, maxOpp=%d, smoothCells=%d',
+    parcelScale.maxConvergenceZones, parcelScale.maxOpportunityZones, parcelScale.gaussianSmoothCells);
   console.log('[TerrainFlow] Parcel bbox:', parcelBbox.map(v => v.toFixed(6)).join(', '));
   console.log('[TerrainFlow] Buffered bbox:', bufferedBbox.map(v => v.toFixed(6)).join(', '));
-  console.log('[TerrainFlow] Parcel coords sample:', coords.slice(0, 3).map(c => `[${c[0].toFixed(5)}, ${c[1].toFixed(5)}]`).join('; '));
   
   // Check if we have corridor data
   const hasCorridorData = corridorData && 
@@ -371,7 +396,7 @@ export function generateTerrainDrivenFlow(
   if (!hasCorridorData) {
     console.log('[TerrainFlow] No corridor data available, generating from parcel terrain indicators');
     // Generate flow based on terrain indicators without corridor data
-    return generateTerrainIndicatorFlow(parcel, coords, parcelBbox, bufferedBbox);
+    return generateTerrainIndicatorFlow(parcel, coords, parcelBbox, bufferedBbox, parcelScale);
   }
   
   console.log('[TerrainFlow] Computing component rasters from corridor data');
@@ -421,19 +446,23 @@ export function generateTerrainDrivenFlow(
     return emptyFlowResponse('Failed to compute flow likelihood surface');
   }
   
-  // Extract flow lines following terrain structure (on buffered extent)
-  const rawFlowLines = extractFlowLines(components.flow_likelihood, corridorData);
+  // Extract flow lines following terrain structure (on buffered extent) - SCALED THRESHOLDS
+  const rawFlowLines = extractFlowLines(components.flow_likelihood, corridorData, scaledThresholds);
   
-  // Identify convergence zones from terrain/flow structure (on buffered extent)
+  // Identify convergence zones from terrain/flow structure (on buffered extent) - SCALED PARAMS
   const rawConvergenceZones = identifyConvergenceZones(
     components.flow_likelihood,
-    rawFlowLines
+    rawFlowLines,
+    scaledThresholds,
+    zoneScaling
   );
   
-  // Identify opportunity zones (on buffered extent)
+  // Identify opportunity zones (on buffered extent) - SCALED PARAMS
   const rawOpportunityZones = identifyOpportunityZones(
     rawConvergenceZones,
-    components.flow_likelihood
+    components.flow_likelihood,
+    scaledThresholds,
+    zoneScaling
   );
   
   // ========== CRITICAL: CLIP TO PARCEL BOUNDARY ==========
@@ -640,49 +669,63 @@ export function generateTerrainDrivenFlow(
 /**
  * Generate terrain-indicator-based flow when no corridor data available
  * Uses terrain simulation based on parcel shape BUT with terrain-like curvature
+ * NOW USES PARCEL-ADAPTIVE SCALING
  */
 function generateTerrainIndicatorFlow(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   coords: number[][],
   parcelBbox: [number, number, number, number],
-  bufferedBbox: [number, number, number, number]
+  bufferedBbox: [number, number, number, number],
+  parcelScale?: ParcelScaleMetrics
 ): TerrainFlowResponse {
   const startTime = Date.now();
   
   const centroid = getCentroid(coords);
   const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
-  const parcelAreaSqM = widthM * heightM * 0.8;
-  const parcelAcres = parcelAreaSqM / 4046.86;
   
-  console.log('[TerrainFlow] Generating terrain-indicator flow for ~', Math.round(parcelAcres), 'acres');
+  // Use provided scale or compute fresh
+  const scale = parcelScale || computeParcelScale(widthM, heightM);
+  const scaledThresholds = getScaledFlowThresholds(scale);
   
-  // Generate terrain-following flow lines
+  console.log('[TerrainFlow:Indicator] Generating for ~%d acres (scale=%.2f)', 
+    Math.round(scale.areaAcres), scale.scaleFactor);
+  console.log('[TerrainFlow:Indicator] Scaled: minLen=%dm/%dm, convRadius=%dm, oppRadius=%dm',
+    scale.minLengthPrimary, scale.minLengthSecondary, 
+    scale.convergenceSearchRadius, scale.opportunityRadius);
+  
+  // Generate terrain-following flow lines with SCALED parameters
   // These follow simulated terrain contours, NOT parcel orientation
-  const rawPrimaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'primary', parcelAcres);
-  const rawSecondaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'secondary', parcelAcres);
+  const rawPrimaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'primary', scale);
+  const rawSecondaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'secondary', scale);
   
-  // Generate convergence zones at terrain pinch points
-  const rawConvergenceZones = generateTerrainConvergenceZones(rawPrimaryLines, rawSecondaryLines, parcelBbox);
+  // Generate convergence zones at terrain pinch points with SCALED radius
+  const rawConvergenceZones = generateTerrainConvergenceZones(
+    rawPrimaryLines, rawSecondaryLines, parcelBbox, scale
+  );
   
-  // Generate opportunity zones
+  // Generate opportunity zones with SCALED count and radius
   const rawOpportunityZones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
-  if (rawConvergenceZones.length > 0 && parcelAcres >= 20) {
-    const topConvergence = rawConvergenceZones[0];
-    rawOpportunityZones.push({
-      type: 'Feature',
-      properties: {
-        id: 'opp_1',
-        score: 0.75 + Math.random() * 0.15,
-        flowIntensity: topConvergence.properties.intensity,
-        convergenceBonus: 0.15,
-        benchBonus: 0.10,
-        saddleBonus: 0.05,
-        radiusM: 25,
-      },
-      geometry: topConvergence.geometry,
-    });
-  }
+  const maxOpp = scale.maxOpportunityZones;
+  const oppRadius = scale.opportunityRadius;
+  
+  rawConvergenceZones.slice(0, maxOpp).forEach((conv, i) => {
+    if (scale.areaAcres >= 20 || conv.properties.intensity > 0.8) {
+      rawOpportunityZones.push({
+        type: 'Feature',
+        properties: {
+          id: `opp_${i}`,
+          score: 0.75 + Math.random() * 0.15,
+          flowIntensity: conv.properties.intensity,
+          convergenceBonus: 0.15,
+          benchBonus: 0.10,
+          saddleBonus: conv.properties.type === 'pinch' ? 0.10 : 0.05,
+          radiusM: oppRadius,
+        },
+        geometry: conv.geometry,
+      });
+    }
+  });
   
   // ========== CLIP TO PARCEL BOUNDARY ==========
   console.log('[TerrainFlow:Indicator] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
@@ -718,12 +761,12 @@ function generateTerrainIndicatorFlow(
       buffer_m: ANALYSIS_BUFFER_M,
       weights: TERRAIN_FLOW_WEIGHTS,
       thresholds: {
-        primary_min: FLOW_THRESHOLDS.primary_percentile,
-        secondary_min: FLOW_THRESHOLDS.secondary_percentile,
-        min_length_m_primary: FLOW_THRESHOLDS.min_length_m_primary,
-        min_length_m_secondary: FLOW_THRESHOLDS.min_length_m_secondary,
-        convergence_threshold: FLOW_THRESHOLDS.convergence_threshold,
-        opportunity_threshold: FLOW_THRESHOLDS.opportunity_threshold,
+        primary_min: scaledThresholds.primary_percentile,
+        secondary_min: scaledThresholds.secondary_percentile,
+        min_length_m_primary: scaledThresholds.min_length_m_primary,
+        min_length_m_secondary: scaledThresholds.min_length_m_secondary,
+        convergence_threshold: scaledThresholds.convergence_threshold,
+        opportunity_threshold: scaledThresholds.opportunity_threshold,
       },
       stats: {
         flow_count_primary: primaryLines.length,
@@ -738,6 +781,11 @@ function generateTerrainIndicatorFlow(
         parcel_bbox: parcelBbox,
         buffered_bbox: bufferedBbox,
       },
+      parcel_scale: {
+        diagonal_m: scale.diagonalM,
+        scale_factor: scale.scaleFactor,
+        acres: scale.areaAcres,
+      },
     },
   };
 }
@@ -745,23 +793,33 @@ function generateTerrainIndicatorFlow(
 /**
  * Generate terrain-following flow lines
  * Uses diagonal/contour-following directions instead of axis-aligned
+ * NOW USES PARCEL-ADAPTIVE SCALING for line lengths
  */
 function generateTerrainFollowingLines(
   coords: number[][],
   centroid: [number, number],
   bbox: [number, number, number, number],
   tier: FlowTier,
-  parcelAcres: number
+  scale: ParcelScaleMetrics
 ): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] {
   const lines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
-  const numLines = tier === 'primary'
-    ? Math.min(4, Math.max(2, Math.floor(parcelAcres / 30)))
-    : Math.min(6, Math.max(3, Math.floor(parcelAcres / 20)));
+  // Scale line counts based on acreage and scale factor
+  const baseLinePrimary = Math.max(2, Math.floor(scale.areaAcres / 30));
+  const baseLineSecondary = Math.max(3, Math.floor(scale.areaAcres / 20));
   
-  const widthM = distanceMeters([bbox[0], centroid[1]], [bbox[2], centroid[1]]);
-  const heightM = distanceMeters([centroid[0], bbox[1]], [centroid[0], bbox[3]]);
-  const maxLength = Math.min(Math.sqrt(widthM * widthM + heightM * heightM), 600);
+  // More lines on larger parcels, but cap with diminishing returns
+  const numLines = tier === 'primary'
+    ? Math.min(Math.round(4 * scale.scaleFactor), Math.max(2, baseLinePrimary))
+    : Math.min(Math.round(6 * scale.scaleFactor), Math.max(3, baseLineSecondary));
+  
+  const widthM = scale.widthM;
+  const heightM = scale.heightM;
+  
+  // SCALED max line length: proportional to parcel diagonal
+  // Larger parcels get proportionally longer flow lines
+  const maxLengthBase = Math.sqrt(widthM * widthM + heightM * heightM);
+  const maxLength = Math.min(maxLengthBase * 0.7, 1500 * scale.scaleFactor); // Cap at scaled max
   
   for (let i = 0; i < numLines; i++) {
     // Generate random terrain-following bearing (not axis-aligned)
@@ -775,11 +833,17 @@ function generateTerrainFollowingLines(
     const perpBearing = (bearing + 90) % 360;
     const startPoint = movePoint(centroid, perpBearing, startOffset * widthM * 0.4);
     
+    // SCALED line length for this tier
+    const targetLength = tier === 'primary' 
+      ? maxLength * 0.8 
+      : maxLength * 0.5;
+    
     // Generate curved line following simulated terrain
     const lineCoords = generateCurvedTerrainLine(
       startPoint,
       bearing,
-      tier === 'primary' ? maxLength * 0.8 : maxLength * 0.5
+      targetLength,
+      scale.scaleFactor
     );
     
     if (lineCoords.length < 3) continue;
@@ -789,10 +853,10 @@ function generateTerrainFollowingLines(
       return sum + distanceMeters(lineCoords[idx - 1], coord);
     }, 0);
     
-    // Skip if too short
+    // Skip if too short (using SCALED min length)
     const minLength = tier === 'primary' 
-      ? FLOW_THRESHOLDS.min_length_m_primary
-      : FLOW_THRESHOLDS.min_length_m_secondary;
+      ? scale.minLengthPrimary
+      : scale.minLengthSecondary;
     if (lineLength < minLength) continue;
     
     lines.push({
@@ -818,23 +882,28 @@ function generateTerrainFollowingLines(
 /**
  * Generate a curved line that follows simulated terrain
  * Uses compound sinusoidal variation for organic appearance
+ * NOW USES SCALE FACTOR for wave amplitudes
  */
 function generateCurvedTerrainLine(
   start: [number, number],
   bearing: number,
-  length: number
+  length: number,
+  scaleFactor: number = 1.0
 ): [number, number][] {
   const points: [number, number][] = [];
-  const numSegments = 12;
+  
+  // SCALED: More segments for longer lines (better resolution)
+  const numSegments = Math.max(12, Math.round(12 * scaleFactor));
   
   for (let i = 0; i <= numSegments; i++) {
     const t = i / numSegments;
     const distAlongLine = (t - 0.5) * length;
     
     // Compound sinusoidal variation for organic curves
-    // Primary wave (terrain-scale bends)
+    // SCALED wave amplitudes: larger parcels get broader curves
+    // Primary wave (terrain-scale bends) - proportional to length
     const primaryWave = Math.sin(t * Math.PI * 1.5) * length * 0.08;
-    // Secondary wave (local terrain variation)
+    // Secondary wave (local terrain variation) - proportional to length
     const secondaryWave = Math.sin(t * Math.PI * 4) * length * 0.02;
     // Combined lateral offset
     const lateralOffset = primaryWave + secondaryWave;
@@ -853,19 +922,27 @@ function generateCurvedTerrainLine(
 /**
  * Generate convergence zones based on flow line proximity/intersection
  * NOT based on parcel shape or endpoint clustering
+ * NOW USES PARCEL-ADAPTIVE SCALING for search radii and zone limits
  */
 function generateTerrainConvergenceZones(
   primaryLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
   secondaryLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
-  bbox: [number, number, number, number]
+  bbox: [number, number, number, number],
+  scale?: ParcelScaleMetrics
 ): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
   const zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
   const allLines = [...primaryLines, ...secondaryLines];
   
   if (allLines.length < 2) return zones;
   
-  // Find intersection/proximity points between different flow lines
-  const proximityThresholdM = 80;
+  // SCALED proximity threshold and max zones
+  const baseProximity = 80;
+  const proximityThresholdM = scale 
+    ? Math.round(baseProximity * scale.scaleFactor) 
+    : baseProximity;
+  const maxZones = scale?.maxConvergenceZones || 5;
+  const baseRadius = scale?.convergenceBaseRadius || 30;
+  
   const foundZones: { coord: [number, number]; intensity: number; flowCount: number }[] = [];
   
   for (let i = 0; i < allLines.length; i++) {
@@ -874,7 +951,7 @@ function generateTerrainConvergenceZones(
     for (let j = i + 1; j < allLines.length; j++) {
       const line2 = allLines[j].geometry.coordinates;
       
-      // Check each segment pair for proximity
+      // Check each segment pair for proximity (SCALED threshold)
       for (const p1 of line1) {
         for (const p2 of line2) {
           const dist = distanceMeters([p1[0], p1[1]], [p2[0], p2[1]]);
@@ -884,7 +961,7 @@ function generateTerrainConvergenceZones(
               (p1[1] + p2[1]) / 2,
             ];
             
-            // Check if near existing zone
+            // Check if near existing zone (SCALED merge radius)
             const existingZone = foundZones.find(z => 
               distanceMeters(z.coord, midpoint) < proximityThresholdM
             );
@@ -905,17 +982,21 @@ function generateTerrainConvergenceZones(
     }
   }
   
-  // Sort by intensity and take top zones
+  // Sort by intensity and take top zones (SCALED count)
   foundZones.sort((a, b) => b.intensity - a.intensity);
   
-  foundZones.slice(0, 3).forEach((zone, idx) => {
+  foundZones.slice(0, maxZones).forEach((zone, idx) => {
+    const flowCountCapped = Math.min(4, zone.flowCount);
+    // SCALED radius: base + flow-count bonus
+    const scaledRadius = baseRadius + flowCountCapped * (baseRadius / 3);
+    
     zones.push({
       type: 'Feature',
       properties: {
         id: `conv_${idx}`,
         intensity: zone.intensity,
-        flowCount: Math.min(4, zone.flowCount),
-        radiusM: 30 + Math.min(4, zone.flowCount) * 10,
+        flowCount: flowCountCapped,
+        radiusM: Math.round(scaledRadius),
         type: zone.flowCount >= 3 ? 'pinch' : 'overlap',
       },
       geometry: {

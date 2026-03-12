@@ -66,15 +66,115 @@ export const SLOPE_BANDS = {
   extreme_threshold: 45,
 };
 
-// Flow extraction thresholds
+// Flow extraction thresholds (BASE values - will be scaled by parcel size)
 export const FLOW_THRESHOLDS = {
   primary_percentile: 0.75,     // Top 25% likelihood
   secondary_percentile: 0.55,   // Top 45% likelihood
-  min_length_m_primary: 150,
-  min_length_m_secondary: 80,
+  min_length_m_primary: 150,    // BASE - scales with parcel
+  min_length_m_secondary: 80,   // BASE - scales with parcel
   convergence_threshold: 0.70,
   opportunity_threshold: 0.80,
 };
+
+// ========== PARCEL-ADAPTIVE SCALING ==========
+
+/**
+ * Reference diagonal for a 40-acre parcel (~400m x 400m)
+ * All scaling is relative to this "typical" parcel size
+ */
+const REFERENCE_DIAGONAL_M = 565; // sqrt(400^2 + 400^2)
+
+/**
+ * Spatial scaling parameters (BASE values at reference size)
+ * These parameters control the spatial extent of flow features
+ */
+export const SPATIAL_SCALING_BASE = {
+  flow_min_length_primary: 150,      // Base minimum primary flow length (m)
+  flow_min_length_secondary: 80,     // Base minimum secondary flow length (m)
+  convergence_search_radius: 100,    // Base radius for flow proximity search (m)
+  convergence_base_radius: 30,       // Base convergence zone display radius (m)
+  opportunity_radius: 25,            // Base opportunity zone radius (m)
+  gaussian_smooth_cells: 3,          // Base smoothing kernel radius (cells)
+  max_convergence_zones: 5,          // Base max convergence zones
+  max_opportunity_zones: 3,          // Base max opportunity zones
+};
+
+/**
+ * Parcel scale metrics computed from parcel dimensions
+ */
+export interface ParcelScaleMetrics {
+  widthM: number;
+  heightM: number;
+  diagonalM: number;
+  areaAcres: number;
+  scaleFactor: number;        // 1.0 for reference size, increases for larger parcels
+  
+  // Scaled parameters
+  minLengthPrimary: number;
+  minLengthSecondary: number;
+  convergenceSearchRadius: number;
+  convergenceBaseRadius: number;
+  opportunityRadius: number;
+  gaussianSmoothCells: number;
+  maxConvergenceZones: number;
+  maxOpportunityZones: number;
+}
+
+/**
+ * Compute parcel-adaptive scaling metrics
+ * 
+ * @param widthM - Parcel width in meters
+ * @param heightM - Parcel height in meters
+ * @returns ParcelScaleMetrics with scaled parameters
+ */
+export function computeParcelScale(widthM: number, heightM: number): ParcelScaleMetrics {
+  const diagonalM = Math.sqrt(widthM * widthM + heightM * heightM);
+  const areaAcres = (widthM * heightM * 0.8) / 4046.86; // ~80% fill factor
+  
+  // Scale factor: 1.0 at reference size, increases for larger parcels
+  // Clamped between 1.0 (small parcels stay tight) and 2.5 (avoid runaway scaling)
+  const rawScale = diagonalM / REFERENCE_DIAGONAL_M;
+  const scaleFactor = Math.max(1.0, Math.min(2.5, rawScale));
+  
+  // Apply non-linear scaling for very large parcels (diminishing returns)
+  // Use square root scaling for zone counts to avoid excessive features
+  const countScale = 1 + Math.sqrt(scaleFactor - 1) * 1.5;
+  
+  return {
+    widthM,
+    heightM,
+    diagonalM,
+    areaAcres,
+    scaleFactor,
+    
+    // Flow line lengths scale directly with parcel size
+    minLengthPrimary: Math.round(SPATIAL_SCALING_BASE.flow_min_length_primary * scaleFactor),
+    minLengthSecondary: Math.round(SPATIAL_SCALING_BASE.flow_min_length_secondary * scaleFactor),
+    
+    // Search and display radii scale with parcel size
+    convergenceSearchRadius: Math.round(SPATIAL_SCALING_BASE.convergence_search_radius * scaleFactor),
+    convergenceBaseRadius: Math.round(SPATIAL_SCALING_BASE.convergence_base_radius * scaleFactor),
+    opportunityRadius: Math.round(SPATIAL_SCALING_BASE.opportunity_radius * scaleFactor),
+    
+    // Smoothing scales more gently (diminishing returns)
+    gaussianSmoothCells: Math.min(6, Math.ceil(SPATIAL_SCALING_BASE.gaussian_smooth_cells * Math.sqrt(scaleFactor))),
+    
+    // Zone counts scale with square root (fewer additional zones on very large parcels)
+    maxConvergenceZones: Math.min(10, Math.round(SPATIAL_SCALING_BASE.max_convergence_zones * countScale)),
+    maxOpportunityZones: Math.min(6, Math.round(SPATIAL_SCALING_BASE.max_opportunity_zones * countScale)),
+  };
+}
+
+/**
+ * Get scaled flow thresholds based on parcel scale
+ */
+export function getScaledFlowThresholds(scale: ParcelScaleMetrics): typeof FLOW_THRESHOLDS {
+  return {
+    ...FLOW_THRESHOLDS,
+    min_length_m_primary: scale.minLengthPrimary,
+    min_length_m_secondary: scale.minLengthSecondary,
+  };
+}
 
 // ========== GEOMETRY UTILITIES ==========
 
@@ -841,8 +941,35 @@ export function extractFlowLines(
 // ========== CONVERGENCE ZONE DETECTION ==========
 
 /**
+ * Scaling options for convergence/opportunity zone detection
+ * Used to adapt feature sizes to parcel dimensions
+ */
+export interface ZoneScalingOptions {
+  searchRadius?: number;       // Radius for nearby flow search (default 100m)
+  baseRadius?: number;         // Base convergence zone display radius (default 30m)
+  maxZones?: number;           // Max convergence zones to return (default 5)
+  smoothingCells?: number;     // Gaussian smoothing kernel radius (default 3)
+  opportunityRadius?: number;  // Opportunity zone radius (default 25m)
+  maxOpportunityZones?: number; // Max opportunity zones (default 3)
+}
+
+const DEFAULT_ZONE_SCALING: Required<ZoneScalingOptions> = {
+  searchRadius: 100,
+  baseRadius: 30,
+  maxZones: 5,
+  smoothingCells: 3,
+  opportunityRadius: 25,
+  maxOpportunityZones: 3,
+};
+
+/**
  * Identify convergence zones from terrain structure (not endpoint clustering)
  * Uses flow density, terrain pinches, and saddle proximity
+ * 
+ * @param likelihoodGrid - Terrain flow likelihood surface
+ * @param flowLines - Extracted primary and secondary flow lines
+ * @param thresholds - Flow extraction thresholds
+ * @param scalingOptions - Parcel-adaptive scaling parameters
  */
 export function identifyConvergenceZones(
   likelihoodGrid: TerrainGrid,
@@ -850,8 +977,12 @@ export function identifyConvergenceZones(
     primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
     secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   },
-  thresholds: typeof FLOW_THRESHOLDS = FLOW_THRESHOLDS
+  thresholds: typeof FLOW_THRESHOLDS = FLOW_THRESHOLDS,
+  scalingOptions: ZoneScalingOptions = {}
 ): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
+  // Merge with defaults
+  const opts = { ...DEFAULT_ZONE_SCALING, ...scalingOptions };
+  
   const zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
   
   // Build flow density grid
@@ -869,8 +1000,8 @@ export function identifyConvergenceZones(
     });
   });
   
-  // Smooth and find local maxima
-  const smoothedDensity = gaussianSmooth(densityGrid, 3);
+  // Smooth and find local maxima (scaling-aware smoothing radius)
+  const smoothedDensity = gaussianSmooth(densityGrid, opts.smoothingCells);
   
   // Find cells that are local maxima and above threshold
   const maxima: { row: number; col: number; value: number }[] = [];
@@ -897,24 +1028,27 @@ export function identifyConvergenceZones(
     }
   }
   
-  // Sort by value and take top convergence zones
+  // Sort by value and take top convergence zones (SCALED max count)
   maxima.sort((a, b) => b.value - a.value);
-  const topZones = maxima.slice(0, 5); // Max 5 convergence zones
+  const topZones = maxima.slice(0, opts.maxZones);
   
   topZones.forEach((max, idx) => {
     const coord = cellToCoord(max.row, max.col, smoothedDensity);
     
-    // Count nearby flows
+    // Count nearby flows using SCALED search radius
     let flowCount = 0;
     allFlows.forEach(flow => {
       const coords = flow.geometry.coordinates;
       for (const c of coords) {
-        if (distanceMeters([c[0], c[1]], coord) < 100) {
+        if (distanceMeters([c[0], c[1]], coord) < opts.searchRadius) {
           flowCount++;
           break;
         }
       }
     });
+    
+    // SCALED radius: base + flow-count bonus
+    const scaledRadius = opts.baseRadius + flowCount * (opts.baseRadius / 3);
     
     zones.push({
       type: 'Feature',
@@ -922,7 +1056,7 @@ export function identifyConvergenceZones(
         id: `conv_${idx}`,
         intensity: Math.min(1, max.value),
         flowCount: Math.max(2, flowCount),
-        radiusM: 30 + flowCount * 10,
+        radiusM: Math.round(scaledRadius),
         type: flowCount >= 3 ? 'pinch' : 'overlap',
       },
       geometry: {
@@ -937,12 +1071,21 @@ export function identifyConvergenceZones(
 
 /**
  * Identify opportunity zones at high-convergence + high-likelihood areas
+ * 
+ * @param convergenceZones - Detected convergence zones
+ * @param likelihoodGrid - Terrain flow likelihood surface
+ * @param thresholds - Flow extraction thresholds
+ * @param scalingOptions - Parcel-adaptive scaling parameters
  */
 export function identifyOpportunityZones(
   convergenceZones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
   likelihoodGrid: TerrainGrid,
-  thresholds: typeof FLOW_THRESHOLDS = FLOW_THRESHOLDS
+  thresholds: typeof FLOW_THRESHOLDS = FLOW_THRESHOLDS,
+  scalingOptions: ZoneScalingOptions = {}
 ): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
+  // Merge with defaults
+  const opts = { ...DEFAULT_ZONE_SCALING, ...scalingOptions };
+  
   const zones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
   
   // Filter high-intensity convergence zones
@@ -950,7 +1093,8 @@ export function identifyOpportunityZones(
     z => z.properties.intensity >= thresholds.opportunity_threshold
   );
   
-  highIntensity.slice(0, 3).forEach((conv, i) => {
+  // Use SCALED max opportunity zone count
+  highIntensity.slice(0, opts.maxOpportunityZones).forEach((conv, i) => {
     const coord = conv.geometry.coordinates as [number, number];
     const cell = coordToCell(coord, likelihoodGrid);
     const localLikelihood = cell ? likelihoodGrid.data[cell.row]?.[cell.col] || 0.5 : 0.5;
@@ -964,7 +1108,7 @@ export function identifyOpportunityZones(
         convergenceBonus: 0.15 * conv.properties.flowCount / 3,
         benchBonus: 0.10,
         saddleBonus: conv.properties.type === 'pinch' ? 0.10 : 0.05,
-        radiusM: 25,
+        radiusM: opts.opportunityRadius, // SCALED opportunity radius
       },
       geometry: conv.geometry,
     });
