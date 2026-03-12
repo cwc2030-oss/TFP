@@ -126,6 +126,14 @@ export interface TerrainFlowMetadata {
     scale_factor: number;       // Scale factor (1.0 = reference 40-acre)
     acres: number;              // Approximate acreage
   };
+  // V3: Pattern classification for flow generation
+  pattern?: {
+    type: string;               // linear, funnel, bench, crossroads, sparse, none
+    confidence: number;         // 0-1 confidence in classification
+    structure_score: number;    // 0-1 how much terrain structure detected
+    dominant_bearing: number;   // Primary flow direction in degrees
+    explanation: string;        // Human-readable explanation
+  };
 }
 
 // ========== UI State Types ==========

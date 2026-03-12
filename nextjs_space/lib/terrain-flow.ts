@@ -89,6 +89,14 @@ import {
   type FlowSegmentScores,
 } from './dem-analysis';
 
+// V3: Pattern-based flow generation (removes X-pattern bias)
+import {
+  generateTerrainFlowV3,
+  classifyFlowPattern,
+  type FlowPatternType,
+  type PatternClassification,
+} from './terrain-flow-v3';
+
 // Re-export for backwards compatibility
 export { TERRAIN_FLOW_WEIGHTS as FLOW_WEIGHTS, FLOW_THRESHOLDS };
 
@@ -668,8 +676,18 @@ export function generateTerrainDrivenFlow(
 
 /**
  * Generate terrain-indicator-based flow when no corridor data available
- * Uses terrain simulation based on parcel shape BUT with terrain-like curvature
- * NOW USES PARCEL-ADAPTIVE SCALING
+ * 
+ * V3 REFACTOR: Uses pattern-based generation to REMOVE X-pattern bias
+ * 
+ * Old approach (REMOVED):
+ * - 4-quadrant diagonal forcing that created X patterns
+ * - Centroid-based symmetric line generation
+ * 
+ * New approach (V3):
+ * - Pattern archetype classification (linear, funnel, bench, etc.)
+ * - Edge-based flow direction derivation
+ * - Asymmetric/sparse results when appropriate
+ * - "No structure" graceful handling
  */
 function generateTerrainIndicatorFlow(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
@@ -678,116 +696,21 @@ function generateTerrainIndicatorFlow(
   bufferedBbox: [number, number, number, number],
   parcelScale?: ParcelScaleMetrics
 ): TerrainFlowResponse {
-  const startTime = Date.now();
+  console.log('[TerrainFlow:Indicator] Using V3 pattern-based generation (no X-bias)');
   
-  const centroid = getCentroid(coords);
-  const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
-  const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
+  // Delegate to V3 pattern-based generator
+  // This will classify the parcel and generate appropriate flow pattern
+  const v3Result = generateTerrainFlowV3(parcel, null, null);
   
-  // Use provided scale or compute fresh
-  const scale = parcelScale || computeParcelScale(widthM, heightM);
-  const scaledThresholds = getScaledFlowThresholds(scale);
-  
-  console.log('[TerrainFlow:Indicator] Generating for ~%d acres (scale=%.2f)', 
-    Math.round(scale.areaAcres), scale.scaleFactor);
-  console.log('[TerrainFlow:Indicator] Scaled: minLen=%dm/%dm, convRadius=%dm, oppRadius=%dm',
-    scale.minLengthPrimary, scale.minLengthSecondary, 
-    scale.convergenceSearchRadius, scale.opportunityRadius);
-  
-  // Generate terrain-following flow lines with SCALED parameters
-  // These follow simulated terrain contours, NOT parcel orientation
-  const rawPrimaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'primary', scale);
-  const rawSecondaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'secondary', scale);
-  
-  // Generate convergence zones at terrain pinch points with SCALED radius
-  const rawConvergenceZones = generateTerrainConvergenceZones(
-    rawPrimaryLines, rawSecondaryLines, parcelBbox, scale
-  );
-  
-  // Generate opportunity zones with SCALED count and radius
-  const rawOpportunityZones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
-  const maxOpp = scale.maxOpportunityZones;
-  const oppRadius = scale.opportunityRadius;
-  
-  rawConvergenceZones.slice(0, maxOpp).forEach((conv, i) => {
-    if (scale.areaAcres >= 20 || conv.properties.intensity > 0.8) {
-      rawOpportunityZones.push({
-        type: 'Feature',
-        properties: {
-          id: `opp_${i}`,
-          score: 0.75 + Math.random() * 0.15,
-          flowIntensity: conv.properties.intensity,
-          convergenceBonus: 0.15,
-          benchBonus: 0.10,
-          saddleBonus: conv.properties.type === 'pinch' ? 0.10 : 0.05,
-          radiusM: oppRadius,
-        },
-        geometry: conv.geometry,
-      });
-    }
-  });
-  
-  // ========== CLIP TO PARCEL BOUNDARY ==========
-  console.log('[TerrainFlow:Indicator] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
-    rawPrimaryLines.length, rawSecondaryLines.length, 
-    rawConvergenceZones.length, rawOpportunityZones.length);
-  
-  const primaryLines = clipFlowLinesToParcel(rawPrimaryLines, coords, 0.40);
-  const secondaryLines = clipFlowLinesToParcel(rawSecondaryLines, coords, 0.40);
-  const convergenceZones = filterConvergenceZonesToParcel(rawConvergenceZones, coords);
-  const opportunityZones = filterOpportunityZonesToParcel(rawOpportunityZones, coords);
-  
-  console.log('[TerrainFlow:Indicator] POST-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
-    primaryLines.length, secondaryLines.length, 
-    convergenceZones.length, opportunityZones.length);
-  
-  const processingTime = (Date.now() - startTime) / 1000;
-  const totalLength = [...primaryLines, ...secondaryLines].reduce(
-    (sum, f) => sum + (f.properties.lengthM || 0), 0
-  );
-  
-  return {
-    success: true,
-    bbox: parcelBbox,
-    flow_primary: { type: 'FeatureCollection', features: primaryLines },
-    flow_secondary: { type: 'FeatureCollection', features: secondaryLines },
-    convergence_zones: { type: 'FeatureCollection', features: convergenceZones },
-    opportunity_zones: { type: 'FeatureCollection', features: opportunityZones },
-    metadata: {
-      processing_time_seconds: processingTime,
-      mode: 'terrain_driven',
-      dem_source: 'TERRAIN_INDICATORS',
-      resolution_m: 30,
-      buffer_m: ANALYSIS_BUFFER_M,
-      weights: TERRAIN_FLOW_WEIGHTS,
-      thresholds: {
-        primary_min: scaledThresholds.primary_percentile,
-        secondary_min: scaledThresholds.secondary_percentile,
-        min_length_m_primary: scaledThresholds.min_length_m_primary,
-        min_length_m_secondary: scaledThresholds.min_length_m_secondary,
-        convergence_threshold: scaledThresholds.convergence_threshold,
-        opportunity_threshold: scaledThresholds.opportunity_threshold,
-      },
-      stats: {
-        flow_count_primary: primaryLines.length,
-        flow_count_secondary: secondaryLines.length,
-        convergence_count: convergenceZones.length,
-        opportunity_count: opportunityZones.length,
-        total_flow_length_m: totalLength,
-        coverage_pct: 0,
-      },
-      fallback_reason: 'Terrain indicators - awaiting real DEM data from Modal backend',
-      analysis_extent: {
-        parcel_bbox: parcelBbox,
-        buffered_bbox: bufferedBbox,
-      },
-      parcel_scale: {
-        diagonal_m: scale.diagonalM,
-        scale_factor: scale.scaleFactor,
-        acres: scale.areaAcres,
-      },
-    },
+  // Update metadata to reflect this was indicator-based
+  v3Result.metadata.dem_source = 'TERRAIN_INDICATORS_V3';
+  v3Result.metadata.fallback_reason = 'Pattern-inferred from parcel geometry (no corridor data)';
+  v3Result.metadata.analysis_extent = {
+    parcel_bbox: parcelBbox,
+    buffered_bbox: bufferedBbox,
   };
+  
+  return v3Result;
 }
 
 /**
