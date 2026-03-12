@@ -298,3 +298,299 @@ export function logGeometryDebug(
   if (result.centroid) console.log(`  Centroid: ${JSON.stringify(result.centroid)}`);
   if (result.area) console.log(`  Area: ${result.area.toFixed(2)} acres`);
 }
+
+// ========== COMPREHENSIVE GEOMETRY TRACE ==========
+
+export interface GeometryTraceStep {
+  stage: string;
+  timestamp: number;
+  geometryType: string;
+  coordCount: number;
+  firstCoord: number[] | null;
+  lastCoord: number[] | null;
+  bounds: [[number, number], [number, number]] | null;
+  centroid: [number, number] | null;
+  area: number | null;
+  isClosed: boolean;
+  isValid: boolean;
+  errors: string[];
+  coordOrder: 'lng_lat' | 'lat_lng' | 'unknown';
+  rawSample: string; // First few coords for inspection
+}
+
+export interface GeometryTrace {
+  parcelId: string;
+  steps: GeometryTraceStep[];
+  mismatchDetected: boolean;
+  mismatchDetails: string[];
+}
+
+/**
+ * Detect coordinate order (lng,lat vs lat,lng)
+ */
+function detectCoordOrder(coords: number[][]): 'lng_lat' | 'lat_lng' | 'unknown' {
+  if (!coords?.length) return 'unknown';
+  const [a, b] = coords[0];
+  
+  // For US coordinates: lng is negative (~-70 to -130), lat is positive (~25 to 50)
+  if (a < 0 && a > -140 && b > 20 && b < 55) {
+    return 'lng_lat'; // Correct GeoJSON order
+  }
+  if (b < 0 && b > -140 && a > 20 && a < 55) {
+    return 'lat_lng'; // Swapped order (common mistake)
+  }
+  return 'unknown';
+}
+
+/**
+ * Check if a ring is closed
+ */
+function isRingClosed(coords: number[][]): boolean {
+  if (!coords || coords.length < 2) return false;
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  return first[0] === last[0] && first[1] === last[1];
+}
+
+/**
+ * Create a trace step from raw coordinates
+ */
+export function createTraceStep(
+  stage: string,
+  coords: number[][] | number[][][] | number[][][][] | null,
+  geometryType: string
+): GeometryTraceStep {
+  const now = Date.now();
+  
+  if (!coords) {
+    return {
+      stage,
+      timestamp: now,
+      geometryType,
+      coordCount: 0,
+      firstCoord: null,
+      lastCoord: null,
+      bounds: null,
+      centroid: null,
+      area: null,
+      isClosed: false,
+      isValid: false,
+      errors: ['No coordinates provided'],
+      coordOrder: 'unknown',
+      rawSample: 'null',
+    };
+  }
+  
+  // Normalize to outer ring for analysis
+  let outerRing: number[][] | null = null;
+  
+  if (geometryType === 'Polygon' || geometryType === 'ring') {
+    // coords is number[][][] for Polygon or number[][] for direct ring
+    if (Array.isArray(coords[0]) && typeof coords[0][0] === 'number') {
+      outerRing = coords as number[][];
+    } else if (Array.isArray(coords[0]) && Array.isArray(coords[0][0])) {
+      outerRing = (coords as number[][][])[0];
+    }
+  } else if (geometryType === 'MultiPolygon') {
+    // coords is number[][][][]
+    const polygons = coords as number[][][][];
+    let largest: number[][] | null = null;
+    let maxLen = 0;
+    for (const poly of polygons) {
+      if (poly[0] && poly[0].length > maxLen) {
+        maxLen = poly[0].length;
+        largest = poly[0];
+      }
+    }
+    outerRing = largest;
+  }
+  
+  if (!outerRing || outerRing.length < 3) {
+    return {
+      stage,
+      timestamp: now,
+      geometryType,
+      coordCount: outerRing?.length || 0,
+      firstCoord: outerRing?.[0] || null,
+      lastCoord: outerRing?.[outerRing?.length - 1] || null,
+      bounds: null,
+      centroid: null,
+      area: null,
+      isClosed: false,
+      isValid: false,
+      errors: ['Could not extract valid ring'],
+      coordOrder: 'unknown',
+      rawSample: JSON.stringify(coords).slice(0, 200),
+    };
+  }
+  
+  const validation = validateParcelGeometry(
+    geometryType === 'ring' ? [outerRing] as number[][][] : coords as number[][][] | number[][][][],
+    geometryType === 'ring' ? 'Polygon' : geometryType
+  );
+  
+  return {
+    stage,
+    timestamp: now,
+    geometryType,
+    coordCount: outerRing.length,
+    firstCoord: outerRing[0],
+    lastCoord: outerRing[outerRing.length - 1],
+    bounds: validation.bounds || calculateBounds(outerRing),
+    centroid: validation.centroid || calculateCentroid(outerRing),
+    area: validation.area || calculatePolygonArea(outerRing),
+    isClosed: isRingClosed(outerRing),
+    isValid: validation.valid,
+    errors: validation.errors,
+    coordOrder: detectCoordOrder(outerRing),
+    rawSample: JSON.stringify(outerRing.slice(0, 3)).slice(0, 300),
+  };
+}
+
+/**
+ * Compare two trace steps to detect mismatches
+ */
+export function compareTraceSteps(a: GeometryTraceStep, b: GeometryTraceStep): string[] {
+  const issues: string[] = [];
+  
+  // Check coordinate counts
+  if (a.coordCount !== b.coordCount) {
+    issues.push(`Coord count mismatch: ${a.stage}=${a.coordCount} vs ${b.stage}=${b.coordCount}`);
+  }
+  
+  // Check first coordinate
+  if (a.firstCoord && b.firstCoord) {
+    const lngDiff = Math.abs(a.firstCoord[0] - b.firstCoord[0]);
+    const latDiff = Math.abs(a.firstCoord[1] - b.firstCoord[1]);
+    if (lngDiff > 0.00001 || latDiff > 0.00001) {
+      issues.push(`First coord mismatch: ${a.stage}=[${a.firstCoord}] vs ${b.stage}=[${b.firstCoord}]`);
+    }
+  }
+  
+  // Check bounds
+  if (a.bounds && b.bounds) {
+    const swLngDiff = Math.abs(a.bounds[0][0] - b.bounds[0][0]);
+    const swLatDiff = Math.abs(a.bounds[0][1] - b.bounds[0][1]);
+    const neLngDiff = Math.abs(a.bounds[1][0] - b.bounds[1][0]);
+    const neLatDiff = Math.abs(a.bounds[1][1] - b.bounds[1][1]);
+    
+    if (swLngDiff > 0.0001 || swLatDiff > 0.0001 || neLngDiff > 0.0001 || neLatDiff > 0.0001) {
+      issues.push(`Bounds mismatch: ${a.stage}=${JSON.stringify(a.bounds)} vs ${b.stage}=${JSON.stringify(b.bounds)}`);
+    }
+  }
+  
+  // Check coordinate order
+  if (a.coordOrder !== b.coordOrder) {
+    issues.push(`Coord order mismatch: ${a.stage}=${a.coordOrder} vs ${b.stage}=${b.coordOrder}`);
+  }
+  
+  // Check validity
+  if (a.isValid !== b.isValid) {
+    issues.push(`Validity mismatch: ${a.stage}=${a.isValid} vs ${b.stage}=${b.isValid}`);
+  }
+  
+  return issues;
+}
+
+/**
+ * Create a full geometry trace
+ */
+export function createGeometryTrace(parcelId: string): GeometryTrace {
+  return {
+    parcelId,
+    steps: [],
+    mismatchDetected: false,
+    mismatchDetails: [],
+  };
+}
+
+/**
+ * Add a step to a trace and check for mismatches
+ */
+export function addTraceStep(trace: GeometryTrace, step: GeometryTraceStep): void {
+  trace.steps.push(step);
+  
+  // Compare with previous step if exists
+  if (trace.steps.length > 1) {
+    const prev = trace.steps[trace.steps.length - 2];
+    const issues = compareTraceSteps(prev, step);
+    if (issues.length > 0) {
+      trace.mismatchDetected = true;
+      trace.mismatchDetails.push(...issues);
+    }
+  }
+}
+
+/**
+ * Print full trace to console
+ */
+export function printGeometryTrace(trace: GeometryTrace): void {
+  console.log('\n========== GEOMETRY TRACE: ' + trace.parcelId + ' ==========');
+  
+  for (const step of trace.steps) {
+    console.log(`\n[${step.stage}]`);
+    console.log(`  Type: ${step.geometryType}`);
+    console.log(`  Coord count: ${step.coordCount}`);
+    console.log(`  First coord: ${JSON.stringify(step.firstCoord)}`);
+    console.log(`  Last coord: ${JSON.stringify(step.lastCoord)}`);
+    console.log(`  Closed: ${step.isClosed}`);
+    console.log(`  Coord order: ${step.coordOrder}`);
+    console.log(`  Bounds: ${JSON.stringify(step.bounds)}`);
+    console.log(`  Centroid: ${JSON.stringify(step.centroid)}`);
+    console.log(`  Area: ${step.area?.toFixed(2)} ac`);
+    console.log(`  Valid: ${step.isValid}`);
+    if (step.errors.length) console.log(`  Errors: ${step.errors.join('; ')}`);
+    console.log(`  Sample: ${step.rawSample}`);
+  }
+  
+  if (trace.mismatchDetected) {
+    console.log('\n⚠️ MISMATCHES DETECTED:');
+    trace.mismatchDetails.forEach(d => console.log(`  - ${d}`));
+  } else {
+    console.log('\n✅ No mismatches detected between stages');
+  }
+  
+  console.log('========== END TRACE ==========\n');
+}
+
+/**
+ * Validate that geometry is ready for terrain analysis
+ */
+export function validateForAnalysis(coords: number[][] | null): {
+  valid: boolean;
+  error: string | null;
+} {
+  if (!coords || coords.length < 4) {
+    return { valid: false, error: 'Parcel has insufficient coordinates (need at least 4)' };
+  }
+  
+  const order = detectCoordOrder(coords);
+  if (order === 'lat_lng') {
+    return { valid: false, error: 'Coordinates appear to be in [lat, lng] order instead of [lng, lat]' };
+  }
+  
+  // Check bounds sanity
+  const bounds = calculateBounds(coords);
+  const width = bounds[1][0] - bounds[0][0];
+  const height = bounds[1][1] - bounds[0][1];
+  
+  if (width <= 0 || height <= 0) {
+    return { valid: false, error: 'Parcel has invalid bounding box (zero or negative dimensions)' };
+  }
+  
+  if (width > 1 || height > 1) {
+    return { valid: false, error: 'Parcel bounds are too large (>1 degree), likely corrupted coordinates' };
+  }
+  
+  // Check area
+  const area = calculatePolygonArea(coords);
+  if (area < 0.5) {
+    return { valid: false, error: `Parcel too small for analysis (${area.toFixed(2)} acres)` };
+  }
+  
+  if (area > 5000) {
+    return { valid: false, error: `Parcel too large for analysis (${area.toFixed(0)} acres)` };
+  }
+  
+  return { valid: true, error: null };
+}

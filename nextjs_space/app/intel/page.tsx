@@ -45,6 +45,15 @@ import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrai
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
 import { computeBrokerScore, type BrokerScoreResult, type BrokerScoreInput } from '@/lib/broker-scoring';
+import { 
+  createGeometryTrace, 
+  addTraceStep, 
+  createTraceStep, 
+  printGeometryTrace, 
+  validateForAnalysis,
+  type GeometryTrace,
+  type GeometryTraceStep
+} from '@/lib/geometry-validation';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -908,6 +917,13 @@ function DeerIntelContent() {
   const [qaShowScorecard, setQaShowScorecard] = useState(false); // Show rating UI after analysis
   const [qaShowAnalytics, setQaShowAnalytics] = useState(false); // Show analytics panel
   const [qaBrokerScore, setQaBrokerScore] = useState<BrokerScoreResult | null>(null); // Broker scoring
+
+  // ========== GEOMETRY DEBUG STATE ==========
+  const [geometryDebugMode, setGeometryDebugMode] = useState(false); // Toggle to show 3-boundary overlay
+  const [geometryTrace, setGeometryTrace] = useState<GeometryTrace | null>(null);
+  const [rawRegridCoords, setRawRegridCoords] = useState<number[][] | null>(null); // Raw coords from API
+  const [analysisCoords, setAnalysisCoords] = useState<number[][] | null>(null); // Coords sent to terrain flow
+  const [geometryValidationError, setGeometryValidationError] = useState<string | null>(null);
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -2332,6 +2348,54 @@ function DeerIntelContent() {
           }, 'tfp-qa-parcel-outline'); // Insert below the main outline
         }
         
+        // ========== DEBUG GEOMETRY LAYERS (3-boundary overlay) ==========
+        // Red: Raw Regrid geometry (before normalization)
+        if (!map.getSource('tfp-debug-raw')) {
+          map.addSource('tfp-debug-raw', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-debug-raw-outline',
+            type: 'line',
+            source: 'tfp-debug-raw',
+            layout: { visibility: 'none' }, // Hidden by default
+            paint: {
+              'line-color': '#ef4444', // Red-500
+              'line-width': 4,
+              'line-opacity': 0.9,
+              'line-dasharray': [2, 2],
+            },
+          });
+        }
+        // Cyan: Normalized geometry (after normalizeToOuterRing)
+        if (!map.getSource('tfp-debug-normalized')) {
+          map.addSource('tfp-debug-normalized', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-debug-normalized-outline',
+            type: 'line',
+            source: 'tfp-debug-normalized',
+            layout: { visibility: 'none' }, // Hidden by default
+            paint: {
+              'line-color': '#06b6d4', // Cyan-500
+              'line-width': 3,
+              'line-opacity': 0.9,
+            },
+          });
+        }
+        // Yellow: Analysis geometry (sent to Terrain Flow)
+        if (!map.getSource('tfp-debug-analysis')) {
+          map.addSource('tfp-debug-analysis', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-debug-analysis-outline',
+            type: 'line',
+            source: 'tfp-debug-analysis',
+            layout: { visibility: 'none' }, // Hidden by default
+            paint: {
+              'line-color': '#fbbf24', // Amber-400
+              'line-width': 2,
+              'line-opacity': 0.9,
+            },
+          });
+        }
+        
         // Bedding source - HIDE in Terrain Work Mode (deer interpretation)
         if (!map.getSource('tfp-bedding')) {
           map.addSource('tfp-bedding', { type: 'geojson', data: EMPTY_FC });
@@ -3430,9 +3494,13 @@ function DeerIntelContent() {
     setQaParcelLoading(true);
     setQaParcelError(null);
     setQaParcel(null);
+    setGeometryValidationError(null);
+    setGeometryTrace(null);
+    setRawRegridCoords(null);
     
     try {
-      const response = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
+      // Fetch with debug=true to get raw geometry info
+      const response = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}&debug=true`);
       const data = await response.json();
       
       if (!data.found) {
@@ -3442,6 +3510,40 @@ function DeerIntelContent() {
       
       if (data.parcel) {
         setQaParcel(data.parcel);
+        
+        // ========== GEOMETRY TRACE: Step 1 - Normalized coords from API ==========
+        const trace = createGeometryTrace(data.parcel.parcelId);
+        const normalizedStep = createTraceStep(
+          '1_API_NORMALIZED',
+          data.parcel.coordinates,
+          'ring'
+        );
+        addTraceStep(trace, normalizedStep);
+        
+        // Store raw coords if available in debug response
+        if (data.debug?.rawCoords) {
+          setRawRegridCoords(data.debug.rawCoords);
+          const rawStep = createTraceStep(
+            '0_REGRID_RAW',
+            data.debug.rawCoords,
+            data.debug.rawGeometryType || 'Polygon'
+          );
+          // Insert at beginning
+          trace.steps.unshift(rawStep);
+        } else {
+          // If no raw coords, store normalized as "raw" too
+          setRawRegridCoords(data.parcel.coordinates);
+        }
+        
+        setGeometryTrace(trace);
+        
+        // Validate geometry for analysis
+        const validation = validateForAnalysis(data.parcel.coordinates);
+        if (!validation.valid) {
+          setGeometryValidationError(validation.error);
+          console.warn('[QA PARCEL] Geometry validation failed:', validation.error);
+        }
+        
         // Track visited parcel (keep last 20)
         setQaRecentParcelIds(prev => {
           const updated = [data.parcel.parcelId, ...prev.filter((id: string) => id !== data.parcel.parcelId)];
@@ -3471,6 +3573,35 @@ function DeerIntelContent() {
             });
           }
           
+          // ========== DEBUG LAYERS UPDATE ==========
+          if (geometryDebugMode) {
+            // Update debug layer: normalized (cyan)
+            const normalizedSource = map.getSource('tfp-debug-normalized') as mapboxgl.GeoJSONSource;
+            if (normalizedSource) {
+              normalizedSource.setData({
+                type: 'Feature',
+                properties: { stage: 'normalized' },
+                geometry: { type: 'Polygon', coordinates: [coords] }
+              });
+            }
+            
+            // Update debug layer: raw (red) - if different from normalized
+            if (data.debug?.rawCoords) {
+              const rawSource = map.getSource('tfp-debug-raw') as mapboxgl.GeoJSONSource;
+              if (rawSource) {
+                const rawCoords = [...data.debug.rawCoords];
+                if (rawCoords.length > 0 && (rawCoords[0][0] !== rawCoords[rawCoords.length-1][0] || rawCoords[0][1] !== rawCoords[rawCoords.length-1][1])) {
+                  rawCoords.push(rawCoords[0]);
+                }
+                rawSource.setData({
+                  type: 'Feature',
+                  properties: { stage: 'raw' },
+                  geometry: { type: 'Polygon', coordinates: [rawCoords] }
+                });
+              }
+            }
+          }
+          
           // Fit bounds to parcel
           if (data.parcel.bounds) {
             map.fitBounds(data.parcel.bounds, {
@@ -3480,6 +3611,11 @@ function DeerIntelContent() {
             });
           }
         }
+        
+        // Print trace to console in debug mode
+        if (geometryDebugMode) {
+          printGeometryTrace(trace);
+        }
       }
     } catch (err) {
       console.error('[QA PARCEL] Lookup error:', err);
@@ -3487,10 +3623,16 @@ function DeerIntelContent() {
     } finally {
       setQaParcelLoading(false);
     }
-  }, [qaParcelLoading]);
+  }, [qaParcelLoading, geometryDebugMode]);
 
   const handleQaParcelAnalyze = useCallback(async () => {
     if (!qaParcel || qaParcelAnalyzing) return;
+    
+    // Check for geometry validation error - block analysis if invalid
+    if (geometryValidationError) {
+      setQaParcelError(`Parcel geometry invalid for analysis: ${geometryValidationError}`);
+      return;
+    }
     
     setQaParcelAnalyzing(true);
     setQaShowScorecard(false); // Reset scorecard for new analysis
@@ -3502,6 +3644,30 @@ function DeerIntelContent() {
       if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
         coords.push(coords[0]);
       }
+      
+      // ========== GEOMETRY TRACE: Step 2 - Analysis coords ==========
+      const analysisStep = createTraceStep(
+        '2_ANALYSIS_INPUT',
+        coords,
+        'ring'
+      );
+      
+      if (geometryTrace) {
+        addTraceStep(geometryTrace, analysisStep);
+        
+        // Print updated trace
+        if (geometryDebugMode) {
+          printGeometryTrace(geometryTrace);
+        }
+        
+        // Check for mismatch
+        if (geometryTrace.mismatchDetected) {
+          console.error('⚠️ GEOMETRY MISMATCH DETECTED:', geometryTrace.mismatchDetails);
+        }
+      }
+      
+      // Store analysis coords for debug comparison
+      setAnalysisCoords(coords);
       
       const parcelFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
         type: 'Feature',
@@ -3516,6 +3682,19 @@ function DeerIntelContent() {
         }
       };
       
+      // ========== DEBUG LAYER: Analysis geometry (yellow) ==========
+      const map = mapRef.current;
+      if (map && geometryDebugMode) {
+        const analysisSource = map.getSource('tfp-debug-analysis') as mapboxgl.GeoJSONSource;
+        if (analysisSource) {
+          analysisSource.setData({
+            type: 'Feature',
+            properties: { stage: 'analysis' },
+            geometry: { type: 'Polygon', coordinates: [coords] }
+          });
+        }
+      }
+      
       // Update the parcelPolygon state - this triggers terrain flow analysis
       setParcelPolygon(parcelFeature);
       
@@ -3527,18 +3706,23 @@ function DeerIntelContent() {
       setTimeout(() => setQaShowScorecard(true), 500);
       
       console.log('[QA PARCEL] Analysis triggered for', qaParcel.address);
+      console.log('[QA PARCEL] Analysis coords sample:', coords.slice(0, 3));
     } catch (err) {
       console.error('[QA PARCEL] Analysis error:', err);
       setQaParcelError('Failed to analyze parcel');
     } finally {
       setQaParcelAnalyzing(false);
     }
-  }, [qaParcel, qaParcelAnalyzing]);
+  }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode]);
 
   const handleQaParcelClear = useCallback(() => {
     setQaParcel(null);
     setQaParcelError(null);
     setQaShowScorecard(false);
+    setGeometryValidationError(null);
+    setGeometryTrace(null);
+    setRawRegridCoords(null);
+    setAnalysisCoords(null);
     
     // Clear map layer
     const map = mapRef.current;
@@ -3547,8 +3731,79 @@ function DeerIntelContent() {
       if (qaSource) {
         qaSource.setData({ type: 'FeatureCollection', features: [] });
       }
+      // Clear debug layers
+      const rawSource = map.getSource('tfp-debug-raw') as mapboxgl.GeoJSONSource;
+      if (rawSource) rawSource.setData({ type: 'FeatureCollection', features: [] });
+      const normalizedSource = map.getSource('tfp-debug-normalized') as mapboxgl.GeoJSONSource;
+      if (normalizedSource) normalizedSource.setData({ type: 'FeatureCollection', features: [] });
+      const analysisSource = map.getSource('tfp-debug-analysis') as mapboxgl.GeoJSONSource;
+      if (analysisSource) analysisSource.setData({ type: 'FeatureCollection', features: [] });
     }
   }, []);
+  
+  // Toggle debug layer visibility when geometryDebugMode changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    
+    const visibility = geometryDebugMode ? 'visible' : 'none';
+    
+    if (map.getLayer('tfp-debug-raw-outline')) {
+      map.setLayoutProperty('tfp-debug-raw-outline', 'visibility', visibility);
+    }
+    if (map.getLayer('tfp-debug-normalized-outline')) {
+      map.setLayoutProperty('tfp-debug-normalized-outline', 'visibility', visibility);
+    }
+    if (map.getLayer('tfp-debug-analysis-outline')) {
+      map.setLayoutProperty('tfp-debug-analysis-outline', 'visibility', visibility);
+    }
+    
+    // When debug mode turns on, re-populate layers if we have data
+    if (geometryDebugMode && qaParcel) {
+      const coords = [...qaParcel.coordinates];
+      if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+        coords.push(coords[0]);
+      }
+      
+      // Normalized (cyan)
+      const normalizedSource = map.getSource('tfp-debug-normalized') as mapboxgl.GeoJSONSource;
+      if (normalizedSource) {
+        normalizedSource.setData({
+          type: 'Feature',
+          properties: { stage: 'normalized' },
+          geometry: { type: 'Polygon', coordinates: [coords] }
+        });
+      }
+      
+      // Raw (red) - if we have it
+      if (rawRegridCoords) {
+        const rawCoords = [...rawRegridCoords];
+        if (rawCoords.length > 0 && (rawCoords[0][0] !== rawCoords[rawCoords.length-1][0] || rawCoords[0][1] !== rawCoords[rawCoords.length-1][1])) {
+          rawCoords.push(rawCoords[0]);
+        }
+        const rawSource = map.getSource('tfp-debug-raw') as mapboxgl.GeoJSONSource;
+        if (rawSource) {
+          rawSource.setData({
+            type: 'Feature',
+            properties: { stage: 'raw' },
+            geometry: { type: 'Polygon', coordinates: [rawCoords] }
+          });
+        }
+      }
+      
+      // Analysis (yellow) - if we have it
+      if (analysisCoords) {
+        const analysisSource = map.getSource('tfp-debug-analysis') as mapboxgl.GeoJSONSource;
+        if (analysisSource) {
+          analysisSource.setData({
+            type: 'Feature',
+            properties: { stage: 'analysis' },
+            geometry: { type: 'Polygon', coordinates: [analysisCoords] }
+          });
+        }
+      }
+    }
+  }, [geometryDebugMode, mapReady, qaParcel, rawRegridCoords, analysisCoords]);
 
   const handleQaParcelCopyInfo = useCallback(() => {
     if (!qaParcel) return;
@@ -4217,6 +4472,22 @@ function DeerIntelContent() {
               <Layers className="h-4 w-4 mr-1" />
               {qaParcelLookupMode ? 'QA Mode ON' : 'QA Mode'}
             </Button>
+            {/* Geometry Debug Toggle (only show when QA Mode is on) */}
+            {qaParcelLookupMode && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`${geometryDebugMode 
+                  ? 'bg-red-600/30 text-red-400 border border-red-500/50' 
+                  : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+                onClick={() => setGeometryDebugMode(!geometryDebugMode)}
+                title="Show 3-boundary debug overlay: Red=Raw, Cyan=Normalized, Yellow=Analysis"
+              >
+                <Bug className="h-4 w-4 mr-1" />
+                {geometryDebugMode ? 'Debug ON' : 'Debug'}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -4267,7 +4538,53 @@ function DeerIntelContent() {
               onClear={handleQaParcelClear}
               onCopyInfo={handleQaParcelCopyInfo}
               error={qaParcelError}
+              geometryValidationError={geometryValidationError}
             />
+          )}
+          
+          {/* Debug Mode Legend (shows when debug mode is on and parcel is selected) */}
+          {geometryDebugMode && qaParcel && (
+            <div className="absolute top-[300px] left-4 z-40 w-64 bg-gray-900/95 backdrop-blur-sm border border-red-500/40 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-red-400 mb-2">
+                <Bug className="h-3.5 w-3.5" />
+                <span>Geometry Debug Overlay</span>
+              </div>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-1 bg-red-500 rounded border border-dashed border-red-600" />
+                  <span className="text-gray-400">Raw (Regrid)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-1 bg-cyan-500 rounded" />
+                  <span className="text-gray-400">Normalized (API)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-1 bg-amber-400 rounded" />
+                  <span className="text-gray-400">Analysis Input</span>
+                </div>
+              </div>
+              {geometryTrace?.mismatchDetected && (
+                <div className="mt-2 pt-2 border-t border-red-500/30">
+                  <div className="flex items-center gap-1.5 text-xs text-red-400">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span className="font-medium">Mismatch Detected!</span>
+                  </div>
+                  <ul className="mt-1 text-xs text-red-400/70 space-y-0.5">
+                    {geometryTrace.mismatchDetails.slice(0, 3).map((d, i) => (
+                      <li key={i} className="truncate" title={d}>• {d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!geometryTrace?.mismatchDetected && analysisCoords && (
+                <div className="mt-2 pt-2 border-t border-emerald-500/30 text-xs text-emerald-400">
+                  ✓ Boundaries match - no offset detected
+                </div>
+              )}
+              <div className="mt-2 text-[10px] text-gray-500">
+                Check console for full trace log
+              </div>
+            </div>
           )}
           
           {/* QA Scorecard (after analysis runs) */}

@@ -70,6 +70,7 @@ interface ParcelLookupCardProps {
   onClear: () => void;
   onCopyInfo: () => void;
   error?: string | null;
+  geometryValidationError?: string | null; // Error from parent's server-side validation
 }
 
 export default function ParcelLookupCard({
@@ -79,15 +80,24 @@ export default function ParcelLookupCard({
   onAnalyze,
   onClear,
   onCopyInfo,
-  error
+  error,
+  geometryValidationError
 }: ParcelLookupCardProps) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   
-  // Validate parcel geometry
-  const geometryValidation = useMemo(() => {
+  // Validate parcel geometry (client-side)
+  const clientValidation = useMemo(() => {
     return validateParcelCoordinates(parcel.coordinates);
   }, [parcel.coordinates]);
+  
+  // Combine client and server validation
+  const geometryValidation = useMemo(() => {
+    if (geometryValidationError) {
+      return { valid: false, error: geometryValidationError };
+    }
+    return clientValidation;
+  }, [clientValidation, geometryValidationError]);
   
   const handleCopy = () => {
     onCopyInfo();

@@ -70,12 +70,25 @@ export interface ParcelLookupResponse {
   };
   error?: string;
   cached?: boolean;
+  // Debug info returned when debug=true query param is set
+  debug?: {
+    rawCoords: number[][] | null; // Raw outer ring from Regrid before any transformation
+    rawGeometryType: 'Polygon' | 'MultiPolygon';
+    normalizedCoords: number[][] | null; // After normalizeToOuterRing
+    coordOrder: 'lng_lat' | 'lat_lng' | 'unknown';
+    validation: {
+      valid: boolean;
+      errors: string[];
+      warnings: string[];
+    };
+  };
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const lat = searchParams.get("lat");
   const lng = searchParams.get("lng");
+  const debugMode = searchParams.get("debug") === "true";
   
   if (!lat || !lng) {
     return NextResponse.json(
@@ -115,6 +128,15 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+  
+  // Helper to detect coordinate order
+  const detectCoordOrder = (coords: number[][]): 'lng_lat' | 'lat_lng' | 'unknown' => {
+    if (!coords?.length) return 'unknown';
+    const [a, b] = coords[0];
+    if (a < 0 && a > -140 && b > 20 && b < 55) return 'lng_lat';
+    if (b < 0 && b > -140 && a > 20 && a < 55) return 'lat_lng';
+    return 'unknown';
+  };
 
   try {
     // Check cache first
@@ -249,6 +271,22 @@ export async function GET(request: NextRequest) {
       fields.plss_section ? `S${fields.plss_section}` : null,
     ].filter(Boolean);
     
+    // Extract raw outer ring for debug comparison
+    let rawOuterRing: number[][] | null = null;
+    if (geoType === 'Polygon') {
+      rawOuterRing = rawCoords[0] as number[][];
+    } else if (geoType === 'MultiPolygon') {
+      // Get largest polygon's outer ring
+      const polygons = rawCoords as number[][][][];
+      let maxLen = 0;
+      for (const poly of polygons) {
+        if (poly[0] && poly[0].length > maxLen) {
+          maxLen = poly[0].length;
+          rawOuterRing = poly[0];
+        }
+      }
+    }
+    
     const response: ParcelLookupResponse = {
       found: true,
       parcel: {
@@ -265,7 +303,21 @@ export async function GET(request: NextRequest) {
         geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
         legalDescription: fields.legaldesc || fields.legal_description || undefined,
         plss: plssParts.length > 0 ? plssParts.join(' ') : undefined,
-      }
+      },
+      // Add debug info if requested
+      ...(debugMode && {
+        debug: {
+          rawCoords: rawOuterRing,
+          rawGeometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' as const : 'Polygon' as const,
+          normalizedCoords,
+          coordOrder: detectCoordOrder(normalizedCoords),
+          validation: {
+            valid: validation.valid,
+            errors: validation.errors,
+            warnings: validation.warnings,
+          },
+        }
+      })
     };
     
     // Cache in background - store raw coordinates AND geometry type
