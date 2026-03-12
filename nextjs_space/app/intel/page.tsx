@@ -1299,6 +1299,7 @@ function DeerIntelContent() {
     console.log('[INTEL] === ANALYSIS START ===');
     console.log('[INTEL] Coordinates:', lat, lng);
     console.log('[INTEL] Season:', season, 'Wind:', windDirection);
+    console.log('[INTEL] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
 
     try {
       // Import shared terrain client
@@ -1306,12 +1307,14 @@ function DeerIntelContent() {
       
       // Get real parcel geometry from Regrid
       setProgress(15);
+      console.log('[INTEL] Fetching parcel geometry for:', lat, lng);
       const parcel = await fetchParcelGeometry(lat, lng);
       
       if (!parcel) {
         // Use synthetic fallback instead of failing
         console.warn('[INTEL] No Regrid parcel, using synthetic boundary');
         const syntheticParcel = generateSyntheticParcel(lat, lng, parseFloat(acreageParam || '80'));
+        console.log('[INTEL] Setting parcelPolygon to SYNTHETIC parcel');
         setParcelPolygon(syntheticParcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
         setProgress(20);
         setProgressStep('Using estimated boundary...');
@@ -1346,6 +1349,11 @@ function DeerIntelContent() {
         return;
       }
       
+      console.log('[INTEL] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
+      console.log('[INTEL] Parcel geometry type:', parcel.geometry.type);
+      console.log('[INTEL] Parcel coords length:', parcel.geometry.type === 'Polygon' 
+        ? parcel.geometry.coordinates[0].length 
+        : parcel.geometry.coordinates.map((p: any) => p[0]?.length || 0));
       setParcelPolygon(parcel);
       setProgress(20);
       setProgressStep('Running terrain analysis...');
@@ -1407,10 +1415,16 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
 
     try {
-      // Update parcel boundary
+      // Update parcel boundary - CRITICAL: clear if null to avoid stale boundaries
       const parcelSource = map.getSource('tfp-parcel') as mapboxgl.GeoJSONSource;
-      if (parcelSource && parcelPolygon) {
-        parcelSource.setData(validateGeoJSON(parcelPolygon));
+      if (parcelSource) {
+        if (parcelPolygon) {
+          parcelSource.setData(validateGeoJSON(parcelPolygon));
+          console.log('[MAP] Updated parcel boundary with', parcelPolygon.properties?.parcelId || 'parcel');
+        } else {
+          parcelSource.setData(EMPTY_FC);
+          console.log('[MAP] Cleared parcel boundary (parcelPolygon is null)');
+        }
       }
 
       // Update bedding polygons
@@ -2076,34 +2090,36 @@ function DeerIntelContent() {
       ? legacySyntheticData 
       : terrainFlowData;
     
-    if (!flowData) return;
+    // CRITICAL FIX: When flowData is null, clear map sources (not return early)
+    // This prevents stale terrain flow from persisting across parcel changes
+    const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
     try {
       // Update primary flow source
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(flowData.flow_primary);
+        primarySource.setData(flowData?.flow_primary || emptyFC);
       }
 
       // Update secondary flow source
       const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(flowData.flow_secondary);
+        secondarySource.setData(flowData?.flow_secondary || emptyFC);
       }
 
       // Update convergence zones source
       const convergenceSource = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
       if (convergenceSource) {
-        convergenceSource.setData(flowData.convergence_zones);
+        convergenceSource.setData(flowData?.convergence_zones || emptyFC);
       }
 
       // Update opportunity zones source
       const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
       if (opportunitySource) {
-        opportunitySource.setData(flowData.opportunity_zones);
+        opportunitySource.setData(flowData?.opportunity_zones || emptyFC);
       }
 
-      console.log('[TerrainFlow] Updated map sources', flowComparisonMode ? '(LEGACY comparison)' : '(terrain-driven)');
+      console.log('[TerrainFlow] Updated map sources', flowData ? (flowComparisonMode ? '(LEGACY comparison)' : '(terrain-driven)') : '(CLEARED - parcel switch)');
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
@@ -3695,18 +3711,33 @@ function DeerIntelContent() {
         }
       }
       
+      // CRITICAL: Reset hasFitToParcel so the new parcel bounds fit occurs
+      hasFitToParcel.current = false;
+      console.log('[QA PARCEL] Reset hasFitToParcel for new parcel orientation');
+      
       // Update the parcelPolygon state - this triggers terrain flow analysis
       setParcelPolygon(parcelFeature);
+      console.log('[QA PARCEL] setParcelPolygon called with:', parcelFeature.properties?.parcelId || qaParcel.parcelId);
       
-      // Reset terrain flow data to trigger re-fetch
+      // Reset terrain flow data to trigger re-fetch (sources will be cleared by effect)
       setTerrainFlowData(null);
       setTerrainFlowLoading(true);
+      
+      // Also clear ridge spine data for clean slate
+      setRidgeSpineData(null);
+      
+      // Clear tiered corridor data
+      setTieredCorridorData(null);
+      
+      // Clear edge intel data  
+      setEdgeIntelData(null);
       
       // Show scorecard after a short delay (analysis will complete)
       setTimeout(() => setQaShowScorecard(true), 500);
       
       console.log('[QA PARCEL] Analysis triggered for', qaParcel.address);
       console.log('[QA PARCEL] Analysis coords sample:', coords.slice(0, 3));
+      console.log('[QA PARCEL] Cleared: terrainFlowData, ridgeSpineData, tieredCorridorData, edgeIntelData');
     } catch (err) {
       console.error('[QA PARCEL] Analysis error:', err);
       setQaParcelError('Failed to analyze parcel');
@@ -3716,6 +3747,8 @@ function DeerIntelContent() {
   }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode]);
 
   const handleQaParcelClear = useCallback(() => {
+    console.log('[QA PARCEL] === CLEARING PARCEL STATE ===');
+    
     setQaParcel(null);
     setQaParcelError(null);
     setQaShowScorecard(false);
@@ -3724,20 +3757,58 @@ function DeerIntelContent() {
     setRawRegridCoords(null);
     setAnalysisCoords(null);
     
-    // Clear map layer
+    // Clear all terrain analysis data
+    setTerrainFlowData(null);
+    setRidgeSpineData(null);
+    setTieredCorridorData(null);
+    setEdgeIntelData(null);
+    setTerrainFlowLoading(false);
+    
+    // Reset parcelPolygon to null (this will clear boundary via effect)
+    setParcelPolygon(null);
+    
+    // Reset fit flag for next parcel
+    hasFitToParcel.current = false;
+    
+    // Clear all map layers immediately
     const map = mapRef.current;
     if (map) {
+      const emptyFC = { type: 'FeatureCollection' as const, features: [] };
+      
       const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
-      if (qaSource) {
-        qaSource.setData({ type: 'FeatureCollection', features: [] });
-      }
+      if (qaSource) qaSource.setData(emptyFC);
+      
+      // Clear main parcel boundary
+      const parcelSource = map.getSource('tfp-parcel') as mapboxgl.GeoJSONSource;
+      if (parcelSource) parcelSource.setData(emptyFC);
+      
       // Clear debug layers
       const rawSource = map.getSource('tfp-debug-raw') as mapboxgl.GeoJSONSource;
-      if (rawSource) rawSource.setData({ type: 'FeatureCollection', features: [] });
+      if (rawSource) rawSource.setData(emptyFC);
       const normalizedSource = map.getSource('tfp-debug-normalized') as mapboxgl.GeoJSONSource;
-      if (normalizedSource) normalizedSource.setData({ type: 'FeatureCollection', features: [] });
+      if (normalizedSource) normalizedSource.setData(emptyFC);
       const analysisSource = map.getSource('tfp-debug-analysis') as mapboxgl.GeoJSONSource;
-      if (analysisSource) analysisSource.setData({ type: 'FeatureCollection', features: [] });
+      if (analysisSource) analysisSource.setData(emptyFC);
+      
+      // Clear terrain flow sources
+      const flowPrimary = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
+      if (flowPrimary) flowPrimary.setData(emptyFC);
+      const flowSecondary = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
+      if (flowSecondary) flowSecondary.setData(emptyFC);
+      const convergence = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
+      if (convergence) convergence.setData(emptyFC);
+      const opportunity = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
+      if (opportunity) opportunity.setData(emptyFC);
+      
+      // Clear ridge spine sources
+      const ridgesPrimary = map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
+      if (ridgesPrimary) ridgesPrimary.setData(emptyFC);
+      const ridgesSecondary = map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
+      if (ridgesSecondary) ridgesSecondary.setData(emptyFC);
+      const saddleNodes = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
+      if (saddleNodes) saddleNodes.setData(emptyFC);
+      
+      console.log('[QA PARCEL] Cleared all map sources');
     }
   }, []);
   
