@@ -46,6 +46,7 @@ import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelP
 import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
 import TerrainStoryPanel, { TerrainStoryExportLegend, StructuralDriversGrid } from '@/components/terrain/terrain-story-panel';
 import { generateTerrainStory, computeStructuralDrivers, type TerrainStorySummary } from '@/lib/terrain-story';
+import HuntingPotentialCard, { computeHuntingPotential, type HuntingPotentialScore } from '@/components/terrain/hunting-potential-card';
 import { computeBrokerScore, type BrokerScoreResult, type BrokerScoreInput } from '@/lib/broker-scoring';
 import { 
   createGeometryTrace, 
@@ -886,8 +887,9 @@ function DeerIntelContent() {
   
   // Terrain Flow visibility (separate from main visibility for cleaner control)
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
-    flowPrimary: true,      // Primary terrain flow lines
-    flowSecondary: true,    // Secondary terrain flow lines
+    pressureHeatmap: true,  // PRIMARY: Terrain pressure heat map (the main visual)
+    flowPrimary: false,     // Secondary: Primary flow lines (supporting evidence - OFF by default)
+    flowSecondary: false,   // Secondary: Secondary flow lines (OFF by default)
     convergenceZones: true, // Convergence zone markers
     opportunityZones: true, // Opportunity zone markers
   });
@@ -2142,6 +2144,62 @@ function DeerIntelContent() {
       if (opportunitySource) {
         opportunitySource.setData(flowData?.opportunity_zones || emptyFC);
       }
+      
+      // Update HEAT MAP source (PRIMARY VISUAL)
+      // Combines opportunity zones + convergence zones for terrain pressure visualization
+      const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
+      if (heatmapSource) {
+        // Merge opportunity and convergence zones for heat map
+        const heatmapFeatures: GeoJSON.Feature[] = [];
+        
+        // Add opportunity zones (higher weight)
+        if (flowData?.opportunity_zones?.features) {
+          flowData.opportunity_zones.features.forEach((f: GeoJSON.Feature) => {
+            heatmapFeatures.push({
+              ...f,
+              properties: {
+                ...f.properties,
+                score: (f.properties?.score || 0.7) * 1.2, // Boost opportunity zones
+              },
+            });
+          });
+        }
+        
+        // Add convergence zones
+        if (flowData?.convergence_zones?.features) {
+          flowData.convergence_zones.features.forEach((f: GeoJSON.Feature) => {
+            heatmapFeatures.push({
+              ...f,
+              properties: {
+                ...f.properties,
+                score: f.properties?.intensity || 0.5,
+              },
+            });
+          });
+        }
+        
+        // Add sample points along primary flow lines for broader heat coverage
+        if (flowData?.flow_primary?.features) {
+          flowData.flow_primary.features.forEach((f: GeoJSON.Feature) => {
+            const coords = (f.geometry as GeoJSON.LineString)?.coordinates || [];
+            const likelihood = f.properties?.likelihood || 0.5;
+            
+            // Sample every 3rd point to add heat without overwhelming
+            coords.filter((_, i) => i % 3 === 0).forEach(coord => {
+              heatmapFeatures.push({
+                type: 'Feature',
+                properties: { score: likelihood * 0.6 },
+                geometry: { type: 'Point', coordinates: coord },
+              });
+            });
+          });
+        }
+        
+        heatmapSource.setData({
+          type: 'FeatureCollection',
+          features: heatmapFeatures,
+        });
+      }
 
       console.log('[TerrainFlow] Updated map sources', flowData ? (flowComparisonMode ? '(LEGACY comparison)' : '(terrain-driven)') : '(CLEARED - parcel switch)');
     } catch (err) {
@@ -2232,6 +2290,11 @@ function DeerIntelContent() {
       });
       
       // Terrain Flow visibility (movement likelihood layers)
+      // HEAT MAP (PRIMARY VISUAL)
+      if (map.getLayer('tfp-pressure-heatmap')) {
+        map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', flowVisibility.pressureHeatmap ? 'visible' : 'none');
+      }
+      // Flow lines (SUPPORTING EVIDENCE)
       if (map.getLayer('tfp-flow-primary')) {
         map.setLayoutProperty('tfp-flow-primary', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
       }
@@ -2793,12 +2856,61 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== TERRAIN FLOW LAYERS (Movement Likelihood Surface) ==========
-        // Visualizes terrain-guided movement structure - NOT wildlife AI
+        // ========== TERRAIN PRESSURE HEAT MAP (PRIMARY VISUAL) ==========
+        // This is the MAIN visual story - shows hunting potential as a gradient
+        // Flow lines are demoted to supporting evidence only
         
-        // Primary flow lines: high-likelihood terrain-guided movement
-        // Color varies by likelihood: Strong (green) > Moderate (cyan) > Weak (blue-muted)
-        // Weak flows are visually less dominant (thinner, more transparent)
+        // Heat map from opportunity + convergence zones
+        if (!map.getSource('tfp-pressure-heatmap')) {
+          map.addSource('tfp-pressure-heatmap', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-pressure-heatmap',
+            type: 'heatmap',
+            source: 'tfp-pressure-heatmap',
+            paint: {
+              // Weight based on score/intensity
+              'heatmap-weight': [
+                'interpolate', ['linear'],
+                ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
+                0, 0.2,
+                0.5, 0.6,
+                1, 1
+              ],
+              // Intensity increases with zoom
+              'heatmap-intensity': [
+                'interpolate', ['linear'], ['zoom'],
+                12, 0.8,
+                15, 1.2,
+                18, 1.5
+              ],
+              // Color gradient: blue (low) → cyan → green → amber (high)
+              'heatmap-color': [
+                'interpolate', ['linear'], ['heatmap-density'],
+                0, 'rgba(0,0,0,0)',
+                0.15, 'rgba(15,118,110,0.3)',    // teal-700 (subtle)
+                0.35, 'rgba(6,182,212,0.45)',    // cyan-500
+                0.55, 'rgba(16,185,129,0.55)',   // emerald-500
+                0.75, 'rgba(245,158,11,0.65)',   // amber-500
+                1, 'rgba(239,68,68,0.75)'        // red-500 (hot)
+              ],
+              // Radius scales with zoom
+              'heatmap-radius': [
+                'interpolate', ['linear'], ['zoom'],
+                12, 40,
+                14, 60,
+                16, 80
+              ],
+              'heatmap-opacity': 0.7,
+            },
+          });
+        }
+        
+        // ========== TERRAIN FLOW LAYERS (SUPPORTING EVIDENCE) ==========
+        // Flow lines are now SUBTLE supporting evidence, not the primary visual
+        // The heat map above tells the main story
+        
+        // Primary flow lines: SUBTLE supporting evidence
+        // Much thinner and more transparent than before
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2806,36 +2918,35 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-flow-primary',
             paint: {
-              // Data-driven color based on likelihood: Strong (≥0.7), Moderate (≥0.5), Weak (<0.5)
+              // Muted colors - supporting evidence only
               'line-color': [
                 'case',
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.7],
-                '#10b981', // Strong = emerald-500 (bold)
+                'rgba(16,185,129,0.6)',  // emerald-500 at 60%
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.5],
-                '#22d3ee', // Moderate = cyan-400
-                '#94a3b8'  // Weak = slate-400 (muted, not bright blue)
+                'rgba(34,211,238,0.5)',  // cyan-400 at 50%
+                'rgba(148,163,184,0.35)' // slate-400 at 35%
               ],
-              // Weak flow is significantly thinner
+              // THIN lines - supporting, not dominant
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 1.5,   // Weak: thin (was 2.5)
-                0.5, 2.5,   // Moderate: medium
-                0.7, 4      // Strong: bold
+                0.3, 1,     // Weak: very thin
+                0.5, 1.5,   // Moderate: thin
+                0.7, 2.5    // Strong: medium (was 4)
               ],
-              // Weak flow is more transparent
+              // Lower opacity overall
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 0.35,  // Weak: quite faded (was 0.6)
-                0.5, 0.65,  // Moderate: visible
-                0.7, 0.9    // Strong: prominent
+                0.3, 0.2,   // Weak: barely visible
+                0.5, 0.35,  // Moderate: subtle
+                0.7, 0.55   // Strong: visible but not dominant (was 0.9)
               ],
-              'line-blur': 0.5,
+              'line-blur': 0.8,
             },
           });
         }
         
-        // Secondary flow lines: supporting movement patterns
-        // Weak secondary flows are even more subtle
+        // Secondary flow lines: VERY subtle supporting patterns
         if (!map.getSource('tfp-flow-secondary')) {
           map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2843,23 +2954,10 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-flow-secondary',
             paint: {
-              'line-color': [
-                'case',
-                ['>=', ['coalesce', ['get', 'likelihood'], 0.4], 0.6],
-                '#67e8f9', // Moderate+ = cyan-300
-                '#6b7280'  // Weak = gray-500 (more muted)
-              ],
-              'line-width': [
-                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.4],
-                0.3, 1.2,   // Weak: very thin
-                0.6, 2      // Moderate+: normal
-              ],
-              'line-opacity': [
-                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.4],
-                0.3, 0.3,   // Weak: faded
-                0.6, 0.55   // Moderate+: visible
-              ],
-              'line-dasharray': [4, 2],
+              'line-color': 'rgba(100,116,139,0.4)', // slate-500 at 40%
+              'line-width': 1,  // Very thin
+              'line-opacity': 0.25,  // Very faded
+              'line-dasharray': [3, 3],
             },
           });
         }
@@ -5333,7 +5431,33 @@ function DeerIntelContent() {
                   </div>
                 )}
                 <div className="space-y-1">
-                  {/* Primary Flow Toggle */}
+                  {/* HEAT MAP Toggle (PRIMARY) */}
+                  <button
+                    onClick={() => setFlowVisibility(v => ({ ...v, pressureHeatmap: !v.pressureHeatmap }))}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      flowVisibility.pressureHeatmap ? 'bg-amber-900/40 border border-amber-700/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded" style={{ 
+                      background: 'linear-gradient(135deg, #0f766e, #06b6d4, #10b981, #f59e0b)', 
+                      opacity: flowVisibility.pressureHeatmap ? 1 : 0.4 
+                    }} />
+                    <span className={`flex-1 text-left font-medium ${flowVisibility.pressureHeatmap ? 'text-amber-300' : 'text-stone-500'}`}>
+                      Pressure Map
+                    </span>
+                    <span className="text-[8px] text-amber-400 px-1 py-0.5 bg-amber-900/50 rounded uppercase tracking-wider">
+                      Primary
+                    </span>
+                  </button>
+                  
+                  {/* Divider with "Supporting Evidence" label */}
+                  <div className="flex items-center gap-2 py-1">
+                    <div className="flex-1 h-px bg-stone-700/50" />
+                    <span className="text-[8px] text-stone-600 uppercase tracking-wider">Supporting</span>
+                    <div className="flex-1 h-px bg-stone-700/50" />
+                  </div>
+                  
+                  {/* Primary Flow Toggle (now secondary) */}
                   {(() => {
                     const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
                     const hasData = primaryCount > 0;
@@ -5342,20 +5466,20 @@ function DeerIntelContent() {
                     return (
                       <button
                         onClick={() => setFlowVisibility(v => ({ ...v, flowPrimary: !v.flowPrimary }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          flowVisibility.flowPrimary ? 'bg-cyan-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        className={`w-full flex items-center gap-2 px-2 py-1 rounded transition-all text-[11px] ${
+                          flowVisibility.flowPrimary ? 'bg-cyan-900/20' : 'bg-stone-800/20 hover:bg-stone-700/20'
                         }`}
                       >
-                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.flowPrimary, opacity: flowVisibility.flowPrimary ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-white' : 'text-stone-500'}`}>Primary Flow</span>
+                        <span className="w-2.5 h-2.5 rounded" style={{ background: LAYER_COLORS.flowPrimary, opacity: flowVisibility.flowPrimary ? 1 : 0.3 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-stone-300' : 'text-stone-600'}`}>Flow Lines</span>
                         {hasData ? (
-                          <span className="text-[9px] text-cyan-400 px-1.5 py-0.5 bg-cyan-900/40 rounded">
+                          <span className="text-[8px] text-cyan-400/70 px-1 py-0.5 bg-cyan-900/30 rounded">
                             {primaryCount}
                           </span>
                         ) : isLoading ? (
-                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">...</span>
+                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">...</span>
                         ) : (
-                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">—</span>
+                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">—</span>
                         )}
                       </button>
                     );
@@ -5566,7 +5690,88 @@ function DeerIntelContent() {
                 )}
               </div>
 
-              {/* ========== TERRAIN STORY PANEL ========== */}
+              {/* ========== HUNTING POTENTIAL CARD (PRIMARY ANSWER) ========== */}
+              {/* This is THE answer to "Does this parcel have hunting potential?" */}
+              {!exportMode && parcelPolygon && (
+                <div className="p-3 border-b border-white/10">
+                  <HuntingPotentialCard
+                    flowData={terrainFlowData ? (() => {
+                      // Build a TerrainFlowResponse-compatible object
+                      const defaultMetadata = {
+                        processing_time_seconds: 0,
+                        mode: 'terrain_driven' as const,
+                        dem_source: 'unknown',
+                        resolution_m: 30,
+                        buffer_m: 1000,
+                        weights: {
+                          bench_likelihood: 0.28,
+                          saddle_proximity: 0.24,
+                          spine_proximity: 0.20,
+                          terrain_convergence: 0.18,
+                          moderate_slope: 0.10,
+                        },
+                        thresholds: {
+                          primary_min: 0.55,
+                          secondary_min: 0.35,
+                          min_length_m_primary: 150,
+                          min_length_m_secondary: 80,
+                          convergence_threshold: 0.5,
+                          opportunity_threshold: 0.6,
+                        },
+                        stats: {
+                          flow_count_primary: terrainFlowData.flow_primary?.features?.length || 0,
+                          flow_count_secondary: terrainFlowData.flow_secondary?.features?.length || 0,
+                          convergence_count: terrainFlowData.convergence_zones?.features?.length || 0,
+                          opportunity_count: terrainFlowData.opportunity_zones?.features?.length || 0,
+                          total_flow_length_m: 0,
+                          coverage_pct: 0,
+                        },
+                      };
+                      return {
+                        success: true,
+                        bbox: [0, 0, 0, 0] as [number, number, number, number],
+                        flow_primary: terrainFlowData.flow_primary,
+                        flow_secondary: terrainFlowData.flow_secondary,
+                        convergence_zones: terrainFlowData.convergence_zones,
+                        opportunity_zones: terrainFlowData.opportunity_zones,
+                        metadata: terrainFlowData.metadata ? { ...defaultMetadata, ...terrainFlowData.metadata } : defaultMetadata,
+                      } as TerrainFlowResponse;
+                    })() : null}
+                    acreage={(() => {
+                      // Extract acreage from URL params or calculate rough estimate
+                      const searchParams = new URLSearchParams(window.location.search);
+                      const acreageParam = searchParams.get('acreage');
+                      if (acreageParam) return parseFloat(acreageParam);
+                      // Rough estimate from parcel bbox
+                      if (parcelPolygon) {
+                        try {
+                          const coords = parcelPolygon.geometry.type === 'Polygon' 
+                            ? parcelPolygon.geometry.coordinates[0]
+                            : parcelPolygon.geometry.coordinates[0][0];
+                          if (coords && coords.length >= 4) {
+                            const lngs = coords.map(c => c[0]);
+                            const lats = coords.map(c => c[1]);
+                            const widthDeg = Math.max(...lngs) - Math.min(...lngs);
+                            const heightDeg = Math.max(...lats) - Math.min(...lats);
+                            const centerLat = (Math.max(...lats) + Math.min(...lats)) / 2;
+                            const widthM = widthDeg * 111320 * Math.cos(centerLat * Math.PI / 180);
+                            const heightM = heightDeg * 111320;
+                            return (widthM * heightM * 0.8) / 4046.86; // Approx acres
+                          }
+                        } catch {}
+                      }
+                      return undefined;
+                    })()}
+                    isLoading={terrainFlowLoading}
+                    onHighlightOpportunity={(oppId) => {
+                      // Could highlight opportunity on map
+                      console.log('[Intel] Highlight opportunity:', oppId);
+                    }}
+                  />
+                </div>
+              )}
+              
+              {/* ========== TERRAIN STORY PANEL (Secondary detail) ========== */}
               {(terrainStory || terrainFlowLoading) && !exportMode && (
                 <div className="p-3 border-b border-white/10">
                   <TerrainStoryPanel 
@@ -5574,7 +5779,7 @@ function DeerIntelContent() {
                     isLoading={terrainFlowLoading}
                     defaultExpanded={false}
                     showNarrative={true}
-                    compact={false}
+                    compact={true}
                   />
                 </div>
               )}
