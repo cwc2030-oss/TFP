@@ -43,6 +43,7 @@ import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-toolti
 import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-badge';
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
+import { QAScorecard, QASessionSummary, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -902,6 +903,8 @@ function DeerIntelContent() {
   const [qaParcelError, setQaParcelError] = useState<string | null>(null);
   const [qaParcelAnalyzing, setQaParcelAnalyzing] = useState(false);
   const [qaRecentParcelIds, setQaRecentParcelIds] = useState<string[]>([]); // Track visited parcels
+  const [qaSessionEntries, setQaSessionEntries] = useState<QAEntry[]>([]); // QA validation log
+  const [qaShowScorecard, setQaShowScorecard] = useState(false); // Show rating UI after analysis
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -3392,6 +3395,7 @@ function DeerIntelContent() {
     if (!qaParcel || qaParcelAnalyzing) return;
     
     setQaParcelAnalyzing(true);
+    setQaShowScorecard(false); // Reset scorecard for new analysis
     console.log('[QA PARCEL] Analyzing:', qaParcel.parcelId);
     
     try {
@@ -3421,6 +3425,9 @@ function DeerIntelContent() {
       setTerrainFlowData(null);
       setTerrainFlowLoading(true);
       
+      // Show scorecard after a short delay (analysis will complete)
+      setTimeout(() => setQaShowScorecard(true), 500);
+      
       console.log('[QA PARCEL] Analysis triggered for', qaParcel.address);
     } catch (err) {
       console.error('[QA PARCEL] Analysis error:', err);
@@ -3433,6 +3440,7 @@ function DeerIntelContent() {
   const handleQaParcelClear = useCallback(() => {
     setQaParcel(null);
     setQaParcelError(null);
+    setQaShowScorecard(false);
     
     // Clear map layer
     const map = mapRef.current;
@@ -3460,6 +3468,26 @@ function DeerIntelContent() {
     
     navigator.clipboard.writeText(info);
   }, [qaParcel]);
+
+  // QA Scorecard handlers
+  const handleQaRatingSubmit = useCallback((entry: QAEntry) => {
+    setQaSessionEntries(prev => [...prev, entry]);
+    console.log('[QA] Rating submitted:', entry.rating, entry.parcelId);
+  }, []);
+
+  const handleQaScorecardSkip = useCallback(() => {
+    setQaShowScorecard(false);
+  }, []);
+
+  const handleQaSessionClear = useCallback(() => {
+    if (window.confirm('Clear all QA session data? This cannot be undone.')) {
+      setQaSessionEntries([]);
+    }
+  }, []);
+
+  const handleQaSessionExport = useCallback(() => {
+    exportSessionCSV(qaSessionEntries);
+  }, [qaSessionEntries]);
 
   // Handler for random parcel picker
   const handleRandomParcelFound = useCallback((parcel: LookupParcel) => {
@@ -4142,6 +4170,32 @@ function DeerIntelContent() {
               onCopyInfo={handleQaParcelCopyInfo}
               error={qaParcelError}
             />
+          )}
+          
+          {/* QA Scorecard (after analysis runs) */}
+          {qaParcel && qaShowScorecard && !terrainFlowLoading && (
+            <div className="absolute top-64 left-4 z-40 w-72">
+              <QAScorecard
+                parcelId={qaParcel.parcelId}
+                state={qaParcel.state}
+                county={qaParcel.county}
+                acreage={qaParcel.acreage}
+                demMode={terrainFlowData?.metadata?.mode || terrainFlowData?.metadata?.dem_source || 'unknown'}
+                onRatingSubmit={handleQaRatingSubmit}
+                onSkip={handleQaScorecardSkip}
+              />
+            </div>
+          )}
+          
+          {/* QA Session Summary (bottom left when entries exist) */}
+          {qaSessionEntries.length > 0 && (
+            <div className="absolute bottom-4 left-4 z-40 w-72">
+              <QASessionSummary
+                entries={qaSessionEntries}
+                onClear={handleQaSessionClear}
+                onExport={handleQaSessionExport}
+              />
+            </div>
           )}
           
           {/* Instruction Banner (when no parcel selected) */}
