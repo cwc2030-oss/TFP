@@ -20,7 +20,7 @@ interface ParcelData {
   sqft: number;
   zoning: string;
   useDescription: string;
-  coordinates: number[][][] | null;
+  coordinates: number[][][] | number[][][][] | null;
   marketValue: number | null;
   landValue: number | null;
   county: string;
@@ -117,7 +117,7 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
   }
 }
 
-function buildParcelPath(coordinates: number[][][] | null): string {
+function buildParcelPath(coordinates: number[][][] | number[][][][] | null): string {
   if (!coordinates || coordinates.length === 0 || !coordinates[0]) return "";
   const ring = coordinates[0];
   if (ring.length < 3) return "";
@@ -132,7 +132,7 @@ function buildParcelPath(coordinates: number[][][] | null): string {
 
 async function fetchGoogleMapImage(
   lat: number, lng: number, mapType: string = "satellite", zoom: number = 15,
-  parcelCoordinates: number[][][] | null = null
+  parcelCoordinates: number[][][] | number[][][][] | null = null
 ): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;

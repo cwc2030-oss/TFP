@@ -11,7 +11,8 @@ export interface CachedParcelData {
   sqft: number;
   zoning: string;
   useDescription: string;
-  coordinates: number[][][] | null;
+  coordinates: number[][][] | number[][][][] | null; // Polygon or MultiPolygon coordinates
+  geometryType?: 'Polygon' | 'MultiPolygon'; // Store original geometry type
   marketValue: number | null;
   landValue: number | null;
   improvementValue: number | null;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeToOuterRing, validateParcelGeometry, logGeometryDebug } from "@/lib/geometry-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -53,32 +54,7 @@ function randomCoordInRegion(region: { minLat: number; maxLat: number; minLng: n
   return { lat, lng };
 }
 
-// Normalize coordinates for polygon
-function normalizeCoordinates(
-  coords: number[][][] | number[][][][],
-  geoType: string
-): number[][] | null {
-  if (!coords || !coords.length) return null;
-  
-  if (geoType === 'Polygon') {
-    const ring = coords[0] as number[][];
-    if (!ring?.length) return null;
-    return ring;
-  } else if (geoType === 'MultiPolygon') {
-    const polygons = coords as number[][][][];
-    let largest: number[][] | null = null;
-    let maxLen = 0;
-    for (const poly of polygons) {
-      if (poly[0] && poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        largest = poly[0];
-      }
-    }
-    return largest;
-  }
-  return null;
-}
-
+// Local helper functions - use validation library for normalization
 function calculateCentroid(coords: number[][]): [number, number] {
   if (!coords?.length) return [0, 0];
   const sum = coords.reduce((acc, c) => [acc[0] + c[0], acc[1] + c[1]], [0, 0]);
@@ -183,16 +159,26 @@ export async function GET(request: NextRequest) {
         continue;
       }
       
-      // Normalize geometry
+      // Validate and normalize geometry
       if (!rawCoords) {
         lastError = "No geometry available";
         continue;
       }
       
-      const normalizedCoords = normalizeCoordinates(rawCoords, geoType);
+      // Log and validate geometry
+      logGeometryDebug(`Random parcel attempt ${attempts}`, rawCoords, geoType);
+      
+      const validation = validateParcelGeometry(rawCoords, geoType);
+      if (!validation.valid) {
+        lastError = `Invalid geometry: ${validation.errors.join(', ')}`;
+        console.log(`[RANDOM PARCEL] Skipping: ${lastError}`);
+        continue;
+      }
+      
+      const normalizedCoords = normalizeToOuterRing(rawCoords, geoType);
       
       if (!normalizedCoords || normalizedCoords.length < 4) {
-        lastError = "Invalid geometry";
+        lastError = "Invalid geometry (< 4 points)";
         continue;
       }
       
@@ -212,6 +198,7 @@ export async function GET(request: NextRequest) {
       ].filter(Boolean);
       
       console.log(`[RANDOM PARCEL] Found: ${parcelId}, ${acreage.toFixed(1)} ac, ${fields.county || 'Unknown'} County`);
+      console.log(`[RANDOM PARCEL] Validated bounds: ${JSON.stringify(validation.bounds)}`);
       
       return NextResponse.json({
         found: true,
@@ -225,8 +212,8 @@ export async function GET(request: NextRequest) {
           owner: fields.owner || 'Unknown',
           zoning: fields.zoning || 'N/A',
           coordinates: normalizedCoords,
-          centroid: calculateCentroid(normalizedCoords),
-          bounds: calculateBounds(normalizedCoords),
+          centroid: validation.centroid || calculateCentroid(normalizedCoords),
+          bounds: validation.bounds || calculateBounds(normalizedCoords),
           geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
           legalDescription: fields.legaldesc || fields.legal_description || undefined,
           plss: plssParts.length > 0 ? plssParts.join(' ') : undefined,

@@ -18,7 +18,7 @@ interface ParcelData {
   sqft: number;
   zoning: string;
   useDescription: string;
-  coordinates: number[][][] | null;
+  coordinates: number[][][] | number[][][][] | null;
   county: string;
   state: string;
   legalDescription: string | null;
@@ -96,7 +96,7 @@ async function fetchRegridParcelData(lat: number, lng: number, address?: string)
   }
 }
 
-function buildParcelPath(coordinates: number[][][] | null): string {
+function buildParcelPath(coordinates: number[][][] | number[][][][] | null): string {
   if (!coordinates || coordinates.length === 0 || !coordinates[0]) return "";
   const ring = coordinates[0];
   if (ring.length < 3) return "";
@@ -106,7 +106,7 @@ function buildParcelPath(coordinates: number[][][] | null): string {
   return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
 }
 
-async function fetchGoogleMapImage(lat: number, lng: number, mapType: string, zoom: number, parcelCoordinates: number[][][] | null): Promise<string | null> {
+async function fetchGoogleMapImage(lat: number, lng: number, mapType: string, zoom: number, parcelCoordinates: number[][][] | number[][][][] | null): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;
   try {

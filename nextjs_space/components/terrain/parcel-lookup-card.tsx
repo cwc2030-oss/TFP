@@ -1,11 +1,50 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   MapPin, X, Copy, Check, Play, Loader2, AlertTriangle,
   Building2, User, FileText, ChevronDown, ChevronUp, Shuffle, Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+
+// Simple client-side geometry validation
+function validateParcelCoordinates(coordinates: number[][] | null): { valid: boolean; error?: string } {
+  if (!coordinates || !Array.isArray(coordinates)) {
+    return { valid: false, error: 'No coordinates provided' };
+  }
+  
+  if (coordinates.length < 4) {
+    return { valid: false, error: `Only ${coordinates.length} points (need at least 4)` };
+  }
+  
+  // Check coordinate sanity (first few points)
+  for (let i = 0; i < Math.min(3, coordinates.length); i++) {
+    const coord = coordinates[i];
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return { valid: false, error: `Invalid coordinate at position ${i}` };
+    }
+    
+    const [lng, lat] = coord;
+    
+    // Check for NaN or undefined
+    if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) {
+      return { valid: false, error: `Non-numeric coordinate at position ${i}` };
+    }
+    
+    // Check if coordinates appear swapped (lat/lng vs lng/lat)
+    // For US, longitude should be negative (-70 to -130), latitude positive (25 to 50)
+    if (lng > 0 && lng < 60 && lat < -60) {
+      return { valid: false, error: 'Coordinates appear swapped (lat/lng instead of lng/lat)' };
+    }
+    
+    // Basic bounds check for KS/MO region
+    if (lng < -110 || lng > -85 || lat < 30 || lat > 45) {
+      return { valid: false, error: 'Coordinates outside expected KS/MO region' };
+    }
+  }
+  
+  return { valid: true };
+}
 
 export interface LookupParcel {
   parcelId: string;
@@ -44,6 +83,11 @@ export default function ParcelLookupCard({
 }: ParcelLookupCardProps) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  
+  // Validate parcel geometry
+  const geometryValidation = useMemo(() => {
+    return validateParcelCoordinates(parcel.coordinates);
+  }, [parcel.coordinates]);
   
   const handleCopy = () => {
     onCopyInfo();
@@ -133,6 +177,17 @@ export default function ParcelLookupCard({
           </div>
         )}
         
+        {/* Geometry Validation Error */}
+        {!geometryValidation.valid && (
+          <div className="flex items-start gap-2 px-3 py-2 bg-amber-900/30 border border-amber-500/30 rounded-lg">
+            <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="text-xs text-amber-300 font-medium">Parcel boundary could not be validated</span>
+              <p className="text-xs text-amber-400/70 mt-0.5">{geometryValidation.error}</p>
+            </div>
+          </div>
+        )}
+        
         {/* Error Message */}
         {error && (
           <div className="flex items-start gap-2 px-3 py-2 bg-red-900/30 border border-red-500/30 rounded-lg">
@@ -145,13 +200,23 @@ export default function ParcelLookupCard({
         <div className="flex gap-2 pt-1">
           <Button
             onClick={onAnalyze}
-            disabled={isAnalyzing || isLoading}
-            className="flex-1 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-medium h-9"
+            disabled={isAnalyzing || isLoading || !geometryValidation.valid}
+            className={`flex-1 font-medium h-9 ${
+              geometryValidation.valid 
+                ? 'bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}
+            title={!geometryValidation.valid ? 'Parcel geometry invalid for analysis' : 'Run terrain analysis'}
           >
             {isAnalyzing ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Analyzing…
+              </>
+            ) : !geometryValidation.valid ? (
+              <>
+                <AlertTriangle className="h-4 w-4 mr-2" />
+                Geometry Invalid
               </>
             ) : (
               <>

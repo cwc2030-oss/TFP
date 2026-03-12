@@ -1,38 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { normalizeToOuterRing, validateParcelGeometry, logGeometryDebug } from "@/lib/geometry-validation";
 
 export const dynamic = "force-dynamic";
 
 // Supported states for QA validation
 const SUPPORTED_STATES = ['KS', 'MO', 'kansas', 'missouri', 'Kansas', 'Missouri'];
-
-// Normalize polygon/multipolygon coordinates to simple polygon array
-function normalizeCoordinates(
-  coords: number[][][] | number[][][][],
-  geoType: string
-): number[][] | null {
-  if (!coords || !coords.length) return null;
-  
-  if (geoType === 'Polygon') {
-    // coords[0] is the outer ring
-    const ring = coords[0] as number[][];
-    if (!ring?.length) return null;
-    return ring;
-  } else if (geoType === 'MultiPolygon') {
-    // Take the largest polygon (by coord count)
-    const polygons = coords as number[][][][];
-    let largest: number[][] | null = null;
-    let maxLen = 0;
-    for (const poly of polygons) {
-      if (poly[0] && poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        largest = poly[0];
-      }
-    }
-    return largest;
-  }
-  return null;
-}
 
 // Calculate acreage from polygon coordinates
 function calculateAcreage(coords: number[][]): number {
@@ -147,33 +120,45 @@ export async function GET(request: NextRequest) {
     // Check cache first
     const cached = await getCachedParcel(latNum, lngNum);
     if (cached && cached.coordinates) {
-      const normalizedCoords = normalizeCoordinates(
-        cached.coordinates as number[][][],
-        'Polygon'
+      // Use stored geometry type or infer from coordinate structure
+      const geoType = cached.geometryType || 
+        (Array.isArray(cached.coordinates[0]?.[0]?.[0]) ? 'MultiPolygon' : 'Polygon');
+      
+      const normalizedCoords = normalizeToOuterRing(
+        cached.coordinates as number[][][] | number[][][][],
+        geoType
       );
       
       if (normalizedCoords) {
-        const response: ParcelLookupResponse = {
-          found: true,
-          cached: true,
-          parcel: {
-            parcelId: cached.parcelId || 'Unknown',
-            address: cached.siteAddress || 'Unknown Address',
-            county: cached.county || 'Unknown',
-            state: cached.state || (inMO ? 'MO' : 'KS'),
-            acreage: cached.acreage || calculateAcreage(normalizedCoords),
-            owner: cached.owner || 'Unknown',
-            zoning: cached.zoning || 'N/A',
-            coordinates: normalizedCoords,
-            centroid: calculateCentroid(normalizedCoords),
-            bounds: calculateBounds(normalizedCoords),
-            geometryType: 'Polygon',
-            legalDescription: cached.legalDescription || undefined,
-            plss: [cached.plssTownship, cached.plssRange, cached.plssSection]
-              .filter(Boolean).join(', ') || undefined,
-          }
-        };
-        return NextResponse.json(response);
+        // Validate the geometry
+        const validation = validateParcelGeometry(cached.coordinates, geoType);
+        if (!validation.valid) {
+          console.warn('[PARCEL LOOKUP] Invalid cached geometry:', validation.errors);
+          // Continue to fetch fresh data instead of returning invalid cached data
+        } else {
+          console.log('[PARCEL LOOKUP] Cache hit, valid geometry:', validation.area?.toFixed(1), 'ac');
+          const response: ParcelLookupResponse = {
+            found: true,
+            cached: true,
+            parcel: {
+              parcelId: cached.parcelId || 'Unknown',
+              address: cached.siteAddress || 'Unknown Address',
+              county: cached.county || 'Unknown',
+              state: cached.state || (inMO ? 'MO' : 'KS'),
+              acreage: cached.acreage || validation.area || calculateAcreage(normalizedCoords),
+              owner: cached.owner || 'Unknown',
+              zoning: cached.zoning || 'N/A',
+              coordinates: normalizedCoords,
+              centroid: validation.centroid || calculateCentroid(normalizedCoords),
+              bounds: validation.bounds || calculateBounds(normalizedCoords),
+              geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
+              legalDescription: cached.legalDescription || undefined,
+              plss: [cached.plssTownship, cached.plssRange, cached.plssSection]
+                .filter(Boolean).join(', ') || undefined,
+            }
+          };
+          return NextResponse.json(response);
+        }
       }
     }
 
@@ -213,7 +198,7 @@ export async function GET(request: NextRequest) {
 
     const feature = results[0];
     const fields = feature.properties?.fields || {};
-    const geoType = feature.geometry?.type || 'Polygon';
+    const geoType = (feature.geometry?.type || 'Polygon') as 'Polygon' | 'MultiPolygon';
     const rawCoords = feature.geometry?.coordinates;
     
     if (!rawCoords) {
@@ -223,7 +208,20 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    const normalizedCoords = normalizeCoordinates(rawCoords, geoType);
+    // Log raw geometry for debugging
+    logGeometryDebug('Regrid response', rawCoords, geoType);
+    
+    // Validate the raw geometry
+    const validation = validateParcelGeometry(rawCoords, geoType);
+    if (!validation.valid) {
+      console.error('[PARCEL LOOKUP] Invalid Regrid geometry:', validation.errors);
+      return NextResponse.json(
+        { found: false, error: `Parcel geometry invalid: ${validation.errors.join(', ')}` },
+        { status: 200 }
+      );
+    }
+    
+    const normalizedCoords = normalizeToOuterRing(rawCoords, geoType);
     
     if (!normalizedCoords) {
       return NextResponse.json(
@@ -231,6 +229,8 @@ export async function GET(request: NextRequest) {
         { status: 200 }
       );
     }
+    
+    console.log('[PARCEL LOOKUP] Valid geometry:', validation.area?.toFixed(1), 'ac, bounds:', JSON.stringify(validation.bounds));
     
     // Build address
     const siteParts = [
@@ -256,19 +256,19 @@ export async function GET(request: NextRequest) {
         address: siteParts.length > 0 ? siteParts.join(', ') : feature.properties?.headline || 'Unknown Address',
         county: fields.county || 'Unknown',
         state: parcelState,
-        acreage: fields.ll_gisacre || fields.gisacre || fields.acres || calculateAcreage(normalizedCoords),
+        acreage: fields.ll_gisacre || fields.gisacre || fields.acres || validation.area || calculateAcreage(normalizedCoords),
         owner: fields.owner || 'Unknown',
         zoning: fields.zoning || 'N/A',
         coordinates: normalizedCoords,
-        centroid: calculateCentroid(normalizedCoords),
-        bounds: calculateBounds(normalizedCoords),
+        centroid: validation.centroid || calculateCentroid(normalizedCoords),
+        bounds: validation.bounds || calculateBounds(normalizedCoords),
         geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
         legalDescription: fields.legaldesc || fields.legal_description || undefined,
         plss: plssParts.length > 0 ? plssParts.join(' ') : undefined,
       }
     };
     
-    // Cache in background
+    // Cache in background - store raw coordinates AND geometry type
     const cacheData: CachedParcelData = {
       parcelId: response.parcel!.parcelId,
       owner: response.parcel!.owner,
@@ -278,7 +278,8 @@ export async function GET(request: NextRequest) {
       sqft: response.parcel!.acreage * 43560,
       zoning: response.parcel!.zoning,
       useDescription: fields.usedesc || '',
-      coordinates: rawCoords as number[][][] || null,
+      coordinates: rawCoords as number[][][] | number[][][][],
+      geometryType: geoType, // Store the actual geometry type!
       marketValue: fields.parval || null,
       landValue: fields.landval || null,
       improvementValue: fields.improvval || null,

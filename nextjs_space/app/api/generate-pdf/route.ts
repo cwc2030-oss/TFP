@@ -19,7 +19,7 @@ interface ParcelData {
   sqft: number;
   zoning: string;
   useDescription: string;
-  coordinates: number[][][] | null;
+  coordinates: number[][][] | number[][][][] | null;
   marketValue: number | null;
   landValue: number | null;
   improvementValue: number | null;
@@ -249,7 +249,7 @@ async function loadLogoImage(): Promise<string | null> {
   return null;
 }
 
-function buildParcelPath(coordinates: number[][][] | null): string {
+function buildParcelPath(coordinates: number[][][] | number[][][][] | null): string {
   if (!coordinates || coordinates.length === 0 || !coordinates[0]) return "";
   const ring = coordinates[0];
   if (ring.length < 3) return "";
@@ -264,7 +264,7 @@ function buildParcelPath(coordinates: number[][][] | null): string {
 
 async function fetchGoogleMapImage(
   lat: number, lng: number, mapType: string = "satellite", zoom: number = 15,
-  parcelCoordinates: number[][][] | null = null
+  parcelCoordinates: number[][][] | number[][][][] | null = null
 ): Promise<string | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
@@ -336,7 +336,7 @@ function drawSampleWatermark(doc: jsPDF, pageWidth: number, pageHeight: number) 
   doc.setTextColor(0, 0, 0);
 }
 
-function drawSimpleMap(doc: jsPDF, lat: number, lng: number, x: number, y: number, width: number, height: number, parcelCoordinates: number[][][] | null = null) {
+function drawSimpleMap(doc: jsPDF, lat: number, lng: number, x: number, y: number, width: number, height: number, parcelCoordinates: number[][][] | number[][][][] | null = null) {
   doc.setFillColor(235, 245, 235);
   doc.rect(x, y, width, height, "F");
   
@@ -345,28 +345,42 @@ function drawSimpleMap(doc: jsPDF, lat: number, lng: number, x: number, y: numbe
   for (let gx = x; gx <= x + width; gx += 15) doc.line(gx, y, gx, y + height);
   for (let gy = y; gy <= y + height; gy += 15) doc.line(x, gy, x + width, gy);
 
-  if (parcelCoordinates && parcelCoordinates[0] && parcelCoordinates[0].length > 2) {
-    const ring = parcelCoordinates[0];
-    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
-    for (const coord of ring) {
-      minLng = Math.min(minLng, coord[0]); maxLng = Math.max(maxLng, coord[0]);
-      minLat = Math.min(minLat, coord[1]); maxLat = Math.max(maxLat, coord[1]);
+  if (parcelCoordinates && parcelCoordinates[0]) {
+    // Extract outer ring - handle both Polygon and MultiPolygon
+    let ring: number[][] | null = null;
+    const firstLevel = parcelCoordinates[0];
+    if (Array.isArray(firstLevel) && firstLevel.length > 0) {
+      if (typeof firstLevel[0] === 'number') {
+        ring = parcelCoordinates[0] as number[][];
+      } else if (Array.isArray(firstLevel[0])) {
+        ring = (parcelCoordinates[0] as number[][][])[0] as number[][];
+      }
     }
-    const lngRange = maxLng - minLng || 0.001;
-    const latRange = maxLat - minLat || 0.001;
-    const padding = 0.15;
     
-    doc.setDrawColor(34, 197, 94);
-    doc.setLineWidth(1.5);
-    const points = ring.map(coord => ({
-      x: x + padding * width + ((coord[0] - minLng) / lngRange) * width * (1 - 2 * padding),
-      y: y + padding * height + ((maxLat - coord[1]) / latRange) * height * (1 - 2 * padding)
-    }));
-    if (points.length > 2) {
-      doc.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) doc.lineTo(points[i].x, points[i].y);
-      doc.lineTo(points[0].x, points[0].y);
-      doc.stroke();
+    if (ring && ring.length > 2) {
+      let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const coord of ring) {
+        if (Array.isArray(coord) && coord.length >= 2) {
+          minLng = Math.min(minLng, coord[0]); maxLng = Math.max(maxLng, coord[0]);
+          minLat = Math.min(minLat, coord[1]); maxLat = Math.max(maxLat, coord[1]);
+        }
+      }
+      const lngRange = maxLng - minLng || 0.001;
+      const latRange = maxLat - minLat || 0.001;
+      const padding = 0.15;
+      
+      doc.setDrawColor(34, 197, 94);
+      doc.setLineWidth(1.5);
+      const points = ring.filter(coord => Array.isArray(coord) && coord.length >= 2).map(coord => ({
+        x: x + padding * width + ((coord[0] - minLng) / lngRange) * width * (1 - 2 * padding),
+        y: y + padding * height + ((maxLat - coord[1]) / latRange) * height * (1 - 2 * padding)
+      }));
+      if (points.length > 2) {
+        doc.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) doc.lineTo(points[i].x, points[i].y);
+        doc.lineTo(points[0].x, points[0].y);
+        doc.stroke();
+      }
     }
   }
 
