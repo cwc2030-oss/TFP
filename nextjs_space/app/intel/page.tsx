@@ -43,7 +43,7 @@ import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-toolti
 import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-badge';
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
-import { QAScorecard, QASessionSummary, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
+import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -905,6 +905,7 @@ function DeerIntelContent() {
   const [qaRecentParcelIds, setQaRecentParcelIds] = useState<string[]>([]); // Track visited parcels
   const [qaSessionEntries, setQaSessionEntries] = useState<QAEntry[]>([]); // QA validation log
   const [qaShowScorecard, setQaShowScorecard] = useState(false); // Show rating UI after analysis
+  const [qaShowAnalytics, setQaShowAnalytics] = useState(false); // Show analytics panel
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -4194,6 +4195,17 @@ function DeerIntelContent() {
                 entries={qaSessionEntries}
                 onClear={handleQaSessionClear}
                 onExport={handleQaSessionExport}
+                onShowAnalytics={() => setQaShowAnalytics(true)}
+              />
+            </div>
+          )}
+          
+          {/* QA Analytics Panel (right side when visible) */}
+          {qaShowAnalytics && (
+            <div className="absolute top-16 right-4 z-50 w-80">
+              <QAAnalyticsPanel
+                entries={qaSessionEntries}
+                onClose={() => setQaShowAnalytics(false)}
               />
             </div>
           )}
