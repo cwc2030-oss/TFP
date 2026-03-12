@@ -42,7 +42,7 @@ import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
 import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-badge';
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
-import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
+import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -901,6 +901,7 @@ function DeerIntelContent() {
   const [qaParcel, setQaParcel] = useState<LookupParcel | null>(null);
   const [qaParcelError, setQaParcelError] = useState<string | null>(null);
   const [qaParcelAnalyzing, setQaParcelAnalyzing] = useState(false);
+  const [qaRecentParcelIds, setQaRecentParcelIds] = useState<string[]>([]); // Track visited parcels
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -3340,6 +3341,11 @@ function DeerIntelContent() {
       
       if (data.parcel) {
         setQaParcel(data.parcel);
+        // Track visited parcel (keep last 20)
+        setQaRecentParcelIds(prev => {
+          const updated = [data.parcel.parcelId, ...prev.filter((id: string) => id !== data.parcel.parcelId)];
+          return updated.slice(0, 20);
+        });
         console.log('[QA PARCEL] Found:', data.parcel.parcelId, data.parcel.acreage, 'ac');
         
         // Update map to show parcel boundary
@@ -3454,6 +3460,52 @@ function DeerIntelContent() {
     
     navigator.clipboard.writeText(info);
   }, [qaParcel]);
+
+  // Handler for random parcel picker
+  const handleRandomParcelFound = useCallback((parcel: LookupParcel) => {
+    setQaParcel(parcel);
+    setQaParcelError(null);
+    
+    // Track visited parcel (keep last 20)
+    setQaRecentParcelIds(prev => {
+      const updated = [parcel.parcelId, ...prev.filter(id => id !== parcel.parcelId)];
+      return updated.slice(0, 20);
+    });
+    
+    console.log('[RANDOM PARCEL] Selected:', parcel.parcelId, parcel.acreage, 'ac,', parcel.county, parcel.state);
+    
+    // Update map to show parcel boundary
+    const map = mapRef.current;
+    if (map && parcel.coordinates) {
+      // Create closed polygon for display
+      const coords = [...parcel.coordinates];
+      if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+        coords.push(coords[0]);
+      }
+      
+      // Update QA parcel source
+      const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
+      if (qaSource) {
+        qaSource.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [coords]
+          }
+        });
+      }
+      
+      // Fit bounds to parcel
+      if (parcel.bounds) {
+        map.fitBounds(parcel.bounds, {
+          padding: 100,
+          duration: 800,
+          maxZoom: 16,
+        });
+      }
+    }
+  }, []);
 
   // Register map click handler for QA parcel lookup
   useEffect(() => {
@@ -4100,6 +4152,15 @@ function DeerIntelContent() {
                 <span>Click anywhere in <strong>Kansas</strong> or <strong>Missouri</strong> to lookup a parcel</span>
               </div>
             </div>
+          )}
+          
+          {/* Random Parcel Picker (when no parcel selected) */}
+          {!qaParcel && !qaParcelLoading && (
+            <RandomParcelPicker
+              onParcelFound={handleRandomParcelFound}
+              recentParcelIds={qaRecentParcelIds}
+              disabled={qaParcelLoading}
+            />
           )}
         </>
       )}

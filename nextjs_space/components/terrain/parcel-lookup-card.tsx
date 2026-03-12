@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import {
   MapPin, X, Copy, Check, Play, Loader2, AlertTriangle,
-  Building2, User, FileText, Map, ChevronDown, ChevronUp
+  Building2, User, FileText, ChevronDown, ChevronUp, Shuffle, Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -219,6 +219,120 @@ export function ParcelLookupError({ message, onDismiss }: { message: string; onD
           >
             <X className="h-4 w-4 text-gray-500" />
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Random parcel picker for QA validation
+interface RandomParcelPickerProps {
+  onParcelFound: (parcel: LookupParcel) => void;
+  recentParcelIds: string[];
+  disabled?: boolean;
+}
+
+export function RandomParcelPicker({ onParcelFound, recentParcelIds, disabled }: RandomParcelPickerProps) {
+  const [loading, setLoading] = useState<'MO' | 'KS' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastAttempts, setLastAttempts] = useState<number>(0);
+
+  const fetchRandomParcel = async (state: 'MO' | 'KS') => {
+    if (loading) return;
+    
+    setLoading(state);
+    setError(null);
+    
+    try {
+      const excludeParam = recentParcelIds.length > 0 
+        ? `&excludeIds=${recentParcelIds.join(',')}` 
+        : '';
+      
+      const response = await fetch(
+        `/api/parcels/random?state=${state}&minAcres=80&maxAcres=200${excludeParam}`
+      );
+      const data = await response.json();
+      
+      setLastAttempts(data.attempts || 0);
+      
+      if (!data.found) {
+        setError(data.error || 'No parcel found');
+        return;
+      }
+      
+      if (data.parcel) {
+        onParcelFound(data.parcel);
+      }
+    } catch (err) {
+      console.error('[RANDOM PARCEL] Error:', err);
+      setError('Failed to fetch random parcel');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  return (
+    <div className="absolute top-16 left-4 z-40 bg-gray-900/95 backdrop-blur-sm border border-cyan-500/30 rounded-xl shadow-2xl overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-cyan-900/40 to-gray-900/40 border-b border-cyan-500/20">
+        <div className="flex items-center gap-2">
+          <Shuffle className="h-4 w-4 text-cyan-400" />
+          <span className="text-sm font-medium text-white">Random 80-200 ac Parcel</span>
+        </div>
+      </div>
+      
+      {/* Buttons */}
+      <div className="p-3 space-y-2">
+        <div className="flex gap-2">
+          <Button
+            onClick={() => fetchRandomParcel('MO')}
+            disabled={disabled || loading !== null}
+            size="sm"
+            className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium h-9"
+          >
+            {loading === 'MO' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Target className="h-3.5 w-3.5 mr-1.5" />
+                Missouri
+              </>
+            )}
+          </Button>
+          <Button
+            onClick={() => fetchRandomParcel('KS')}
+            disabled={disabled || loading !== null}
+            size="sm"
+            className="flex-1 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-medium h-9"
+          >
+            {loading === 'KS' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Target className="h-3.5 w-3.5 mr-1.5" />
+                Kansas
+              </>
+            )}
+          </Button>
+        </div>
+        
+        {/* Status */}
+        {loading && (
+          <div className="text-xs text-cyan-400 text-center">
+            Searching rural {loading}... (attempt {lastAttempts || 1})
+          </div>
+        )}
+        
+        {error && !loading && (
+          <div className="flex items-start gap-2 px-2 py-1.5 bg-amber-900/30 border border-amber-500/30 rounded-lg">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <span className="text-xs text-amber-300">{error}</span>
+          </div>
+        )}
+        
+        {/* Help text */}
+        <div className="text-[10px] text-gray-500 text-center">
+          Samples rural areas • Skips recent parcels
         </div>
       </div>
     </div>
