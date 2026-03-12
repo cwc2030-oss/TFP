@@ -90,6 +90,110 @@ export { TERRAIN_FLOW_WEIGHTS as FLOW_WEIGHTS, FLOW_THRESHOLDS };
 // Re-export DEM analysis functions for external use
 export { computeFlowSegmentScores, type FlowSegmentScores };
 
+// ========== PARCEL CLIPPING UTILITIES ==========
+
+/**
+ * Check if a point is inside a polygon (ray casting algorithm)
+ */
+function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
+  let inside = false;
+  const x = point[0], y = point[1];
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Calculate the percentage of a line that falls inside the parcel
+ * Uses midpoint sampling for segment containment
+ */
+function lineParcelOverlapPercent(
+  lineCoords: [number, number][],
+  parcelCoords: number[][]
+): number {
+  if (lineCoords.length < 2) return 0;
+  
+  let insideLen = 0;
+  let totalLen = 0;
+  
+  for (let i = 0; i < lineCoords.length - 1; i++) {
+    const segLen = distanceMeters(lineCoords[i], lineCoords[i + 1]);
+    const midpoint: [number, number] = [
+      (lineCoords[i][0] + lineCoords[i + 1][0]) / 2,
+      (lineCoords[i][1] + lineCoords[i + 1][1]) / 2
+    ];
+    
+    totalLen += segLen;
+    if (pointInPolygon(midpoint, parcelCoords)) {
+      insideLen += segLen;
+    }
+  }
+  
+  return totalLen > 0 ? insideLen / totalLen : 0;
+}
+
+/**
+ * Clip flow lines to parcel boundary
+ * Keeps lines that have significant overlap (>30%) with the parcel
+ * Returns new FeatureCollection with clipped/filtered lines
+ */
+function clipFlowLinesToParcel(
+  flowLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
+  parcelCoords: number[][],
+  minOverlapPercent: number = 0.30
+): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] {
+  return flowLines.filter(feature => {
+    const coords = feature.geometry.coordinates as [number, number][];
+    const overlap = lineParcelOverlapPercent(coords, parcelCoords);
+    
+    // Keep if significant portion is inside parcel
+    return overlap >= minOverlapPercent;
+  }).map(feature => {
+    // Optionally add parcel overlap metadata
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        parcelOverlapPct: lineParcelOverlapPercent(
+          feature.geometry.coordinates as [number, number][],
+          parcelCoords
+        ),
+      },
+    };
+  });
+}
+
+/**
+ * Filter convergence zones to only include those inside the parcel
+ */
+function filterConvergenceZonesToParcel(
+  zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
+  parcelCoords: number[][]
+): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
+  return zones.filter(zone => {
+    const point = zone.geometry.coordinates as [number, number];
+    return pointInPolygon(point, parcelCoords);
+  });
+}
+
+/**
+ * Filter opportunity zones to only include those inside the parcel
+ */
+function filterOpportunityZonesToParcel(
+  zones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[],
+  parcelCoords: number[][]
+): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
+  return zones.filter(zone => {
+    const point = zone.geometry.coordinates as [number, number];
+    return pointInPolygon(point, parcelCoords);
+  });
+}
+
 // ========== API CLIENT ==========
 
 const TERRAIN_FLOW_API_URL = '/api/terrain-flow';
@@ -219,7 +323,13 @@ export function generateTerrainDrivenFlow(
 ): TerrainFlowResponse {
   const startTime = Date.now();
   
+  // Extract parcel ID for debugging
+  const parcelId = (parcel.properties as any)?.parcelId || 
+                   (parcel.properties as any)?.ll_uuid || 
+                   'unknown';
+  
   console.log('[TerrainFlow] === TERRAIN-DRIVEN GENERATION ===');
+  console.log('[TerrainFlow] Parcel ID:', parcelId);
   
   // Extract parcel coordinates
   let coords: number[][] = [];
@@ -241,6 +351,18 @@ export function generateTerrainDrivenFlow(
   
   const parcelBbox = getBbox(coords);
   const bufferedBbox = expandBbox(parcelBbox, ANALYSIS_BUFFER_M);
+  
+  // Calculate parcel area for debug logging
+  const centroid = getCentroid(coords);
+  const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
+  const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
+  const approxAcres = (widthM * heightM * 0.8) / 4046.86;
+  
+  console.log('[TerrainFlow] Parcel extent: %d x %d m (~%d acres)', 
+    Math.round(widthM), Math.round(heightM), Math.round(approxAcres));
+  console.log('[TerrainFlow] Parcel bbox:', parcelBbox.map(v => v.toFixed(6)).join(', '));
+  console.log('[TerrainFlow] Buffered bbox:', bufferedBbox.map(v => v.toFixed(6)).join(', '));
+  console.log('[TerrainFlow] Parcel coords sample:', coords.slice(0, 3).map(c => `[${c[0].toFixed(5)}, ${c[1].toFixed(5)}]`).join('; '));
   
   // Check if we have corridor data
   const hasCorridorData = corridorData && 
@@ -299,20 +421,40 @@ export function generateTerrainDrivenFlow(
     return emptyFlowResponse('Failed to compute flow likelihood surface');
   }
   
-  // Extract flow lines following terrain structure
-  const flowLines = extractFlowLines(components.flow_likelihood, corridorData);
+  // Extract flow lines following terrain structure (on buffered extent)
+  const rawFlowLines = extractFlowLines(components.flow_likelihood, corridorData);
   
-  // Identify convergence zones from terrain/flow structure
-  const convergenceZones = identifyConvergenceZones(
+  // Identify convergence zones from terrain/flow structure (on buffered extent)
+  const rawConvergenceZones = identifyConvergenceZones(
     components.flow_likelihood,
-    flowLines
+    rawFlowLines
   );
   
-  // Identify opportunity zones
-  const opportunityZones = identifyOpportunityZones(
-    convergenceZones,
+  // Identify opportunity zones (on buffered extent)
+  const rawOpportunityZones = identifyOpportunityZones(
+    rawConvergenceZones,
     components.flow_likelihood
   );
+  
+  // ========== CRITICAL: CLIP TO PARCEL BOUNDARY ==========
+  // This ensures adjacent parcels don't show identical results
+  console.log('[TerrainFlow] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
+    rawFlowLines.primary.length, rawFlowLines.secondary.length, 
+    rawConvergenceZones.length, rawOpportunityZones.length);
+  
+  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, coords, 0.25);
+  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, coords, 0.25);
+  const clippedConvergence = filterConvergenceZonesToParcel(rawConvergenceZones, coords);
+  const clippedOpportunity = filterOpportunityZonesToParcel(rawOpportunityZones, coords);
+  
+  console.log('[TerrainFlow] POST-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
+    clippedPrimary.length, clippedSecondary.length, 
+    clippedConvergence.length, clippedOpportunity.length);
+  
+  // Use clipped results
+  const flowLines = { primary: clippedPrimary, secondary: clippedSecondary };
+  const convergenceZones = clippedConvergence;
+  const opportunityZones = clippedOpportunity;
   
   // Build debug layers if requested (enhanced with DEM data when available)
   let debugLayers: DebugLayers | undefined;
@@ -517,17 +659,17 @@ function generateTerrainIndicatorFlow(
   
   // Generate terrain-following flow lines
   // These follow simulated terrain contours, NOT parcel orientation
-  const primaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'primary', parcelAcres);
-  const secondaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'secondary', parcelAcres);
+  const rawPrimaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'primary', parcelAcres);
+  const rawSecondaryLines = generateTerrainFollowingLines(coords, centroid, parcelBbox, 'secondary', parcelAcres);
   
   // Generate convergence zones at terrain pinch points
-  const convergenceZones = generateTerrainConvergenceZones(primaryLines, secondaryLines, parcelBbox);
+  const rawConvergenceZones = generateTerrainConvergenceZones(rawPrimaryLines, rawSecondaryLines, parcelBbox);
   
   // Generate opportunity zones
-  const opportunityZones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
-  if (convergenceZones.length > 0 && parcelAcres >= 20) {
-    const topConvergence = convergenceZones[0];
-    opportunityZones.push({
+  const rawOpportunityZones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] = [];
+  if (rawConvergenceZones.length > 0 && parcelAcres >= 20) {
+    const topConvergence = rawConvergenceZones[0];
+    rawOpportunityZones.push({
       type: 'Feature',
       properties: {
         id: 'opp_1',
@@ -541,6 +683,20 @@ function generateTerrainIndicatorFlow(
       geometry: topConvergence.geometry,
     });
   }
+  
+  // ========== CLIP TO PARCEL BOUNDARY ==========
+  console.log('[TerrainFlow:Indicator] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
+    rawPrimaryLines.length, rawSecondaryLines.length, 
+    rawConvergenceZones.length, rawOpportunityZones.length);
+  
+  const primaryLines = clipFlowLinesToParcel(rawPrimaryLines, coords, 0.25);
+  const secondaryLines = clipFlowLinesToParcel(rawSecondaryLines, coords, 0.25);
+  const convergenceZones = filterConvergenceZonesToParcel(rawConvergenceZones, coords);
+  const opportunityZones = filterOpportunityZonesToParcel(rawOpportunityZones, coords);
+  
+  console.log('[TerrainFlow:Indicator] POST-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
+    primaryLines.length, secondaryLines.length, 
+    convergenceZones.length, opportunityZones.length);
   
   const processingTime = (Date.now() - startTime) / 1000;
   const totalLength = [...primaryLines, ...secondaryLines].reduce(
