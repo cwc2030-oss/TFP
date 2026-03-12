@@ -44,6 +44,7 @@ import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
+import { computeBrokerScore, type BrokerScoreResult, type BrokerScoreInput } from '@/lib/broker-scoring';
 
 // ========== ERROR BOUNDARY ==========
 interface ErrorBoundaryState {
@@ -906,6 +907,7 @@ function DeerIntelContent() {
   const [qaSessionEntries, setQaSessionEntries] = useState<QAEntry[]>([]); // QA validation log
   const [qaShowScorecard, setQaShowScorecard] = useState(false); // Show rating UI after analysis
   const [qaShowAnalytics, setQaShowAnalytics] = useState(false); // Show analytics panel
+  const [qaBrokerScore, setQaBrokerScore] = useState<BrokerScoreResult | null>(null); // Broker scoring
 
   // Edge Intelligence Layer state
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -1952,6 +1954,101 @@ function DeerIntelContent() {
 
     generateFlowData();
   }, [parcelPolygon]);
+
+  // ========== COMPUTE BROKER SCORE (QA MODE) ==========
+  useEffect(() => {
+    if (!terrainFlowData || terrainFlowLoading) {
+      setQaBrokerScore(null);
+      return;
+    }
+    
+    // Only compute when we have terrain data
+    try {
+      // Extract flow segments from terrain flow data
+      const flowSegments: Array<{ likelihood: number; isPrimary: boolean }> = [];
+      
+      // Extract from primary flows
+      if (terrainFlowData.flow_primary?.features) {
+        terrainFlowData.flow_primary.features.forEach((feature: any) => {
+          const props = feature.properties || {};
+          flowSegments.push({
+            likelihood: props.likelihood ?? props.score ?? 0.7,
+            isPrimary: true
+          });
+        });
+      }
+      
+      // Extract from secondary flows
+      if (terrainFlowData.flow_secondary?.features) {
+        terrainFlowData.flow_secondary.features.forEach((feature: any) => {
+          const props = feature.properties || {};
+          flowSegments.push({
+            likelihood: props.likelihood ?? props.score ?? 0.5,
+            isPrimary: false
+          });
+        });
+      }
+      
+      // Get convergence/opportunity zone counts
+      const convergenceCount = terrainFlowData.convergence_zones?.features?.length || 0;
+      const opportunityCount = terrainFlowData.opportunity_zones?.features?.length || 0;
+      
+      // Get max intensity from opportunity zones
+      let maxOverlapIntensity = 0;
+      if (terrainFlowData.opportunity_zones?.features) {
+        terrainFlowData.opportunity_zones.features.forEach((feature: any) => {
+          const score = feature.properties?.score ?? feature.properties?.intensity ?? 0;
+          if (score > maxOverlapIntensity) maxOverlapIntensity = score;
+        });
+      }
+      
+      // Get terrain feature support from ridge spine data
+      const ridgeSupport = ridgeSpineData?.metadata?.ridge_count_primary 
+        ? Math.min(1, ridgeSpineData.metadata.ridge_count_primary / 5)
+        : 0;
+      const saddleSupport = ridgeSpineData?.metadata?.saddle_count
+        ? Math.min(1, ridgeSpineData.metadata.saddle_count / 3)
+        : 0;
+      const benchSupport = 0.3; // Default - we don't have explicit bench detection yet
+      
+      // Get DEM mode
+      const demMode = terrainFlowData.metadata?.mode || 
+                      terrainFlowData.metadata?.dem_source || 
+                      (terrainFlowData.isSynthetic ? 'synthetic' : 'unknown');
+      
+      // Get acreage from qaParcel or parcelPolygon
+      const acreage = qaParcel?.acreage || 
+                      (parcelPolygon?.properties as any)?.ll_gisacre ||
+                      (parcelPolygon?.properties as any)?.acreage ||
+                      null;
+      
+      // Compute broker score
+      const input: BrokerScoreInput = {
+        flowSegments,
+        convergenceZoneCount: Math.max(convergenceCount, opportunityCount),
+        maxOverlapIntensity,
+        ridgeSupport,
+        saddleSupport,
+        benchSupport,
+        hasDEMData: demMode.toLowerCase().includes('dem') || ridgeSupport > 0,
+        demMode,
+        acreage
+      };
+      
+      const result = computeBrokerScore(input);
+      setQaBrokerScore(result);
+      
+      console.log('[BrokerScore] Computed:', {
+        score: result.brokerScore,
+        class: result.brokerClass,
+        components: result.components,
+        inputs: { flowSegments: flowSegments.length, convergenceCount, demMode, acreage }
+      });
+    } catch (err) {
+      console.error('[BrokerScore] Error computing broker score:', err);
+      setQaBrokerScore(null);
+    }
+  }, [terrainFlowData, terrainFlowLoading, ridgeSpineData, qaParcel, parcelPolygon]);
 
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
   useEffect(() => {
@@ -4182,6 +4279,9 @@ function DeerIntelContent() {
                 county={qaParcel.county}
                 acreage={qaParcel.acreage}
                 demMode={terrainFlowData?.metadata?.mode || terrainFlowData?.metadata?.dem_source || 'unknown'}
+                brokerScore={qaBrokerScore?.brokerScore}
+                brokerClass={qaBrokerScore?.brokerClass}
+                brokerComponents={qaBrokerScore?.components}
                 onRatingSubmit={handleQaRatingSubmit}
                 onSkip={handleQaScorecardSkip}
               />
