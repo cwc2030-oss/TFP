@@ -37,6 +37,7 @@ import type {
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
+import { buildTerrainHeatMap } from '@/lib/terrain-heatmap';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
@@ -2148,66 +2149,44 @@ function DeerIntelContent() {
       }
       
       // Update HEAT MAP source (PRIMARY VISUAL)
-      // Combines opportunity zones + convergence zones for terrain pressure visualization
+      // TERRAIN-DRIVEN: uses Modal analysis layers + parcel grid + season weights
+      // Flow/convergence demoted to validation role (~15%)
       const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
       if (heatmapSource) {
-        // Merge opportunity and convergence zones for heat map
-        const heatmapFeatures: GeoJSON.Feature[] = [];
-        
-        // Add opportunity zones (higher weight)
-        if (flowData?.opportunity_zones?.features) {
-          flowData.opportunity_zones.features.forEach((f: GeoJSON.Feature) => {
-            heatmapFeatures.push({
-              ...f,
-              properties: {
-                ...f.properties,
-                score: (f.properties?.score || 0.7) * 1.2, // Boost opportunity zones
-              },
-            });
-          });
+        // Extract parcel coordinates for grid generation
+        let parcelCoordsForGrid: number[][] | undefined;
+        if (parcelPolygon?.geometry) {
+          const geom = parcelPolygon.geometry;
+          if (geom.type === 'Polygon') {
+            parcelCoordsForGrid = (geom as GeoJSON.Polygon).coordinates[0];
+          } else if (geom.type === 'MultiPolygon') {
+            parcelCoordsForGrid = ((geom as GeoJSON.MultiPolygon).coordinates[0] || [])[0];
+          }
         }
-        
-        // Add convergence zones
-        if (flowData?.convergence_zones?.features) {
-          flowData.convergence_zones.features.forEach((f: GeoJSON.Feature) => {
-            heatmapFeatures.push({
-              ...f,
-              properties: {
-                ...f.properties,
-                score: f.properties?.intensity || 0.5,
-              },
-            });
-          });
-        }
-        
-        // Add sample points along primary flow lines for broader heat coverage
-        if (flowData?.flow_primary?.features) {
-          flowData.flow_primary.features.forEach((f: GeoJSON.Feature) => {
-            const coords = (f.geometry as GeoJSON.LineString)?.coordinates || [];
-            const likelihood = f.properties?.likelihood || 0.5;
-            
-            // Sample every 3rd point to add heat without overwhelming
-            coords.filter((_, i) => i % 3 === 0).forEach(coord => {
-              heatmapFeatures.push({
-                type: 'Feature',
-                properties: { score: likelihood * 0.6 },
-                geometry: { type: 'Point', coordinates: coord },
-              });
-            });
-          });
-        }
-        
-        heatmapSource.setData({
-          type: 'FeatureCollection',
-          features: heatmapFeatures,
+
+        const heatMapData = buildTerrainHeatMap({
+          // Layer 1: Modal terrain features (45% weight)
+          beddingPolygons: layers?.beddingPolygons || undefined,
+          funnels: layers?.funnels || undefined,
+          standPoints: layers?.standPoints || undefined,
+          // Layer 2: Parcel-wide terrain grid (30% weight)
+          parcelCoords: parcelCoordsForGrid,
+          // Layer 3: Flow validation signal (15% weight, capped)
+          convergenceZones: flowData?.convergence_zones || undefined,
+          opportunityZones: flowData?.opportunity_zones || undefined,
+          flowPrimary: flowData?.flow_primary || undefined,
+          // Season modifier (10% adjustment on all above)
+          season,
         });
+        
+        heatmapSource.setData(heatMapData);
       }
 
       console.log('[TerrainFlow] Updated map sources', flowData ? (flowComparisonMode ? '(LEGACY comparison)' : '(terrain-driven)') : '(CLEARED - parcel switch)');
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, parcelPolygon]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {

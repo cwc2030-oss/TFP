@@ -867,10 +867,28 @@ function generateOpportunityZones(
   convergenceZones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
   scale: ParcelScaleMetrics
 ): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
-  return convergenceZones
+  const MIN_SEPARATION_M = 80; // Minimum 80m between opportunity zones
+  const MAX_ZONES = Math.min(3, scale.maxOpportunityZones); // Hard cap at 3
+
+  const candidates = convergenceZones
     .filter(z => z.properties.intensity >= 0.65)
-    .slice(0, scale.maxOpportunityZones)
-    .map((conv, i) => ({
+    .sort((a, b) => b.properties.intensity - a.properties.intensity);
+
+  // Spatial deduplication: keep only zones that are MIN_SEPARATION_M apart
+  const selected: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
+  for (const candidate of candidates) {
+    if (selected.length >= MAX_ZONES) break;
+    const cCoord = candidate.geometry.coordinates as [number, number];
+    const tooClose = selected.some(s => {
+      const sCoord = s.geometry.coordinates as [number, number];
+      return distanceMeters(cCoord, sCoord) < MIN_SEPARATION_M;
+    });
+    if (!tooClose) {
+      selected.push(candidate);
+    }
+  }
+
+  return selected.map((conv, i) => ({
       type: 'Feature',
       properties: {
         id: `opp_${i}`,
