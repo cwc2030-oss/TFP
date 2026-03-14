@@ -80,6 +80,7 @@ declare module 'mapbox-gl' {
     getStyle(): Style | undefined;
     setLayoutProperty(layerId: string, name: string, value: any): void;
     setPaintProperty(layerId: string, name: string, value: any): void;
+    setFilter(layerId: string, filter: any[] | null | undefined): void;
     setTerrain(terrain: any): void;
     getBearing(): number;
     setBearing(bearing: number): void;

@@ -21,6 +21,7 @@ import type { SeasonProfile } from '@/types/terrain';
 
 // ============ CONVERGENCE MODE ============
 export type ConvergenceMode = 'off' | 'light';
+export type PressureFocus = 'broad' | 'balanced' | 'focused';
 
 // ============ TERRAIN-FIRST WEIGHTS ============
 // No convergence/draw weight — redistro across bench/saddle/ridge
@@ -81,7 +82,19 @@ export interface HeatMapInput {
   season: SeasonProfile;
   /** Convergence mode: 'off' = pure terrain, 'light' = terrain + convergence amplifier */
   convergenceMode?: ConvergenceMode;
+  /** Pressure focus: controls score floor/ceiling to tighten or broaden the heat map */
+  focusMode?: PressureFocus;
 }
+
+// ============ FOCUS MODE CONFIG ============
+// scoreFloor: points below this score are dropped entirely
+// scoreGamma: power curve — >1 suppresses weak, <1 lifts weak
+// Each mode reshapes the score distribution, not just brightness.
+const FOCUS_CONFIG: Record<PressureFocus, { scoreFloor: number; scoreGamma: number }> = {
+  broad:    { scoreFloor: 0.02, scoreGamma: 0.70 },  // lifts weak signals, shows full terrain story
+  balanced: { scoreFloor: 0.08, scoreGamma: 1.00 },  // default — linear mapping
+  focused:  { scoreFloor: 0.20, scoreGamma: 1.50 },  // suppresses weak, keeps only strong hotspots
+};
 
 // ============ INFLUENCE RADII (meters) ============
 const BENCH_INFLUENCE_M  = 75;
@@ -190,9 +203,24 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
     applyConvergenceAmplifier(features, input.funnels);
   }
 
+  // ====== PRESSURE FOCUS: floor + gamma reshaping ======
+  const focus = FOCUS_CONFIG[input.focusMode ?? 'balanced'];
+  const finalFeatures: GeoJSON.Feature[] = [];
+  for (const f of features) {
+    const raw = (f.properties as Record<string, number>)?.score ?? 0;
+    if (raw < focus.scoreFloor) continue;               // drop below floor
+    // Normalize to 0-1 within [floor..1], then apply gamma
+    const norm = (raw - focus.scoreFloor) / (1 - focus.scoreFloor);
+    const shaped = Math.pow(Math.max(0, Math.min(1, norm)), focus.scoreGamma);
+    finalFeatures.push({
+      ...f,
+      properties: { ...f.properties, score: shaped, intensity: shaped },
+    });
+  }
+
   return {
     type: 'FeatureCollection',
-    features,
+    features: finalFeatures,
   };
 }
 
@@ -256,6 +284,28 @@ function applyConvergenceAmplifier(
  */
 export function getSeasonWeights(season: SeasonProfile): SeasonWeightProfile {
   return SEASON_WEIGHTS[season] || SEASON_WEIGHTS.rut;
+}
+
+/**
+ * Mapbox paint overrides per focus mode.
+ * Returns partial paint properties that should be set dynamically
+ * when the user changes the focus slider.
+ */
+export function getFocusPaintParams(focus: PressureFocus): {
+  weightCurve: number[];       // [floor, low, mid, high] for heatmap-weight stops
+  intensityMult: number;       // multiplier applied to heatmap-intensity at each zoom
+  radiusOffset: number;        // px offset added to each zoom-level radius (negative = tighter)
+  opacity: number;
+  oppZoneMaxCount: number;     // max opportunity zones to show
+} {
+  switch (focus) {
+    case 'broad':
+      return { weightCurve: [0.20, 0.50, 0.75, 1.0], intensityMult: 0.85, radiusOffset: 6, opacity: 0.65, oppZoneMaxCount: 3 };
+    case 'focused':
+      return { weightCurve: [0.0, 0.20, 0.70, 1.0], intensityMult: 1.25, radiusOffset: -6, opacity: 0.85, oppZoneMaxCount: 1 };
+    default: // balanced
+      return { weightCurve: [0.10, 0.45, 0.80, 1.0], intensityMult: 1.0, radiusOffset: 0, opacity: 0.75, oppZoneMaxCount: 3 };
+  }
 }
 
 // ============ STAND-SITE RESCORING ============

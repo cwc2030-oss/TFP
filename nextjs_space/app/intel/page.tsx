@@ -37,7 +37,7 @@ import type {
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
-import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
+import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus } from '@/lib/terrain-heatmap';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
@@ -855,6 +855,7 @@ function DeerIntelContent() {
 
   // User controls
   const [season, setSeason] = useState<SeasonProfile>('rut');
+  const [pressureFocus, setPressureFocus] = useState<PressureFocus>('balanced');
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(new Date());
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
@@ -2184,6 +2185,8 @@ function DeerIntelContent() {
           season,
           // v2.9: convergence as light amplifier, not primary source
           convergenceMode: 'light',
+          // Pressure focus slider — reshapes score distribution
+          focusMode: pressureFocus,
         });
         
         heatmapSource.setData(heatMapData);
@@ -2193,7 +2196,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, parcelPolygon, ridgeSpineData]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, pressureFocus, parcelPolygon, ridgeSpineData]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
@@ -2306,6 +2309,63 @@ function DeerIntelContent() {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
   }, [visibility, flowVisibility, mapReady]);
+
+  // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    try {
+      const fp = getFocusPaintParams(pressureFocus);
+      if (map.getLayer('tfp-pressure-heatmap')) {
+        // Weight curve: reshape score-to-visual mapping
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
+          'interpolate', ['linear'],
+          ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
+          0, fp.weightCurve[0],
+          0.3, fp.weightCurve[1],
+          0.6, fp.weightCurve[2],
+          1, fp.weightCurve[3],
+        ]);
+        // Intensity: scaled per focus
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
+          'interpolate', ['linear'], ['zoom'],
+          12, 1.1 * fp.intensityMult,
+          14, 1.5 * fp.intensityMult,
+          16, 1.8 * fp.intensityMult,
+          18, 2.0 * fp.intensityMult,
+        ]);
+        // Radius: offset per focus (tighter in focused, wider in broad)
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
+          'interpolate', ['linear'], ['zoom'],
+          12, Math.max(10, 22 + fp.radiusOffset),
+          14, Math.max(15, 35 + fp.radiusOffset),
+          16, Math.max(20, 50 + fp.radiusOffset),
+        ]);
+        // Opacity
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', fp.opacity);
+      }
+
+      // Opportunity zones: hide weaker ones in focused mode
+      if (map.getLayer('tfp-flow-opportunity')) {
+        if (fp.oppZoneMaxCount < 3) {
+          // Filter to only the highest-scoring zone(s)
+          map.setFilter('tfp-flow-opportunity', ['>=', ['get', 'score'], 0.5]);
+          if (map.getLayer('tfp-flow-opportunity-glow')) {
+            map.setFilter('tfp-flow-opportunity-glow', ['>=', ['get', 'score'], 0.5]);
+          }
+        } else {
+          map.setFilter('tfp-flow-opportunity', null);
+          if (map.getLayer('tfp-flow-opportunity-glow')) {
+            map.setFilter('tfp-flow-opportunity-glow', null);
+          }
+        }
+      }
+
+      console.log('[PressureFocus]', pressureFocus, fp);
+    } catch (err) {
+      console.error('[PressureFocus] Error updating paint (non-fatal):', err);
+    }
+  }, [pressureFocus, mapReady]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -4551,7 +4611,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v2.9.0 | terrain-first convergence demotion | 2026-03-14 | cp:tcd';
+  const BUILD_STAMP = 'v2.9.1 | pressure focus slider | 2026-03-14 | cp:pfs';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -5439,6 +5499,44 @@ function DeerIntelContent() {
                       Primary
                     </span>
                   </button>
+
+                  {/* Pressure Focus Slider */}
+                  {flowVisibility.pressureHeatmap && (
+                    <div className="px-2 py-2 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-stone-400 uppercase tracking-wider font-medium">Focus</span>
+                        <span className="text-[10px] text-amber-400 font-semibold">
+                          {pressureFocus === 'broad' ? '🌲 Broad' : pressureFocus === 'focused' ? '🎯 Focused' : '⚖️ Balanced'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {([
+                          { key: 'broad' as PressureFocus, label: 'Broad', sub: 'Full parcel', icon: '🌲' },
+                          { key: 'balanced' as PressureFocus, label: 'Balanced', sub: 'Default', icon: '⚖️' },
+                          { key: 'focused' as PressureFocus, label: 'Focused', sub: 'Best spots', icon: '🎯' },
+                        ]).map(m => (
+                          <button
+                            key={m.key}
+                            onClick={() => setPressureFocus(m.key)}
+                            className={`p-1.5 rounded text-center transition-all ${
+                              pressureFocus === m.key
+                                ? 'bg-amber-500/25 border border-amber-500/60 text-white'
+                                : 'bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 hover:text-white/70'
+                            }`}
+                          >
+                            <span className="text-sm block">{m.icon}</span>
+                            <span className="text-[9px] font-medium block mt-0.5">{m.label}</span>
+                            <span className="text-[7px] text-white/40 block">{m.sub}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[8px] text-stone-600 mt-1.5 text-center">
+                        {pressureFocus === 'broad' ? 'Showing wider terrain pressure — overall huntability' :
+                         pressureFocus === 'focused' ? 'Suppressing weak zones — strongest hotspots only' :
+                         'Balanced terrain structure and strongest areas'}
+                      </p>
+                    </div>
+                  )}
                   
                   {/* Divider with "Supporting Evidence" label */}
                   <div className="flex items-center gap-2 py-1">
