@@ -1,25 +1,36 @@
 /**
- * Terrain-Driven Heat Map Builder v2
+ * Terrain-Driven Heat Map Builder v3
  *
- * Four DEM-structure layers detected from slope, curvature, and TPI:
+ * TERRAIN-FIRST architecture: heat comes only from terrain structure.
+ * Convergence is DEMOTED to a local amplifier / tie-breaker — not a heat source.
  *
  *   terrain_pressure =
- *     0.35 × bench_probability   +
- *     0.25 × saddle_probability  +
- *     0.20 × ridge_structure     +
- *     0.20 × draw_convergence
+ *     0.40 × bench_probability   +
+ *     0.30 × saddle_probability  +
+ *     0.30 × ridge_structure
  *
- * Season weights act as multipliers on the raw layer scores.
- * No synthetic grid fill — heat is ONLY where terrain structure exists.
+ *   Then: if convergence is near a terrain hotspot, boost by up to +15%.
+ *   Convergence alone generates ZERO heat.
+ *
+ * convergenceMode controls A/B testing:
+ *   'off'   → Version A: pure terrain, no convergence at all
+ *   'light' → Version B: terrain-first + light convergence refinement (+15% max)
  */
 
 import type { SeasonProfile } from '@/types/terrain';
 
-// ============ COMPONENT WEIGHTS (user-specified) ============
-const W_BENCH  = 0.35;
-const W_SADDLE = 0.25;
-const W_RIDGE  = 0.20;
-const W_DRAW   = 0.20;
+// ============ CONVERGENCE MODE ============
+export type ConvergenceMode = 'off' | 'light';
+
+// ============ TERRAIN-FIRST WEIGHTS ============
+// No convergence/draw weight — redistro across bench/saddle/ridge
+const W_BENCH  = 0.40;  // was 0.35 — promoted (primary terrain structure)
+const W_SADDLE = 0.30;  // was 0.25 — promoted (key deer funnels)
+const W_RIDGE  = 0.30;  // was 0.20 — promoted (spine of terrain story)
+
+// Convergence amplifier cap (only in 'light' mode)
+const CONVERGENCE_AMP_MAX = 0.15; // max +15% boost on existing terrain heat
+const CONVERGENCE_AMP_RADIUS_M = 120; // how close convergence must be to boost
 
 // ============ SEASON WEIGHT PROFILES ============
 const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
@@ -28,21 +39,18 @@ const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
     bench: 1.3,          // Food-adjacent bedding is key
     saddle: 0.8,         // Less travel through saddles
     ridge: 0.9,          // Moderate ridge use
-    draw: 0.7,           // Draws less critical early
   },
   rut: {
     label: 'Rut (Nov)',
     bench: 0.8,          // Bucks leave benches
     saddle: 1.4,         // Saddle crossings are king
     ridge: 1.2,          // Ridgeline travel increases
-    draw: 1.1,           // Draw heads become funnels
   },
   late: {
     label: 'Late Season (Dec-Jan)',
     bench: 1.2,          // Return to thermal benches
     saddle: 0.9,         // Moderate saddle use
     ridge: 0.8,          // Less ridge travel
-    draw: 0.6,           // Draws less critical late
   },
 };
 
@@ -51,7 +59,6 @@ interface SeasonWeightProfile {
   bench: number;
   saddle: number;
   ridge: number;
-  draw: number;
 }
 
 export interface RidgeSpineInput {
@@ -64,7 +71,7 @@ export interface RidgeSpineInput {
 export interface HeatMapInput {
   /** Modal analysis: bedding polygons → bench_probability proxy */
   beddingPolygons?: GeoJSON.FeatureCollection;
-  /** Modal analysis: funnels → draw_convergence proxy */
+  /** Modal analysis: funnels → used ONLY as convergence amplifier, NOT primary heat */
   funnels?: GeoJSON.FeatureCollection;
   /** Ridge spine data → ridge_structure + saddle_probability */
   ridgeSpineData?: RidgeSpineInput | null;
@@ -72,33 +79,32 @@ export interface HeatMapInput {
   parcelCoords?: number[][];
   /** Season profile */
   season: SeasonProfile;
+  /** Convergence mode: 'off' = pure terrain, 'light' = terrain + convergence amplifier */
+  convergenceMode?: ConvergenceMode;
 }
 
 // ============ INFLUENCE RADII (meters) ============
-// v2.8.1: Tightened to resolve blobs into terrain-shaped pockets
-const BENCH_INFLUENCE_M  = 75;   // Bench heat tightly around bedding (was 120)
-const SADDLE_INFLUENCE_M = 120;  // Saddle draws from moderate range (was 200)
-const RIDGE_INFLUENCE_M  = 60;   // Ridge heat hugs the spine (was 100)
-const DRAW_INFLUENCE_M   = 90;   // Draw head influence tighter (was 150)
+const BENCH_INFLUENCE_M  = 75;
+const SADDLE_INFLUENCE_M = 120;
+const RIDGE_INFLUENCE_M  = 60;
 
 /**
  * Build terrain-driven heat map features.
  * Returns a FeatureCollection of Point features with `score` property (0-1).
  *
- * Heat is ONLY placed where terrain structure exists — no synthetic grid.
- * Each source feature generates a cluster of heat points (centroid + samples)
- * weighted by the 4-component formula.
+ * Heat is ONLY placed where terrain structure exists.
+ * Convergence does NOT generate heat — it only amplifies nearby terrain points.
  */
 export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   const sw = SEASON_WEIGHTS[input.season] || SEASON_WEIGHTS.rut;
+  const convMode = input.convergenceMode ?? 'light';
 
-  // ====== BENCH_PROBABILITY (0.35) ← bedding polygons ======
+  // ====== BENCH_PROBABILITY (0.40) ← bedding polygons ======
   if (input.beddingPolygons?.features?.length) {
     for (const f of input.beddingPolygons.features) {
       const props = f.properties || {};
       const confidence = props.confidence || 0.6;
-      // Raw bench probability from bedding confidence (boosted contrast)
       const rawBench = Math.min(1, confidence * 1.3);
       const score = rawBench * W_BENCH * sw.bench;
 
@@ -106,29 +112,27 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
       if (centroid) {
         features.push(makeHeatPoint(centroid, score, 'bench'));
       }
-      // Spread heat across bedding area (denser to compensate for tighter radius)
-      const pts = sampleGeometryPoints(f.geometry, 8); // was 5
+      const pts = sampleGeometryPoints(f.geometry, 8);
       for (const pt of pts) {
         features.push(makeHeatPoint(pt, score * 0.8, 'bench'));
       }
     }
   }
 
-  // ====== SADDLE_PROBABILITY (0.25) ← saddle_nodes ======
+  // ====== SADDLE_PROBABILITY (0.30) ← saddle_nodes ======
   const saddleNodes = input.ridgeSpineData?.saddle_nodes?.features || [];
   if (saddleNodes.length > 0) {
     for (const f of saddleNodes) {
       const props = f.properties || {};
-      // Saddle quality: deeper drop = better funnel (boosted contrast)
       const dropFt = props.ridgeDropFt || 15;
-      const rawSaddle = Math.min(1, dropFt / 30); // 30ft drop = max (was 40)
+      const rawSaddle = Math.min(1, dropFt / 30);
       const score = rawSaddle * W_SADDLE * sw.saddle;
 
       if (f.geometry?.type === 'Point') {
         const coord = f.geometry.coordinates as [number, number];
         features.push(makeHeatPoint(coord, score, 'saddle'));
-        // Halo: 4 surrounding points at ~half influence radius
-        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.5) / 111000; // ~60m halo (tighter)
+        // Tight halo
+        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.5) / 111000;
         const offsets: [number, number][] = [
           [haloOffsetDeg, 0], [-haloOffsetDeg, 0],
           [0, haloOffsetDeg], [0, -haloOffsetDeg],
@@ -144,7 +148,7 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
     }
   }
 
-  // ====== RIDGE_STRUCTURE (0.20) ← ridge spines ======
+  // ====== RIDGE_STRUCTURE (0.30) ← ridge spines ======
   const useSyntheticRidges = input.ridgeSpineData?.isSynthetic ?? true;
   const ridgePrimary = input.ridgeSpineData?.ridges_primary?.features || [];
   const ridgeSecondary = input.ridgeSpineData?.ridges_secondary?.features || [];
@@ -154,17 +158,14 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
     for (const f of allRidges) {
       const props = f.properties || {};
       const isPrimary = ridgePrimary.includes(f);
-      // Primary ridges score higher than secondary
       const prominenceFt = props.prominenceFt || props.prominence_ft || 20;
-      const rawRidge = Math.min(1, prominenceFt / 45) * (isPrimary ? 1.0 : 0.7); // 45ft prominence = max (was 60)
-      // Down-weight synthetic ridges (backbone fallback)
+      const rawRidge = Math.min(1, prominenceFt / 45) * (isPrimary ? 1.0 : 0.7);
       const syntheticPenalty = useSyntheticRidges ? 0.5 : 1.0;
       const score = rawRidge * syntheticPenalty * W_RIDGE * sw.ridge;
 
-      // Sample points along the ridge line (denser to compensate for tighter radius)
       const coords = (f.geometry as GeoJSON.LineString)?.coordinates || [];
       if (coords.length >= 2) {
-        const step = Math.max(1, Math.floor(coords.length / 10)); // was /6, denser now
+        const step = Math.max(1, Math.floor(coords.length / 10));
         for (let i = 0; i < coords.length; i += step) {
           features.push(makeHeatPoint(
             coords[i] as [number, number],
@@ -176,65 +177,78 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
     }
   }
 
-  // ====== DRAW_CONVERGENCE (0.20) ← funnels (draw/convergence) ======
-  if (input.funnels?.features?.length) {
-    for (const f of input.funnels.features) {
-      const props = f.properties || {};
-      const corridorScore = props.corridorScore || props.score || 0.6;
-      const rawDraw = Math.min(1, corridorScore * 1.3); // boosted contrast (was 1.1)
-      const score = rawDraw * W_DRAW * sw.draw;
+  // ====== NO DRAW/CONVERGENCE HEAT POINTS ======
+  // Funnels/convergence do NOT generate heat. They only amplify below.
 
-      if (f.geometry.type === 'Point') {
-        features.push(makeHeatPoint(
-          f.geometry.coordinates as [number, number],
-          score,
-          'draw'
-        ));
-      } else if (f.geometry.type === 'LineString') {
-        const coords = (f.geometry as GeoJSON.LineString).coordinates;
-        // Focus heat at the convergence end (last point = draw head)
-        if (coords.length >= 2) {
-          // Draw head = strongest
-          features.push(makeHeatPoint(
-            coords[coords.length - 1] as [number, number],
-            score,
-            'draw_head'
-          ));
-          // Mid-draw
-          const mid = Math.floor(coords.length / 2);
-          features.push(makeHeatPoint(
-            coords[mid] as [number, number],
-            score * 0.65,
-            'draw_mid'
-          ));
-          // Mouth = weakest
-          features.push(makeHeatPoint(
-            coords[0] as [number, number],
-            score * 0.4,
-            'draw_mouth'
-          ));
-        }
-      } else if (f.geometry.type === 'Polygon') {
-        const centroid = getPolygonCentroid(f.geometry);
-        if (centroid) {
-          features.push(makeHeatPoint(centroid, score, 'draw'));
-        }
-        const pts = sampleGeometryPoints(f.geometry, 3);
-        for (const pt of pts) {
-          features.push(makeHeatPoint(pt, score * 0.6, 'draw_edge'));
-        }
-      }
-    }
-  }
-
-  // ====== INTERSECTION BONUSES ======
-  // Where two structure types overlap within proximity, boost heat
+  // ====== TERRAIN INTERSECTION BONUSES ======
   addIntersectionBonuses(features, sw);
+
+  // ====== CONVERGENCE AMPLIFIER (light mode only) ======
+  // For each existing terrain heat point, if convergence is nearby, boost score.
+  // This is the ONLY way convergence affects the map.
+  if (convMode === 'light' && input.funnels?.features?.length) {
+    applyConvergenceAmplifier(features, input.funnels);
+  }
 
   return {
     type: 'FeatureCollection',
     features,
   };
+}
+
+/**
+ * Apply convergence as a LOCAL AMPLIFIER on existing terrain heat points.
+ * For each heat point, check proximity to funnels/convergence features.
+ * If close, boost score by up to CONVERGENCE_AMP_MAX (15%).
+ * This never creates new heat — only strengthens what terrain already placed.
+ */
+function applyConvergenceAmplifier(
+  features: GeoJSON.Feature[],
+  funnels: GeoJSON.FeatureCollection
+) {
+  // Build a list of convergence reference points from funnels
+  const convPoints: [number, number][] = [];
+  for (const f of funnels.features) {
+    if (f.geometry.type === 'Point') {
+      convPoints.push(f.geometry.coordinates as [number, number]);
+    } else if (f.geometry.type === 'LineString') {
+      const coords = (f.geometry as GeoJSON.LineString).coordinates;
+      // Use draw head (last point) and midpoint
+      if (coords.length >= 2) {
+        convPoints.push(coords[coords.length - 1] as [number, number]);
+        convPoints.push(coords[Math.floor(coords.length / 2)] as [number, number]);
+      }
+    } else if (f.geometry.type === 'Polygon') {
+      const centroid = getPolygonCentroid(f.geometry);
+      if (centroid) convPoints.push(centroid);
+    }
+  }
+
+  if (convPoints.length === 0) return;
+
+  const ampRadiusDeg = CONVERGENCE_AMP_RADIUS_M / 111000;
+
+  for (const feat of features) {
+    if (feat.geometry.type !== 'Point' || !feat.properties?.score) continue;
+    const coord = feat.geometry.coordinates as [number, number];
+    const currentScore = feat.properties.score as number;
+
+    // Find nearest convergence point
+    let minDist = Infinity;
+    for (const cp of convPoints) {
+      const d = coordDist(coord, cp);
+      if (d < minDist) minDist = d;
+    }
+
+    if (minDist < ampRadiusDeg) {
+      // Proximity factor: 1.0 at center, 0.0 at edge
+      const proximity = 1 - minDist / ampRadiusDeg;
+      // Boost: up to CONVERGENCE_AMP_MAX of the current score
+      const boost = currentScore * CONVERGENCE_AMP_MAX * proximity;
+      feat.properties.score = Math.min(1, currentScore + boost);
+      feat.properties.convergenceBoost = boost;
+    }
+  }
 }
 
 /**
@@ -247,7 +261,8 @@ export function getSeasonWeights(season: SeasonProfile): SeasonWeightProfile {
 // ============ STAND-SITE RESCORING ============
 
 /**
- * Re-score opportunity zones using the 4-component terrain formula.
+ * Re-score opportunity zones using terrain-first formula.
+ * Convergence is only a small tie-breaker bonus, not a main driver.
  * Called client-side after all data sources are available.
  * Returns up to 3 zones, sorted best-to-worst.
  */
@@ -260,16 +275,15 @@ export function rescoreStandSites(
   if (zones.length === 0) return emptyFC;
 
   const sw = SEASON_WEIGHTS[input.season] || SEASON_WEIGHTS.rut;
+  const convMode = input.convergenceMode ?? 'light';
 
   const scored = zones.map(f => {
     if (f.geometry.type !== 'Point') return { feature: f, score: 0 };
     const coord = f.geometry.coordinates as [number, number];
 
-    // Bench proximity (tightened from 200m)
+    // Primary terrain scores (100% of base score)
     const benchProx = proximityToFeatures(coord, input.beddingPolygons, 140);
-    // Saddle proximity (tightened from 300m)
     const saddleProx = proximityToFeatures(coord, input.ridgeSpineData?.saddle_nodes, 200);
-    // Ridge structure (tightened from 200m)
     const allRidges: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: [
@@ -279,16 +293,22 @@ export function rescoreStandSites(
     };
     const isSynthetic = input.ridgeSpineData?.isSynthetic ?? true;
     const ridgeStruct = proximityToFeatures(coord, allRidges, 140) * (isSynthetic ? 0.5 : 1.0);
-    // Draw convergence (tightened from 250m)
-    const drawConv = proximityToFeatures(coord, input.funnels, 170);
 
-    const rawScore =
+    // Terrain-only base score
+    const terrainScore =
       W_BENCH * benchProx * sw.bench +
       W_SADDLE * saddleProx * sw.saddle +
-      W_RIDGE * ridgeStruct * sw.ridge +
-      W_DRAW * drawConv * sw.draw;
+      W_RIDGE * ridgeStruct * sw.ridge;
 
-    // Update feature properties with component scores
+    // Convergence as tie-breaker only (light mode: up to +10% of terrain score)
+    let convBonus = 0;
+    if (convMode === 'light') {
+      const drawConv = proximityToFeatures(coord, input.funnels, 170);
+      convBonus = terrainScore * 0.10 * drawConv; // max +10% boost, scaled by proximity
+    }
+
+    const rawScore = terrainScore + convBonus;
+
     const updatedFeature: GeoJSON.Feature = {
       ...f,
       properties: {
@@ -297,7 +317,7 @@ export function rescoreStandSites(
         benchBonus: benchProx * W_BENCH,
         saddleBonus: saddleProx * W_SADDLE,
         ridgeBonus: ridgeStruct * W_RIDGE,
-        drawBonus: drawConv * W_DRAW,
+        convergenceBoost: convBonus,
       },
     };
 
@@ -319,7 +339,7 @@ function proximityToFeatures(
   radiusM: number
 ): number {
   if (!fc?.features?.length) return 0;
-  const radiusDeg = radiusM / 111000; // rough m→deg
+  const radiusDeg = radiusM / 111000;
   let minDist = Infinity;
   for (const f of fc.features) {
     if (f.geometry.type === 'Point') {
@@ -341,18 +361,17 @@ function proximityToFeatures(
   return minDist < radiusDeg ? Math.max(0, 1 - minDist / radiusDeg) : 0;
 }
 
-// ============ INTERSECTION BONUSES ============
+// ============ INTERSECTION BONUSES (terrain-only) ============
 
 /**
- * Where multiple terrain structure types overlap spatially,
+ * Where multiple TERRAIN structure types overlap spatially,
  * the combined signal is stronger than any single layer.
- * E.g. a saddle at a ridge junction is extremely high-value.
+ * NOTE: No draw/convergence intersections — only bench × saddle × ridge.
  */
 function addIntersectionBonuses(
   features: GeoJSON.Feature[],
   sw: SeasonWeightProfile
 ) {
-  // Collect point locations by source type
   const byType: Record<string, [number, number][]> = {};
   for (const f of features) {
     const src = (f.properties?.source || '') as string;
@@ -364,34 +383,39 @@ function addIntersectionBonuses(
     }
   }
 
-  const PROXIMITY_DEG = 100 / 111000; // ~100m in degrees (tightened from 150m)
+  const PROXIMITY_DEG = 100 / 111000;
 
-  // Saddle near bench = high-value intersection
   const saddlePts = byType['saddle'] || [];
   const benchPts = byType['bench'] || [];
   const ridgePts = byType['ridge'] || [];
-  const drawPts = byType['draw'] || [];
+  // NOTE: no drawPts — convergence is not in the intersection model
 
+  // Saddle × Bench (highest value intersection)
   for (const sp of saddlePts) {
     for (const bp of benchPts) {
       if (coordDist(sp, bp) < PROXIMITY_DEG) {
         const midPt: [number, number] = [(sp[0] + bp[0]) / 2, (sp[1] + bp[1]) / 2];
-        features.push(makeHeatPoint(midPt, 0.18 * sw.saddle, 'intersection_saddle_bench'));
-      }
-    }
-    for (const dp of drawPts) {
-      if (coordDist(sp, dp) < PROXIMITY_DEG) {
-        const midPt: [number, number] = [(sp[0] + dp[0]) / 2, (sp[1] + dp[1]) / 2];
-        features.push(makeHeatPoint(midPt, 0.15 * sw.saddle, 'intersection_saddle_draw'));
+        features.push(makeHeatPoint(midPt, 0.20 * sw.saddle, 'intersection_saddle_bench'));
       }
     }
   }
 
+  // Saddle × Ridge
+  for (const sp of saddlePts) {
+    for (const rp of ridgePts) {
+      if (coordDist(sp, rp) < PROXIMITY_DEG) {
+        const midPt: [number, number] = [(sp[0] + rp[0]) / 2, (sp[1] + rp[1]) / 2];
+        features.push(makeHeatPoint(midPt, 0.16 * sw.saddle, 'intersection_saddle_ridge'));
+      }
+    }
+  }
+
+  // Ridge × Bench
   for (const rp of ridgePts) {
     for (const bp of benchPts) {
       if (coordDist(rp, bp) < PROXIMITY_DEG) {
         const midPt: [number, number] = [(rp[0] + bp[0]) / 2, (rp[1] + bp[1]) / 2];
-        features.push(makeHeatPoint(midPt, 0.12 * sw.ridge, 'intersection_ridge_bench'));
+        features.push(makeHeatPoint(midPt, 0.14 * sw.ridge, 'intersection_ridge_bench'));
       }
     }
   }

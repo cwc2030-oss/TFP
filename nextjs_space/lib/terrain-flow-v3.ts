@@ -882,8 +882,8 @@ function generateOpportunityZones(
   const MIN_SEPARATION_M = 80;
   const MAX_ZONES = Math.min(3, scale.maxOpportunityZones);
 
-  // Collect candidate points from all terrain sources
-  const candidates: { coord: [number, number]; benchProx: number; saddleProx: number; ridgeStruct: number; drawConv: number }[] = [];
+  // v2.9 – Terrain-first candidate scoring.  Convergence is a tiny tie-breaker, NOT a primary signal.
+  const candidates: { coord: [number, number]; benchProx: number; saddleProx: number; ridgeStruct: number; convergenceTB: number }[] = [];
 
   // Helper: score proximity to nearest feature in a collection
   const proximityScore = (coord: [number, number], fc: GeoJSON.FeatureCollection | undefined, radiusM: number): number => {
@@ -922,22 +922,19 @@ function generateOpportunityZones(
     features: [...(ridgePrimary?.features || []), ...(ridgeSecondary?.features || [])],
   };
 
-  // Score a single candidate point
+  // Score a single candidate point – terrain components only, convergence as tie-breaker
   const scorePt = (coord: [number, number]) => {
-    const benchProx = proximityScore(coord, beddingPolygons, 200);
-    const saddleProx = proximityScore(coord, saddleNodes, 300);
-    const ridgeStruct = proximityScore(coord, allRidgesFC, 200) * ridgePenalty;
-    const drawConv = proximityScore(coord, funnels, 250);
-    return { coord, benchProx, saddleProx, ridgeStruct, drawConv };
+    const benchProx = proximityScore(coord, beddingPolygons, 140);
+    const saddleProx = proximityScore(coord, saddleNodes, 200);
+    const ridgeStruct = proximityScore(coord, allRidgesFC, 140) * ridgePenalty;
+    // Convergence: tiny proximity check for tie-breaking only (capped contribution)
+    const convergenceTB = proximityScore(coord, funnels, 120) * 0.10; // max 10% influence
+    return { coord, benchProx, saddleProx, ridgeStruct, convergenceTB };
   };
 
-  // Source 1: convergence zone centers
-  for (const cz of convergenceZones) {
-    const coord = cz.geometry.coordinates as [number, number];
-    candidates.push(scorePt(coord));
-  }
+  // Source 1 (was convergence zones – REMOVED in v2.9, terrain-only now)
 
-  // Source 2: saddle nodes (natural stand sites)
+  // Source 1: saddle nodes (natural stand sites)
   if (saddleNodes?.features?.length) {
     for (const f of saddleNodes.features) {
       if (f.geometry.type === 'Point') {
@@ -972,10 +969,10 @@ function generateOpportunityZones(
     }
   }
 
-  // Score each candidate using the 4-component formula
+  // Score each candidate: 3-component terrain formula + convergence tie-breaker
   const scored = candidates.map(c => ({
     ...c,
-    totalScore: 0.35 * c.benchProx + 0.25 * c.saddleProx + 0.20 * c.ridgeStruct + 0.20 * c.drawConv,
+    totalScore: 0.40 * c.benchProx + 0.30 * c.saddleProx + 0.30 * c.ridgeStruct + c.convergenceTB,
   }));
 
   // Sort by total score descending
@@ -999,10 +996,10 @@ function generateOpportunityZones(
     properties: {
       id: `opp_${i}`,
       score: Math.min(1, s.totalScore * 1.5 + 0.1), // Normalize to 0-1 display range
-      flowIntensity: s.drawConv,
-      convergenceBonus: s.drawConv * 0.20,
-      benchBonus: s.benchProx * 0.35,
-      saddleBonus: s.saddleProx * 0.25,
+      flowIntensity: s.convergenceTB,            // kept for layer compat; now tiny
+      convergenceBonus: s.convergenceTB,
+      benchBonus: s.benchProx * 0.40,
+      saddleBonus: s.saddleProx * 0.30,
       radiusM: scale.opportunityRadius,
     },
     geometry: { type: 'Point' as const, coordinates: s.coord },

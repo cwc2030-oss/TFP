@@ -2142,7 +2142,7 @@ function DeerIntelContent() {
         convergenceSource.setData(flowData?.convergence_zones || emptyFC);
       }
 
-      // Update opportunity zones source — re-scored using 4-component terrain formula
+      // Update opportunity zones source — re-scored using 3-component terrain formula + light convergence
       const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
       if (opportunitySource) {
         const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
@@ -2150,12 +2150,13 @@ function DeerIntelContent() {
           funnels: layers?.funnels || undefined,
           ridgeSpineData: ridgeSpineData || undefined,
           season,
+          convergenceMode: 'light',
         });
         opportunitySource.setData(rescoredOpp);
       }
       
       // Update HEAT MAP source (PRIMARY VISUAL)
-      // terrain_pressure = 0.35×bench + 0.25×saddle + 0.20×ridge + 0.20×draw
+      // v2.9 terrain_pressure = 0.40×bench + 0.30×saddle + 0.30×ridge  (convergence = amplifier only)
       // No synthetic grid fill — heat only where terrain structure exists
       const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
       if (heatmapSource) {
@@ -2171,16 +2172,18 @@ function DeerIntelContent() {
         }
 
         const heatMapData = buildTerrainHeatMap({
-          // bench_probability (0.35) ← bedding polygons
+          // bench_probability (0.40) ← bedding polygons
           beddingPolygons: layers?.beddingPolygons || undefined,
-          // draw_convergence (0.20) ← funnels / draws
+          // funnels passed for convergence amplifier only (NOT primary heat)
           funnels: layers?.funnels || undefined,
-          // ridge_structure (0.20) + saddle_probability (0.25) ← ridge spines
+          // ridge_structure (0.30) + saddle_probability (0.30) ← ridge spines
           ridgeSpineData: ridgeSpineData || undefined,
           // Parcel coords for proximity calculations
           parcelCoords: parcelCoordsForGrid,
           // Season modifier on all components
           season,
+          // v2.9: convergence as light amplifier, not primary source
+          convergenceMode: 'light',
         });
         
         heatmapSource.setData(heatMapData);
@@ -4548,7 +4551,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v2.8.1 | tighter pressure smoothing | 2026-03-14 | cp:tps';
+  const BUILD_STAMP = 'v2.9.0 | terrain-first convergence demotion | 2026-03-14 | cp:tcd';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
