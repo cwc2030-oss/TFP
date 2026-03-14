@@ -4542,7 +4542,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'V7-NATIVE-MAPBOX-2026-02-22';
+  const BUILD_STAMP = 'v2.7.3 | Terrain-driven heatmap + season weights | 2026-03-14 09:42 | cp:tdh-sw';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
