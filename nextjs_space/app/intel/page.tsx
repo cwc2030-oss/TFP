@@ -37,7 +37,7 @@ import type {
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
-import { buildTerrainHeatMap } from '@/lib/terrain-heatmap';
+import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
@@ -2142,15 +2142,21 @@ function DeerIntelContent() {
         convergenceSource.setData(flowData?.convergence_zones || emptyFC);
       }
 
-      // Update opportunity zones source
+      // Update opportunity zones source — re-scored using 4-component terrain formula
       const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
       if (opportunitySource) {
-        opportunitySource.setData(flowData?.opportunity_zones || emptyFC);
+        const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
+          beddingPolygons: layers?.beddingPolygons || undefined,
+          funnels: layers?.funnels || undefined,
+          ridgeSpineData: ridgeSpineData || undefined,
+          season,
+        });
+        opportunitySource.setData(rescoredOpp);
       }
       
       // Update HEAT MAP source (PRIMARY VISUAL)
-      // TERRAIN-DRIVEN: uses Modal analysis layers + parcel grid + season weights
-      // Flow/convergence demoted to validation role (~15%)
+      // terrain_pressure = 0.35×bench + 0.25×saddle + 0.20×ridge + 0.20×draw
+      // No synthetic grid fill — heat only where terrain structure exists
       const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
       if (heatmapSource) {
         // Extract parcel coordinates for grid generation
@@ -2165,17 +2171,15 @@ function DeerIntelContent() {
         }
 
         const heatMapData = buildTerrainHeatMap({
-          // Layer 1: Modal terrain features (45% weight)
+          // bench_probability (0.35) ← bedding polygons
           beddingPolygons: layers?.beddingPolygons || undefined,
+          // draw_convergence (0.20) ← funnels / draws
           funnels: layers?.funnels || undefined,
-          standPoints: layers?.standPoints || undefined,
-          // Layer 2: Parcel-wide terrain grid (30% weight)
+          // ridge_structure (0.20) + saddle_probability (0.25) ← ridge spines
+          ridgeSpineData: ridgeSpineData || undefined,
+          // Parcel coords for proximity calculations
           parcelCoords: parcelCoordsForGrid,
-          // Layer 3: Flow validation signal (15% weight, capped)
-          convergenceZones: flowData?.convergence_zones || undefined,
-          opportunityZones: flowData?.opportunity_zones || undefined,
-          flowPrimary: flowData?.flow_primary || undefined,
-          // Season modifier (10% adjustment on all above)
+          // Season modifier on all components
           season,
         });
         
@@ -2186,7 +2190,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, parcelPolygon]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, parcelPolygon, ridgeSpineData]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
@@ -4542,7 +4546,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v2.7.3 | Terrain-driven heatmap + season weights | 2026-03-14 09:42 | cp:tdh-sw';
+  const BUILD_STAMP = 'v2.8.0 | 4-component terrain pressure formula | 2026-03-14 | cp:4ctpf';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {

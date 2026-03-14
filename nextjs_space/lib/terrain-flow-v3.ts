@@ -676,7 +676,9 @@ function computeLineLength(coords: [number, number][]): number {
 export function generateTerrainFlowV3(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   corridorData: any,
-  ridgeData: any
+  ridgeData: any,
+  beddingPolygons?: GeoJSON.FeatureCollection,
+  funnels?: GeoJSON.FeatureCollection
 ): TerrainFlowResponse {
   const startTime = Date.now();
   
@@ -722,8 +724,8 @@ export function generateTerrainFlowV3(
   // Generate convergence zones (if flows exist)
   const convergenceZones = generateConvergenceFromFlows(primary, secondary, coords, parcelScale);
   
-  // Generate opportunity zones
-  const opportunityZones = generateOpportunityZones(convergenceZones, parcelScale);
+  // Generate opportunity zones scored by 4-component terrain formula
+  const opportunityZones = generateOpportunityZones(convergenceZones, parcelScale, ridgeData, beddingPolygons, funnels);
   
   const processingTime = (Date.now() - startTime) / 1000;
   const totalLength = [...primary, ...secondary].reduce((sum, f) => sum + (f.properties.lengthM || 0), 0);
@@ -863,44 +865,164 @@ function generateConvergenceFromFlows(
   return zones;
 }
 
+/**
+ * Generate opportunity zones (stand sites) scored by 4-component terrain formula:
+ *   stand_score = 0.35×bench_prox + 0.25×saddle_prox + 0.20×ridge_struct + 0.20×draw_conv
+ *
+ * Candidate points: convergence zone centers, saddle nodes, flow intersections.
+ * Hard cap: 1-3 sites, min 80m separation.
+ */
 function generateOpportunityZones(
   convergenceZones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
-  scale: ParcelScaleMetrics
+  scale: ParcelScaleMetrics,
+  ridgeData?: { ridges_primary?: GeoJSON.FeatureCollection; ridges_secondary?: GeoJSON.FeatureCollection; saddle_nodes?: GeoJSON.FeatureCollection; isSynthetic?: boolean },
+  beddingPolygons?: GeoJSON.FeatureCollection,
+  funnels?: GeoJSON.FeatureCollection
 ): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
-  const MIN_SEPARATION_M = 80; // Minimum 80m between opportunity zones
-  const MAX_ZONES = Math.min(3, scale.maxOpportunityZones); // Hard cap at 3
+  const MIN_SEPARATION_M = 80;
+  const MAX_ZONES = Math.min(3, scale.maxOpportunityZones);
 
-  const candidates = convergenceZones
-    .filter(z => z.properties.intensity >= 0.65)
-    .sort((a, b) => b.properties.intensity - a.properties.intensity);
+  // Collect candidate points from all terrain sources
+  const candidates: { coord: [number, number]; benchProx: number; saddleProx: number; ridgeStruct: number; drawConv: number }[] = [];
+
+  // Helper: score proximity to nearest feature in a collection
+  const proximityScore = (coord: [number, number], fc: GeoJSON.FeatureCollection | undefined, radiusM: number): number => {
+    if (!fc?.features?.length) return 0;
+    let minDist = Infinity;
+    for (const f of fc.features) {
+      if (f.geometry.type === 'Point') {
+        const d = distanceMeters(coord, f.geometry.coordinates as [number, number]);
+        if (d < minDist) minDist = d;
+      } else if (f.geometry.type === 'Polygon') {
+        const centroid = getPolygonCentroid(f.geometry);
+        if (centroid) {
+          const d = distanceMeters(coord, centroid);
+          if (d < minDist) minDist = d;
+        }
+      } else if (f.geometry.type === 'LineString') {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates;
+        for (const c of coords) {
+          const d = distanceMeters(coord, [c[0], c[1]]);
+          if (d < minDist) minDist = d;
+        }
+      }
+    }
+    return minDist < radiusM ? Math.max(0, 1 - minDist / radiusM) : 0;
+  };
+
+  const ridgePrimary = ridgeData?.ridges_primary;
+  const ridgeSecondary = ridgeData?.ridges_secondary;
+  const saddleNodes = ridgeData?.saddle_nodes;
+  const isSynthetic = ridgeData?.isSynthetic ?? true;
+  const ridgePenalty = isSynthetic ? 0.5 : 1.0;
+
+  // All ridges combined for proximity check
+  const allRidgesFC: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: [...(ridgePrimary?.features || []), ...(ridgeSecondary?.features || [])],
+  };
+
+  // Score a single candidate point
+  const scorePt = (coord: [number, number]) => {
+    const benchProx = proximityScore(coord, beddingPolygons, 200);
+    const saddleProx = proximityScore(coord, saddleNodes, 300);
+    const ridgeStruct = proximityScore(coord, allRidgesFC, 200) * ridgePenalty;
+    const drawConv = proximityScore(coord, funnels, 250);
+    return { coord, benchProx, saddleProx, ridgeStruct, drawConv };
+  };
+
+  // Source 1: convergence zone centers
+  for (const cz of convergenceZones) {
+    const coord = cz.geometry.coordinates as [number, number];
+    candidates.push(scorePt(coord));
+  }
+
+  // Source 2: saddle nodes (natural stand sites)
+  if (saddleNodes?.features?.length) {
+    for (const f of saddleNodes.features) {
+      if (f.geometry.type === 'Point') {
+        const coord = f.geometry.coordinates as [number, number];
+        candidates.push(scorePt(coord));
+      }
+    }
+  }
+
+  // Source 3: ridge-bench intersections (where ridge meets bedding)
+  if (allRidgesFC.features.length > 0 && beddingPolygons?.features?.length) {
+    for (const ridge of allRidgesFC.features) {
+      const rCoords = (ridge.geometry as GeoJSON.LineString)?.coordinates || [];
+      for (const bed of beddingPolygons.features) {
+        const bedCentroid = getPolygonCentroid(bed.geometry);
+        if (!bedCentroid) continue;
+        // Find closest ridge point to bench centroid
+        let closestDist = Infinity;
+        let closestPt: [number, number] | null = null;
+        for (const rc of rCoords) {
+          const d = distanceMeters([rc[0], rc[1]], bedCentroid);
+          if (d < closestDist) {
+            closestDist = d;
+            closestPt = [rc[0], rc[1]];
+          }
+        }
+        if (closestPt && closestDist < 250) {
+          const midPt: [number, number] = [(closestPt[0] + bedCentroid[0]) / 2, (closestPt[1] + bedCentroid[1]) / 2];
+          candidates.push(scorePt(midPt));
+        }
+      }
+    }
+  }
+
+  // Score each candidate using the 4-component formula
+  const scored = candidates.map(c => ({
+    ...c,
+    totalScore: 0.35 * c.benchProx + 0.25 * c.saddleProx + 0.20 * c.ridgeStruct + 0.20 * c.drawConv,
+  }));
+
+  // Sort by total score descending
+  scored.sort((a, b) => b.totalScore - a.totalScore);
 
   // Spatial deduplication: keep only zones that are MIN_SEPARATION_M apart
-  const selected: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
-  for (const candidate of candidates) {
+  const selected: typeof scored = [];
+  for (const candidate of scored) {
     if (selected.length >= MAX_ZONES) break;
-    const cCoord = candidate.geometry.coordinates as [number, number];
-    const tooClose = selected.some(s => {
-      const sCoord = s.geometry.coordinates as [number, number];
-      return distanceMeters(cCoord, sCoord) < MIN_SEPARATION_M;
-    });
+    if (candidate.totalScore < 0.10) continue; // Minimum threshold
+    const tooClose = selected.some(s =>
+      distanceMeters(candidate.coord, s.coord) < MIN_SEPARATION_M
+    );
     if (!tooClose) {
       selected.push(candidate);
     }
   }
 
-  return selected.map((conv, i) => ({
-      type: 'Feature',
-      properties: {
-        id: `opp_${i}`,
-        score: conv.properties.intensity * 0.9 + 0.1,
-        flowIntensity: conv.properties.intensity,
-        convergenceBonus: conv.properties.flowCount >= 3 ? 0.15 : 0.08,
-        benchBonus: 0.05,
-        saddleBonus: 0.05,
-        radiusM: scale.opportunityRadius,
-      },
-      geometry: conv.geometry,
-    }));
+  return selected.map((s, i) => ({
+    type: 'Feature' as const,
+    properties: {
+      id: `opp_${i}`,
+      score: Math.min(1, s.totalScore * 1.5 + 0.1), // Normalize to 0-1 display range
+      flowIntensity: s.drawConv,
+      convergenceBonus: s.drawConv * 0.20,
+      benchBonus: s.benchProx * 0.35,
+      saddleBonus: s.saddleProx * 0.25,
+      radiusM: scale.opportunityRadius,
+    },
+    geometry: { type: 'Point' as const, coordinates: s.coord },
+  }));
+}
+
+// Helper for opportunity zone scoring
+function getPolygonCentroid(geometry: GeoJSON.Geometry): [number, number] | null {
+  let coords: number[][] = [];
+  if (geometry.type === 'Polygon') {
+    coords = (geometry as GeoJSON.Polygon).coordinates[0] || [];
+  } else if (geometry.type === 'MultiPolygon') {
+    coords = ((geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
+  } else {
+    return null;
+  }
+  if (coords.length === 0) return null;
+  let sumX = 0, sumY = 0;
+  for (const c of coords) { sumX += c[0]; sumY += c[1]; }
+  return [sumX / coords.length, sumY / coords.length];
 }
 
 function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
