@@ -890,8 +890,8 @@ function DeerIntelContent() {
   // Terrain Flow visibility (separate from main visibility for cleaner control)
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
     pressureHeatmap: true,  // PRIMARY: Terrain pressure heat map (the main visual)
-    flowPrimary: false,     // Secondary: Primary flow lines (supporting evidence - OFF by default)
-    flowSecondary: false,   // Secondary: Secondary flow lines (OFF by default)
+    flowPrimary: true,      // Primary flow corridors (validates heat map)
+    flowSecondary: true,    // Secondary feeder lines (terrain-justified only)
     convergenceZones: true, // Convergence zone markers
     opportunityZones: true, // Opportunity zone markers
   });
@@ -2912,8 +2912,8 @@ function DeerIntelContent() {
         // Flow lines are now SUBTLE supporting evidence, not the primary visual
         // The heat map above tells the main story
         
-        // Primary flow lines: SUBTLE supporting evidence
-        // Much thinner and more transparent than before
+        // Primary flow lines: bold validation of heat map corridors
+        // Fewer lines (1-3 per parcel) but each one clearly readable
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2921,35 +2921,34 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-flow-primary',
             paint: {
-              // Muted colors - supporting evidence only
+              // Bold but not dominant — validates the heat map
               'line-color': [
                 'case',
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.7],
-                'rgba(16,185,129,0.6)',  // emerald-500 at 60%
+                'rgba(16,185,129,0.85)',  // emerald-500 — strong corridors
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.5],
-                'rgba(34,211,238,0.5)',  // cyan-400 at 50%
-                'rgba(148,163,184,0.35)' // slate-400 at 35%
+                'rgba(34,211,238,0.7)',   // cyan-400 — moderate
+                'rgba(148,163,184,0.45)'  // slate-400 — weak
               ],
-              // THIN lines - supporting, not dominant
+              // Bolder widths — fewer lines so each one counts
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 1,     // Weak: very thin
-                0.5, 1.5,   // Moderate: thin
-                0.7, 2.5    // Strong: medium (was 4)
+                0.4, 1.5,    // Weak: visible
+                0.55, 2.5,   // Moderate: clear
+                0.75, 3.5    // Strong: bold corridor
               ],
-              // Lower opacity overall
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 0.2,   // Weak: barely visible
-                0.5, 0.35,  // Moderate: subtle
-                0.7, 0.55   // Strong: visible but not dominant (was 0.9)
+                0.4, 0.4,    // Weak: present but subordinate
+                0.55, 0.55,  // Moderate: clear
+                0.75, 0.7    // Strong: confident
               ],
-              'line-blur': 0.8,
+              'line-blur': 0.5,
             },
           });
         }
         
-        // Secondary flow lines: VERY subtle supporting patterns
+        // Secondary flow lines: visible but clearly subordinate feeders
         if (!map.getSource('tfp-flow-secondary')) {
           map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -2957,10 +2956,10 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-flow-secondary',
             paint: {
-              'line-color': 'rgba(100,116,139,0.4)', // slate-500 at 40%
-              'line-width': 1,  // Very thin
-              'line-opacity': 0.25,  // Very faded
-              'line-dasharray': [3, 3],
+              'line-color': 'rgba(148,163,184,0.6)', // slate-400 at 60%
+              'line-width': 1.3,
+              'line-opacity': 0.4,
+              'line-dasharray': [4, 3],
             },
           });
         }

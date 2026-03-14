@@ -448,10 +448,11 @@ export function generateSyntheticRidgeSpines(
     properties: {
       id: 'ridge_primary_0',
       tier: 'primary' as RidgeTier,
-      prominence_ft: 55,
-      length_m: Math.round(primaryLength),
-      confidence: confidence,
-      is_synthetic: true,
+      prominenceFt: 55,
+      lengthMeters: Math.round(primaryLength),
+      avgElevationM: 300,
+      avgSlopeDeg: 8,
+      curvatureProfile: 0.02,
     },
     geometry: {
       type: 'LineString',
@@ -485,10 +486,11 @@ export function generateSyntheticRidgeSpines(
       properties: {
         id: 'ridge_secondary_0',
         tier: 'secondary' as RidgeTier,
-        prominence_ft: 35,
-        length_m: Math.round(branchLength),
-        confidence: confidence * 0.8,
-        is_synthetic: true,
+        prominenceFt: 35,
+        lengthMeters: Math.round(branchLength),
+        avgElevationM: 290,
+        avgSlopeDeg: 6,
+        curvatureProfile: 0.015,
       },
       geometry: {
         type: 'LineString',
@@ -519,11 +521,9 @@ export function generateSyntheticRidgeSpines(
       type: 'Feature',
       properties: {
         id: 'saddle_0',
-        prominence_drop_ft: 30,
-        width_m: 40,
-        connecting_ridges: 2,
-        confidence: confidence * 0.85,
-        is_synthetic: true,
+        elevationM: 285,
+        ridgeDropFt: 30,
+        adjacentRidgeIds: ['ridge_primary_0'],
       },
       geometry: {
         type: 'Point',
@@ -533,7 +533,7 @@ export function generateSyntheticRidgeSpines(
   }
   
   const totalLength = primaryLength + secondaryFeatures.reduce(
-    (sum, f) => sum + (f.properties.length_m || 0), 0
+    (sum, f) => sum + (f.properties.lengthMeters || 0), 0
   );
   const processingTime = (Date.now() - startTime) / 1000;
   
