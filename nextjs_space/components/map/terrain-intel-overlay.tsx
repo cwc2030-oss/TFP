@@ -56,6 +56,8 @@ export default function TerrainIntelOverlay({
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     bedding: true,
     funnels: true,
+    saddles: true,
+    draws: true,
     stands: true,
     corridors: true,
     ridgeSpines: true,

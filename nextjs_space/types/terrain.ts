@@ -251,7 +251,9 @@ export interface TerrainIntelState {
 
 export interface TerrainLayerVisibility {
   bedding: boolean;
-  funnels: boolean;
+  funnels: boolean;      // Legacy combined key (kept for compat)
+  saddles: boolean;      // Independent saddle visibility
+  draws: boolean;        // Independent draw visibility
   stands: boolean;
   corridors: boolean;
   ridgeSpines: boolean;  // Structure-first terrain anatomy layer

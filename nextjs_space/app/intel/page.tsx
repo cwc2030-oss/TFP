@@ -880,7 +880,9 @@ function DeerIntelContent() {
     stands: !TERRAIN_WORK_MODE,     // Stand markers = deer interpretation
     corridors: !TERRAIN_WORK_MODE,  // Corridor lines = deer interpretation
     // Physical terrain structure - SHOW in Terrain Work Mode
-    funnels: true,  // Controls draws & saddles (physical terrain)
+    funnels: true,    // Legacy combined key (kept for compat)
+    saddles: true,    // Independent saddle visibility
+    draws: true,      // Independent draw visibility
     // Always show terrain anatomy
     ridgeSpines: true,
   });
@@ -2221,9 +2223,9 @@ function DeerIntelContent() {
         map.setLayoutProperty('tfp-bedding-outline', 'visibility', visibility.bedding ? 'visible' : 'none');
       }
 
-      // Funnel visibility - draws layer
+      // Funnel visibility - draws layer (now independently controlled)
       if (map.getLayer('tfp-funnels-lines-draws')) {
-        map.setLayoutProperty('tfp-funnels-lines-draws', 'visibility', visibility.funnels ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-funnels-lines-draws', 'visibility', visibility.draws ? 'visible' : 'none');
       }
       // Corridors layers (solid for high/med, dashed for low)
       if (map.getLayer('tfp-funnels-lines-corridors-solid')) {
@@ -2238,14 +2240,15 @@ function DeerIntelContent() {
       }
       // Fallback layer
       if (map.getLayer('tfp-funnels-lines')) {
-        const funnelVisible = visibility.funnels || visibility.corridors;
+        const funnelVisible = visibility.draws || visibility.saddles || visibility.corridors;
         map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
       }
+      // Saddle polygons (now independently controlled)
       if (map.getLayer('tfp-funnels-polys-fill')) {
-        map.setLayoutProperty('tfp-funnels-polys-fill', 'visibility', visibility.funnels ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-funnels-polys-fill', 'visibility', visibility.saddles ? 'visible' : 'none');
       }
       if (map.getLayer('tfp-funnels-polys-outline')) {
-        map.setLayoutProperty('tfp-funnels-polys-outline', 'visibility', visibility.funnels ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-funnels-polys-outline', 'visibility', visibility.saddles ? 'visible' : 'none');
       }
       
       // V2 Tiered corridor visibility
@@ -5181,34 +5184,34 @@ function DeerIntelContent() {
                         </button>
                       )}
                       
-                      {/* Saddles - Physical terrain structure (always shown) */}
+                      {/* Saddles - Physical terrain structure (independent toggle) */}
                       <button
-                        onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
+                        onClick={() => setVisibility(v => ({ ...v, saddles: !v.saddles }))}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          visibility.funnels ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                          visibility.saddles ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
                         }`}
                       >
-                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.funnels ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.funnels ? 'text-white' : 'text-stone-500'}`}>
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.saddles ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.saddles ? 'text-white' : 'text-stone-500'}`}>
                           Saddles
                         </span>
-                        <span className={`text-[10px] ${visibility.funnels ? 'text-stone-400' : 'text-stone-600'}`}>
+                        <span className={`text-[10px] ${visibility.saddles ? 'text-stone-400' : 'text-stone-600'}`}>
                           {saddleCount}
                         </span>
                       </button>
                       
-                      {/* Draws - Physical terrain structure (always shown) */}
+                      {/* Draws - Physical terrain structure (independent toggle) */}
                       <button
-                        onClick={() => setVisibility(v => ({ ...v, funnels: !v.funnels }))}
+                        onClick={() => setVisibility(v => ({ ...v, draws: !v.draws }))}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          visibility.funnels ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                          visibility.draws ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
                         }`}
                       >
-                        <span className="w-3 h-0.5 rounded-full" style={{ background: LAYER_COLORS.funnelDraw, opacity: visibility.funnels ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.funnels ? 'text-white' : 'text-stone-500'}`}>
+                        <span className="w-3 h-0.5 rounded-full" style={{ background: LAYER_COLORS.funnelDraw, opacity: visibility.draws ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.draws ? 'text-white' : 'text-stone-500'}`}>
                           Draws
                         </span>
-                        <span className={`text-[10px] ${visibility.funnels ? 'text-stone-400' : 'text-stone-600'}`}>
+                        <span className={`text-[10px] ${visibility.draws ? 'text-stone-400' : 'text-stone-600'}`}>
                           {drawCount}
                         </span>
                       </button>
