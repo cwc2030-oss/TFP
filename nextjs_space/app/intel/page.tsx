@@ -2854,39 +2854,41 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-pressure-heatmap',
             paint: {
-              // Weight based on score/intensity
+              // Weight: sharper contrast between weak and strong signals
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
-                0, 0.2,
-                0.5, 0.6,
+                0, 0.1,    // was 0.2 — weaker floor
+                0.3, 0.45,
+                0.6, 0.8,
                 1, 1
               ],
-              // Intensity increases with zoom
+              // Intensity: boosted to compensate for tighter radius
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 0.8,
-                15, 1.2,
-                18, 1.5
+                12, 1.1,   // was 0.8
+                14, 1.5,   // was ~1.0
+                16, 1.8,   // was ~1.35
+                18, 2.0    // was 1.5
               ],
               // Color gradient: blue (low) → cyan → green → amber (high)
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
                 0, 'rgba(0,0,0,0)',
-                0.15, 'rgba(15,118,110,0.3)',    // teal-700 (subtle)
-                0.35, 'rgba(6,182,212,0.45)',    // cyan-500
-                0.55, 'rgba(16,185,129,0.55)',   // emerald-500
-                0.75, 'rgba(245,158,11,0.65)',   // amber-500
-                1, 'rgba(239,68,68,0.75)'        // red-500 (hot)
+                0.12, 'rgba(15,118,110,0.25)',   // teal-700 (subtle)
+                0.30, 'rgba(6,182,212,0.40)',    // cyan-500
+                0.50, 'rgba(16,185,129,0.55)',   // emerald-500
+                0.72, 'rgba(245,158,11,0.68)',   // amber-500
+                1, 'rgba(239,68,68,0.80)'        // red-500 (hot)
               ],
-              // Radius scales with zoom
+              // Radius: TIGHTENED ~45% to separate adjacent hotspots
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 40,
-                14, 60,
-                16, 80
+                12, 22,    // was 40
+                14, 35,    // was 60
+                16, 50     // was 80
               ],
-              'heatmap-opacity': 0.7,
+              'heatmap-opacity': 0.75, // slight boost from 0.7
             },
           });
         }
@@ -4546,7 +4548,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v2.8.0 | 4-component terrain pressure formula | 2026-03-14 | cp:4ctpf';
+  const BUILD_STAMP = 'v2.8.1 | tighter pressure smoothing | 2026-03-14 | cp:tps';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {

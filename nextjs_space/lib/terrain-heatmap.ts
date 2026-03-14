@@ -75,10 +75,11 @@ export interface HeatMapInput {
 }
 
 // ============ INFLUENCE RADII (meters) ============
-const BENCH_INFLUENCE_M  = 120;  // Bench heat spreads ~120m
-const SADDLE_INFLUENCE_M = 200;  // Saddle draws from further
-const RIDGE_INFLUENCE_M  = 100;  // Ridge heat is tighter
-const DRAW_INFLUENCE_M   = 150;  // Draw head influence
+// v2.8.1: Tightened to resolve blobs into terrain-shaped pockets
+const BENCH_INFLUENCE_M  = 75;   // Bench heat tightly around bedding (was 120)
+const SADDLE_INFLUENCE_M = 120;  // Saddle draws from moderate range (was 200)
+const RIDGE_INFLUENCE_M  = 60;   // Ridge heat hugs the spine (was 100)
+const DRAW_INFLUENCE_M   = 90;   // Draw head influence tighter (was 150)
 
 /**
  * Build terrain-driven heat map features.
@@ -97,16 +98,16 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
     for (const f of input.beddingPolygons.features) {
       const props = f.properties || {};
       const confidence = props.confidence || 0.6;
-      // Raw bench probability from bedding confidence
-      const rawBench = Math.min(1, confidence * 1.1);
+      // Raw bench probability from bedding confidence (boosted contrast)
+      const rawBench = Math.min(1, confidence * 1.3);
       const score = rawBench * W_BENCH * sw.bench;
 
       const centroid = getPolygonCentroid(f.geometry);
       if (centroid) {
         features.push(makeHeatPoint(centroid, score, 'bench'));
       }
-      // Spread heat across bedding area
-      const pts = sampleGeometryPoints(f.geometry, 5);
+      // Spread heat across bedding area (denser to compensate for tighter radius)
+      const pts = sampleGeometryPoints(f.geometry, 8); // was 5
       for (const pt of pts) {
         features.push(makeHeatPoint(pt, score * 0.8, 'bench'));
       }
@@ -118,16 +119,16 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
   if (saddleNodes.length > 0) {
     for (const f of saddleNodes) {
       const props = f.properties || {};
-      // Saddle quality: deeper drop = better funnel
+      // Saddle quality: deeper drop = better funnel (boosted contrast)
       const dropFt = props.ridgeDropFt || 15;
-      const rawSaddle = Math.min(1, dropFt / 40); // 40ft drop = max
+      const rawSaddle = Math.min(1, dropFt / 30); // 30ft drop = max (was 40)
       const score = rawSaddle * W_SADDLE * sw.saddle;
 
       if (f.geometry?.type === 'Point') {
         const coord = f.geometry.coordinates as [number, number];
         features.push(makeHeatPoint(coord, score, 'saddle'));
-        // Halo: 4 surrounding points at ~half influence
-        const haloOffsetDeg = SADDLE_INFLUENCE_M / 111000; // rough m→deg
+        // Halo: 4 surrounding points at ~half influence radius
+        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.5) / 111000; // ~60m halo (tighter)
         const offsets: [number, number][] = [
           [haloOffsetDeg, 0], [-haloOffsetDeg, 0],
           [0, haloOffsetDeg], [0, -haloOffsetDeg],
@@ -155,15 +156,15 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
       const isPrimary = ridgePrimary.includes(f);
       // Primary ridges score higher than secondary
       const prominenceFt = props.prominenceFt || props.prominence_ft || 20;
-      const rawRidge = Math.min(1, prominenceFt / 60) * (isPrimary ? 1.0 : 0.7);
+      const rawRidge = Math.min(1, prominenceFt / 45) * (isPrimary ? 1.0 : 0.7); // 45ft prominence = max (was 60)
       // Down-weight synthetic ridges (backbone fallback)
       const syntheticPenalty = useSyntheticRidges ? 0.5 : 1.0;
       const score = rawRidge * syntheticPenalty * W_RIDGE * sw.ridge;
 
-      // Sample points along the ridge line
+      // Sample points along the ridge line (denser to compensate for tighter radius)
       const coords = (f.geometry as GeoJSON.LineString)?.coordinates || [];
       if (coords.length >= 2) {
-        const step = Math.max(1, Math.floor(coords.length / 6));
+        const step = Math.max(1, Math.floor(coords.length / 10)); // was /6, denser now
         for (let i = 0; i < coords.length; i += step) {
           features.push(makeHeatPoint(
             coords[i] as [number, number],
@@ -180,7 +181,7 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
     for (const f of input.funnels.features) {
       const props = f.properties || {};
       const corridorScore = props.corridorScore || props.score || 0.6;
-      const rawDraw = Math.min(1, corridorScore * 1.1);
+      const rawDraw = Math.min(1, corridorScore * 1.3); // boosted contrast (was 1.1)
       const score = rawDraw * W_DRAW * sw.draw;
 
       if (f.geometry.type === 'Point') {
@@ -264,11 +265,11 @@ export function rescoreStandSites(
     if (f.geometry.type !== 'Point') return { feature: f, score: 0 };
     const coord = f.geometry.coordinates as [number, number];
 
-    // Bench proximity
-    const benchProx = proximityToFeatures(coord, input.beddingPolygons, 200);
-    // Saddle proximity
-    const saddleProx = proximityToFeatures(coord, input.ridgeSpineData?.saddle_nodes, 300);
-    // Ridge structure
+    // Bench proximity (tightened from 200m)
+    const benchProx = proximityToFeatures(coord, input.beddingPolygons, 140);
+    // Saddle proximity (tightened from 300m)
+    const saddleProx = proximityToFeatures(coord, input.ridgeSpineData?.saddle_nodes, 200);
+    // Ridge structure (tightened from 200m)
     const allRidges: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: [
@@ -277,9 +278,9 @@ export function rescoreStandSites(
       ],
     };
     const isSynthetic = input.ridgeSpineData?.isSynthetic ?? true;
-    const ridgeStruct = proximityToFeatures(coord, allRidges, 200) * (isSynthetic ? 0.5 : 1.0);
-    // Draw convergence
-    const drawConv = proximityToFeatures(coord, input.funnels, 250);
+    const ridgeStruct = proximityToFeatures(coord, allRidges, 140) * (isSynthetic ? 0.5 : 1.0);
+    // Draw convergence (tightened from 250m)
+    const drawConv = proximityToFeatures(coord, input.funnels, 170);
 
     const rawScore =
       W_BENCH * benchProx * sw.bench +
@@ -363,7 +364,7 @@ function addIntersectionBonuses(
     }
   }
 
-  const PROXIMITY_DEG = 150 / 111000; // ~150m in degrees
+  const PROXIMITY_DEG = 100 / 111000; // ~100m in degrees (tightened from 150m)
 
   // Saddle near bench = high-value intersection
   const saddlePts = byType['saddle'] || [];
