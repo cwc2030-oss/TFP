@@ -1366,22 +1366,27 @@ function convergenceNodesToGeoJSON(nodes: ConvergenceNode[]): GeoJSON.FeatureCol
  * not travel lanes.
  */
 
-// Bedding probability weights
+// v3.6.1: Bedding Probability v2 — Tightened weights
+// Shifted focus to ridge-shoulder, shelter, and corridor offset
 const BEDDING_WEIGHTS = {
-  upperSlope: 0.22,        // Upper-slope elevation position
-  leewardAspect: 0.18,     // Leeward (NW/N in most regions) bonus
-  ridgeDistance: 0.20,     // Band just below ridge crest
-  slopeSuitability: 0.15,  // Moderate slope (8-25%)
-  terrainShelter: 0.15,    // Concave terrain pocket
-  corridorOffset: 0.10,    // Not too close to corridors
+  upperSlope: 0.18,        // Upper-slope elevation position
+  leewardAspect: 0.14,     // Leeward (NW/N in most regions) bonus
+  ridgeDistance: 0.24,     // Ridge-shoulder band (strengthened)
+  slopeSuitability: 0.12,  // Moderate slope (8-25%)
+  terrainShelter: 0.18,    // Concave terrain pocket (strengthened)
+  corridorOffset: 0.14,    // Not on movement lanes (strengthened)
 };
 
-// Bedding detection thresholds
+// v3.6.1: Bedding detection thresholds — tightened for fewer, better pockets
 const BEDDING_CONFIG = {
-  minProbability: 0.45,    // Minimum to mark as bedding zone
-  maxZones: 12,            // Limit zones per parcel
-  radiusM: 35,             // Display radius for zones
-  corridorOffsetMinM: 40,  // Minimum distance from primary corridors
+  minProbability: 0.55,    // Raised threshold: "likely" vs "capable"
+  prominenceThreshold: 0.08, // v2: zone must exceed neighbors by this amount
+  patchQualityThreshold: 0.35, // v2: surrounding cells must average above this
+  maxZones: 8,             // Reduced from 12: target 3-6 actual
+  radiusM: 28,             // Tighter, more compact pockets (was 35)
+  minZoneSpacingCells: 5,  // Increased spacing (was 3): avoid scatter
+  corridorOffsetMinM: 50,  // Raised minimum from 40m
+  corridorOffsetHardGateM: 40, // v2: below this, shelter must be exceptional
   corridorOffsetMaxM: 150, // Maximum (too far is less ideal)
 };
 
@@ -1404,23 +1409,24 @@ function computeBeddingProbability(
     for (let c = 1; c < grid.cols - 1; c++) {
       const cell = grid.cells[r][c];
       
-      // 1. Upper-slope preference (use ridge proximity as elevation proxy)
-      // Sweet spot: ridge_prox 0.4-0.75 (not on crest, but elevated)
+      // v3.6.1: Tightened upper-slope scoring
+      // Sweet spot narrowed to 0.45-0.70 (ridge-shoulder focus)
       let upperSlope = 0;
-      if (cell.ridge_prox >= 0.4 && cell.ridge_prox <= 0.75) {
-        upperSlope = 0.9; // Optimal elevation band
-      } else if (cell.ridge_prox >= 0.3 && cell.ridge_prox < 0.4) {
-        upperSlope = 0.6; // Acceptable
-      } else if (cell.ridge_prox > 0.75 && cell.ridge_prox <= 0.85) {
-        upperSlope = 0.5; // Getting close to crest
-      } else if (cell.ridge_prox > 0.85) {
-        upperSlope = 0.2; // Too exposed on ridge crest
+      if (cell.ridge_prox >= 0.50 && cell.ridge_prox <= 0.70) {
+        upperSlope = 0.95; // Optimal ridge-shoulder band
+      } else if (cell.ridge_prox >= 0.45 && cell.ridge_prox < 0.50) {
+        upperSlope = 0.75; // Good
+      } else if (cell.ridge_prox > 0.70 && cell.ridge_prox <= 0.78) {
+        upperSlope = 0.55; // Getting close to crest
+      } else if (cell.ridge_prox > 0.78) {
+        upperSlope = 0.15; // Too exposed on ridge crest
+      } else if (cell.ridge_prox >= 0.35) {
+        upperSlope = 0.35; // Mid-slope, acceptable with other factors
       } else {
-        upperSlope = 0.3; // Valley/low terrain
+        upperSlope = 0.10; // Valley/low terrain — deer don't bed here
       }
       
       // 2. Leeward aspect (simplified: assume NW/N winds dominant)
-      // Use grid position relative to ridge as aspect proxy
       const ridgeN = grid.cells[r - 1][c].ridge_prox;
       const ridgeS = grid.cells[r + 1][c].ridge_prox;
       const ridgeE = grid.cells[r][c + 1].ridge_prox;
@@ -1430,42 +1436,48 @@ function computeBeddingProbability(
       const leewardSignal = (ridgeN + ridgeW) / 2 - (ridgeS + ridgeE) / 2;
       const leewardAspect = leewardSignal > 0.05 ? Math.min(1, leewardSignal * 3) : 0;
       
-      // 3. Ridge-distance band (optimal: 0.5-0.7 ridge proximity)
+      // v3.6.1: Ridge-distance band tightened (optimal: 0.55-0.70)
+      // This is the "ridge-shoulder" — just below crest, sheltered
       let ridgeDistance = 0;
-      if (cell.ridge_prox >= 0.5 && cell.ridge_prox <= 0.7) {
-        ridgeDistance = 0.9; // Perfect band just below crest
-      } else if (cell.ridge_prox >= 0.4 && cell.ridge_prox < 0.5) {
-        ridgeDistance = 0.7;
-      } else if (cell.ridge_prox > 0.7 && cell.ridge_prox <= 0.8) {
-        ridgeDistance = 0.6;
+      if (cell.ridge_prox >= 0.55 && cell.ridge_prox <= 0.70) {
+        ridgeDistance = 1.0; // Perfect ridge-shoulder
+      } else if (cell.ridge_prox >= 0.50 && cell.ridge_prox < 0.55) {
+        ridgeDistance = 0.75;
+      } else if (cell.ridge_prox > 0.70 && cell.ridge_prox <= 0.78) {
+        ridgeDistance = 0.50; // Higher on ridge, less sheltered
+      } else if (cell.ridge_prox >= 0.40 && cell.ridge_prox < 0.50) {
+        ridgeDistance = 0.35;
       } else {
-        ridgeDistance = 0.2;
+        ridgeDistance = 0.10; // Valley or exposed crest
       }
       
-      // 4. Moderate slope suitability (use slope_pref as proxy)
-      // Bedding prefers gentler slopes than travel
+      // 4. Moderate slope suitability
       let slopeSuitability = 0;
       if (cell.slope_pref >= 0.7) {
-        slopeSuitability = 0.5; // Good for travel, OK for bedding
-      } else if (cell.slope_pref >= 0.4 && cell.slope_pref < 0.7) {
+        slopeSuitability = 0.4; // Good for travel, less ideal for bedding
+      } else if (cell.slope_pref >= 0.45 && cell.slope_pref < 0.7) {
         slopeSuitability = 0.85; // Optimal for bedding (gentler)
-      } else if (cell.slope_pref < 0.4 && cell.bench > 0.5) {
-        slopeSuitability = 0.9; // Flat bench = good bedding
+      } else if (cell.slope_pref < 0.45 && cell.bench > 0.55) {
+        slopeSuitability = 0.95; // Flat bench = ideal bedding
       } else {
-        slopeSuitability = 0.3;
+        slopeSuitability = 0.25;
       }
       
-      // 5. Terrain shelter (concave = low drainage penalty, moderate bench)
+      // v3.6.1: Terrain shelter scoring — tightened thresholds
+      // Require stronger shelter signal (concave pocket)
       let terrainShelter = 0;
-      if (cell.drainage_pen < 0.2 && cell.bench >= 0.4 && cell.bench < 0.8) {
-        terrainShelter = 0.8; // Sheltered pocket
-      } else if (cell.drainage_pen < 0.3 && cell.bench >= 0.3) {
-        terrainShelter = 0.5;
+      if (cell.drainage_pen < 0.15 && cell.bench >= 0.45 && cell.bench < 0.75) {
+        terrainShelter = 0.95; // Strongly sheltered pocket
+      } else if (cell.drainage_pen < 0.20 && cell.bench >= 0.40 && cell.bench < 0.80) {
+        terrainShelter = 0.70; // Good shelter
+      } else if (cell.drainage_pen < 0.28 && cell.bench >= 0.35) {
+        terrainShelter = 0.40;
       } else {
-        terrainShelter = 0.2;
+        terrainShelter = 0.10; // Exposed or wet
       }
       
-      // 6. Corridor offset (deer don't bed ON corridors)
+      // v3.6.1: Corridor offset — tightened with hard gate
+      // Deer don't bed ON corridors or immediately adjacent
       let corridorOffset = 0;
       const cellKey = `${r},${c}`;
       
@@ -1487,16 +1499,20 @@ function computeBeddingProbability(
         
         if (distM >= BEDDING_CONFIG.corridorOffsetMinM && 
             distM <= BEDDING_CONFIG.corridorOffsetMaxM) {
-          // Optimal offset band
-          corridorOffset = 0.9;
+          // Optimal offset band (50-150m)
+          corridorOffset = 0.95;
         } else if (distM > BEDDING_CONFIG.corridorOffsetMaxM) {
-          // Far from corridors
-          corridorOffset = 0.5;
-        } else if (distM >= 20) {
-          // Close but not on
-          corridorOffset = 0.3;
+          // Far from corridors — still okay
+          corridorOffset = 0.50;
+        } else if (distM >= BEDDING_CONFIG.corridorOffsetHardGateM) {
+          // 40-50m: acceptable only with exceptional shelter
+          corridorOffset = terrainShelter >= 0.70 ? 0.55 : 0.20;
+        } else if (distM >= 25) {
+          // 25-40m: very close — only exceptional shelter saves it
+          corridorOffset = terrainShelter >= 0.90 ? 0.30 : 0.05;
         } else {
-          corridorOffset = 0.1;
+          // < 25m: too close, essentially on the movement lane
+          corridorOffset = 0.0;
         }
       }
       
@@ -1523,70 +1539,102 @@ function computeBeddingProbability(
 }
 
 /**
- * Extract bedding zones from computed probabilities.
- * Uses local maxima detection to avoid overlapping zones.
+ * v3.6.1: Extract bedding zones from computed probabilities.
+ * Tightened with prominence filter, patch quality gate, and expanded neighborhood.
  */
 function extractBeddingZones(grid: HuntabilityGrid): BeddingZone[] {
   const candidates: Array<{
     row: number;
     col: number;
     probability: number;
+    prominence: number;  // v2: how much it exceeds neighbors
+    patchQuality: number; // v2: average of surrounding cells
     factors: BeddingZone['factors'];
   }> = [];
   
-  // Find local maxima above threshold
-  for (let r = 2; r < grid.rows - 2; r++) {
-    for (let c = 2; c < grid.cols - 2; c++) {
+  // v3.6.1: Expanded boundary margin for 5x5 neighborhood
+  const margin = 3;
+  
+  // Find local maxima above threshold with v2 filters
+  for (let r = margin; r < grid.rows - margin; r++) {
+    for (let c = margin; c < grid.cols - margin; c++) {
       const cell = grid.cells[r][c];
       const prob = (cell as any).bedding_probability || 0;
       
       if (prob < BEDDING_CONFIG.minProbability) continue;
       
-      // Check if local maximum (3x3 neighborhood)
+      // v3.6.1: Expanded local maximum check (5x5 neighborhood)
       let isMax = true;
-      for (let dr = -1; dr <= 1 && isMax; dr++) {
-        for (let dc = -1; dc <= 1 && isMax; dc++) {
+      let neighborSum = 0;
+      let neighborCount = 0;
+      let maxNeighborProb = 0;
+      
+      for (let dr = -2; dr <= 2 && isMax; dr++) {
+        for (let dc = -2; dc <= 2 && isMax; dc++) {
           if (dr === 0 && dc === 0) continue;
           const neighbor = grid.cells[r + dr][c + dc];
-          if (((neighbor as any).bedding_probability || 0) > prob) {
-            isMax = false;
+          const neighborProb = (neighbor as any).bedding_probability || 0;
+          
+          // For immediate neighbors (3x3), require strict maximum
+          if (Math.abs(dr) <= 1 && Math.abs(dc) <= 1) {
+            if (neighborProb > prob) {
+              isMax = false;
+            }
           }
+          
+          neighborSum += neighborProb;
+          neighborCount++;
+          maxNeighborProb = Math.max(maxNeighborProb, neighborProb);
         }
       }
       
-      if (isMax) {
-        candidates.push({
-          row: r,
-          col: c,
-          probability: prob,
-          factors: (cell as any).bedding_factors || {
-            upperSlope: 0,
-            leewardAspect: 0,
-            ridgeDistance: 0,
-            slopeSuitability: 0,
-            terrainShelter: 0,
-            corridorOffset: 0,
-          },
-        });
-      }
+      if (!isMax) continue;
+      
+      // v3.6.1: Prominence filter — zone must meaningfully exceed neighbors
+      const prominence = prob - maxNeighborProb;
+      if (prominence < BEDDING_CONFIG.prominenceThreshold) continue;
+      
+      // v3.6.1: Patch quality filter — surrounding cells must be decent
+      const patchQuality = neighborSum / neighborCount;
+      if (patchQuality < BEDDING_CONFIG.patchQualityThreshold) continue;
+      
+      candidates.push({
+        row: r,
+        col: c,
+        probability: prob,
+        prominence,
+        patchQuality,
+        factors: (cell as any).bedding_factors || {
+          upperSlope: 0,
+          leewardAspect: 0,
+          ridgeDistance: 0,
+          slopeSuitability: 0,
+          terrainShelter: 0,
+          corridorOffset: 0,
+        },
+      });
     }
   }
   
-  // Sort by probability (highest first)
-  candidates.sort((a, b) => b.probability - a.probability);
+  // Sort by combined score: probability + prominence bonus
+  candidates.sort((a, b) => {
+    const scoreA = a.probability + a.prominence * 0.5 + a.patchQuality * 0.3;
+    const scoreB = b.probability + b.prominence * 0.5 + b.patchQuality * 0.3;
+    return scoreB - scoreA;
+  });
   
-  // Non-max suppression: avoid zones too close together
-  const MIN_ZONE_SPACING_CELLS = 3;
+  // v3.6.1: Non-max suppression with increased spacing
   const zones: BeddingZone[] = [];
   const used = new Set<string>();
+  const spacing = BEDDING_CONFIG.minZoneSpacingCells;
   
   for (const cand of candidates) {
     if (zones.length >= BEDDING_CONFIG.maxZones) break;
     
     // Check if too close to existing zone
     let tooClose = false;
-    for (let dr = -MIN_ZONE_SPACING_CELLS; dr <= MIN_ZONE_SPACING_CELLS && !tooClose; dr++) {
-      for (let dc = -MIN_ZONE_SPACING_CELLS; dc <= MIN_ZONE_SPACING_CELLS && !tooClose; dc++) {
+    for (let dr = -spacing; dr <= spacing && !tooClose; dr++) {
+      for (let dc = -spacing; dc <= spacing && !tooClose; dc++) {
         if (used.has(`${cand.row + dr},${cand.col + dc}`)) {
           tooClose = true;
         }
@@ -1595,8 +1643,12 @@ function extractBeddingZones(grid: HuntabilityGrid): BeddingZone[] {
     
     if (tooClose) continue;
     
-    // Mark as used
-    used.add(`${cand.row},${cand.col}`);
+    // Mark zone and surrounding cells as used
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        used.add(`${cand.row + dr},${cand.col + dc}`);
+      }
+    }
     
     // Get coordinates
     const cell = grid.cells[cand.row][cand.col];

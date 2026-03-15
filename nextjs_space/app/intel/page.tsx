@@ -3450,11 +3450,11 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== v3.6.0: BEDDING PROBABILITY LAYER ==========
-        // Muted earthy/plum tones — these are ORIGIN areas, not travel lanes
+        // ========== v3.6.1: BEDDING PROBABILITY LAYER ==========
+        // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
         if (!map.getSource('tfp-bedding-probability')) {
           map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
-          // Outer glow (muted plum/purple)
+          // v3.6.1: Outer glow — tighter, more compact pockets
           map.addLayer({
             id: 'tfp-bedding-probability-glow',
             type: 'circle',
@@ -3463,16 +3463,16 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.45, 35,  // Min threshold
-                0.70, 50,  // High probability = larger radius
-                1.0, 60,
+                0.55, 28,  // v2: raised threshold, smaller radius
+                0.75, 38,  // High probability = modest radius increase
+                1.0, 45,   // Max stays compact
               ],
               'circle-color': LAYER_COLORS.beddingProbabilityGlow,
               'circle-opacity': 0.15,
               'circle-blur': 1.2,
             },
           });
-          // Inner fill (earthy plum)
+          // v3.6.1: Inner fill — tighter pockets
           map.addLayer({
             id: 'tfp-bedding-probability-fill',
             type: 'circle',
@@ -3481,15 +3481,15 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.45, 18,
-                0.70, 28,
-                1.0, 35,
+                0.55, 14,  // v2: tighter
+                0.75, 20,  
+                1.0, 28,   // Matches radiusM config
               ],
               'circle-color': LAYER_COLORS.beddingProbability,
               'circle-opacity': 0.30,
             },
           });
-          // Outline ring
+          // v3.6.1: Outline ring — matches fill
           map.addLayer({
             id: 'tfp-bedding-probability-outline',
             type: 'circle',
@@ -3498,9 +3498,9 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.45, 18,
-                0.70, 28,
-                1.0, 35,
+                0.55, 14,
+                0.75, 20,
+                1.0, 28,
               ],
               'circle-color': 'transparent',
               'circle-stroke-color': LAYER_COLORS.beddingProbabilityOutline,
@@ -4131,7 +4131,7 @@ function DeerIntelContent() {
         map.on('click', 'tfp-flow-opportunity', handleOpportunityClick);
         map.on('click', 'tfp-flow-opportunity-glow', handleOpportunityClick);
         
-        // v3.6.0: Bedding probability click handler (for terrain reasons)
+        // v3.6.1: Bedding probability click handler (for terrain reasons)
         const handleBeddingClick = (e: mapboxgl.MapLayerMouseEvent) => {
           if (!e.features || !e.features[0]) return;
           const props = e.features[0].properties || {};
@@ -5327,7 +5327,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.6.0 | terrain reasons + bedding probability v1 | 2026-03-15 | cp:terrain-reasons';
+  const BUILD_STAMP = 'v3.6.1 | bedding probability v2 tightening | 2026-03-15 | cp:bedding-v2';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -6358,7 +6358,7 @@ function DeerIntelContent() {
                     );
                   })()}
                   
-                  {/* v3.6.0: Bedding Probability Toggle */}
+                  {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
                   {(() => {
                     const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
                     const hasData = beddingCount > 0;
@@ -6378,7 +6378,7 @@ function DeerIntelContent() {
                           </span>
                         ) : (
                           <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
-                            v1
+                            v2
                           </span>
                         )}
                       </button>
