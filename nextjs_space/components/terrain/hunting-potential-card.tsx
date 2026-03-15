@@ -287,11 +287,11 @@ export default function HuntingPotentialCard({
         </div>
       </div>
       
-      {/* Opportunity Zones */}
+      {/* Prime Stand Sites */}
       {potential.topOpportunities.length > 0 && (
         <div className="px-4 py-3">
           <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
-            Key Opportunity Areas
+            Prime Stand Sites
           </h4>
           <div className="space-y-2">
             {potential.topOpportunities.map((opp, i) => (
@@ -329,7 +329,7 @@ export default function HuntingPotentialCard({
       
       {potential.topOpportunities.length === 0 && (
         <div className="px-4 py-3 text-center">
-          <p className="text-xs text-slate-500">No concentrated opportunity zones detected</p>
+          <p className="text-xs text-slate-500">No prime stand sites detected</p>
         </div>
       )}
     </div>

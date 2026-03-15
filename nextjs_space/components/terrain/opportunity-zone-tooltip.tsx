@@ -1,8 +1,8 @@
 /**
- * Opportunity Zone Tooltip
+ * Prime Stand Site Tooltip
  * 
- * When hovering/clicking on an opportunity zone, shows a "Why Here?" tooltip
- * explaining the 4 structural drivers behind this high-value location.
+ * When hovering/clicking on a Prime Stand Site marker, shows a "Why Here?" tooltip
+ * explaining the structural drivers behind this high-value stand location.
  */
 
 'use client';
@@ -137,7 +137,7 @@ export default function OpportunityZoneTooltip({
       <div className="px-3 py-2.5 border-b border-amber-700/30 bg-amber-900/20">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-amber-300/70 uppercase tracking-wide">
-            Opportunity Score
+            Stand Score
           </span>
           <span className="text-xl font-bold text-amber-300">
             {(properties.score * 100).toFixed(0)}%

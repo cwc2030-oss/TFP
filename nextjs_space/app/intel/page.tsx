@@ -38,7 +38,7 @@ import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corrid
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus } from '@/lib/terrain-heatmap';
-import { buildTerrainRaster, opportunityZonesToGeoJSON } from '@/lib/terrain-raster';
+import { buildTerrainRaster, primeStandSitesToGeoJSON } from '@/lib/terrain-raster';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
@@ -1032,7 +1032,7 @@ function DeerIntelContent() {
   const [flowSegmentExplainLoading, setFlowSegmentExplainLoading] = useState(false);
   const [flowSegmentClickPosition, setFlowSegmentClickPosition] = useState<{ x: number; y: number } | null>(null);
   
-  // Opportunity Zone Tooltip State
+  // Prime Stand Site Tooltip State
   const [selectedOpportunityZone, setSelectedOpportunityZone] = useState<OpportunityZoneProperties | null>(null);
   const [opportunityZonePosition, setOpportunityZonePosition] = useState<{ x: number; y: number } | null>(null);
 
@@ -2178,16 +2178,16 @@ function DeerIntelContent() {
             heatmapSource.setData(rasterResult.heatPoints);
           }
 
-          // Update opportunity zones from raster local maxima
+          // Update Prime Stand Sites from raster local maxima
           if (opportunitySource) {
-            const oppGeoJSON = opportunityZonesToGeoJSON(rasterResult.opportunityZones);
+            const oppGeoJSON = primeStandSitesToGeoJSON(rasterResult.primeStandSites);
             opportunitySource.setData(oppGeoJSON);
           }
 
           console.log('[TerrainRaster] Built pressure surface:', {
             grid: `${rasterResult.grid.rows}×${rasterResult.grid.cols}`,
             heatPoints: rasterResult.heatPoints.features.length,
-            opportunityZones: rasterResult.opportunityZones.length,
+            primeStandSites: rasterResult.primeStandSites.length,
           });
         } else {
           // Fallback to feature-based approach
@@ -4660,7 +4660,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.0.0 | raster pressure surface | 2026-03-15 | cp:rps';
+  const BUILD_STAMP = 'v3.1.0 | sidehill bonus + prime stand sites | 2026-03-15 | cp:shb';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -5668,7 +5668,7 @@ function DeerIntelContent() {
                     );
                   })()}
                   
-                  {/* Opportunity Zones Toggle */}
+                  {/* Prime Stand Sites Toggle */}
                   {(() => {
                     const opportunityCount = terrainFlowData?.metadata?.opportunity_count || 0;
                     const hasData = opportunityCount > 0;
@@ -5681,7 +5681,7 @@ function DeerIntelContent() {
                         }`}
                       >
                         <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowOpportunity, opacity: flowVisibility.opportunityZones ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.opportunityZones ? 'text-white' : 'text-stone-500'}`}>Opportunity Zones</span>
+                        <span className={`flex-1 text-left ${flowVisibility.opportunityZones ? 'text-white' : 'text-stone-500'}`}>Prime Stand Sites</span>
                         {hasData && (
                           <span className="text-[9px] text-amber-300 px-1.5 py-0.5 bg-amber-800/40 rounded">
                             {opportunityCount}
@@ -5791,7 +5791,7 @@ function DeerIntelContent() {
                               )}
                               {opportunityCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span>Opportunity Zones</span>
+                                  <span>Prime Stand Sites</span>
                                   <span className="text-amber-300">{opportunityCount}</span>
                                 </div>
                               )}

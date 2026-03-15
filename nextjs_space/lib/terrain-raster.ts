@@ -1,13 +1,23 @@
 /**
- * Terrain Raster Pressure Surface
+ * Terrain Raster Pressure Surface v3.1
  * 
  * Computes a grid-based terrain pressure map at 10-20m resolution.
- * Each cell gets bench/saddle/ridge scores based on proximity to terrain features.
+ * Each cell gets bench/saddle/ridge scores based on proximity to terrain features,
+ * plus a sidehill/leeward bonus for ridge shoulders and leeward benches.
  * 
- * pressure = 0.40 × bench_score + 0.30 × saddle_score + 0.30 × ridge_score
+ * pressure =
+ *   0.40 × bench_score +
+ *   0.30 × saddle_score +
+ *   0.30 × ridge_score +
+ *   sidehill_bonus (up to +12%)
+ * 
+ * Sidehill bonus favors:
+ *   - Moderate slope bands (8-25%)
+ *   - Cells slightly below ridge crest (20-60m offset)
+ *   - NW/N/NE aspects (leeward bedding tendency)
  * 
  * Then applies Gaussian smoothing (1-2 cell kernel) for natural transitions.
- * Opportunity zones are extracted from local maxima in the pressure surface.
+ * Prime Stand Sites are extracted from local maxima in the pressure surface.
  */
 
 import type { SeasonProfile } from '@/types/terrain';
@@ -22,6 +32,14 @@ const MAX_CELLS = 100;  // maximum grid dimension (prevents massive grids)
 const W_BENCH  = 0.40;
 const W_SADDLE = 0.30;
 const W_RIDGE  = 0.30;
+
+// ============ SIDEHILL / LEEWARD BONUS ============
+// Modest bonus for ridge shoulders and leeward benches — not dominant
+const SIDEHILL_BONUS_MAX = 0.12;  // up to +12% boost
+const OPTIMAL_SLOPE_MIN = 0.08;   // 8% grade
+const OPTIMAL_SLOPE_MAX = 0.25;   // 25% grade
+const RIDGE_OFFSET_MIN_M = 20;    // minimum distance below ridge crest
+const RIDGE_OFFSET_MAX_M = 60;    // maximum distance below ridge crest
 
 // ============ INFLUENCE RADII (meters) ============
 const BENCH_INFLUENCE_M  = 80;   // how far bench influence extends
@@ -65,10 +83,11 @@ export interface RasterCell {
   col: number;
   lng: number;
   lat: number;
-  bench: number;   // 0-1 bench likelihood
-  saddle: number;  // 0-1 saddle influence
-  ridge: number;   // 0-1 ridge structure
-  pressure: number; // combined 0-1 pressure score
+  bench: number;     // 0-1 bench likelihood
+  saddle: number;    // 0-1 saddle influence
+  ridge: number;     // 0-1 ridge structure
+  sidehill: number;  // 0-1 sidehill/leeward bonus
+  pressure: number;  // combined 0-1 pressure score
 }
 
 export interface RasterGrid {
@@ -79,7 +98,7 @@ export interface RasterGrid {
   cellSizeM: number;
 }
 
-export interface OpportunityZone {
+export interface PrimeStandSite {
   lng: number;
   lat: number;
   score: number;
@@ -214,6 +233,7 @@ export function generateRasterGrid(parcelCoords: number[][]): RasterGrid | null 
         bench: 0,
         saddle: 0,
         ridge: 0,
+        sidehill: 0,
         pressure: 0,
       });
     }
@@ -340,6 +360,189 @@ function computeRidgeScore(
   return Math.min(1, maxScore);
 }
 
+// ============ SIDEHILL / LEEWARD BONUS ============
+
+/**
+ * Compute sidehill/leeward bonus for a cell.
+ * 
+ * This bonus favors ridge shoulders and leeward benches — ideal for mature buck movement.
+ * Three components:
+ *   1. Slope band: moderate slopes (8-25%) are rewarded
+ *   2. Ridge offset: cells 20-60m below ridge crest get bonus
+ *   3. Aspect: NW/N/NE aspects (leeward bedding tendency) get bonus
+ * 
+ * Returns 0-1 score that gets scaled by SIDEHILL_BONUS_MAX.
+ */
+function computeSidehillBonus(
+  cell: RasterCell,
+  grid: RasterGrid,
+  ridgesPrimary: GeoJSON.FeatureCollection | undefined,
+  ridgesSecondary: GeoJSON.FeatureCollection | undefined
+): number {
+  // Component 1: Slope band score
+  // Estimate local slope from elevation proxy (grid position as rough elevation indicator)
+  // In absence of DEM, we use ridge proximity gradient as slope proxy
+  const slopeScore = computeSlopeProxy(cell, grid);
+  
+  // Component 2: Ridge offset score
+  // Favor cells slightly below ridge crest (not on top, not at bottom)
+  const ridgeOffsetScore = computeRidgeOffsetScore(cell, ridgesPrimary, ridgesSecondary);
+  
+  // Component 3: Aspect score (leeward tendency)
+  // NW/N/NE aspects favor thermal bedding and fall travel
+  const aspectScore = computeAspectScore(cell, grid);
+  
+  // Combine with diminishing returns — need at least 2 of 3 to score well
+  // Use geometric mean to reward combinations
+  const combined = Math.pow(
+    Math.max(0.01, slopeScore) *
+    Math.max(0.01, ridgeOffsetScore) *
+    Math.max(0.01, aspectScore),
+    1/3
+  );
+  
+  return Math.min(1, combined);
+}
+
+/**
+ * Estimate slope from grid gradient.
+ * Uses difference in terrain scores as elevation proxy.
+ * Returns 1.0 for optimal slope band (8-25%), fading outside.
+ */
+function computeSlopeProxy(cell: RasterCell, grid: RasterGrid): number {
+  const r = cell.row;
+  const c = cell.col;
+  
+  // Need neighbors to compute gradient
+  if (r < 1 || r >= grid.rows - 1 || c < 1 || c >= grid.cols - 1) {
+    return 0.3; // edge cells get modest score
+  }
+  
+  // Use ridge score as elevation proxy (higher ridge = higher elevation)
+  const centerElev = grid.cells[r][c].ridge;
+  const northElev = grid.cells[r - 1][c].ridge;
+  const southElev = grid.cells[r + 1][c].ridge;
+  const eastElev = grid.cells[r][c + 1].ridge;
+  const westElev = grid.cells[r][c - 1].ridge;
+  
+  // Compute gradient magnitude
+  const dLat = (northElev - southElev) / 2;
+  const dLng = (eastElev - westElev) / 2;
+  const gradient = Math.sqrt(dLat * dLat + dLng * dLng);
+  
+  // Map gradient to slope band score
+  // Optimal is 8-25% (gradient 0.08-0.25 in our normalized space)
+  const normalizedSlope = gradient * 3; // scale factor for our terrain scores
+  
+  if (normalizedSlope < OPTIMAL_SLOPE_MIN) {
+    // Too flat — partial credit
+    return normalizedSlope / OPTIMAL_SLOPE_MIN * 0.5;
+  } else if (normalizedSlope <= OPTIMAL_SLOPE_MAX) {
+    // Optimal band — full credit
+    return 1.0;
+  } else if (normalizedSlope < 0.40) {
+    // Steeper but still huntable
+    return 1.0 - (normalizedSlope - OPTIMAL_SLOPE_MAX) / 0.15 * 0.5;
+  } else {
+    // Too steep
+    return 0.2;
+  }
+}
+
+/**
+ * Compute ridge offset score.
+ * Rewards cells that are close to but not directly on ridges.
+ * Sweet spot: 20-60m below the crest.
+ */
+function computeRidgeOffsetScore(
+  cell: RasterCell,
+  ridgesPrimary: GeoJSON.FeatureCollection | undefined,
+  ridgesSecondary: GeoJSON.FeatureCollection | undefined
+): number {
+  const cellCoord: [number, number] = [cell.lng, cell.lat];
+  let minDist = Infinity;
+  
+  // Find distance to nearest ridge
+  const checkRidges = (fc: GeoJSON.FeatureCollection | undefined, sampleCount: number) => {
+    if (!fc?.features?.length) return;
+    for (const f of fc.features) {
+      if (f.geometry.type !== 'LineString') continue;
+      const coords = f.geometry.coordinates;
+      const step = Math.max(1, Math.floor(coords.length / sampleCount));
+      for (let i = 0; i < coords.length; i += step) {
+        const pt: [number, number] = [coords[i][0], coords[i][1]];
+        const dist = distanceMeters(cellCoord, pt);
+        minDist = Math.min(minDist, dist);
+      }
+    }
+  };
+  
+  checkRidges(ridgesPrimary, 12);
+  checkRidges(ridgesSecondary, 8);
+  
+  if (minDist === Infinity) return 0.3; // no ridges found — modest default
+  
+  // Score based on offset distance
+  if (minDist < RIDGE_OFFSET_MIN_M) {
+    // Too close to crest (exposed, windy)
+    return 0.4 + (minDist / RIDGE_OFFSET_MIN_M) * 0.3;
+  } else if (minDist <= RIDGE_OFFSET_MAX_M) {
+    // Sweet spot — ridge shoulder
+    return 1.0;
+  } else if (minDist < 100) {
+    // Still decent — upper slope
+    return 1.0 - (minDist - RIDGE_OFFSET_MAX_M) / 40 * 0.5;
+  } else {
+    // Too far from ridge
+    return 0.3;
+  }
+}
+
+/**
+ * Compute aspect score favoring leeward (NW/N/NE) aspects.
+ * Uses terrain gradient direction as aspect proxy.
+ */
+function computeAspectScore(cell: RasterCell, grid: RasterGrid): number {
+  const r = cell.row;
+  const c = cell.col;
+  
+  if (r < 1 || r >= grid.rows - 1 || c < 1 || c >= grid.cols - 1) {
+    return 0.5; // edge cells get neutral score
+  }
+  
+  // Use ridge scores to estimate downhill direction
+  const northElev = grid.cells[r - 1][c].ridge;
+  const southElev = grid.cells[r + 1][c].ridge;
+  const eastElev = grid.cells[r][c + 1].ridge;
+  const westElev = grid.cells[r][c - 1].ridge;
+  
+  // Gradient points downhill
+  const dLat = southElev - northElev; // positive = facing north
+  const dLng = westElev - eastElev;   // positive = facing east
+  
+  // Compute aspect angle (0 = N, 90 = E, 180 = S, 270 = W)
+  let aspect = Math.atan2(dLng, dLat) * 180 / Math.PI;
+  if (aspect < 0) aspect += 360;
+  
+  // Score leeward aspects (NW/N/NE = roughly 270-360 and 0-90)
+  // Peak at N (0/360), fade to E (90) and W (270), low at S (180)
+  const distFromNorth = Math.min(aspect, 360 - aspect);
+  
+  if (distFromNorth <= 45) {
+    // NW to NE — optimal leeward
+    return 1.0;
+  } else if (distFromNorth <= 90) {
+    // W to WNW or E to ENE — good
+    return 0.8 - (distFromNorth - 45) / 45 * 0.3;
+  } else if (distFromNorth <= 135) {
+    // SW to SSW or SE to SSE — exposed
+    return 0.5 - (distFromNorth - 90) / 45 * 0.2;
+  } else {
+    // S — most exposed
+    return 0.3;
+  }
+}
+
 // ============ GAUSSIAN SMOOTHING ============
 
 /**
@@ -383,7 +586,7 @@ function applyGaussianSmoothing(grid: RasterGrid): void {
 export function buildTerrainRaster(input: RasterInput): {
   grid: RasterGrid;
   heatPoints: GeoJSON.FeatureCollection;
-  opportunityZones: OpportunityZone[];
+  primeStandSites: PrimeStandSite[];
 } | null {
   // Generate grid
   const grid = generateRasterGrid(input.parcelCoords);
@@ -394,7 +597,7 @@ export function buildTerrainRaster(input: RasterInput): {
   const sw = SEASON_WEIGHTS[input.season] || SEASON_WEIGHTS.rut;
   const focus = FOCUS_CONFIG[input.focusMode ?? 'balanced'];
 
-  // Compute terrain scores for each cell
+  // Pass 1: Compute base terrain scores for each cell
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
@@ -407,13 +610,38 @@ export function buildTerrainRaster(input: RasterInput): {
         input.ridgeSpineData?.ridges_primary,
         input.ridgeSpineData?.ridges_secondary
       );
+    }
+  }
 
-      // Apply season weights and combine
+  // Pass 2: Compute sidehill bonus (needs ridge scores from all cells)
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const cell = grid.cells[r][c];
+      cell.sidehill = computeSidehillBonus(
+        cell,
+        grid,
+        input.ridgeSpineData?.ridges_primary,
+        input.ridgeSpineData?.ridges_secondary
+      );
+    }
+  }
+
+  // Pass 3: Combine scores with weights and sidehill bonus
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const cell = grid.cells[r][c];
+
+      // Apply season weights and combine base terrain
       const benchW = cell.bench * sw.bench * W_BENCH;
       const saddleW = cell.saddle * sw.saddle * W_SADDLE;
       const ridgeW = cell.ridge * sw.ridge * W_RIDGE;
+      const basePressure = benchW + saddleW + ridgeW;
 
-      cell.pressure = benchW + saddleW + ridgeW;
+      // Add sidehill bonus (scaled by base pressure — only boost where there's terrain)
+      // This ensures sidehill doesn't create heat on empty cells
+      const sidehillBonus = cell.sidehill * SIDEHILL_BONUS_MAX * Math.min(1, basePressure * 2);
+
+      cell.pressure = basePressure + sidehillBonus;
     }
   }
 
@@ -457,6 +685,7 @@ export function buildTerrainRaster(input: RasterInput): {
           bench: cell.bench,
           saddle: cell.saddle,
           ridge: cell.ridge,
+          sidehill: cell.sidehill,
           source: 'raster',
         },
         geometry: {
@@ -467,13 +696,13 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // Extract opportunity zones from local maxima
-  const opportunityZones = extractLocalMaxima(grid, 3);
+  // Extract Prime Stand Sites from local maxima
+  const primeStandSites = extractLocalMaxima(grid, 3);
 
   return {
     grid,
     heatPoints: { type: 'FeatureCollection', features },
-    opportunityZones,
+    primeStandSites,
   };
 }
 
@@ -481,9 +710,9 @@ export function buildTerrainRaster(input: RasterInput): {
 
 /**
  * Extract local maxima from the pressure surface.
- * These become opportunity zones (best stand site candidates).
+ * These become Prime Stand Sites (best stand site candidates).
  */
-function extractLocalMaxima(grid: RasterGrid, maxCount: number): OpportunityZone[] {
+function extractLocalMaxima(grid: RasterGrid, maxCount: number): PrimeStandSite[] {
   const candidates: { row: number; col: number; pressure: number }[] = [];
 
   // Find cells that are local maxima (higher than all 8 neighbors)
@@ -513,12 +742,12 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): OpportunityZone
 
   // Deduplicate: keep only maxima that are far enough apart
   const MIN_SEPARATION_CELLS = 4; // ~60m at 15m cell size
-  const selected: OpportunityZone[] = [];
+  const selected: PrimeStandSite[] = [];
 
   for (const cand of candidates) {
     if (selected.length >= maxCount) break;
 
-    // Check distance from already-selected zones
+    // Check distance from already-selected sites
     let tooClose = false;
     for (const sel of selected) {
       const cell = grid.cells[cand.row][cand.col];
@@ -538,7 +767,7 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): OpportunityZone
 
     if (!tooClose) {
       const cell = grid.cells[cand.row][cand.col];
-      const zone: OpportunityZone & { _row: number; _col: number } = {
+      const site: PrimeStandSite & { _row: number; _col: number } = {
         lng: cell.lng,
         lat: cell.lat,
         score: cand.pressure,
@@ -546,7 +775,7 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): OpportunityZone
         _row: cand.row,
         _col: cand.col,
       };
-      selected.push(zone);
+      selected.push(site);
     }
   }
 
@@ -555,28 +784,29 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): OpportunityZone
 }
 
 /**
- * Convert opportunity zones to GeoJSON for map rendering.
+ * Convert Prime Stand Sites to GeoJSON for map rendering.
  */
-export function opportunityZonesToGeoJSON(
-  zones: OpportunityZone[]
+export function primeStandSitesToGeoJSON(
+  sites: PrimeStandSite[]
 ): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: zones.map((z, i) => ({
+    features: sites.map((s, i) => ({
       type: 'Feature' as const,
       properties: {
-        id: `opp_raster_${i}`,
-        score: z.score,
-        rank: z.rank,
-        flowIntensity: z.score,
+        id: `pss_raster_${i}`,
+        score: s.score,
+        rank: s.rank,
+        flowIntensity: s.score,
         convergenceBonus: 0,
-        benchBonus: z.score * 0.40,
-        saddleBonus: z.score * 0.30,
+        benchBonus: s.score * 0.40,
+        saddleBonus: s.score * 0.30,
+        sidehillBonus: s.score * 0.12,
         radiusM: 50,
       },
       geometry: {
         type: 'Point' as const,
-        coordinates: [z.lng, z.lat],
+        coordinates: [s.lng, s.lat],
       },
     })),
   };
