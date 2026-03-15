@@ -4707,7 +4707,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.2.0 | terrain skeleton ridge spine | 2026-03-15 | cp:skeleton';
+  const BUILD_STAMP = 'v3.3.0 | kill window offset | 2026-03-15 | cp:killwindow';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {

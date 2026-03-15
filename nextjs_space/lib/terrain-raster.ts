@@ -1,5 +1,5 @@
 /**
- * Terrain Raster Pressure Surface v3.1
+ * Terrain Raster Pressure Surface v3.2 — Kill Window Model
  * 
  * Computes a grid-based terrain pressure map at 10-20m resolution.
  * Each cell gets bench/saddle/ridge scores based on proximity to terrain features,
@@ -17,7 +17,18 @@
  *   - NW/N/NE aspects (leeward bedding tendency)
  * 
  * Then applies Gaussian smoothing (1-2 cell kernel) for natural transitions.
- * Prime Stand Sites are extracted from local maxima in the pressure surface.
+ * 
+ * KILL WINDOW MODEL (v3.2):
+ * Prime Stand Sites are NOT placed at pressure maxima (where deer want to go).
+ * Instead, they are OFFSET 25-40m toward the best intercept edge:
+ *   - Pressure core = deer destination
+ *   - Prime Stand Site = hunter intercept position
+ * 
+ * Offset direction prioritizes:
+ *   1. Pressure gradient (intercept incoming movement)
+ *   2. Leeward side (wind advantage)
+ *   3. Slightly downhill / sidehill (thermals, exit)
+ *   4. Corridor edge (ambush position)
  */
 
 import type { SeasonProfile } from '@/types/terrain';
@@ -40,6 +51,12 @@ const OPTIMAL_SLOPE_MIN = 0.08;   // 8% grade
 const OPTIMAL_SLOPE_MAX = 0.25;   // 25% grade
 const RIDGE_OFFSET_MIN_M = 20;    // minimum distance below ridge crest
 const RIDGE_OFFSET_MAX_M = 60;    // maximum distance below ridge crest
+
+// ============ KILL WINDOW OFFSET ============
+// Shift Prime Stand Sites from pressure cores to intercept positions
+const KILL_WINDOW_OFFSET_MIN_M = 25;  // minimum offset from pressure core
+const KILL_WINDOW_OFFSET_MAX_M = 40;  // maximum offset from pressure core
+const KILL_WINDOW_OFFSET_CELLS = 2;   // ~30m at 15m cell size (typical offset)
 
 // ============ INFLUENCE RADII (meters) ============
 const BENCH_INFLUENCE_M  = 80;   // how far bench influence extends
@@ -103,6 +120,12 @@ export interface PrimeStandSite {
   lat: number;
   score: number;
   rank: number;
+  // Kill window offset metadata
+  hotspotLng?: number;      // original hotspot center
+  hotspotLat?: number;
+  offsetDistanceM?: number; // actual offset applied
+  offsetAngle?: number;     // direction of offset (degrees, 0=N, 90=E)
+  interceptType?: 'gradient' | 'leeward' | 'sidehill' | 'combined';
 }
 
 // ============ UTILITY FUNCTIONS ============
@@ -696,8 +719,9 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // Extract Prime Stand Sites from local maxima
-  const primeStandSites = extractLocalMaxima(grid, 3);
+  // Extract Prime Stand Sites using Kill Window model
+  // (offset from hotspot centers toward intercept edges)
+  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData);
 
   return {
     grid,
@@ -706,21 +730,201 @@ export function buildTerrainRaster(input: RasterInput): {
   };
 }
 
-// ============ LOCAL MAXIMA EXTRACTION ============
+// ============ KILL WINDOW OFFSET SYSTEM ============
+
+interface HotspotCandidate {
+  row: number;
+  col: number;
+  pressure: number;
+  cell: RasterCell;
+}
 
 /**
- * Extract local maxima from the pressure surface.
- * These become Prime Stand Sites (best stand site candidates).
+ * Compute the optimal intercept direction for a hotspot.
+ * Returns angle in degrees (0=N, 90=E, 180=S, 270=W) and confidence.
+ * 
+ * Considers:
+ *   1. Pressure gradient (intercept deer approaching the core)
+ *   2. Leeward preference (NW/N/NE for wind advantage)
+ *   3. Sidehill/downhill preference (thermals, exit routes)
  */
-function extractLocalMaxima(grid: RasterGrid, maxCount: number): PrimeStandSite[] {
-  const candidates: { row: number; col: number; pressure: number }[] = [];
+function computeInterceptDirection(
+  hotspot: HotspotCandidate,
+  grid: RasterGrid,
+  ridgesPrimary?: GeoJSON.FeatureCollection,
+  ridgesSecondary?: GeoJSON.FeatureCollection
+): { angle: number; confidence: number; type: 'gradient' | 'leeward' | 'sidehill' | 'combined' } {
+  const r = hotspot.row;
+  const c = hotspot.col;
+  
+  // Compute pressure gradient (points TOWARD higher pressure = where deer come FROM)
+  // We want to offset TOWARD the incoming direction to intercept
+  let gradDr = 0, gradDc = 0;
+  let gradMag = 0;
+  
+  if (r >= 2 && r < grid.rows - 2 && c >= 2 && c < grid.cols - 2) {
+    // Use a wider kernel for smoother gradient
+    const pN = (grid.cells[r-1][c].pressure + grid.cells[r-2][c].pressure) / 2;
+    const pS = (grid.cells[r+1][c].pressure + grid.cells[r+2][c].pressure) / 2;
+    const pE = (grid.cells[r][c+1].pressure + grid.cells[r][c+2].pressure) / 2;
+    const pW = (grid.cells[r][c-1].pressure + grid.cells[r][c-2].pressure) / 2;
+    
+    // Gradient points from low to high pressure
+    // But we want to intercept incoming deer, so offset toward LOWER pressure
+    // (deer are moving FROM lower pressure areas TOWARD the hotspot)
+    gradDr = pN - pS; // positive = intercept from north
+    gradDc = pW - pE; // positive = intercept from west
+    gradMag = Math.sqrt(gradDr * gradDr + gradDc * gradDc);
+  }
+  
+  // Compute leeward direction score
+  // NW/N/NE aspects get boost (prevailing winds from W/SW in most of US)
+  // We want hunter on the leeward side for scent control
+  const leewardDr = -1; // north (leeward)
+  const leewardDc = -0.3; // slight west bias
+  
+  // Compute sidehill/downhill direction using ridge scores
+  // Hunter should be slightly below the ridge crest (thermal advantage)
+  let sidehillDr = 0, sidehillDc = 0;
+  if (r >= 1 && r < grid.rows - 1 && c >= 1 && c < grid.cols - 1) {
+    const ridgeN = grid.cells[r-1][c].ridge;
+    const ridgeS = grid.cells[r+1][c].ridge;
+    const ridgeE = grid.cells[r][c+1].ridge;
+    const ridgeW = grid.cells[r][c-1].ridge;
+    
+    // Point away from ridge crest (toward lower ridge scores = downhill)
+    sidehillDr = ridgeS - ridgeN; // positive = move south (away from north ridge)
+    sidehillDc = ridgeE - ridgeW; // positive = move east (away from west ridge)
+    
+    // Normalize
+    const sidehillMag = Math.sqrt(sidehillDr * sidehillDr + sidehillDc * sidehillDc);
+    if (sidehillMag > 0.01) {
+      sidehillDr /= sidehillMag;
+      sidehillDc /= sidehillMag;
+    }
+  }
+  
+  // Combine vectors with weights
+  // Gradient is primary (intercept incoming deer)
+  // Leeward is secondary (scent control)
+  // Sidehill is tertiary (thermals, visibility)
+  const W_GRAD = 0.50;
+  const W_LEEWARD = 0.30;
+  const W_SIDEHILL = 0.20;
+  
+  let finalDr: number, finalDc: number;
+  let interceptType: 'gradient' | 'leeward' | 'sidehill' | 'combined';
+  
+  if (gradMag > 0.05) {
+    // Good gradient signal — use it primarily
+    const normGradDr = gradDr / gradMag;
+    const normGradDc = gradDc / gradMag;
+    
+    finalDr = normGradDr * W_GRAD + leewardDr * W_LEEWARD + sidehillDr * W_SIDEHILL;
+    finalDc = normGradDc * W_GRAD + leewardDc * W_LEEWARD + sidehillDc * W_SIDEHILL;
+    interceptType = 'combined';
+  } else {
+    // Weak gradient — rely more on leeward/sidehill
+    finalDr = leewardDr * 0.6 + sidehillDr * 0.4;
+    finalDc = leewardDc * 0.6 + sidehillDc * 0.4;
+    interceptType = hotspot.cell.sidehill > 0.5 ? 'sidehill' : 'leeward';
+  }
+  
+  // Normalize final direction
+  const finalMag = Math.sqrt(finalDr * finalDr + finalDc * finalDc);
+  if (finalMag > 0) {
+    finalDr /= finalMag;
+    finalDc /= finalMag;
+  } else {
+    // Fallback: offset to the north (leeward default)
+    finalDr = -1;
+    finalDc = 0;
+    interceptType = 'leeward';
+  }
+  
+  // Convert to angle (0=N, 90=E, 180=S, 270=W)
+  // Note: row increases going south, col increases going east
+  // So finalDr < 0 means north, finalDc > 0 means east
+  let angle = Math.atan2(finalDc, -finalDr) * 180 / Math.PI;
+  if (angle < 0) angle += 360;
+  
+  // Confidence based on gradient strength and terrain structure
+  const terrainScore = (hotspot.cell.ridge + hotspot.cell.saddle + hotspot.cell.sidehill) / 3;
+  const confidence = Math.min(1, gradMag * 5 + terrainScore * 0.5);
+  
+  return { angle, confidence, type: interceptType };
+}
 
-  // Find cells that are local maxima (higher than all 8 neighbors)
-  for (let r = 1; r < grid.rows - 1; r++) {
-    for (let c = 1; c < grid.cols - 1; c++) {
-      const center = grid.cells[r][c].pressure;
-      if (center < 0.25) continue; // minimum threshold for opportunity
+/**
+ * Apply kill window offset to a hotspot center.
+ * Returns the optimal stand site position (intercept edge).
+ */
+function applyKillWindowOffset(
+  hotspot: HotspotCandidate,
+  grid: RasterGrid,
+  offsetDirection: { angle: number; confidence: number; type: 'gradient' | 'leeward' | 'sidehill' | 'combined' }
+): { lng: number; lat: number; offsetM: number } {
+  const hotspotCell = hotspot.cell;
+  const mpd = metersPerDegree(hotspotCell.lat);
+  
+  // Compute offset distance (25-40m based on confidence and terrain)
+  // Higher confidence = more aggressive offset
+  const baseOffset = KILL_WINDOW_OFFSET_MIN_M + 
+    (KILL_WINDOW_OFFSET_MAX_M - KILL_WINDOW_OFFSET_MIN_M) * offsetDirection.confidence;
+  
+  // Adjust offset based on terrain type
+  // Saddles get slightly less offset (pinch points are already tight)
+  // Ridges get more offset (larger area to cover)
+  let offsetM = baseOffset;
+  if (hotspotCell.saddle > 0.6) {
+    offsetM *= 0.8; // tighter offset at saddles
+  } else if (hotspotCell.ridge > 0.6) {
+    offsetM *= 1.1; // wider offset along ridges
+  }
+  
+  // Clamp to valid range
+  offsetM = Math.max(KILL_WINDOW_OFFSET_MIN_M, Math.min(KILL_WINDOW_OFFSET_MAX_M, offsetM));
+  
+  // Convert angle to direction vector
+  // angle: 0=N, 90=E, 180=S, 270=W
+  const angleRad = offsetDirection.angle * Math.PI / 180;
+  const dLng = Math.sin(angleRad) * offsetM / mpd.lng;
+  const dLat = Math.cos(angleRad) * offsetM / mpd.lat;
+  
+  return {
+    lng: hotspotCell.lng + dLng,
+    lat: hotspotCell.lat + dLat,
+    offsetM,
+  };
+}
 
+/**
+ * Extract Prime Stand Sites using the Kill Window model.
+ * 
+ * 1. Find local pressure maxima (hotspot centers / deer destinations)
+ * 2. Compute optimal intercept direction for each hotspot
+ * 3. Offset stand sites 25-40m toward the intercept edge
+ * 
+ * Result: Stand sites positioned for ambush, not at the center of activity.
+ */
+function extractPrimeStandSites(
+  grid: RasterGrid,
+  maxCount: number,
+  ridgeSpineData?: {
+    ridges_primary?: GeoJSON.FeatureCollection;
+    ridges_secondary?: GeoJSON.FeatureCollection;
+  } | null
+): PrimeStandSite[] {
+  const candidates: HotspotCandidate[] = [];
+
+  // Step 1: Find local pressure maxima (hotspot centers)
+  for (let r = 2; r < grid.rows - 2; r++) {
+    for (let c = 2; c < grid.cols - 2; c++) {
+      const cell = grid.cells[r][c];
+      const center = cell.pressure;
+      if (center < 0.25) continue; // minimum threshold
+
+      // Check if this cell is a local maximum (higher than all 8 neighbors)
       let isMax = true;
       for (let dr = -1; dr <= 1 && isMax; dr++) {
         for (let dc = -1; dc <= 1 && isMax; dc++) {
@@ -732,7 +936,7 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): PrimeStandSite[
       }
 
       if (isMax) {
-        candidates.push({ row: r, col: c, pressure: center });
+        candidates.push({ row: r, col: c, pressure: center, cell });
       }
     }
   }
@@ -740,24 +944,31 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): PrimeStandSite[
   // Sort by pressure (highest first)
   candidates.sort((a, b) => b.pressure - a.pressure);
 
-  // Deduplicate: keep only maxima that are far enough apart
+  // Step 2 & 3: For each hotspot, compute intercept and apply offset
   const MIN_SEPARATION_CELLS = 4; // ~60m at 15m cell size
-  const selected: PrimeStandSite[] = [];
+  const selected: (PrimeStandSite & { _row: number; _col: number })[] = [];
 
-  for (const cand of candidates) {
+  for (const hotspot of candidates) {
     if (selected.length >= maxCount) break;
 
-    // Check distance from already-selected sites
+    // Compute intercept direction
+    const interceptDir = computeInterceptDirection(
+      hotspot,
+      grid,
+      ridgeSpineData?.ridges_primary,
+      ridgeSpineData?.ridges_secondary
+    );
+
+    // Apply kill window offset
+    const offsetPos = applyKillWindowOffset(hotspot, grid, interceptDir);
+
+    // Check distance from already-selected sites (use offset position)
     let tooClose = false;
     for (const sel of selected) {
-      const cell = grid.cells[cand.row][cand.col];
-      const dist = Math.sqrt(
-        Math.pow(cell.lng - sel.lng, 2) + Math.pow(cell.lat - sel.lat, 2)
-      );
-      // Convert to approximate cell distance
+      // Use cell distance to hotspot center for separation check
       const cellDist = Math.sqrt(
-        Math.pow(cand.row - (sel as any)._row, 2) +
-        Math.pow(cand.col - (sel as any)._col, 2)
+        Math.pow(hotspot.row - sel._row, 2) +
+        Math.pow(hotspot.col - sel._col, 2)
       );
       if (cellDist < MIN_SEPARATION_CELLS) {
         tooClose = true;
@@ -766,25 +977,32 @@ function extractLocalMaxima(grid: RasterGrid, maxCount: number): PrimeStandSite[
     }
 
     if (!tooClose) {
-      const cell = grid.cells[cand.row][cand.col];
       const site: PrimeStandSite & { _row: number; _col: number } = {
-        lng: cell.lng,
-        lat: cell.lat,
-        score: cand.pressure,
+        lng: offsetPos.lng,
+        lat: offsetPos.lat,
+        score: hotspot.pressure,
         rank: selected.length + 1,
-        _row: cand.row,
-        _col: cand.col,
+        // Kill window metadata
+        hotspotLng: hotspot.cell.lng,
+        hotspotLat: hotspot.cell.lat,
+        offsetDistanceM: offsetPos.offsetM,
+        offsetAngle: interceptDir.angle,
+        interceptType: interceptDir.type,
+        // Internal tracking
+        _row: hotspot.row,
+        _col: hotspot.col,
       };
       selected.push(site);
     }
   }
 
   // Clean up internal tracking properties
-  return selected.map(({ lng, lat, score, rank }) => ({ lng, lat, score, rank }));
+  return selected.map(({ _row, _col, ...rest }) => rest);
 }
 
 /**
  * Convert Prime Stand Sites to GeoJSON for map rendering.
+ * Includes kill window metadata for enhanced tooltips.
  */
 export function primeStandSitesToGeoJSON(
   sites: PrimeStandSite[]
@@ -803,6 +1021,12 @@ export function primeStandSitesToGeoJSON(
         saddleBonus: s.score * 0.30,
         sidehillBonus: s.score * 0.12,
         radiusM: 50,
+        // Kill window offset metadata
+        hotspotLng: s.hotspotLng,
+        hotspotLat: s.hotspotLat,
+        offsetDistanceM: s.offsetDistanceM,
+        offsetAngle: s.offsetAngle,
+        interceptType: s.interceptType,
       },
       geometry: {
         type: 'Point' as const,
