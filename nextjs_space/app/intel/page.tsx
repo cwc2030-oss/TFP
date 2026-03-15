@@ -263,7 +263,14 @@ const LAYER_COLORS = {
   standGold: '#fbbf24',            // #1 Today's Sit: gold highlight ring
   standMed: '#f59e0b',
   standLow: '#6b7280',
-  parcelBoundary: '#fbbf24',
+  // v3.5.1 — Selected parcel boundary (gold/amber with glow)
+  parcelBoundary: '#f59e0b',       // Amber-500 — gold/amber for clear visibility
+  parcelGlow: '#fbbf24',           // Amber-400 — subtle glow halo
+  // v3.5.1 — Adjacent parcel context lines (cool gray, faint)
+  adjacentParcel: '#94a3b8',       // Slate-400 — cool gray/blue-gray context
+  // v3.5.1 — Topo/contour line overrides (muted tan/slate)
+  contourIndex: '#a8a29e',         // Stone-400 — muted for 100ft intervals
+  contourRegular: '#d6d3d1',       // Stone-300 — very muted for 20ft intervals
   // Edge Intelligence Layer colors
   edgeCorridorArrow: '#8B4513',    // Sienna for continuation arrows
   edgeGhostBedding: '#22c55e',     // Semi-transparent green for ghost bedding
@@ -277,9 +284,11 @@ const LAYER_COLORS = {
   ridgeSecondary: '#6D4C41',      // Medium brown - secondary spines (distinct from primary)
   ridgeCasing: '#EFEBE9',         // Off-white casing/halo for visibility over heat
   saddleNode: '#8D6E63',          // Warm taupe - saddle markers (subtle)
-  // Terrain Flow colors (movement likelihood - blue/teal palette)
-  flowPrimary: '#0891b2',         // Cyan-600: primary flow lines (bold, readable)
-  flowSecondary: '#67e8f9',       // Cyan-300: secondary flow lines (lighter)
+  // v3.5.1 — Animated Travel Corridor colors (teal/cyan movement palette)
+  flowPrimary: '#14b8a6',         // Teal-500: primary flow lines (animated)
+  flowSecondary: '#5eead4',       // Teal-300: secondary flow lines
+  flowAnimated: '#2dd4bf',        // Teal-400: animated flow glow
+  flowConvergenceBright: '#fbbf24', // Amber-400: brighter glow through convergence
   flowConvergence: '#f59e0b',     // Amber-500: convergence zone markers
   flowOpportunity: '#fbbf24',     // Amber-400: opportunity zone markers (gold)
 };
@@ -836,6 +845,10 @@ function DeerIntelContent() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
+  
+  // v3.5.1 — Animation frame ref for corridor flow animation
+  const flowAnimationRef = useRef<number | null>(null);
+  const flowAnimationPhase = useRef<number>(0);
 
   // URL params
   const lat = parseFloat(searchParams.get('lat') || '38.7958');
@@ -2445,9 +2458,12 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-pressure-heatmap')) {
         map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', flowVisibility.pressureHeatmap ? 'visible' : 'none');
       }
-      // Flow lines (SUPPORTING EVIDENCE)
+      // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
       if (map.getLayer('tfp-flow-primary')) {
         map.setLayoutProperty('tfp-flow-primary', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-flow-primary-glow')) {
+        map.setLayoutProperty('tfp-flow-primary-glow', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
       }
       if (map.getLayer('tfp-flow-secondary')) {
         map.setLayoutProperty('tfp-flow-secondary', 'visibility', flowVisibility.flowSecondary ? 'visible' : 'none');
@@ -2610,17 +2626,32 @@ function DeerIntelContent() {
       try {
         console.log('[MAP] Creating native Mapbox sources...');
         
-        // Parcel boundary source
+        // ========== v3.5.1 — SELECTED PARCEL BOUNDARY (gold/amber with glow) ==========
+        // Gold/amber dashed line (~4-5px) with subtle outer glow so it clearly stands out
         if (!map.getSource('tfp-parcel')) {
           map.addSource('tfp-parcel', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow layer (wider, blurred, behind main line)
+          map.addLayer({
+            id: 'tfp-parcel-glow',
+            type: 'line',
+            source: 'tfp-parcel',
+            paint: {
+              'line-color': LAYER_COLORS.parcelGlow,
+              'line-width': 10,           // Wide glow halo
+              'line-opacity': 0.35,       // Subtle, not overpowering
+              'line-blur': 4,             // Soft edge glow effect
+            },
+          });
+          // Main boundary line (gold/amber dashed, prominent)
           map.addLayer({
             id: 'tfp-parcel-outline',
             type: 'line',
             source: 'tfp-parcel',
             paint: {
               'line-color': LAYER_COLORS.parcelBoundary,
-              'line-width': 3,
-              'line-dasharray': [4, 2],
+              'line-width': 4.5,          // ~4-5px for clear visibility
+              'line-dasharray': [5, 3],   // Dashed pattern
+              'line-opacity': 0.95,       // Strong presence
             },
           });
         }
@@ -3152,42 +3183,61 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== TERRAIN FLOW LAYERS (SUPPORTING EVIDENCE) ==========
-        // Flow lines are now SUBTLE supporting evidence, not the primary visual
-        // The heat map above tells the main story
+        // ========== v3.5.1 — ANIMATED TERRAIN FLOW LAYERS (TEAL/CYAN PALETTE) ==========
+        // Primary travel corridors with subtle animation to communicate movement
+        // Slow, calm dash animation along corridor centerlines
         
-        // Primary flow lines: bold validation of heat map corridors
-        // Fewer lines (1-3 per parcel) but each one clearly readable
+        // Primary flow lines: animated teal/cyan movement corridors
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
+          
+          // v3.5.1 — Animated glow layer (soft teal glow behind main line)
+          map.addLayer({
+            id: 'tfp-flow-primary-glow',
+            type: 'line',
+            source: 'tfp-flow-primary',
+            paint: {
+              'line-color': LAYER_COLORS.flowAnimated, // Teal-400 glow
+              'line-width': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.4, 6,      // Wider glow halo
+                0.75, 10
+              ],
+              'line-opacity': 0.25,
+              'line-blur': 3,
+            },
+          });
+          
+          // v3.5.1 — Main animated flow line (teal/cyan with dashes for animation)
           map.addLayer({
             id: 'tfp-flow-primary',
             type: 'line',
             source: 'tfp-flow-primary',
             paint: {
-              // Bold but not dominant — validates the heat map
+              // Teal/cyan color palette for movement feel
               'line-color': [
                 'case',
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.7],
-                'rgba(16,185,129,0.85)',  // emerald-500 — strong corridors
+                LAYER_COLORS.flowPrimary,      // Teal-500 — strong corridors
                 ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.5],
-                'rgba(34,211,238,0.7)',   // cyan-400 — moderate
-                'rgba(148,163,184,0.45)'  // slate-400 — weak
+                LAYER_COLORS.flowAnimated,     // Teal-400 — moderate
+                LAYER_COLORS.flowSecondary     // Teal-300 — weak
               ],
-              // Bolder widths — fewer lines so each one counts
+              // Bolder widths for visibility
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 1.5,    // Weak: visible
-                0.55, 2.5,   // Moderate: clear
-                0.75, 3.5    // Strong: bold corridor
+                0.4, 2,      // Weak: visible
+                0.55, 3,     // Moderate: clear
+                0.75, 4      // Strong: bold corridor
               ],
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 0.4,    // Weak: present but subordinate
-                0.55, 0.55,  // Moderate: clear
-                0.75, 0.7    // Strong: confident
+                0.4, 0.55,
+                0.55, 0.70,
+                0.75, 0.85
               ],
-              'line-blur': 0.5,
+              // Dashed pattern for animation (will be animated via dasharray-offset)
+              'line-dasharray': [6, 4],
             },
           });
         }
@@ -3200,9 +3250,9 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-flow-secondary',
             paint: {
-              'line-color': 'rgba(148,163,184,0.6)', // slate-400 at 60%
-              'line-width': 1.3,
-              'line-opacity': 0.4,
+              'line-color': LAYER_COLORS.flowSecondary, // Teal-300
+              'line-width': 1.5,
+              'line-opacity': 0.45,
               'line-dasharray': [4, 3],
             },
           });
@@ -3488,9 +3538,11 @@ function DeerIntelContent() {
           });
         }
         
-        // Adjacent parcel boundary (invisible but clickable)
+        // ========== v3.5.1 — ADJACENT PARCEL CONTEXT LINES (cool gray, faint) ==========
+        // Thin cool gray/blue-gray stroke (~1-1.5px) for neighboring ownership context
         if (!map.getSource('tfp-edge-boundary')) {
           map.addSource('tfp-edge-boundary', { type: 'geojson', data: EMPTY_FC });
+          // Invisible fill for click/hover detection
           map.addLayer({
             id: 'tfp-edge-boundary-fill',
             type: 'fill',
@@ -3500,6 +3552,18 @@ function DeerIntelContent() {
               'fill-opacity': 0, // Invisible by default
             },
           });
+          // v3.5.1 — Always-visible faint context lines for adjacent parcels
+          map.addLayer({
+            id: 'tfp-edge-boundary-context',
+            type: 'line',
+            source: 'tfp-edge-boundary',
+            paint: {
+              'line-color': LAYER_COLORS.adjacentParcel, // Cool gray/blue-gray
+              'line-width': 1.25,         // Thin ~1-1.5px
+              'line-opacity': 0.45,       // Faint but readable
+            },
+          });
+          // Highlight layer (intensifies on hover)
           map.addLayer({
             id: 'tfp-edge-boundary-highlight',
             type: 'line',
@@ -3516,6 +3580,97 @@ function DeerIntelContent() {
         
         overlaySourcesCreated.current = true;
         console.log('[MAP] Native Mapbox sources created successfully');
+        
+        // ========== v3.5.1 — TOPO/CONTOUR LINE RESTYLING ==========
+        // Override satellite-streets-v12 built-in contour lines to be muted tan/slate
+        // so they read as terrain reference and don't resemble parcel boundaries
+        const contourLayers = [
+          'contour-label', 'contour-line'
+        ];
+        contourLayers.forEach(layerId => {
+          if (map.getLayer(layerId)) {
+            try {
+              // Mute contour lines to tan/slate, thin width (~1px)
+              if (layerId === 'contour-line') {
+                map.setPaintProperty(layerId, 'line-color', LAYER_COLORS.contourRegular);
+                map.setPaintProperty(layerId, 'line-width', 0.8);
+                map.setPaintProperty(layerId, 'line-opacity', 0.4);
+              }
+              if (layerId === 'contour-label') {
+                map.setPaintProperty(layerId, 'text-color', LAYER_COLORS.contourIndex);
+                map.setPaintProperty(layerId, 'text-opacity', 0.5);
+              }
+              console.log(`[MAP] Restyled contour layer: ${layerId}`);
+            } catch (err) {
+              console.warn(`[MAP] Could not restyle ${layerId}:`, err);
+            }
+          }
+        });
+        
+        // ========== v3.5.1 — LAYER HIERARCHY / Z-ORDER ==========
+        // Ensure proper visual stacking:
+        // 1. Aerial imagery & hillshade (base style)
+        // 2. Topo/contour lines (muted, restyled above)
+        // 3. Adjacent parcel context lines
+        // 4. Selected parcel boundary (gold glow + dashed line)
+        // 5. Terrain structure layers (bedding, draws, saddles)
+        // 6. Pressure/corridor surfaces (heatmap)
+        // 7. Animated primary flow lines
+        // 8. Convergence nodes
+        // 9. Stand site markers (HTML, always on top)
+        
+        // Move layers to ensure proper ordering
+        const layerOrder = [
+          // Base terrain reference (lowest)
+          'tfp-edge-boundary-context',     // Adjacent parcel context lines
+          'tfp-parcel-glow',               // Selected parcel glow (below main line)
+          'tfp-parcel-outline',            // Selected parcel boundary
+          // Terrain structure
+          'tfp-bedding-fill',
+          'tfp-bedding-outline',
+          'tfp-funnels-lines-draws',
+          'tfp-funnels-polys-fill',
+          'tfp-funnels-polys-outline',
+          // Corridors & funnels
+          'tfp-corridors-primary',
+          'tfp-corridors-possible',
+          'tfp-corridors-exploratory',
+          // Pressure heatmap
+          'tfp-pressure-heatmap',
+          // Ridge spines
+          'tfp-ridges-primary-casing',
+          'tfp-ridges-primary',
+          'tfp-ridges-secondary-casing',
+          'tfp-ridges-secondary',
+          // Flow lines (animated) — v3.5.1
+          'tfp-flow-secondary',
+          'tfp-flow-primary-glow',      // Animated glow below main line
+          'tfp-flow-primary',
+          // Convergence & opportunity (top)
+          'tfp-flow-convergence-pulse',
+          'tfp-flow-convergence',
+          'tfp-flow-opportunity-glow',
+          'tfp-flow-opportunity',
+          'tfp-huntability-convergence-glow',
+          'tfp-huntability-convergence',
+        ];
+        
+        // Move layers in order (later = higher z-index)
+        let prevLayerId: string | undefined;
+        layerOrder.forEach(layerId => {
+          if (map.getLayer(layerId)) {
+            try {
+              if (prevLayerId && map.getLayer(prevLayerId)) {
+                // Move this layer above the previous one
+                map.moveLayer(layerId);
+              }
+              prevLayerId = layerId;
+            } catch (err) {
+              // Layer ordering is best-effort
+            }
+          }
+        });
+        console.log('[MAP] v3.5.1 layer hierarchy applied');
         
         // ========== HOVER INTERACTIONS FOR FEATURE INFO ==========
         // Create a reusable popup for hover info
@@ -3931,10 +4086,79 @@ function DeerIntelContent() {
         window.__TFP_MAP__ = null;
       }
       overlaySourcesCreated.current = false;
+      // v3.5.1 — Cleanup flow animation
+      if (flowAnimationRef.current !== null) {
+        cancelAnimationFrame(flowAnimationRef.current);
+        flowAnimationRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
     };
   }, []); // Empty deps - only mount once
+  
+  // ========== v3.5.1 — ANIMATED FLOW CORRIDOR EFFECT ==========
+  // Slow, calm dash animation along primary travel corridors
+  // Animation brightens slightly through convergence nodes
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+    
+    // Cancel any existing animation
+    if (flowAnimationRef.current !== null) {
+      cancelAnimationFrame(flowAnimationRef.current);
+    }
+    
+    // Animation parameters: calm, slow movement (~3 second cycle)
+    const ANIMATION_DURATION = 3000; // ms for full dash cycle
+    const DASH_PATTERN = [6, 4]; // Matches layer definition
+    const TOTAL_DASH_LENGTH = DASH_PATTERN[0] + DASH_PATTERN[1]; // 10
+    
+    let lastTime = 0;
+    
+    const animateFlow = (currentTime: number) => {
+      // Throttle to ~20fps for performance
+      if (currentTime - lastTime < 50) {
+        flowAnimationRef.current = requestAnimationFrame(animateFlow);
+        return;
+      }
+      lastTime = currentTime;
+      
+      // Calculate offset based on time (slow, smooth movement)
+      const phase = (currentTime % ANIMATION_DURATION) / ANIMATION_DURATION;
+      const offset = phase * TOTAL_DASH_LENGTH;
+      
+      // Update dash pattern to create movement effect
+      // Mapbox doesn't support dasharray-offset, so we shift the pattern
+      const shiftedDash = [
+        Math.max(0.5, DASH_PATTERN[0] - offset),
+        DASH_PATTERN[1],
+        Math.min(TOTAL_DASH_LENGTH - 0.5, offset),
+      ].filter(v => v > 0.1);
+      
+      try {
+        if (map.getLayer('tfp-flow-primary')) {
+          // Subtle pulsing glow opacity through convergence
+          const glowOpacity = 0.20 + 0.08 * Math.sin(phase * Math.PI * 2);
+          map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', glowOpacity);
+        }
+      } catch (err) {
+        // Ignore errors if layer doesn't exist
+      }
+      
+      flowAnimationRef.current = requestAnimationFrame(animateFlow);
+    };
+    
+    // Start animation
+    flowAnimationRef.current = requestAnimationFrame(animateFlow);
+    console.log('[MAP] v3.5.1 flow animation started');
+    
+    return () => {
+      if (flowAnimationRef.current !== null) {
+        cancelAnimationFrame(flowAnimationRef.current);
+        flowAnimationRef.current = null;
+      }
+    };
+  }, [mapReady]);
 
   // Run analysis immediately on mount, and when season/wind changes
   useEffect(() => {
@@ -4900,7 +5124,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.5.0 | convergence refinement + cover gating | 2026-03-15 | cp:convergence-fix';
+  const BUILD_STAMP = 'v3.5.1 | visual clarity + animated flow | 2026-03-15 | cp:visual-clarity';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {

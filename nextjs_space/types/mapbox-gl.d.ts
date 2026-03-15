@@ -74,6 +74,7 @@ declare module 'mapbox-gl' {
     addSource(id: string, source: any): void;
     addLayer(layer: any, before?: string): void;
     removeLayer(id: string): void;
+    moveLayer(layerId: string, beforeId?: string): void;
     removeSource(id: string): void;
     getSource(id: string): GeoJSONSource | any;
     getLayer(id: string): StyleLayer | undefined;
