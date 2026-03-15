@@ -43,6 +43,13 @@ import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore 
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
+import TerrainReasonsPanel, { 
+  extractStandReasons, 
+  extractCorridorReasons, 
+  extractConvergenceReasons,
+  extractBeddingReasons,
+  type TerrainReasonData 
+} from '@/components/terrain/terrain-reasons-panel';
 import DEMModeBadge, { DEMModeBadgeInline } from '@/components/terrain/dem-mode-badge';
 import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrain/analysis-quality-badge';
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
@@ -291,6 +298,10 @@ const LAYER_COLORS = {
   flowConvergenceBright: '#fbbf24', // Amber-400: brighter glow through convergence
   flowConvergence: '#f59e0b',     // Amber-500: convergence zone markers
   flowOpportunity: '#fbbf24',     // Amber-400: opportunity zone markers (gold)
+  // v3.6.0 — Bedding Probability colors (muted earthy/plum tones)
+  beddingProbability: '#7c3aed', // Violet-600: bedding zone fill
+  beddingProbabilityGlow: '#a855f7', // Purple-500: bedding zone glow/halo
+  beddingProbabilityOutline: '#6d28d9', // Violet-700: bedding zone outline
 };
 
 // ========== EDGE INTELLIGENCE UTILITIES ==========
@@ -913,6 +924,14 @@ function DeerIntelContent() {
     convergenceZones: true, // Convergence zone markers
     opportunityZones: true, // Opportunity zone markers
   });
+  
+  // v3.6.0 — Terrain Reasons toggle (shows explanations when clicking features)
+  const [showTerrainReasons, setShowTerrainReasons] = useState(false);
+  const [terrainReasonData, setTerrainReasonData] = useState<TerrainReasonData | null>(null);
+  const [terrainReasonPosition, setTerrainReasonPosition] = useState<{ x: number; y: number } | null>(null);
+  
+  // v3.6.0 — Bedding Probability visibility toggle
+  const [showBeddingProbability, setShowBeddingProbability] = useState(false);
 
   // UI state
   const [panelCollapsed, setPanelCollapsed] = useState(true); // Left panel collapsed by default
@@ -1996,10 +2015,17 @@ function DeerIntelContent() {
         favorabilitySource.setData(huntabilityData.favorabilitySurface);
       }
 
+      // v3.6.0: Update bedding probability source
+      const beddingSource = map.getSource('tfp-bedding-probability') as mapboxgl.GeoJSONSource;
+      if (beddingSource && huntabilityData.beddingProbabilityGeoJSON) {
+        beddingSource.setData(huntabilityData.beddingProbabilityGeoJSON);
+      }
+
       console.log('[Huntability] Updated map sources:', {
         corridors: huntabilityData.corridorLines.features.length,
         convergence: huntabilityData.convergencePoints.features.length,
         favorability: huntabilityData.favorabilitySurface.features.length,
+        beddingZones: huntabilityData.beddingProbabilityGeoJSON?.features?.length || 0,
       });
     } catch (err) {
       console.error('[Huntability] Error updating map sources (non-fatal):', err);
@@ -2480,10 +2506,21 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-flow-opportunity-glow')) {
         map.setLayoutProperty('tfp-flow-opportunity-glow', 'visibility', flowVisibility.opportunityZones ? 'visible' : 'none');
       }
+      
+      // v3.6.0: Bedding Probability visibility
+      if (map.getLayer('tfp-bedding-probability-glow')) {
+        map.setLayoutProperty('tfp-bedding-probability-glow', 'visibility', showBeddingProbability ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-bedding-probability-fill')) {
+        map.setLayoutProperty('tfp-bedding-probability-fill', 'visibility', showBeddingProbability ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-bedding-probability-outline')) {
+        map.setLayoutProperty('tfp-bedding-probability-outline', 'visibility', showBeddingProbability ? 'visible' : 'none');
+      }
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, mapReady]);
+  }, [visibility, flowVisibility, showBeddingProbability, mapReady]);
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   useEffect(() => {
@@ -3413,6 +3450,66 @@ function DeerIntelContent() {
           });
         }
         
+        // ========== v3.6.0: BEDDING PROBABILITY LAYER ==========
+        // Muted earthy/plum tones — these are ORIGIN areas, not travel lanes
+        if (!map.getSource('tfp-bedding-probability')) {
+          map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow (muted plum/purple)
+          map.addLayer({
+            id: 'tfp-bedding-probability-glow',
+            type: 'circle',
+            source: 'tfp-bedding-probability',
+            layout: { visibility: 'none' }, // Controlled by showBeddingProbability toggle
+            paint: {
+              'circle-radius': [
+                'interpolate', ['linear'], ['get', 'beddingScore'],
+                0.45, 35,  // Min threshold
+                0.70, 50,  // High probability = larger radius
+                1.0, 60,
+              ],
+              'circle-color': LAYER_COLORS.beddingProbabilityGlow,
+              'circle-opacity': 0.15,
+              'circle-blur': 1.2,
+            },
+          });
+          // Inner fill (earthy plum)
+          map.addLayer({
+            id: 'tfp-bedding-probability-fill',
+            type: 'circle',
+            source: 'tfp-bedding-probability',
+            layout: { visibility: 'none' }, // Controlled by showBeddingProbability toggle
+            paint: {
+              'circle-radius': [
+                'interpolate', ['linear'], ['get', 'beddingScore'],
+                0.45, 18,
+                0.70, 28,
+                1.0, 35,
+              ],
+              'circle-color': LAYER_COLORS.beddingProbability,
+              'circle-opacity': 0.30,
+            },
+          });
+          // Outline ring
+          map.addLayer({
+            id: 'tfp-bedding-probability-outline',
+            type: 'circle',
+            source: 'tfp-bedding-probability',
+            layout: { visibility: 'none' }, // Controlled by showBeddingProbability toggle
+            paint: {
+              'circle-radius': [
+                'interpolate', ['linear'], ['get', 'beddingScore'],
+                0.45, 18,
+                0.70, 28,
+                1.0, 35,
+              ],
+              'circle-color': 'transparent',
+              'circle-stroke-color': LAYER_COLORS.beddingProbabilityOutline,
+              'circle-stroke-width': 2,
+              'circle-stroke-opacity': 0.45,
+            },
+          });
+        }
+        
         // ========== EDGE INTELLIGENCE SOURCES AND LAYERS ==========
         // ALL HIDDEN in Terrain Work Mode (deer interpretation)
         
@@ -4034,8 +4131,36 @@ function DeerIntelContent() {
         map.on('click', 'tfp-flow-opportunity', handleOpportunityClick);
         map.on('click', 'tfp-flow-opportunity-glow', handleOpportunityClick);
         
+        // v3.6.0: Bedding probability click handler (for terrain reasons)
+        const handleBeddingClick = (e: mapboxgl.MapLayerMouseEvent) => {
+          if (!e.features || !e.features[0]) return;
+          const props = e.features[0].properties || {};
+          const coords = (e.features[0].geometry as GeoJSON.Point).coordinates;
+          
+          window.dispatchEvent(new CustomEvent('tfp-bedding-click', {
+            detail: {
+              id: props.id,
+              beddingScore: props.beddingScore || 0.5,
+              upperSlope: props.upperSlope || 0,
+              leewardAspect: props.leewardAspect || 0,
+              ridgeDistance: props.ridgeDistance || 0,
+              slopeSuitability: props.slopeSuitability || 0,
+              terrainShelter: props.terrainShelter || 0,
+              corridorOffset: props.corridorOffset || 0,
+              radiusM: props.radiusM || 35,
+              lng: coords[0],
+              lat: coords[1],
+              screenX: e.point.x,
+              screenY: e.point.y,
+            }
+          }));
+        };
+        
+        map.on('click', 'tfp-bedding-probability-fill', handleBeddingClick);
+        map.on('click', 'tfp-bedding-probability-glow', handleBeddingClick);
+        
         // Cursor changes for clickable layers
-        const flowLayers = ['tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-opportunity', 'tfp-flow-opportunity-glow'];
+        const flowLayers = ['tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-opportunity', 'tfp-flow-opportunity-glow', 'tfp-bedding-probability-fill', 'tfp-bedding-probability-glow'];
         flowLayers.forEach(layerId => {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
           map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -4768,6 +4893,84 @@ function DeerIntelContent() {
     };
   }, []);
 
+  // ========== v3.6.0: TERRAIN REASONS EVENT LISTENER ==========
+  // When showTerrainReasons is ON, clicking features shows terrain factor explanations
+  useEffect(() => {
+    if (!showTerrainReasons) {
+      // Clear any open panel when toggle is turned off
+      setTerrainReasonData(null);
+      setTerrainReasonPosition(null);
+      return;
+    }
+    
+    // Handle opportunity zone clicks for terrain reasons
+    const handleOpportunityReasons = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const reasons = extractStandReasons(
+        {
+          score: detail.score,
+          flowIntensity: detail.flowIntensity,
+          convergenceBonus: detail.convergenceBonus,
+          benchBonus: detail.benchBonus,
+          saddleBonus: detail.saddleBonus,
+        },
+        { lng: 0, lat: 0 } // Position from event not available directly
+      );
+      setTerrainReasonData(reasons);
+      setTerrainReasonPosition({ x: detail.screenX, y: detail.screenY });
+    };
+    
+    // Handle corridor clicks for terrain reasons
+    const handleCorridorReasons = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      // Corridors don't have detailed breakdown in current implementation
+      // We'll create a simple summary based on likelihood
+      const reasons = extractCorridorReasons(
+        {
+          likelihood: detail.likelihood,
+          bench_likelihood: detail.likelihood * 0.6,
+          slope_preference: detail.likelihood * 0.5,
+          saddle_proximity: detail.likelihood * 0.3,
+          terrain_convergence: detail.likelihood * 0.4,
+          spine_proximity: detail.likelihood * 0.5,
+        },
+        { lng: 0, lat: 0 }
+      );
+      setTerrainReasonData(reasons);
+      setTerrainReasonPosition({ x: detail.screenX, y: detail.screenY });
+    };
+    
+    // Handle bedding zone clicks for terrain reasons
+    const handleBeddingReasons = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const reasons = extractBeddingReasons(
+        {
+          score: detail.beddingScore,
+          beddingScore: detail.beddingScore,
+          upperSlope: detail.upperSlope,
+          leewardAspect: detail.leewardAspect,
+          ridgeDistance: detail.ridgeDistance,
+          slopeSuitability: detail.slopeSuitability,
+          terrainShelter: detail.terrainShelter,
+          corridorOffset: detail.corridorOffset,
+        },
+        { lng: detail.lng, lat: detail.lat }
+      );
+      setTerrainReasonData(reasons);
+      setTerrainReasonPosition({ x: detail.screenX, y: detail.screenY });
+    };
+    
+    window.addEventListener('tfp-opportunity-click', handleOpportunityReasons);
+    window.addEventListener('tfp-flow-segment-click', handleCorridorReasons);
+    window.addEventListener('tfp-bedding-click', handleBeddingReasons);
+    
+    return () => {
+      window.removeEventListener('tfp-opportunity-click', handleOpportunityReasons);
+      window.removeEventListener('tfp-flow-segment-click', handleCorridorReasons);
+      window.removeEventListener('tfp-bedding-click', handleBeddingReasons);
+    };
+  }, [showTerrainReasons]);
+
   // ========== HTML STAND MARKERS (top 2 only) ==========
   // Skip entirely in Terrain Work Mode - deer interpretation layer
   useEffect(() => {
@@ -5124,7 +5327,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.5.1 | visual clarity + animated flow | 2026-03-15 | cp:visual-clarity';
+  const BUILD_STAMP = 'v3.6.0 | terrain reasons + bedding probability v1 | 2026-03-15 | cp:terrain-reasons';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -6154,6 +6357,60 @@ function DeerIntelContent() {
                       </button>
                     );
                   })()}
+                  
+                  {/* v3.6.0: Bedding Probability Toggle */}
+                  {(() => {
+                    const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
+                    const hasData = beddingCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setShowBeddingProbability(v => !v)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          showBeddingProbability ? 'bg-purple-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.beddingProbability, opacity: showBeddingProbability ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
+                        {hasData ? (
+                          <span className="text-[9px] text-purple-300 px-1.5 py-0.5 bg-purple-800/40 rounded">
+                            {beddingCount}
+                          </span>
+                        ) : (
+                          <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
+                            v1
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                </div>
+                
+                {/* v3.6.0: Terrain Reasons Toggle */}
+                <div className="mt-3 pt-3 border-t border-stone-700/50">
+                  <button
+                    onClick={() => setShowTerrainReasons(v => !v)}
+                    className={`w-full flex items-center gap-2 px-2 py-2 rounded transition-all text-xs ${
+                      showTerrainReasons 
+                        ? 'bg-gradient-to-r from-purple-900/40 to-violet-900/40 border border-purple-700/40' 
+                        : 'bg-stone-800/40 hover:bg-stone-700/40 border border-transparent'
+                    }`}
+                  >
+                    <Info className={`h-4 w-4 ${showTerrainReasons ? 'text-purple-400' : 'text-stone-500'}`} />
+                    <span className={`flex-1 text-left font-medium ${showTerrainReasons ? 'text-purple-300' : 'text-stone-400'}`}>
+                      Show Terrain Reasons
+                    </span>
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      showTerrainReasons ? 'bg-purple-500/30 text-purple-300' : 'bg-stone-700/50 text-stone-500'
+                    }`}>
+                      {showTerrainReasons ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                  {showTerrainReasons && (
+                    <p className="text-[9px] text-purple-300/70 mt-1.5 px-2 leading-relaxed">
+                      Click any stand, corridor, or bedding zone to see why terrain factors make it significant.
+                    </p>
+                  )}
                 </div>
                 
                 {/* Expanded details when any flow toggle is on */}
@@ -6816,13 +7073,25 @@ function DeerIntelContent() {
       )}
       
       {/* ========== OPPORTUNITY ZONE TOOLTIP ========== */}
-      {selectedOpportunityZone && opportunityZonePosition && (
+      {selectedOpportunityZone && opportunityZonePosition && !showTerrainReasons && (
         <OpportunityZoneTooltip
           properties={selectedOpportunityZone}
           position={opportunityZonePosition}
           onClose={() => {
             setSelectedOpportunityZone(null);
             setOpportunityZonePosition(null);
+          }}
+        />
+      )}
+      
+      {/* ========== v3.6.0: TERRAIN REASONS PANEL ========== */}
+      {showTerrainReasons && terrainReasonData && terrainReasonPosition && (
+        <TerrainReasonsPanel
+          data={terrainReasonData}
+          position={terrainReasonPosition}
+          onClose={() => {
+            setTerrainReasonData(null);
+            setTerrainReasonPosition(null);
           }}
         />
       )}
