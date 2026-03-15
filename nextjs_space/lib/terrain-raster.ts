@@ -1,5 +1,5 @@
 /**
- * Terrain Raster Pressure Surface v3.2 — Kill Window Model
+ * Terrain Raster Pressure Surface v3.4 — Cover Gating & Weak Parcel Limits
  * 
  * Computes a grid-based terrain pressure map at 10-20m resolution.
  * Each cell gets bench/saddle/ridge scores based on proximity to terrain features,
@@ -24,11 +24,17 @@
  *   - Pressure core = deer destination
  *   - Prime Stand Site = hunter intercept position
  * 
- * Offset direction prioritizes:
- *   1. Pressure gradient (intercept incoming movement)
- *   2. Leeward side (wind advantage)
- *   3. Slightly downhill / sidehill (thermals, exit)
- *   4. Corridor edge (ambush position)
+ * v3.4 REFINEMENTS:
+ * 
+ * COVER GATING:
+ *   - Prevent open-field stand placements
+ *   - Require ridge/bench proximity (indicates timber cover)
+ *   - Exception for extreme terrain compression (narrow draw crossings)
+ * 
+ * WEAK PARCEL LIMITS:
+ *   - Score < 35: limit to 0-1 stands
+ *   - Score < 20: no stands recommended
+ *   - Weak terrain should visually appear quiet
  */
 
 import type { SeasonProfile } from '@/types/terrain';
@@ -57,6 +63,31 @@ const RIDGE_OFFSET_MAX_M = 60;    // maximum distance below ridge crest
 const KILL_WINDOW_OFFSET_MIN_M = 25;  // minimum offset from pressure core
 const KILL_WINDOW_OFFSET_MAX_M = 40;  // maximum offset from pressure core
 const KILL_WINDOW_OFFSET_CELLS = 2;   // ~30m at 15m cell size (typical offset)
+
+// ============ COVER GATING (v3.4) ============
+// Prevent stand placement in open fields — require proximity to cover/timber
+const COVER_GATING = {
+  enabled: true,
+  // Minimum terrain structure score for stand placement
+  min_terrain_structure: 0.25,
+  // Ridge/bench proximity indicates tree cover (ridges tend to be timbered)
+  min_ridge_or_bench: 0.35,
+  // Allow exception for extreme terrain compression (narrow draw crossings)
+  extreme_terrain_exception_threshold: 0.85,
+  // Penalty multiplier for low-cover hotspots
+  open_field_penalty: 0.3,
+};
+
+// ============ WEAK PARCEL LIMITS (v3.4) ============
+// Reduce stand count recommendations on parcels with weak terrain
+const WEAK_PARCEL_CONFIG = {
+  // Score threshold below which parcel is considered "weak"
+  weak_score_threshold: 35,
+  // Maximum stands on weak parcels
+  weak_parcel_max_stands: 1,
+  // Very weak threshold (no stands recommended)
+  very_weak_score_threshold: 20,
+};
 
 // ============ INFLUENCE RADII (meters) ============
 const BENCH_INFLUENCE_M  = 80;   // how far bench influence extends
@@ -899,13 +930,60 @@ function applyKillWindowOffset(
 }
 
 /**
- * Extract Prime Stand Sites using the Kill Window model.
+ * Evaluate cover quality for a hotspot cell.
+ * Returns a cover score (0-1) based on terrain structure.
+ * High ridge/bench proximity = likely timbered cover.
+ */
+function evaluateCoverQuality(cell: RasterCell): {
+  coverScore: number;
+  hasAdequateCover: boolean;
+  coverType: 'timber' | 'edge' | 'open' | 'draw';
+} {
+  // Ridge proximity suggests timber cover (ridges are typically timbered)
+  const ridgeContrib = cell.ridge * 0.6;
+  // Bench areas often have cover (transition zones)
+  const benchContrib = cell.bench * 0.3;
+  // Sidehill bonus indicates terrain structure (not open field)
+  const sidehillContrib = cell.sidehill * 0.1;
+  
+  const coverScore = ridgeContrib + benchContrib + sidehillContrib;
+  
+  // Determine cover type
+  let coverType: 'timber' | 'edge' | 'draw' | 'open';
+  if (cell.ridge > 0.5 && cell.bench > 0.3) {
+    coverType = 'timber';
+  } else if (cell.ridge > 0.3 || cell.bench > 0.5) {
+    coverType = 'edge';
+  } else if (cell.saddle > 0.4) {
+    coverType = 'draw'; // Saddles/draws often have cover
+  } else {
+    coverType = 'open';
+  }
+  
+  // Check if adequate cover is present
+  const hasAdequateCover = 
+    coverScore >= COVER_GATING.min_ridge_or_bench ||
+    cell.ridge >= COVER_GATING.min_ridge_or_bench ||
+    cell.bench >= COVER_GATING.min_ridge_or_bench;
+  
+  return { coverScore, hasAdequateCover, coverType };
+}
+
+/**
+ * Extract Prime Stand Sites using the Kill Window model with Cover Gating.
  * 
+ * v3.4 Enhancements:
+ * - COVER GATING: Reject open-field hotspots unless extreme terrain compression
+ * - WEAK PARCEL LIMITS: Reduce recommendations on weak terrain parcels
+ * 
+ * Pipeline:
  * 1. Find local pressure maxima (hotspot centers / deer destinations)
- * 2. Compute optimal intercept direction for each hotspot
- * 3. Offset stand sites 25-40m toward the intercept edge
+ * 2. Apply cover gating (reject open-field candidates)
+ * 3. Compute optimal intercept direction for each hotspot
+ * 4. Offset stand sites 25-40m toward the intercept edge
+ * 5. Respect weak parcel stand limits
  * 
- * Result: Stand sites positioned for ambush, not at the center of activity.
+ * Result: Stand sites positioned for ambush in believable terrain locations.
  */
 function extractPrimeStandSites(
   grid: RasterGrid,
@@ -913,8 +991,25 @@ function extractPrimeStandSites(
   ridgeSpineData?: {
     ridges_primary?: GeoJSON.FeatureCollection;
     ridges_secondary?: GeoJSON.FeatureCollection;
-  } | null
+  } | null,
+  huntabilityScore?: number // Optional: pass score to apply weak parcel limits
 ): PrimeStandSite[] {
+  // Step 0: Determine effective max count based on huntability score
+  let effectiveMaxCount = maxCount;
+  
+  if (huntabilityScore !== undefined) {
+    if (huntabilityScore < WEAK_PARCEL_CONFIG.very_weak_score_threshold) {
+      // Very weak terrain: no stands recommended
+      console.log('[PrimeStandSites] Very weak parcel (score < 20), no stands recommended');
+      return [];
+    }
+    if (huntabilityScore < WEAK_PARCEL_CONFIG.weak_score_threshold) {
+      // Weak terrain: limit to 1 stand
+      effectiveMaxCount = Math.min(maxCount, WEAK_PARCEL_CONFIG.weak_parcel_max_stands);
+      console.log('[PrimeStandSites] Weak parcel (score < 35), limiting to', effectiveMaxCount, 'stands');
+    }
+  }
+  
   const candidates: HotspotCandidate[] = [];
 
   // Step 1: Find local pressure maxima (hotspot centers)
@@ -944,12 +1039,35 @@ function extractPrimeStandSites(
   // Sort by pressure (highest first)
   candidates.sort((a, b) => b.pressure - a.pressure);
 
-  // Step 2 & 3: For each hotspot, compute intercept and apply offset
+  // Step 2, 3, 4: For each hotspot, apply cover gating, compute intercept, and apply offset
   const MIN_SEPARATION_CELLS = 4; // ~60m at 15m cell size
   const selected: (PrimeStandSite & { _row: number; _col: number })[] = [];
 
   for (const hotspot of candidates) {
-    if (selected.length >= maxCount) break;
+    if (selected.length >= effectiveMaxCount) break;
+
+    // === COVER GATING (v3.4) ===
+    if (COVER_GATING.enabled) {
+      const coverEval = evaluateCoverQuality(hotspot.cell);
+      
+      // Check if this is an open-field hotspot
+      if (!coverEval.hasAdequateCover) {
+        // Allow exception for extreme terrain compression (narrow draw crossing)
+        const isExtremeTerrain = hotspot.pressure >= COVER_GATING.extreme_terrain_exception_threshold;
+        const hasDrawFeature = hotspot.cell.saddle > 0.5; // Saddle often indicates draw crossing
+        
+        if (isExtremeTerrain && hasDrawFeature) {
+          console.log('[PrimeStandSites] Open-field exception: extreme terrain draw crossing at', 
+            hotspot.cell.lng.toFixed(5), hotspot.cell.lat.toFixed(5));
+        } else {
+          // Reject this open-field hotspot
+          console.log('[PrimeStandSites] Rejected open-field hotspot (cover:', coverEval.coverScore.toFixed(2), 
+            'type:', coverEval.coverType, ') at', 
+            hotspot.cell.lng.toFixed(5), hotspot.cell.lat.toFixed(5));
+          continue;
+        }
+      }
+    }
 
     // Compute intercept direction
     const interceptDir = computeInterceptDirection(

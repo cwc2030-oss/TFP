@@ -272,7 +272,7 @@ const LAYER_COLORS = {
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
   edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
-  // Terrain Spine colors (structure-first, BOLD earth tones for skeleton feel)
+  // Travel Corridor colors (structure-first, BOLD earth tones for skeleton feel)
   ridgePrimary: '#4E342E',        // Dark coffee brown - major spines (bold, visible)
   ridgeSecondary: '#6D4C41',      // Medium brown - secondary spines (distinct from primary)
   ridgeCasing: '#EFEBE9',         // Off-white casing/halo for visibility over heat
@@ -866,7 +866,7 @@ function DeerIntelContent() {
   // A terrain study tool for verifying terrain anatomy before deer interpretation layers.
   // 
   // ENABLED LAYERS (physical terrain structure):
-  //   • Terrain Spine (Backbone) - ridge crests
+  //   • Travel Corridor (Primary Path) - movement spine
   //   • Draws - water flow channels / drainage
   //   • Saddles - low points between ridges
   //   • Future: contour travel zones / benches
@@ -4900,7 +4900,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.4.0 | huntability engine v1 | 2026-03-15 | cp:huntability';
+  const BUILD_STAMP = 'v3.5.0 | convergence refinement + cover gating | 2026-03-15 | cp:convergence-fix';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -5604,15 +5604,15 @@ function DeerIntelContent() {
                 );
               })()}
               
-              {/* Terrain Spine Layer (Structure-First, DEM-Only - ON by default) */}
+              {/* Travel Corridor Layer (Primary Movement Path - ON by default) */}
               <div className="p-3 border-b border-white/10">
                 <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
                   <Mountain className="h-4 w-4 text-stone-400" />
-                  Terrain Spine
+                  Travel Corridor
                 </h3>
                 <div className="space-y-1">
                   {(() => {
-                    // Calculate backbone status
+                    // Calculate corridor status
                     const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
                     const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
                     const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
@@ -5630,7 +5630,7 @@ function DeerIntelContent() {
                         }`}
                       >
                         <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Backbone</span>
+                        <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Primary Path</span>
                         {/* Status badge */}
                         {hasFeatures ? (
                           <span className="text-[9px] text-green-400 px-1.5 py-0.5 bg-green-900/40 rounded">

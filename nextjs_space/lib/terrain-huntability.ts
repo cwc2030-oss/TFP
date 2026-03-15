@@ -1,20 +1,25 @@
 /**
- * Terrain Huntability Engine v1.0
+ * Terrain Huntability Engine v1.1 — Structural Signal Convergence
  * 
  * A comprehensive DEM-based terrain analysis system that computes:
  *   1. Travel Favorability Surface - where terrain facilitates movement
  *   2. Corridor Extraction - connected high-favorability paths
- *   3. Convergence Nodes - where multiple corridors meet
+ *   3. Convergence Nodes - where STRUCTURAL SIGNALS overlap (not just pressure maxima)
  *   4. Huntability Score - overall parcel hunting quality
  * 
+ * v1.1 Refinements (Convergence & Stand Placement):
+ *   - Convergence requires 2+ structural signals (corridor intersection, saddle, draw, curvature, etc.)
+ *   - Convergence is derived FROM corridors, not from favorability heatmap
+ *   - Tighter search radius (2 cells) for compact convergence nodes
+ *   - Reduced max nodes (6) for quality over quantity
+ * 
  * The "Big Beautiful Map" renders:
- *   - Terrain Skeleton (ridges, saddles)
- *   - Travel Corridors (tiered by likelihood)
- *   - Convergence Nodes (strategic pinch points)
+ *   - Travel Corridors (primary movement spine, not "ridge")
+ *   - Convergence Nodes (true pinch points, not pressure blankets)
  *   - Huntability Score badge
  * 
  * This is pure terrain physics, not wildlife AI.
- * "Where would terrain naturally guide movement?"
+ * "Where would terrain naturally COMPRESS movement?"
  */
 
 import {
@@ -66,12 +71,25 @@ const CORRIDOR_THRESHOLDS = {
   max_gap_cells: 2,           // Allow 2-cell gaps in corridors
 };
 
-// Convergence detection
+// Convergence detection — STRUCTURAL SIGNALS REQUIRED
+// Convergence = true movement compression, NOT general terrain suitability
 const CONVERGENCE_CONFIG = {
-  search_radius_cells: 3,     // Search within 3 cells
-  min_corridors: 2,           // Need at least 2 corridors converging
-  min_intensity: 0.6,         // Minimum convergence intensity
-  max_nodes: 8,               // Maximum convergence nodes
+  search_radius_cells: 2,       // Tighter radius (was 3) — compact nodes only
+  min_corridors: 2,             // Need at least 2 corridors converging
+  min_structural_signals: 2,    // NEW: require 2+ overlapping structural signals
+  min_intensity: 0.65,          // Slightly higher threshold
+  max_nodes: 6,                 // Fewer nodes (was 8) — quality over quantity
+  min_corridor_intersection_score: 0.5, // Actual corridor overlap required
+};
+
+// Structural signal thresholds for convergence qualification
+const STRUCTURAL_THRESHOLDS = {
+  corridor_intersection: 0.5,   // Multiple corridors within tight radius
+  saddle_proximity_m: 60,       // Within 60m of a saddle
+  draw_proximity_m: 80,         // Within 80m of drainage/draw
+  terrain_curvature: 0.4,       // Concave terrain (pinch/funnel)
+  corridor_narrowing: 0.3,      // Local corridor width contraction
+  ridge_wrap: 0.5,              // Ridge bending/narrowing
 };
 
 // Huntability score component weights
@@ -739,14 +757,190 @@ function buildCorridor(
   };
 }
 
-// ========== CONVERGENCE DETECTION ==========
+// ========== CONVERGENCE DETECTION (STRUCTURAL SIGNAL APPROACH) ==========
 
 /**
- * Detect convergence nodes where multiple corridors meet.
+ * Structural signal scores for a convergence candidate.
+ * Convergence requires at least 2 overlapping structural signals.
+ */
+interface StructuralSignals {
+  corridorIntersection: number;  // Multiple corridors within tight radius
+  saddleProximity: number;       // Near a saddle point
+  drawProximity: number;         // Near a draw/drainage
+  terrainCurvature: number;      // Concave terrain (natural funnel)
+  corridorNarrowing: number;     // Local corridor width contraction
+  ridgeWrap: number;             // Ridge bending creates pinch
+  signalCount: number;           // How many signals exceed threshold
+}
+
+/**
+ * Compute structural signals for a candidate convergence point.
+ * Returns individual signal scores and count of qualifying signals.
+ */
+function computeStructuralSignals(
+  row: number,
+  col: number,
+  grid: HuntabilityGrid,
+  corridors: Corridor[],
+  corridorMap: Map<string, Set<number>>,
+  saddleNodes?: GeoJSON.FeatureCollection
+): StructuralSignals {
+  const searchRadius = CONVERGENCE_CONFIG.search_radius_cells;
+  const cell = grid.cells[row][col];
+  const cellCoord: [number, number] = [cell.lng, cell.lat];
+  
+  // Signal 1: Corridor intersection (multiple distinct corridors in tight area)
+  const nearbyCorridors = new Set<number>();
+  for (let dr = -searchRadius; dr <= searchRadius; dr++) {
+    for (let dc = -searchRadius; dc <= searchRadius; dc++) {
+      const key = `${row + dr},${col + dc}`;
+      if (corridorMap.has(key)) {
+        for (const cid of corridorMap.get(key)!) {
+          nearbyCorridors.add(cid);
+        }
+      }
+    }
+  }
+  // Score based on corridor count (2=base, more=better)
+  const corridorIntersection = nearbyCorridors.size >= 2 
+    ? Math.min(1, 0.5 + (nearbyCorridors.size - 2) * 0.25)
+    : 0;
+  
+  // Signal 2: Saddle proximity (actual saddle within threshold distance)
+  let saddleProximity = 0;
+  if (saddleNodes?.features?.length) {
+    for (const f of saddleNodes.features) {
+      if (f.geometry?.type !== 'Point') continue;
+      const saddleCoord = f.geometry.coordinates as [number, number];
+      const dist = distanceMeters(cellCoord, saddleCoord);
+      if (dist < STRUCTURAL_THRESHOLDS.saddle_proximity_m) {
+        const prox = 1 - (dist / STRUCTURAL_THRESHOLDS.saddle_proximity_m);
+        saddleProximity = Math.max(saddleProximity, prox);
+      }
+    }
+  }
+  
+  // Signal 3: Draw/drainage proximity (low ridge areas with drainage penalty)
+  let drawProximity = 0;
+  // Check nearby cells for drainage characteristics
+  for (let dr = -2; dr <= 2; dr++) {
+    for (let dc = -2; dc <= 2; dc++) {
+      const nr = row + dr;
+      const nc = col + dc;
+      if (nr < 0 || nr >= grid.rows || nc < 0 || nc >= grid.cols) continue;
+      const nearCell = grid.cells[nr][nc];
+      // Draw = low ridge proximity + drainage penalty
+      if (nearCell.drainage_pen > 0.4 && nearCell.ridge_prox < 0.3) {
+        const dist = Math.sqrt(dr * dr + dc * dc);
+        const contribution = nearCell.drainage_pen * (1 - dist / 3);
+        drawProximity = Math.max(drawProximity, contribution);
+      }
+    }
+  }
+  
+  // Signal 4: Terrain curvature (concave terrain = funnel/pinch)
+  let terrainCurvature = 0;
+  if (row >= 2 && row < grid.rows - 2 && col >= 2 && col < grid.cols - 2) {
+    // Laplacian approximation for curvature using favorability as proxy
+    const center = cell.favorability;
+    const neighbors = [
+      grid.cells[row-1][col].favorability,
+      grid.cells[row+1][col].favorability,
+      grid.cells[row][col-1].favorability,
+      grid.cells[row][col+1].favorability,
+    ];
+    const avgNeighbor = neighbors.reduce((a, b) => a + b, 0) / 4;
+    // Concave = center higher than average neighbors (funneling toward center)
+    const laplacian = center - avgNeighbor;
+    if (laplacian > 0) {
+      terrainCurvature = Math.min(1, laplacian * 4);
+    }
+  }
+  
+  // Signal 5: Corridor narrowing (width contraction near this point)
+  let corridorNarrowing = 0;
+  // Count corridor cells in concentric rings and check for narrowing
+  const innerCells = countCorridorCellsInRing(row, col, 0, 1, corridorMap);
+  const outerCells = countCorridorCellsInRing(row, col, 2, 3, corridorMap);
+  if (outerCells > innerCells && innerCells > 0) {
+    // More corridor cells in outer ring than inner = narrowing toward center
+    corridorNarrowing = Math.min(1, (outerCells - innerCells) / 6);
+  }
+  
+  // Signal 6: Ridge wrap (ridge bending creates natural pinch)
+  let ridgeWrap = 0;
+  // Check if ridge proximity varies significantly around the cell (indicates curve)
+  if (row >= 2 && row < grid.rows - 2 && col >= 2 && col < grid.cols - 2) {
+    const ridgeValues = [
+      grid.cells[row-2][col].ridge_prox,
+      grid.cells[row+2][col].ridge_prox,
+      grid.cells[row][col-2].ridge_prox,
+      grid.cells[row][col+2].ridge_prox,
+    ];
+    const maxRidge = Math.max(...ridgeValues);
+    const minRidge = Math.min(...ridgeValues);
+    // High variance in ridge proximity = ridge is bending
+    if (maxRidge > 0.5 && (maxRidge - minRidge) > 0.3) {
+      ridgeWrap = Math.min(1, (maxRidge - minRidge) * 1.5);
+    }
+  }
+  
+  // Count signals exceeding thresholds
+  let signalCount = 0;
+  if (corridorIntersection >= STRUCTURAL_THRESHOLDS.corridor_intersection) signalCount++;
+  if (saddleProximity >= 0.4) signalCount++;  // 40% saddle proximity
+  if (drawProximity >= 0.3) signalCount++;    // 30% draw proximity
+  if (terrainCurvature >= STRUCTURAL_THRESHOLDS.terrain_curvature) signalCount++;
+  if (corridorNarrowing >= STRUCTURAL_THRESHOLDS.corridor_narrowing) signalCount++;
+  if (ridgeWrap >= STRUCTURAL_THRESHOLDS.ridge_wrap) signalCount++;
+  
+  return {
+    corridorIntersection,
+    saddleProximity,
+    drawProximity,
+    terrainCurvature,
+    corridorNarrowing,
+    ridgeWrap,
+    signalCount,
+  };
+}
+
+/** Helper: count corridor cells in a ring between minDist and maxDist */
+function countCorridorCellsInRing(
+  centerRow: number,
+  centerCol: number,
+  minDist: number,
+  maxDist: number,
+  corridorMap: Map<string, Set<number>>
+): number {
+  let count = 0;
+  for (let dr = -maxDist; dr <= maxDist; dr++) {
+    for (let dc = -maxDist; dc <= maxDist; dc++) {
+      const dist = Math.sqrt(dr * dr + dc * dc);
+      if (dist >= minDist && dist <= maxDist) {
+        const key = `${centerRow + dr},${centerCol + dc}`;
+        if (corridorMap.has(key) && corridorMap.get(key)!.size > 0) {
+          count++;
+        }
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * Detect convergence nodes using STRUCTURAL SIGNAL approach.
+ * 
+ * Key principles:
+ * 1. Convergence must have 2+ structural signals (not just high favorability)
+ * 2. Corridor intersection is required (convergence is corridor-derived)
+ * 3. Nodes are compact (small search radius) and well-separated
+ * 4. Types determined by dominant structural signal
  */
 function detectConvergenceNodes(
   grid: HuntabilityGrid,
-  corridors: Corridor[]
+  corridors: Corridor[],
+  saddleNodes?: GeoJSON.FeatureCollection
 ): ConvergenceNode[] {
   const nodes: ConvergenceNode[] = [];
   const searchRadius = CONVERGENCE_CONFIG.search_radius_cells;
@@ -763,21 +957,38 @@ function detectConvergenceNodes(
     }
   }
   
-  // Find cells where multiple corridors are nearby
+  // Phase 1: Find candidates that have corridor presence
   const convergenceCandidates: Array<{
     row: number;
     col: number;
+    signals: StructuralSignals;
     corridorIds: Set<number>;
-    intensity: number;
+    compositeScore: number;
   }> = [];
   
   for (let r = searchRadius; r < grid.rows - searchRadius; r++) {
     for (let c = searchRadius; c < grid.cols - searchRadius; c++) {
-      const nearbyCorridors = new Set<number>();
-      let totalFav = 0;
-      let count = 0;
+      // Only consider cells that are ON or immediately adjacent to corridors
+      const cellKey = `${r},${c}`;
+      const isOnCorridor = corridorMap.has(cellKey);
+      const isAdjacentToCorridor = !isOnCorridor && (
+        corridorMap.has(`${r-1},${c}`) || corridorMap.has(`${r+1},${c}`) ||
+        corridorMap.has(`${r},${c-1}`) || corridorMap.has(`${r},${c+1}`)
+      );
       
-      // Search within radius
+      if (!isOnCorridor && !isAdjacentToCorridor) continue;
+      
+      // Compute structural signals
+      const signals = computeStructuralSignals(
+        r, c, grid, corridors, corridorMap, saddleNodes
+      );
+      
+      // REQUIRE: corridor intersection + at least 1 other structural signal
+      if (signals.corridorIntersection < CONVERGENCE_CONFIG.min_corridor_intersection_score) continue;
+      if (signals.signalCount < CONVERGENCE_CONFIG.min_structural_signals) continue;
+      
+      // Collect corridor IDs for this candidate
+      const nearbyCorridors = new Set<number>();
       for (let dr = -searchRadius; dr <= searchRadius; dr++) {
         for (let dc = -searchRadius; dc <= searchRadius; dc++) {
           const key = `${r + dr},${c + dc}`;
@@ -786,28 +997,34 @@ function detectConvergenceNodes(
               nearbyCorridors.add(cid);
             }
           }
-          totalFav += grid.cells[r + dr][c + dc].favorability;
-          count++;
         }
       }
       
-      const avgFav = totalFav / count;
+      // Composite score: weighted combination of signals
+      const compositeScore = 
+        signals.corridorIntersection * 0.35 +
+        signals.saddleProximity * 0.25 +
+        signals.drawProximity * 0.15 +
+        signals.terrainCurvature * 0.10 +
+        signals.corridorNarrowing * 0.10 +
+        signals.ridgeWrap * 0.05;
       
-      if (nearbyCorridors.size >= CONVERGENCE_CONFIG.min_corridors && avgFav >= CONVERGENCE_CONFIG.min_intensity) {
+      if (compositeScore >= CONVERGENCE_CONFIG.min_intensity) {
         convergenceCandidates.push({
           row: r,
           col: c,
+          signals,
           corridorIds: nearbyCorridors,
-          intensity: avgFav * (nearbyCorridors.size / 5), // Scale by corridor count
+          compositeScore,
         });
       }
     }
   }
   
-  // Sort by intensity and pick top nodes (with spatial separation)
-  convergenceCandidates.sort((a, b) => b.intensity - a.intensity);
+  // Phase 2: Sort by composite score and select with spatial separation
+  convergenceCandidates.sort((a, b) => b.compositeScore - a.compositeScore);
   
-  const MIN_SEPARATION = 4; // cells
+  const MIN_SEPARATION = 5; // cells (~100m at 20m cell size) — tighter nodes
   let nodeId = 0;
   
   for (const candidate of convergenceCandidates) {
@@ -816,42 +1033,47 @@ function detectConvergenceNodes(
     // Check distance to existing nodes
     let tooClose = false;
     for (const existing of nodes) {
-      const existingCell = { row: 0, col: 0 };
-      // Find existing node's cell position
-      for (let r = 0; r < grid.rows && !tooClose; r++) {
-        for (let c = 0; c < grid.cols && !tooClose; c++) {
-          if (Math.abs(grid.cells[r][c].lng - existing.lng) < 0.0001 &&
-              Math.abs(grid.cells[r][c].lat - existing.lat) < 0.0001) {
-            const dist = Math.sqrt(
-              Math.pow(candidate.row - r, 2) + Math.pow(candidate.col - c, 2)
-            );
-            if (dist < MIN_SEPARATION) {
-              tooClose = true;
-            }
-          }
-        }
+      // Find existing node's approximate cell position
+      const existingRow = Math.round((existing.lat - grid.bounds.minLat) / 
+        ((grid.bounds.maxLat - grid.bounds.minLat) / grid.rows));
+      const existingCol = Math.round((existing.lng - grid.bounds.minLng) / 
+        ((grid.bounds.maxLng - grid.bounds.minLng) / grid.cols));
+      
+      const dist = Math.sqrt(
+        Math.pow(candidate.row - existingRow, 2) + 
+        Math.pow(candidate.col - existingCol, 2)
+      );
+      if (dist < MIN_SEPARATION) {
+        tooClose = true;
+        break;
       }
     }
     
     if (!tooClose) {
       const cell = grid.cells[candidate.row][candidate.col];
+      const signals = candidate.signals;
       
-      // Determine convergence type
-      let type: ConvergenceNode['type'] = 'hub';
-      if (cell.saddle_prox > 0.5) {
+      // Determine convergence type based on dominant structural signal
+      let type: ConvergenceNode['type'];
+      if (signals.saddleProximity >= 0.5) {
         type = 'saddle_crossing';
-      } else if (candidate.corridorIds.size === 2 && candidate.intensity > 0.7) {
+      } else if (signals.corridorNarrowing >= 0.4 || signals.terrainCurvature >= 0.5) {
         type = 'pinch';
+      } else {
+        type = 'hub';
       }
+      
+      // Smaller radius for tighter, more precise convergence nodes
+      const radiusM = 20 + Math.min(20, candidate.corridorIds.size * 5);
       
       nodes.push({
         id: nodeId++,
         lng: cell.lng,
         lat: cell.lat,
         corridorIds: Array.from(candidate.corridorIds),
-        intensity: Math.min(1, candidate.intensity),
+        intensity: Math.min(1, candidate.compositeScore),
         type,
-        radiusM: 30 + (candidate.corridorIds.size * 10), // Larger for more corridors
+        radiusM,
       });
     }
   }
@@ -1151,8 +1373,8 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
     secondary: corridors.filter(c => c.tier === 'secondary').length 
   });
   
-  // Step 4: Detect convergence nodes
-  const convergenceNodes = detectConvergenceNodes(grid, corridors);
+  // Step 4: Detect convergence nodes (corridor-derived, structural signals required)
+  const convergenceNodes = detectConvergenceNodes(grid, corridors, input.ridgeData?.saddle_nodes);
   console.log('[Huntability] Convergence nodes:', convergenceNodes.length);
   
   // Step 5: Compute huntability score
