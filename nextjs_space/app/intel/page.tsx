@@ -39,6 +39,7 @@ import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extr
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON } from '@/lib/terrain-raster';
+import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
@@ -1040,6 +1041,10 @@ function DeerIntelContent() {
   // Terrain Story State (structural narrative)
   const [terrainStory, setTerrainStory] = useState<TerrainStorySummary | null>(null);
 
+  // ========== HUNTABILITY ENGINE STATE (Big Beautiful Map v1) ==========
+  const [huntabilityData, setHuntabilityData] = useState<HuntabilityResult | null>(null);
+  const [huntabilityLoading, setHuntabilityLoading] = useState(false);
+
   // ========== ALIGNMENT ENGINE STATE ==========
   type AlignedStand = {
     rank: number;
@@ -1892,6 +1897,101 @@ function DeerIntelContent() {
       console.error('[Backbone] Error updating map sources (non-fatal):', err);
     }
   }, [ridgeSpineData, mapReady]);
+
+  // ========== HUNTABILITY ENGINE — BIG BEAUTIFUL MAP v1 ==========
+  useEffect(() => {
+    if (!parcelPolygon) {
+      setHuntabilityData(null);
+      return;
+    }
+
+    const generateHuntability = async () => {
+      setHuntabilityLoading(true);
+      try {
+        // Extract parcel coordinates
+        let parcelCoords: number[][] | undefined;
+        const geom = parcelPolygon.geometry;
+        if (geom.type === 'Polygon') {
+          parcelCoords = (geom as GeoJSON.Polygon).coordinates[0];
+        } else if (geom.type === 'MultiPolygon') {
+          parcelCoords = ((geom as GeoJSON.MultiPolygon).coordinates[0] || [])[0];
+        }
+
+        if (!parcelCoords || parcelCoords.length < 3) {
+          console.warn('[Huntability] Invalid parcel coordinates');
+          setHuntabilityLoading(false);
+          return;
+        }
+
+        console.log('[Huntability] Building huntability analysis...');
+
+        const result = buildTerrainHuntability({
+          parcelCoords,
+          ridgeData: ridgeSpineData ? {
+            ridges_primary: ridgeSpineData.ridges_primary,
+            ridges_secondary: ridgeSpineData.ridges_secondary,
+            saddle_nodes: ridgeSpineData.saddle_nodes,
+          } : undefined,
+        });
+
+        if (result) {
+          setHuntabilityData(result);
+          console.log('[Huntability] Analysis complete:', {
+            score: result.score.overall,
+            grade: result.score.grade,
+            corridors: result.metadata.corridorCount,
+            convergence: result.metadata.convergenceCount,
+            processingTimeMs: result.metadata.processingTimeMs,
+          });
+        } else {
+          console.warn('[Huntability] Analysis failed');
+        }
+      } catch (err) {
+        console.error('[Huntability] Error:', err);
+      } finally {
+        setHuntabilityLoading(false);
+      }
+    };
+
+    // Wait for ridge spine data before generating huntability
+    // (ridge data improves accuracy, but we can run without it)
+    const timer = setTimeout(generateHuntability, 100);
+    return () => clearTimeout(timer);
+  }, [parcelPolygon, ridgeSpineData]);
+
+  // ========== UPDATE HUNTABILITY MAP SOURCES ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current || !huntabilityData) return;
+
+    try {
+      // Update huntability corridor source
+      const corridorSource = map.getSource('tfp-huntability-corridors') as mapboxgl.GeoJSONSource;
+      if (corridorSource) {
+        corridorSource.setData(huntabilityData.corridorLines);
+      }
+
+      // Update huntability convergence source
+      const convergenceSource = map.getSource('tfp-huntability-convergence') as mapboxgl.GeoJSONSource;
+      if (convergenceSource) {
+        convergenceSource.setData(huntabilityData.convergencePoints);
+      }
+
+      // Update huntability favorability heatmap source
+      const favorabilitySource = map.getSource('tfp-huntability-favorability') as mapboxgl.GeoJSONSource;
+      if (favorabilitySource) {
+        favorabilitySource.setData(huntabilityData.favorabilitySurface);
+      }
+
+      console.log('[Huntability] Updated map sources:', {
+        corridors: huntabilityData.corridorLines.features.length,
+        convergence: huntabilityData.convergencePoints.features.length,
+        favorability: huntabilityData.favorabilitySurface.features.length,
+      });
+    } catch (err) {
+      console.error('[Huntability] Error updating map sources (non-fatal):', err);
+    }
+  }, [huntabilityData, mapReady]);
 
   // ========== TERRAIN FLOW DATA GENERATION ==========
   useEffect(() => {
@@ -3165,6 +3265,99 @@ function DeerIntelContent() {
               'circle-opacity': 0.90,
               'circle-stroke-color': '#fff',
               'circle-stroke-width': 2.5,
+              'circle-stroke-opacity': 0.95,
+            },
+          });
+        }
+        
+        // ========== HUNTABILITY ENGINE SOURCES AND LAYERS (Big Beautiful Map v1) ==========
+        
+        // Huntability favorability heatmap (travel favorability surface)
+        if (!map.getSource('tfp-huntability-favorability')) {
+          map.addSource('tfp-huntability-favorability', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-huntability-favorability-heatmap',
+            type: 'heatmap',
+            source: 'tfp-huntability-favorability',
+            layout: { visibility: 'none' }, // Toggle on for debug
+            paint: {
+              'heatmap-weight': ['get', 'favorability'],
+              'heatmap-intensity': 0.6,
+              'heatmap-color': [
+                'interpolate', ['linear'], ['heatmap-density'],
+                0, 'rgba(33,102,172,0)',
+                0.2, 'rgba(103,169,207,0.3)',
+                0.4, 'rgba(209,229,240,0.5)',
+                0.6, 'rgba(253,219,199,0.6)',
+                0.8, 'rgba(239,138,98,0.7)',
+                1, 'rgba(178,24,43,0.85)'
+              ],
+              'heatmap-radius': 25,
+              'heatmap-opacity': 0.65,
+            },
+          });
+        }
+        
+        // Huntability corridors (travel corridors from DEM analysis)
+        if (!map.getSource('tfp-huntability-corridors')) {
+          map.addSource('tfp-huntability-corridors', { type: 'geojson', data: EMPTY_FC });
+          // Primary corridors: thick, solid
+          map.addLayer({
+            id: 'tfp-huntability-corridors-primary',
+            type: 'line',
+            source: 'tfp-huntability-corridors',
+            filter: ['==', ['get', 'tier'], 'primary'],
+            layout: { visibility: 'none' }, // Toggle on for debug
+            paint: {
+              'line-color': '#0ea5e9', // Sky-500
+              'line-width': 4,
+              'line-opacity': 0.85,
+            },
+          });
+          // Secondary corridors: thinner, dashed
+          map.addLayer({
+            id: 'tfp-huntability-corridors-secondary',
+            type: 'line',
+            source: 'tfp-huntability-corridors',
+            filter: ['==', ['get', 'tier'], 'secondary'],
+            layout: { visibility: 'none' }, // Toggle on for debug
+            paint: {
+              'line-color': '#38bdf8', // Sky-400
+              'line-width': 2.5,
+              'line-opacity': 0.65,
+              'line-dasharray': [4, 2],
+            },
+          });
+        }
+        
+        // Huntability convergence nodes (where corridors meet)
+        if (!map.getSource('tfp-huntability-convergence')) {
+          map.addSource('tfp-huntability-convergence', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow
+          map.addLayer({
+            id: 'tfp-huntability-convergence-glow',
+            type: 'circle',
+            source: 'tfp-huntability-convergence',
+            layout: { visibility: 'none' }, // Toggle on for debug
+            paint: {
+              'circle-radius': ['*', ['get', 'intensity'], 25],
+              'circle-color': '#f59e0b', // Amber-500
+              'circle-opacity': 0.30,
+              'circle-blur': 0.8,
+            },
+          });
+          // Inner node marker
+          map.addLayer({
+            id: 'tfp-huntability-convergence',
+            type: 'circle',
+            source: 'tfp-huntability-convergence',
+            layout: { visibility: 'none' }, // Toggle on for debug
+            paint: {
+              'circle-radius': 8,
+              'circle-color': '#f59e0b', // Amber-500
+              'circle-opacity': 0.90,
+              'circle-stroke-color': '#fff',
+              'circle-stroke-width': 2,
               'circle-stroke-opacity': 0.95,
             },
           });
@@ -4707,7 +4900,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.3.0 | kill window offset | 2026-03-15 | cp:killwindow';
+  const BUILD_STAMP = 'v3.4.0 | huntability engine v1 | 2026-03-15 | cp:huntability';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
