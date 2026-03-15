@@ -38,6 +38,7 @@ import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corrid
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus } from '@/lib/terrain-heatmap';
+import { buildTerrainRaster, opportunityZonesToGeoJSON } from '@/lib/terrain-raster';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
@@ -2143,53 +2144,101 @@ function DeerIntelContent() {
         convergenceSource.setData(flowData?.convergence_zones || emptyFC);
       }
 
-      // Update opportunity zones source — re-scored using 3-component terrain formula + light convergence
-      const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
-      if (opportunitySource) {
-        const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
-          beddingPolygons: layers?.beddingPolygons || undefined,
-          funnels: layers?.funnels || undefined,
-          ridgeSpineData: ridgeSpineData || undefined,
-          season,
-          convergenceMode: 'light',
-        });
-        opportunitySource.setData(rescoredOpp);
-      }
+      // v3.0 RASTER-BASED PRESSURE SURFACE
+      // Build a proper grid at 15m resolution, compute terrain metrics per cell,
+      // apply weighted formula + Gaussian smoothing, extract local maxima for opportunity zones.
       
-      // Update HEAT MAP source (PRIMARY VISUAL)
-      // v2.9 terrain_pressure = 0.40×bench + 0.30×saddle + 0.30×ridge  (convergence = amplifier only)
-      // No synthetic grid fill — heat only where terrain structure exists
-      const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
-      if (heatmapSource) {
-        // Extract parcel coordinates for grid generation
-        let parcelCoordsForGrid: number[][] | undefined;
-        if (parcelPolygon?.geometry) {
-          const geom = parcelPolygon.geometry;
-          if (geom.type === 'Polygon') {
-            parcelCoordsForGrid = (geom as GeoJSON.Polygon).coordinates[0];
-          } else if (geom.type === 'MultiPolygon') {
-            parcelCoordsForGrid = ((geom as GeoJSON.MultiPolygon).coordinates[0] || [])[0];
-          }
+      // Extract parcel coordinates for raster grid generation
+      let parcelCoordsForGrid: number[][] | undefined;
+      if (parcelPolygon?.geometry) {
+        const geom = parcelPolygon.geometry;
+        if (geom.type === 'Polygon') {
+          parcelCoordsForGrid = (geom as GeoJSON.Polygon).coordinates[0];
+        } else if (geom.type === 'MultiPolygon') {
+          parcelCoordsForGrid = ((geom as GeoJSON.MultiPolygon).coordinates[0] || [])[0];
         }
+      }
 
-        const heatMapData = buildTerrainHeatMap({
-          // bench_probability (0.40) ← bedding polygons
-          beddingPolygons: layers?.beddingPolygons || undefined,
-          // funnels passed for convergence amplifier only (NOT primary heat)
-          funnels: layers?.funnels || undefined,
-          // ridge_structure (0.30) + saddle_probability (0.30) ← ridge spines
-          ridgeSpineData: ridgeSpineData || undefined,
-          // Parcel coords for proximity calculations
+      const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
+      const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
+
+      // Try raster-based approach if we have parcel coords
+      if (parcelCoordsForGrid && parcelCoordsForGrid.length >= 3) {
+        const rasterResult = buildTerrainRaster({
           parcelCoords: parcelCoordsForGrid,
-          // Season modifier on all components
+          beddingPolygons: layers?.beddingPolygons || undefined,
+          ridgeSpineData: ridgeSpineData || undefined,
           season,
-          // v2.9: convergence as light amplifier, not primary source
-          convergenceMode: 'light',
-          // Pressure focus slider — reshapes score distribution
           focusMode: pressureFocus,
         });
-        
-        heatmapSource.setData(heatMapData);
+
+        if (rasterResult) {
+          // Update heat map from raster surface
+          if (heatmapSource) {
+            heatmapSource.setData(rasterResult.heatPoints);
+          }
+
+          // Update opportunity zones from raster local maxima
+          if (opportunitySource) {
+            const oppGeoJSON = opportunityZonesToGeoJSON(rasterResult.opportunityZones);
+            opportunitySource.setData(oppGeoJSON);
+          }
+
+          console.log('[TerrainRaster] Built pressure surface:', {
+            grid: `${rasterResult.grid.rows}×${rasterResult.grid.cols}`,
+            heatPoints: rasterResult.heatPoints.features.length,
+            opportunityZones: rasterResult.opportunityZones.length,
+          });
+        } else {
+          // Fallback to feature-based approach
+          console.warn('[TerrainRaster] Raster build failed, falling back to feature-based');
+          if (heatmapSource) {
+            const heatMapData = buildTerrainHeatMap({
+              beddingPolygons: layers?.beddingPolygons || undefined,
+              funnels: layers?.funnels || undefined,
+              ridgeSpineData: ridgeSpineData || undefined,
+              parcelCoords: parcelCoordsForGrid,
+              season,
+              convergenceMode: 'light',
+              focusMode: pressureFocus,
+            });
+            heatmapSource.setData(heatMapData);
+          }
+          if (opportunitySource) {
+            const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
+              beddingPolygons: layers?.beddingPolygons || undefined,
+              funnels: layers?.funnels || undefined,
+              ridgeSpineData: ridgeSpineData || undefined,
+              season,
+              convergenceMode: 'light',
+            });
+            opportunitySource.setData(rescoredOpp);
+          }
+        }
+      } else {
+        // No parcel coords — use legacy feature-based approach
+        if (heatmapSource) {
+          const heatMapData = buildTerrainHeatMap({
+            beddingPolygons: layers?.beddingPolygons || undefined,
+            funnels: layers?.funnels || undefined,
+            ridgeSpineData: ridgeSpineData || undefined,
+            parcelCoords: parcelCoordsForGrid,
+            season,
+            convergenceMode: 'light',
+            focusMode: pressureFocus,
+          });
+          heatmapSource.setData(heatMapData);
+        }
+        if (opportunitySource) {
+          const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
+            beddingPolygons: layers?.beddingPolygons || undefined,
+            funnels: layers?.funnels || undefined,
+            ridgeSpineData: ridgeSpineData || undefined,
+            season,
+            convergenceMode: 'light',
+          });
+          opportunitySource.setData(rescoredOpp);
+        }
       }
 
       console.log('[TerrainFlow] Updated map sources', flowData ? (flowComparisonMode ? '(LEGACY comparison)' : '(terrain-driven)') : '(CLEARED - parcel switch)');
@@ -4611,7 +4660,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v2.9.1 | pressure focus slider | 2026-03-14 | cp:pfs';
+  const BUILD_STAMP = 'v3.0.0 | raster pressure surface | 2026-03-15 | cp:rps';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
