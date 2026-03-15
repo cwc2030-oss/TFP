@@ -271,9 +271,10 @@ const LAYER_COLORS = {
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
   edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
-  // Terrain Spine colors (structure-first, restrained earth tones)
-  ridgePrimary: '#5D4037',        // Deep brown - major continuous spines (restrained)
-  ridgeSecondary: '#795548',      // Medium brown - secondary spines (lighter)
+  // Terrain Spine colors (structure-first, BOLD earth tones for skeleton feel)
+  ridgePrimary: '#4E342E',        // Dark coffee brown - major spines (bold, visible)
+  ridgeSecondary: '#6D4C41',      // Medium brown - secondary spines (distinct from primary)
+  ridgeCasing: '#EFEBE9',         // Off-white casing/halo for visibility over heat
   saddleNode: '#8D6E63',          // Warm taupe - saddle markers (subtle)
   // Terrain Flow colors (movement likelihood - blue/teal palette)
   flowPrimary: '#0891b2',         // Cyan-600: primary flow lines (bold, readable)
@@ -2318,9 +2319,12 @@ function DeerIntelContent() {
       });
       
       // Ridge spine visibility (structure-first terrain anatomy)
+      // Includes casing/halo layers for the "terrain skeleton" effect
       const ridgeSpineLayers = [
-        'tfp-ridges-primary',
-        'tfp-ridges-secondary',
+        'tfp-ridges-primary-casing',    // Halo/casing
+        'tfp-ridges-primary',           // Core line
+        'tfp-ridges-secondary-casing',  // Halo/casing
+        'tfp-ridges-secondary',         // Core line
         'tfp-saddle-nodes',
         'tfp-saddle-nodes-outline',
       ];
@@ -2329,6 +2333,12 @@ function DeerIntelContent() {
           map.setLayoutProperty(layerId, 'visibility', visibility.ridgeSpines ? 'visible' : 'none');
         }
       });
+      
+      // When ridge spines are ON, reduce heatmap opacity slightly so skeleton is readable
+      if (map.getLayer('tfp-pressure-heatmap')) {
+        const heatmapOpacity = visibility.ridgeSpines ? 0.55 : 0.75;
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', heatmapOpacity);
+      }
       
       // Terrain Flow visibility (movement likelihood layers)
       // HEAT MAP (PRIMARY VISUAL)
@@ -2390,8 +2400,9 @@ function DeerIntelContent() {
           14, Math.max(15, 35 + fp.radiusOffset),
           16, Math.max(20, 50 + fp.radiusOffset),
         ]);
-        // Opacity
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', fp.opacity);
+        // Opacity: reduce when ridge spines are visible so skeleton shows through
+        const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', baseOpacity);
       }
 
       // Opportunity zones: hide weaker ones in focused mode
@@ -2410,11 +2421,11 @@ function DeerIntelContent() {
         }
       }
 
-      console.log('[PressureFocus]', pressureFocus, fp);
+      console.log('[PressureFocus]', pressureFocus, fp, 'ridgeSpines:', visibility.ridgeSpines);
     } catch (err) {
       console.error('[PressureFocus] Error updating paint (non-fatal):', err);
     }
-  }, [pressureFocus, mapReady]);
+  }, [pressureFocus, mapReady, visibility.ridgeSpines]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -2894,37 +2905,13 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== TERRAIN SPINE LAYERS (Structure-First, Calm, Minimal) ==========
-        // Goal: A hunter toggles this on and says "Yep, that's the backbone"
-        
-        // Primary spines: Major structural ridges (>300m, >35ft prominence)
+        // ========== TERRAIN SPINE DATA SOURCES (added early, layers added after heatmap) ==========
+        // Sources for ridge spines - layers will be added after heatmap for proper z-order
         if (!map.getSource('tfp-ridges-primary')) {
           map.addSource('tfp-ridges-primary', { type: 'geojson', data: EMPTY_FC });
-          map.addLayer({
-            id: 'tfp-ridges-primary',
-            type: 'line',
-            source: 'tfp-ridges-primary',
-            paint: {
-              'line-color': LAYER_COLORS.ridgePrimary,
-              'line-width': 2.5,           // Restrained width
-              'line-opacity': 0.65,        // Not too prominent
-            },
-          });
         }
-        
-        // Secondary spines: Shorter but valid ridges (>180m, >25ft prominence)
         if (!map.getSource('tfp-ridges-secondary')) {
           map.addSource('tfp-ridges-secondary', { type: 'geojson', data: EMPTY_FC });
-          map.addLayer({
-            id: 'tfp-ridges-secondary',
-            type: 'line',
-            source: 'tfp-ridges-secondary',
-            paint: {
-              'line-color': LAYER_COLORS.ridgeSecondary,
-              'line-width': 1.5,           // Thinner than primary
-              'line-opacity': 0.45,        // Subtler
-            },
-          });
         }
         
         // Saddle nodes: Only meaningful low points (sparse, subtle)
@@ -3001,6 +2988,66 @@ function DeerIntelContent() {
                 16, 50     // was 80
               ],
               'heatmap-opacity': 0.75, // slight boost from 0.7
+            },
+          });
+        }
+        
+        // ========== TERRAIN SPINE LAYERS (Skeleton — ABOVE heatmap, BELOW stand sites) ==========
+        // Goal: When toggled on, the structural backbone is immediately obvious
+        // Layers render AFTER heatmap for proper z-order
+        
+        // Primary spine CASING (outer halo for visibility over imagery/heat)
+        if (!map.getLayer('tfp-ridges-primary-casing')) {
+          map.addLayer({
+            id: 'tfp-ridges-primary-casing',
+            type: 'line',
+            source: 'tfp-ridges-primary',
+            paint: {
+              'line-color': LAYER_COLORS.ridgeCasing,
+              'line-width': 8,            // Wide casing halo
+              'line-opacity': 0.5,        // Semi-transparent for soft edge
+              'line-blur': 1.5,           // Soft glow effect
+            },
+          });
+        }
+        // Primary spine CORE (thick, dark brown — major structural ridges)
+        if (!map.getLayer('tfp-ridges-primary')) {
+          map.addLayer({
+            id: 'tfp-ridges-primary',
+            type: 'line',
+            source: 'tfp-ridges-primary',
+            paint: {
+              'line-color': LAYER_COLORS.ridgePrimary,
+              'line-width': 4.5,          // Bold, prominent
+              'line-opacity': 0.90,       // Strong presence
+            },
+          });
+        }
+        
+        // Secondary spine CASING (lighter halo)
+        if (!map.getLayer('tfp-ridges-secondary-casing')) {
+          map.addLayer({
+            id: 'tfp-ridges-secondary-casing',
+            type: 'line',
+            source: 'tfp-ridges-secondary',
+            paint: {
+              'line-color': LAYER_COLORS.ridgeCasing,
+              'line-width': 5,            // Narrower than primary
+              'line-opacity': 0.35,       // Subtler halo
+              'line-blur': 1,
+            },
+          });
+        }
+        // Secondary spine CORE (thinner, lighter brown)
+        if (!map.getLayer('tfp-ridges-secondary')) {
+          map.addLayer({
+            id: 'tfp-ridges-secondary',
+            type: 'line',
+            source: 'tfp-ridges-secondary',
+            paint: {
+              'line-color': LAYER_COLORS.ridgeSecondary,
+              'line-width': 2.5,          // Clear but subordinate
+              'line-opacity': 0.75,       // Visible, not overpowering
             },
           });
         }
@@ -4660,7 +4707,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.1.0 | sidehill bonus + prime stand sites | 2026-03-15 | cp:shb';
+  const BUILD_STAMP = 'v3.2.0 | terrain skeleton ridge spine | 2026-03-15 | cp:skeleton';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
