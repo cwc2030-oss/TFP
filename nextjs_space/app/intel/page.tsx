@@ -5026,16 +5026,17 @@ function DeerIntelContent() {
     };
   }, [showTerrainReasons]);
 
-  // ========== HTML STAND MARKERS (top 2 only) ==========
+  // ========== HTML STAND MARKERS (top 2 by alignment) ==========
+  // v3.8: Uses alignedStands (wind-sorted) so markers react to wind changes
   // Skip entirely in Terrain Work Mode - deer interpretation layer
   useEffect(() => {
     if (TERRAIN_WORK_MODE) {
       cleanupMarkers(); // Ensure no stale markers
       return;
     }
-    if (!mapRef.current || !mapReady || !layers?.standPoints) return;
+    if (!mapRef.current || !mapReady || !alignedStands.length) return;
     addStandMarkers();
-  }, [layers, mapReady]);
+  }, [alignedStands, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Toggle visibility of HTML markers
   useEffect(() => {
@@ -5055,19 +5056,21 @@ function DeerIntelContent() {
 
   const addStandMarkers = () => {
     const map = mapRef.current;
-    if (!map || !layers?.standPoints) return;
+    if (!map || !alignedStands.length) return;
 
     cleanupMarkers();
 
-    // Only show TOP 2 stands
-    const topTwoStands = layers.standPoints?.features?.slice(0, 2) || [];
+    // v3.8: Use wind-sorted alignedStands — top 2 by current alignment score
+    const topTwo = alignedStands.slice(0, 2);
 
-    topTwoStands.forEach((feature) => {
-      const props = feature.properties as StandPointProperties;
-      const coords = feature.geometry.coordinates as [number, number];
+    topTwo.forEach((stand, idx) => {
+      const props = stand.props;
+      const coords = stand.coords;
+      const alignScore = stand.alignment.score;
+      const tierLabel = stand.alignment.label === 'Open Ground' ? 'Field Stone' : stand.alignment.label;
 
-      // #1 gets gold highlight ring = "Today's Sit"
-      const isTopStand = props.rank === 1;
+      // Index 0 in aligned order gets gold highlight ring = "Today's Sit"
+      const isTopStand = idx === 0;
       const markerColor = isTopStand ? LAYER_COLORS.standHigh : LAYER_COLORS.standHigh;
       const ringColor = isTopStand ? LAYER_COLORS.standGold : 'white';
       const ringWidth = isTopStand ? 6 : 4;
@@ -5111,7 +5114,7 @@ function DeerIntelContent() {
           transition: transform 0.2s, box-shadow 0.2s;
           pointer-events: none;
         ">
-          ${isTopStand ? '⭐' : props.rank}
+          ${isTopStand ? '⭐' : idx + 1}
         </div>
         ${isTopStand ? `
           <div style="
@@ -5133,7 +5136,7 @@ function DeerIntelContent() {
         ` : ''}
       `;
 
-      // Hover tooltip for quick info
+      // Hover tooltip — v3.8: shows alignment score + tier, not static analysis score
       const hoverTooltip = document.createElement('div');
       hoverTooltip.className = 'stand-hover-tooltip';
       hoverTooltip.style.cssText = `
@@ -5154,13 +5157,14 @@ function DeerIntelContent() {
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
       `;
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
-      const tooltipColor = props.rank === 1 ? LAYER_COLORS.standGold : props.rank <= 3 ? LAYER_COLORS.standHigh : LAYER_COLORS.standMed;
-      const standLabel = props.rank === 1 ? "⭐ Today's Sit" : `Stand #${props.rank}`;
+      const tooltipColor = isTopStand ? LAYER_COLORS.standGold : LAYER_COLORS.standHigh;
+      const standLabel = isTopStand ? "⭐ Today's Sit" : stand.name;
       hoverTooltip.innerHTML = `
         <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 4px;">
-          ${standLabel} • ${props.score}/100
+          ${standLabel} • ${alignScore}/100
         </div>
         <div style="color: #ccc; font-size: 12px; line-height: 1.4;">
+          <div>🏷️ Tier: <b style="color: ${tooltipColor}">${tierLabel}</b></div>
           <div>🌬️ Best Wind: <b style="color: #22c55e">${props.windOk.slice(0, 2).join(', ')}</b></div>
           <div>⏰ Best Time: <b>${bestTime}</b></div>
           <div>🦌 To Corridor: <b>${props.distToCorridorMeters}m</b></div>
@@ -5192,7 +5196,7 @@ function DeerIntelContent() {
 
       el.onclick = () => {
         hoverTooltip.style.opacity = '0'; // Hide tooltip on click
-        setSelectedStand(props.rank);
+        setSelectedStand(stand.rank);
         showStandPopup(coords, props);
         map.flyTo({ center: coords, zoom: 16 });
       };
