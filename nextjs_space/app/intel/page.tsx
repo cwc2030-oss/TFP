@@ -3381,16 +3381,16 @@ function DeerIntelContent() {
         // Convergence zones: where flows overlap or pinch
         if (!map.getSource('tfp-flow-convergence')) {
           map.addSource('tfp-flow-convergence', { type: 'geojson', data: EMPTY_FC });
-          // Outer glow/pulse effect
+          // v3.8.2 — Static outer halo (precise, no animation/breathing)
           map.addLayer({
             id: 'tfp-flow-convergence-pulse',
             type: 'circle',
             source: 'tfp-flow-convergence',
             paint: {
-              'circle-radius': ['*', ['get', 'radiusM'], 0.8],
+              'circle-radius': ['*', ['get', 'radiusM'], 0.6],
               'circle-color': LAYER_COLORS.flowConvergence,
-              'circle-opacity': 0.20,
-              'circle-blur': 0.8,
+              'circle-opacity': 0.15,
+              'circle-blur': 0.5,
             },
           });
           // Inner marker
@@ -3440,8 +3440,9 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== v3.8.1 — TOP-STAND ATTENTION BIAS ==========
-        // Subtle radial glow near the #1 wind-aligned stand ("Today's Sit")
+        // ========== v3.8.1/v3.8.2 — TOP-STAND ATTENTION BIAS ==========
+        // Subtle STATIC radial glow near the #1 wind-aligned stand ("Today's Sit")
+        // v3.8.2: reduced radius, no animation — just a calm fixed tint
         if (!map.getSource('tfp-stand-emphasis')) {
           map.addSource('tfp-stand-emphasis', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3449,10 +3450,10 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-stand-emphasis',
             paint: {
-              'circle-radius': 70,
+              'circle-radius': 45,
               'circle-color': LAYER_COLORS.standEmphasisGlow,
-              'circle-opacity': 0.08,
-              'circle-blur': 1,
+              'circle-opacity': 0.07,
+              'circle-blur': 0.9,
             },
           });
         }
@@ -4391,16 +4392,19 @@ function DeerIntelContent() {
       cancelAnimationFrame(flowAnimationRef.current);
     }
     
-    // Animation parameters: calm, slow movement (~3 second cycle)
-    const ANIMATION_DURATION = 3000; // ms for full dash cycle
+    // v3.8.2 — Animation parameters: calm, slow movement (~4 second cycle)
+    // ONLY animates dash pattern on flow lines + subtle glow pulse.
+    // Convergence and stand emphasis are static — no per-frame churn on those layers
+    // to prevent Mapbox repaint cascades that cause parcel/panel flicker.
+    const ANIMATION_DURATION = 4000; // ms for full dash cycle (slower = calmer)
     const DASH_PATTERN = [6, 4]; // Matches layer definition
     const TOTAL_DASH_LENGTH = DASH_PATTERN[0] + DASH_PATTERN[1]; // 10
     
     let lastTime = 0;
     
     const animateFlow = (currentTime: number) => {
-      // Throttle to ~20fps for performance
-      if (currentTime - lastTime < 50) {
+      // Throttle to ~12fps — minimal repaints, still smooth enough for slow dash drift
+      if (currentTime - lastTime < 80) {
         flowAnimationRef.current = requestAnimationFrame(animateFlow);
         return;
       }
@@ -4420,27 +4424,15 @@ function DeerIntelContent() {
       
       try {
         if (map.getLayer('tfp-flow-primary')) {
-          // v3.8.1 — Activate flowing dash pattern (was computed but never applied before)
+          // v3.8.1 — Flowing dash pattern along primary corridors
           map.setPaintProperty('tfp-flow-primary', 'line-dasharray', shiftedDash);
           
-          // Subtle pulsing glow opacity through convergence
-          const glowOpacity = 0.20 + 0.08 * Math.sin(phase * Math.PI * 2);
+          // Subtle pulsing glow opacity (only 2 paint calls per frame — minimal)
+          const glowOpacity = 0.20 + 0.06 * Math.sin(phase * Math.PI * 2);
           map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', glowOpacity);
         }
-        
-        // v3.8.1 — Convergence point brightening pulse (slow breathing)
-        if (map.getLayer('tfp-flow-convergence-pulse')) {
-          const convPulseOpacity = 0.18 + 0.10 * Math.sin(phase * Math.PI * 2);
-          const convPulseRadius = 0.75 + 0.15 * Math.sin(phase * Math.PI * 2);
-          map.setPaintProperty('tfp-flow-convergence-pulse', 'circle-opacity', convPulseOpacity);
-          map.setPaintProperty('tfp-flow-convergence-pulse', 'circle-radius', ['*', ['get', 'radiusM'], convPulseRadius]);
-        }
-        
-        // v3.8.1 — Stand emphasis glow gentle pulse
-        if (map.getLayer('tfp-stand-emphasis-glow')) {
-          const standGlowOpacity = 0.06 + 0.04 * Math.sin(phase * Math.PI * 2);
-          map.setPaintProperty('tfp-stand-emphasis-glow', 'circle-opacity', standGlowOpacity);
-        }
+        // v3.8.2 — NO per-frame updates on convergence or stand emphasis layers.
+        // Those are static paint properties set once at layer creation time.
       } catch (err) {
         // Ignore errors if layer doesn't exist
       }
@@ -4450,7 +4442,7 @@ function DeerIntelContent() {
     
     // Start animation
     flowAnimationRef.current = requestAnimationFrame(animateFlow);
-    console.log('[MAP] v3.8.1 flow animation started (directional emphasis)');
+    console.log('[MAP] v3.8.2 flow animation started (stabilized, 2 paint calls/frame)');
     
     return () => {
       if (flowAnimationRef.current !== null) {
@@ -5542,6 +5534,19 @@ function DeerIntelContent() {
       <div className={`absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg transition-opacity duration-300 ${exportMode ? 'opacity-0' : 'opacity-100'}`}>
         BUILD: {BUILD_STAMP}
       </div>
+
+      {/* v3.8.2 — Compact map-level busy indicator for async operations */}
+      {(flowSegmentExplainLoading || qaParcelAnalyzing) && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div className="flex items-center gap-2 bg-black/75 backdrop-blur-sm text-white/90 px-4 py-2 rounded-full shadow-lg text-xs font-medium">
+            <svg className="animate-spin h-3.5 w-3.5 text-amber-400" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span>{flowSegmentExplainLoading ? 'Analyzing flow segment…' : 'Analyzing parcel…'}</span>
+          </div>
+        </div>
+      )}
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
