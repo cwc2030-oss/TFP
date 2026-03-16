@@ -1338,8 +1338,38 @@ function DeerIntelContent() {
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
 
+  // ========== FULL OVERLAY RESET — clears every tfp-* GeoJSON source ==========
+  const clearAllOverlaySources = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const ALL_TFP_SOURCES = [
+      'tfp-parcel', 'tfp-qa-parcel',
+      'tfp-debug-raw', 'tfp-debug-normalized', 'tfp-debug-analysis',
+      'tfp-bedding', 'tfp-funnels-lines', 'tfp-funnels-polys',
+      'tfp-corridors-primary', 'tfp-corridors-possible', 'tfp-corridors-exploratory',
+      'tfp-corridors-context-primary', 'tfp-corridors-context-possible',
+      'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
+      'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
+      'tfp-pressure-heatmap',
+      'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-convergence', 'tfp-flow-opportunity',
+      'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
+      'tfp-huntability-corridors', 'tfp-huntability-convergence',
+      'tfp-bedding-probability',
+      'tfp-edge-arrows', 'tfp-edge-ghost', 'tfp-edge-ghost-saddles',
+      'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
+    ];
+    for (const id of ALL_TFP_SOURCES) {
+      const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
+      if (src) src.setData(EMPTY_FC);
+    }
+    console.log('[OVERLAY RESET] Cleared all', ALL_TFP_SOURCES.length, 'tfp-* sources');
+  }, []);
+
   // Fetch terrain analysis using shared client
   const runAnalysis = useCallback(async () => {
+    // Clear ALL previous overlay sources before starting fresh analysis
+    clearAllOverlaySources();
+
     setIsLoading(true);
     setError(null);
     setProgress(10);
@@ -1453,7 +1483,7 @@ function DeerIntelContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [lat, lng, season, windDirection, acreageParam]);
+  }, [lat, lng, season, windDirection, acreageParam, clearAllOverlaySources]);
 
   // ========== NATIVE MAPBOX SOURCES INITIALIZED FLAG ==========
   const overlaySourcesCreated = useRef(false);
@@ -4348,10 +4378,10 @@ function DeerIntelContent() {
     };
   }, [mapReady]);
 
-  // Run analysis immediately on mount, and when season/wind changes
+  // Run analysis once on mount — season/wind changes are handled by local alignment rescore
   useEffect(() => {
     runAnalysis();
-  }, [season, windDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== EDGE INTELLIGENCE CLICK EVENT LISTENER ==========
   useEffect(() => {
@@ -4645,47 +4675,9 @@ function DeerIntelContent() {
     // Reset fit flag for next parcel
     hasFitToParcel.current = false;
     
-    // Clear all map layers immediately
-    const map = mapRef.current;
-    if (map) {
-      const emptyFC = { type: 'FeatureCollection' as const, features: [] };
-      
-      const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
-      if (qaSource) qaSource.setData(emptyFC);
-      
-      // Clear main parcel boundary
-      const parcelSource = map.getSource('tfp-parcel') as mapboxgl.GeoJSONSource;
-      if (parcelSource) parcelSource.setData(emptyFC);
-      
-      // Clear debug layers
-      const rawSource = map.getSource('tfp-debug-raw') as mapboxgl.GeoJSONSource;
-      if (rawSource) rawSource.setData(emptyFC);
-      const normalizedSource = map.getSource('tfp-debug-normalized') as mapboxgl.GeoJSONSource;
-      if (normalizedSource) normalizedSource.setData(emptyFC);
-      const analysisSource = map.getSource('tfp-debug-analysis') as mapboxgl.GeoJSONSource;
-      if (analysisSource) analysisSource.setData(emptyFC);
-      
-      // Clear terrain flow sources
-      const flowPrimary = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
-      if (flowPrimary) flowPrimary.setData(emptyFC);
-      const flowSecondary = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
-      if (flowSecondary) flowSecondary.setData(emptyFC);
-      const convergence = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
-      if (convergence) convergence.setData(emptyFC);
-      const opportunity = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
-      if (opportunity) opportunity.setData(emptyFC);
-      
-      // Clear ridge spine sources
-      const ridgesPrimary = map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
-      if (ridgesPrimary) ridgesPrimary.setData(emptyFC);
-      const ridgesSecondary = map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
-      if (ridgesSecondary) ridgesSecondary.setData(emptyFC);
-      const saddleNodes = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
-      if (saddleNodes) saddleNodes.setData(emptyFC);
-      
-      console.log('[QA PARCEL] Cleared all map sources');
-    }
-  }, []);
+    // Clear ALL map overlay sources (full reset — no carryover between parcels)
+    clearAllOverlaySources();
+  }, [clearAllOverlaySources]);
   
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
@@ -5806,7 +5798,6 @@ function DeerIntelContent() {
                       key={s.value}
                       onClick={() => {
                         setSeason(s.value);
-                        runAnalysis();
                       }}
                       className={`
                         p-2 rounded-lg text-center transition-all
