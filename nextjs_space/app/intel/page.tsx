@@ -1997,7 +1997,13 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current || !huntabilityData) return;
 
     try {
-      // Update huntability corridor source
+      // v3.7.0: Update corridor zone polygon source
+      const corridorZoneSource = map.getSource('tfp-huntability-corridor-zones') as mapboxgl.GeoJSONSource;
+      if (corridorZoneSource && huntabilityData.corridorZones) {
+        corridorZoneSource.setData(huntabilityData.corridorZones);
+      }
+
+      // Update huntability corridor spine source
       const corridorSource = map.getSource('tfp-huntability-corridors') as mapboxgl.GeoJSONSource;
       if (corridorSource) {
         corridorSource.setData(huntabilityData.corridorLines);
@@ -2022,7 +2028,8 @@ function DeerIntelContent() {
       }
 
       console.log('[Huntability] Updated map sources:', {
-        corridors: huntabilityData.corridorLines.features.length,
+        corridorZones: huntabilityData.corridorZones?.features?.length || 0,
+        corridorSpines: huntabilityData.corridorLines.features.length,
         convergence: huntabilityData.convergencePoints.features.length,
         favorability: huntabilityData.favorabilitySurface.features.length,
         beddingZones: huntabilityData.beddingProbabilityGeoJSON?.features?.length || 0,
@@ -3385,20 +3392,76 @@ function DeerIntelContent() {
           });
         }
         
-        // Huntability corridors (travel corridors from DEM analysis)
+        // v3.7.0: Huntability corridor ZONE fills (movement neighborhoods)
+        if (!map.getSource('tfp-huntability-corridor-zones')) {
+          map.addSource('tfp-huntability-corridor-zones', { type: 'geojson', data: EMPTY_FC });
+          // Primary zone fills — subtle warm earth tones
+          map.addLayer({
+            id: 'tfp-huntability-corridor-zones-primary',
+            type: 'fill',
+            source: 'tfp-huntability-corridor-zones',
+            filter: ['==', ['get', 'tier'], 'primary'],
+            layout: { visibility: 'none' },
+            paint: {
+              'fill-color': '#7c6f5b',   // Warm earth brown
+              'fill-opacity': 0.18,
+            },
+          });
+          // Primary zone outlines
+          map.addLayer({
+            id: 'tfp-huntability-corridor-zones-primary-outline',
+            type: 'line',
+            source: 'tfp-huntability-corridor-zones',
+            filter: ['==', ['get', 'tier'], 'primary'],
+            layout: { visibility: 'none' },
+            paint: {
+              'line-color': '#7c6f5b',
+              'line-width': 1.2,
+              'line-opacity': 0.35,
+            },
+          });
+          // Secondary zone fills — lighter, more transparent
+          map.addLayer({
+            id: 'tfp-huntability-corridor-zones-secondary',
+            type: 'fill',
+            source: 'tfp-huntability-corridor-zones',
+            filter: ['==', ['get', 'tier'], 'secondary'],
+            layout: { visibility: 'none' },
+            paint: {
+              'fill-color': '#a39583',    // Lighter earth tone
+              'fill-opacity': 0.10,
+            },
+          });
+          // Secondary zone outlines
+          map.addLayer({
+            id: 'tfp-huntability-corridor-zones-secondary-outline',
+            type: 'line',
+            source: 'tfp-huntability-corridor-zones',
+            filter: ['==', ['get', 'tier'], 'secondary'],
+            layout: { visibility: 'none' },
+            paint: {
+              'line-color': '#a39583',
+              'line-width': 0.8,
+              'line-opacity': 0.25,
+              'line-dasharray': [3, 2],
+            },
+          });
+        }
+
+        // Huntability corridor SPINE lines (flow direction + click targets)
         if (!map.getSource('tfp-huntability-corridors')) {
           map.addSource('tfp-huntability-corridors', { type: 'geojson', data: EMPTY_FC });
-          // Primary corridors: thick, solid
+          // Primary corridors: thin spine lines
           map.addLayer({
             id: 'tfp-huntability-corridors-primary',
             type: 'line',
             source: 'tfp-huntability-corridors',
             filter: ['==', ['get', 'tier'], 'primary'],
-            layout: { visibility: 'none' }, // Toggle on for debug
+            layout: { visibility: 'none' },
             paint: {
-              'line-color': '#0ea5e9', // Sky-500
-              'line-width': 4,
-              'line-opacity': 0.85,
+              'line-color': '#5d5244',    // Dark earth
+              'line-width': 2,
+              'line-opacity': 0.55,
             },
           });
           // Secondary corridors: thinner, dashed
@@ -3407,11 +3470,11 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-huntability-corridors',
             filter: ['==', ['get', 'tier'], 'secondary'],
-            layout: { visibility: 'none' }, // Toggle on for debug
+            layout: { visibility: 'none' },
             paint: {
-              'line-color': '#38bdf8', // Sky-400
-              'line-width': 2.5,
-              'line-opacity': 0.65,
+              'line-color': '#8b7d6b',    // Medium earth
+              'line-width': 1.5,
+              'line-opacity': 0.40,
               'line-dasharray': [4, 2],
             },
           });

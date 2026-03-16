@@ -63,11 +63,12 @@ const FAVORABILITY_WEIGHTS = {
   drainage_penalty: -0.10,    // Avoid incised drainages
 };
 
-// Corridor extraction thresholds
+// Corridor extraction thresholds — v3.7.0 zone-based corridors
 const CORRIDOR_THRESHOLDS = {
-  primary_percentile: 0.80,   // Top 20% = primary corridors
-  secondary_percentile: 0.60, // Top 40% = secondary corridors
-  min_length_cells: 5,        // Minimum 5 cells (~100m)
+  primary_percentile: 0.82,   // Top ~18% = primary movement zones
+  secondary_percentile: 0.65, // Top ~35% = secondary movement zones
+  min_zone_cells: 4,          // Minimum 4 cells for a zone (~0.16 ha)
+  min_spine_cells: 3,         // Minimum cells for a spine line
   max_gap_cells: 2,           // Allow 2-cell gaps in corridors
 };
 
@@ -146,9 +147,13 @@ export interface Corridor {
   id: number;
   tier: 'primary' | 'secondary';
   cells: Array<{ row: number; col: number }>;
-  coordinates: [number, number][];
+  coordinates: [number, number][];       // Spine line through the zone
   avgFavorability: number;
   lengthM: number;
+  // v3.7.0 zone metadata
+  zoneHull?: [number, number][];          // Convex hull polygon (closed ring)
+  zoneWidthM?: number;                    // Estimated zone width in meters
+  zoneAreaCells?: number;                 // Number of cells in the zone
 }
 
 export interface ConvergenceNode {
@@ -199,6 +204,7 @@ export interface HuntabilityResult {
   // GeoJSON for map rendering
   favorabilitySurface: GeoJSON.FeatureCollection;
   corridorLines: GeoJSON.FeatureCollection;
+  corridorZones: GeoJSON.FeatureCollection;  // v3.7.0: Zone polygons
   convergencePoints: GeoJSON.FeatureCollection;
   beddingProbabilityGeoJSON: GeoJSON.FeatureCollection;  // v3.6.0: Bedding layer
   terrainSkeleton: {
@@ -624,11 +630,21 @@ function applyGaussianSmoothing(grid: HuntabilityGrid): void {
   }
 }
 
-// ========== CORRIDOR EXTRACTION ==========
+// ========== CORRIDOR EXTRACTION (v3.7.0 — Zone-Based) ==========
 
 /**
- * Extract travel corridors from the favorability surface.
- * Uses connected component analysis on high-favorability cells.
+ * Extract travel corridors as MOVEMENT ZONES from the favorability surface.
+ *
+ * v3.7.0: Instead of collapsing movement into single backbone lines, we:
+ * 1. Threshold the favorability surface at the top ~18% (primary) and ~35% (secondary)
+ * 2. Run connected-component labeling to find contiguous high-favorability patches
+ * 3. For each patch, compute:
+ *    - A convex-hull zone polygon (the "movement neighborhood")
+ *    - A principal-axis spine line (for flow rendering & click targets)
+ *    - Zone width, area, and average favorability for rendering decisions
+ *
+ * The result: multiple parallel routes and wide swaths where terrain supports them,
+ * rather than a single repeating backbone.
  */
 function extractCorridors(grid: HuntabilityGrid): Corridor[] {
   // Compute percentile thresholds
@@ -639,12 +655,12 @@ function extractCorridors(grid: HuntabilityGrid): Corridor[] {
     }
   }
   allFavorabilities.sort((a, b) => a - b);
-  
+
   const primaryIdx = Math.floor(allFavorabilities.length * CORRIDOR_THRESHOLDS.primary_percentile);
   const secondaryIdx = Math.floor(allFavorabilities.length * CORRIDOR_THRESHOLDS.secondary_percentile);
   const primaryThreshold = allFavorabilities[primaryIdx] || 0.7;
   const secondaryThreshold = allFavorabilities[secondaryIdx] || 0.5;
-  
+
   // Mark cells by tier
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
@@ -656,123 +672,236 @@ function extractCorridors(grid: HuntabilityGrid): Corridor[] {
       }
     }
   }
-  
-  // Connected component labeling for corridors
+
+  // Connected-component flood-fill for both tiers
   const corridors: Corridor[] = [];
   const visited: boolean[][] = Array(grid.rows).fill(null).map(() => Array(grid.cols).fill(false));
   let corridorId = 0;
-  
-  // Extract primary corridors first
-  for (let r = 0; r < grid.rows; r++) {
-    for (let c = 0; c < grid.cols; c++) {
-      if (visited[r][c] || grid.cells[r][c].corridorTier !== 'primary') continue;
-      
-      const cells: Array<{ row: number; col: number }> = [];
-      const stack: Array<[number, number]> = [[r, c]];
-      
-      while (stack.length > 0) {
-        const [cr, cc] = stack.pop()!;
-        if (visited[cr][cc]) continue;
-        if (grid.cells[cr][cc].corridorTier !== 'primary') continue;
-        
-        visited[cr][cc] = true;
-        cells.push({ row: cr, col: cc });
-        grid.cells[cr][cc].corridorId = corridorId;
-        
-        // Check 8-connected neighbors
-        for (let dr = -1; dr <= 1; dr++) {
-          for (let dc = -1; dc <= 1; dc++) {
-            if (dr === 0 && dc === 0) continue;
-            const nr = cr + dr;
-            const nc = cc + dc;
-            if (nr >= 0 && nr < grid.rows && nc >= 0 && nc < grid.cols && !visited[nr][nc]) {
-              stack.push([nr, nc]);
+
+  const floodFillTier = (tier: 'primary' | 'secondary') => {
+    for (let r = 0; r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) {
+        if (visited[r][c] || grid.cells[r][c].corridorTier !== tier) continue;
+
+        const cells: Array<{ row: number; col: number }> = [];
+        const stack: Array<[number, number]> = [[r, c]];
+
+        while (stack.length > 0) {
+          const [cr, cc] = stack.pop()!;
+          if (visited[cr][cc]) continue;
+          if (grid.cells[cr][cc].corridorTier !== tier) continue;
+
+          visited[cr][cc] = true;
+          cells.push({ row: cr, col: cc });
+          grid.cells[cr][cc].corridorId = corridorId;
+
+          // 8-connected neighbors
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = cr + dr;
+              const nc = cc + dc;
+              if (nr >= 0 && nr < grid.rows && nc >= 0 && nc < grid.cols && !visited[nr][nc]) {
+                stack.push([nr, nc]);
+              }
             }
           }
         }
-      }
-      
-      if (cells.length >= CORRIDOR_THRESHOLDS.min_length_cells) {
-        const corridor = buildCorridor(grid, cells, corridorId, 'primary');
-        corridors.push(corridor);
-        corridorId++;
-      }
-    }
-  }
-  
-  // Extract secondary corridors
-  for (let r = 0; r < grid.rows; r++) {
-    for (let c = 0; c < grid.cols; c++) {
-      if (visited[r][c] || grid.cells[r][c].corridorTier !== 'secondary') continue;
-      
-      const cells: Array<{ row: number; col: number }> = [];
-      const stack: Array<[number, number]> = [[r, c]];
-      
-      while (stack.length > 0) {
-        const [cr, cc] = stack.pop()!;
-        if (visited[cr][cc]) continue;
-        if (grid.cells[cr][cc].corridorTier !== 'secondary') continue;
-        
-        visited[cr][cc] = true;
-        cells.push({ row: cr, col: cc });
-        grid.cells[cr][cc].corridorId = corridorId;
-        
-        for (let dr = -1; dr <= 1; dr++) {
-          for (let dc = -1; dc <= 1; dc++) {
-            if (dr === 0 && dc === 0) continue;
-            const nr = cr + dr;
-            const nc = cc + dc;
-            if (nr >= 0 && nr < grid.rows && nc >= 0 && nc < grid.cols && !visited[nr][nc]) {
-              stack.push([nr, nc]);
-            }
-          }
+
+        if (cells.length >= CORRIDOR_THRESHOLDS.min_zone_cells) {
+          const corridor = buildZoneCorridor(grid, cells, corridorId, tier);
+          corridors.push(corridor);
+          corridorId++;
         }
       }
-      
-      if (cells.length >= CORRIDOR_THRESHOLDS.min_length_cells) {
-        const corridor = buildCorridor(grid, cells, corridorId, 'secondary');
-        corridors.push(corridor);
-        corridorId++;
+    }
+  };
+
+  floodFillTier('primary');
+  // Reset visited for secondary so secondary cells adjacent to primary are still found
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      if (grid.cells[r][c].corridorTier === 'secondary') {
+        visited[r][c] = false;
       }
     }
   }
-  
+  floodFillTier('secondary');
+
   return corridors;
 }
 
 /**
- * Build a corridor from a set of cells.
+ * Compute convex hull of a set of 2D points (Andrew's monotone chain).
  */
-function buildCorridor(
+function convexHull(points: [number, number][]): [number, number][] {
+  if (points.length < 3) return [...points, points[0]]; // Degenerate: return triangle/segment
+
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+
+  // Lower hull
+  const lower: [number, number][] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+      lower.pop();
+    lower.push(p);
+  }
+
+  // Upper hull
+  const upper: [number, number][] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+      upper.pop();
+    upper.push(p);
+  }
+
+  // Remove last point of each half because it repeats
+  lower.pop();
+  upper.pop();
+  const hull = lower.concat(upper);
+  hull.push(hull[0]); // Close the ring
+  return hull;
+}
+
+/**
+ * Extract the principal-axis spine through a set of zone cells.
+ *
+ * Uses PCA to find the dominant direction, projects all cells onto it,
+ * then walks along the projection to build a smooth spine line.
+ */
+function extractSpineLine(
+  grid: HuntabilityGrid,
+  cells: Array<{ row: number; col: number }>
+): [number, number][] {
+  if (cells.length < CORRIDOR_THRESHOLDS.min_spine_cells) return [];
+
+  // Compute centroid (in cell coords)
+  let sumR = 0, sumC = 0;
+  for (const c of cells) { sumR += c.row; sumC += c.col; }
+  const cR = sumR / cells.length;
+  const cC = sumC / cells.length;
+
+  // PCA: covariance matrix
+  let cov00 = 0, cov01 = 0, cov11 = 0;
+  for (const c of cells) {
+    const dr = c.row - cR;
+    const dc = c.col - cC;
+    cov00 += dc * dc;
+    cov01 += dc * dr;
+    cov11 += dr * dr;
+  }
+
+  // Principal eigenvector via analytic 2x2 eigen decomposition
+  const trace = cov00 + cov11;
+  const det = cov00 * cov11 - cov01 * cov01;
+  const discriminant = Math.sqrt(Math.max(0, trace * trace / 4 - det));
+  // Largest eigenvalue
+  const lambda1 = trace / 2 + discriminant;
+  // Eigenvector for lambda1
+  let ex = cov01;
+  let ey = lambda1 - cov00;
+  const len = Math.sqrt(ex * ex + ey * ey);
+  if (len > 1e-8) { ex /= len; ey /= len; }
+  else { ex = 1; ey = 0; } // Fallback: horizontal
+
+  // Project each cell onto the principal axis
+  const projected = cells.map(c => ({
+    row: c.row,
+    col: c.col,
+    t: (c.col - cC) * ex + (c.row - cR) * ey,
+    fav: grid.cells[c.row][c.col].favorability,
+  }));
+
+  // Sort by projection
+  projected.sort((a, b) => a.t - b.t);
+
+  // Bin the projections into ~8-12 spine segments and take the
+  // favorability-weighted centroid of each bin → smooth spine
+  const numBins = Math.min(12, Math.max(4, Math.ceil(projected.length / 3)));
+  const minT = projected[0].t;
+  const maxT = projected[projected.length - 1].t;
+  const binWidth = (maxT - minT) / numBins;
+
+  const spine: [number, number][] = [];
+  for (let b = 0; b < numBins; b++) {
+    const tLo = minT + b * binWidth;
+    const tHi = tLo + binWidth;
+    let wSum = 0, wLng = 0, wLat = 0;
+    for (const p of projected) {
+      if (p.t >= tLo && p.t < tHi) {
+        const cell = grid.cells[p.row][p.col];
+        const w = cell.favorability;
+        wLng += cell.lng * w;
+        wLat += cell.lat * w;
+        wSum += w;
+      }
+    }
+    if (wSum > 0) {
+      spine.push([wLng / wSum, wLat / wSum]);
+    }
+  }
+
+  // Handle last bin edge case (include the last point)
+  if (spine.length === 0 && projected.length > 0) {
+    const first = grid.cells[projected[0].row][projected[0].col];
+    const last = grid.cells[projected[projected.length - 1].row][projected[projected.length - 1].col];
+    spine.push([first.lng, first.lat], [last.lng, last.lat]);
+  }
+
+  return spine;
+}
+
+/**
+ * Build a corridor zone from a set of connected cells.
+ * Computes convex hull polygon, spine line, width, and area.
+ */
+function buildZoneCorridor(
   grid: HuntabilityGrid,
   cells: Array<{ row: number; col: number }>,
   id: number,
   tier: 'primary' | 'secondary'
 ): Corridor {
-  // Order cells by connectivity to create a path
+  // Collect coordinates and compute average favorability
   const coordinates: [number, number][] = [];
   let totalFav = 0;
-  
-  // Simple centroid-based ordering
   for (const c of cells) {
     const cell = grid.cells[c.row][c.col];
     coordinates.push([cell.lng, cell.lat]);
     totalFav += cell.favorability;
   }
-  
-  // Estimate length
-  let lengthM = 0;
-  for (let i = 1; i < coordinates.length; i++) {
-    lengthM += distanceMeters(coordinates[i - 1], coordinates[i]);
+
+  // Compute convex hull for zone polygon
+  const hull = convexHull(coordinates);
+
+  // Compute spine line through the zone
+  const spine = extractSpineLine(grid, cells);
+
+  // Estimate zone width (cells perpendicular to principal axis)
+  // Use bounding box dimensions as proxy
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  for (const c of cells) {
+    minR = Math.min(minR, c.row); maxR = Math.max(maxR, c.row);
+    minC = Math.min(minC, c.col); maxC = Math.max(maxC, c.col);
   }
-  
+  const spanR = (maxR - minR + 1) * grid.cellSizeM;
+  const spanC = (maxC - minC + 1) * grid.cellSizeM;
+  const lengthM = Math.max(spanR, spanC);
+  const widthM = Math.min(spanR, spanC);
+
   return {
     id,
     tier,
     cells,
-    coordinates,
+    coordinates: spine.length >= 2 ? spine : coordinates.slice(0, 2),
     avgFavorability: totalFav / cells.length,
     lengthM,
+    // v3.7.0 zone metadata attached to the Corridor object
+    zoneHull: hull,
+    zoneWidthM: widthM,
+    zoneAreaCells: cells.length,
   };
 }
 
@@ -1263,18 +1392,14 @@ function gridToFavorabilityGeoJSON(grid: HuntabilityGrid): GeoJSON.FeatureCollec
 }
 
 /**
- * Convert corridors to GeoJSON LineStrings.
+ * v3.7.0: Convert corridors to GeoJSON LineStrings using PCA spine coordinates.
+ * The spine is already computed in buildZoneCorridor; we just emit it directly.
  */
 function corridorsToGeoJSON(corridors: Corridor[]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   
   for (const corridor of corridors) {
-    // Create a simplified line through corridor cells
     if (corridor.coordinates.length < 2) continue;
-    
-    // Sort coordinates to create a reasonable path
-    const sorted = simplifyCorridorPath(corridor.coordinates);
-    if (sorted.length < 2) continue;
     
     features.push({
       type: 'Feature',
@@ -1283,10 +1408,13 @@ function corridorsToGeoJSON(corridors: Corridor[]): GeoJSON.FeatureCollection {
         tier: corridor.tier,
         likelihood: corridor.avgFavorability,
         lengthM: corridor.lengthM,
+        corridorScore: corridor.avgFavorability,
+        zoneWidthM: corridor.zoneWidthM ?? 0,
+        zoneAreaCells: corridor.zoneAreaCells ?? 0,
       },
       geometry: {
         type: 'LineString',
-        coordinates: sorted,
+        coordinates: corridor.coordinates,
       },
     });
   }
@@ -1295,34 +1423,36 @@ function corridorsToGeoJSON(corridors: Corridor[]): GeoJSON.FeatureCollection {
 }
 
 /**
- * Simplify corridor path to a cleaner line.
+ * v3.7.0: Convert corridor zone hulls to GeoJSON Polygons for fill rendering.
+ * Each polygon represents a "movement neighborhood" — the area where terrain
+ * supports travel, rendered as a subtle semi-transparent fill.
  */
-function simplifyCorridorPath(coords: [number, number][]): [number, number][] {
-  if (coords.length <= 3) return coords;
-  
-  // Find centroid
-  let sumLng = 0, sumLat = 0;
-  for (const c of coords) {
-    sumLng += c[0];
-    sumLat += c[1];
+function corridorZonesToGeoJSON(corridors: Corridor[]): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+
+  for (const corridor of corridors) {
+    const hull = corridor.zoneHull;
+    if (!hull || hull.length < 4) continue; // Need at least 3 points + closing point
+
+    features.push({
+      type: 'Feature',
+      properties: {
+        id: `corridor_zone_${corridor.id}`,
+        tier: corridor.tier,
+        likelihood: corridor.avgFavorability,
+        lengthM: corridor.lengthM,
+        corridorScore: corridor.avgFavorability,
+        zoneWidthM: corridor.zoneWidthM ?? 0,
+        zoneAreaCells: corridor.zoneAreaCells ?? 0,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [hull],
+      },
+    });
   }
-  const centroid: [number, number] = [sumLng / coords.length, sumLat / coords.length];
-  
-  // Sort by angle from centroid to create a continuous path
-  const sorted = [...coords].sort((a, b) => {
-    const angleA = Math.atan2(a[1] - centroid[1], a[0] - centroid[0]);
-    const angleB = Math.atan2(b[1] - centroid[1], b[0] - centroid[0]);
-    return angleA - angleB;
-  });
-  
-  // Simplify by taking every Nth point
-  const simplified: [number, number][] = [];
-  const step = Math.max(1, Math.floor(sorted.length / 12));
-  for (let i = 0; i < sorted.length; i += step) {
-    simplified.push(sorted[i]);
-  }
-  
-  return simplified;
+
+  return { type: 'FeatureCollection', features };
 }
 
 /**
@@ -1755,8 +1885,11 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   // Convert to GeoJSON
   const favorabilitySurface = gridToFavorabilityGeoJSON(grid);
   const corridorLines = corridorsToGeoJSON(corridors);
+  const corridorZones = corridorZonesToGeoJSON(corridors);  // v3.7.0: zone polygons
   const convergencePoints = convergenceNodesToGeoJSON(convergenceNodes);
   const beddingProbabilityGeoJSON = beddingZonesToGeoJSON(beddingZones);
+  
+  console.log('[Huntability] v3.7.0 corridor zones:', corridorZones.features.length, 'polygons');
   
   // Terrain skeleton from input data
   const terrainSkeleton = {
@@ -1780,6 +1913,7 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
     beddingZones,
     favorabilitySurface,
     corridorLines,
+    corridorZones,
     convergencePoints,
     beddingProbabilityGeoJSON,
     terrainSkeleton,
