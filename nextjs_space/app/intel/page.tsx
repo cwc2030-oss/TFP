@@ -297,6 +297,9 @@ const LAYER_COLORS = {
   flowAnimated: '#2dd4bf',        // Teal-400: animated flow glow
   flowConvergenceBright: '#fbbf24', // Amber-400: brighter glow through convergence
   flowConvergence: '#f59e0b',     // Amber-500: convergence zone markers
+  // v3.8.1 — Directional flow emphasis
+  flowDirectionChevron: '#14b8a6', // Teal-500: directional chevrons along flow
+  standEmphasisGlow: '#2dd4bf',    // Teal-400: subtle glow bias toward top stand
   flowOpportunity: '#fbbf24',     // Amber-400: opportunity zone markers (gold)
   // v3.6.0 — Bedding Probability colors (muted earthy/plum tones)
   beddingProbability: '#7c3aed', // Violet-600: bedding zone fill
@@ -1357,6 +1360,7 @@ function DeerIntelContent() {
       'tfp-bedding-probability',
       'tfp-edge-arrows', 'tfp-edge-ghost', 'tfp-edge-ghost-saddles',
       'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
+      'tfp-stand-emphasis', // v3.8.1 — top-stand attention glow
     ];
     for (const id of ALL_TFP_SOURCES) {
       const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
@@ -2528,6 +2532,10 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-flow-primary-glow')) {
         map.setLayoutProperty('tfp-flow-primary-glow', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
       }
+      // v3.8.1 — Directional chevrons follow primary flow visibility
+      if (map.getLayer('tfp-flow-direction-chevrons')) {
+        map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+      }
       if (map.getLayer('tfp-flow-secondary')) {
         map.setLayoutProperty('tfp-flow-secondary', 'visibility', flowVisibility.flowSecondary ? 'visible' : 'none');
       }
@@ -3314,6 +3322,44 @@ function DeerIntelContent() {
               'line-dasharray': [6, 4],
             },
           });
+          
+          // v3.8.1 — Directional chevron symbols along primary flow lines
+          // Uses text symbols placed along lines to indicate flow direction
+          map.addLayer({
+            id: 'tfp-flow-direction-chevrons',
+            type: 'symbol',
+            source: 'tfp-flow-primary',
+            layout: {
+              'symbol-placement': 'line',
+              'symbol-spacing': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.4, 160,    // Weak corridors: sparse chevrons
+                0.55, 110,   // Moderate: tighter
+                0.75, 75,    // Strong: dense
+              ],
+              'text-field': '›',
+              'text-size': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.4, 11,
+                0.75, 16,
+              ],
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+              'text-rotate': 0,
+              'text-keep-upright': false,
+            },
+            paint: {
+              'text-color': LAYER_COLORS.flowDirectionChevron,
+              'text-opacity': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.4, 0.22,
+                0.55, 0.35,
+                0.75, 0.50,
+              ],
+              'text-halo-color': 'rgba(0,0,0,0.15)',
+              'text-halo-width': 0.5,
+            },
+          });
         }
         
         // Secondary flow lines: visible but clearly subordinate feeders
@@ -3390,6 +3436,23 @@ function DeerIntelContent() {
               'circle-stroke-color': '#fff',
               'circle-stroke-width': 2.5,
               'circle-stroke-opacity': 0.95,
+            },
+          });
+        }
+        
+        // ========== v3.8.1 — TOP-STAND ATTENTION BIAS ==========
+        // Subtle radial glow near the #1 wind-aligned stand ("Today's Sit")
+        if (!map.getSource('tfp-stand-emphasis')) {
+          map.addSource('tfp-stand-emphasis', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-stand-emphasis-glow',
+            type: 'circle',
+            source: 'tfp-stand-emphasis',
+            paint: {
+              'circle-radius': 70,
+              'circle-color': LAYER_COLORS.standEmphasisGlow,
+              'circle-opacity': 0.08,
+              'circle-blur': 1,
             },
           });
         }
@@ -3833,9 +3896,11 @@ function DeerIntelContent() {
           'tfp-ridges-secondary-casing',
           'tfp-ridges-secondary',
           // Flow lines (animated) — v3.5.1
+          'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
           'tfp-flow-secondary',
           'tfp-flow-primary-glow',      // Animated glow below main line
           'tfp-flow-primary',
+          'tfp-flow-direction-chevrons', // v3.8.1 — directional chevrons along flow
           // Convergence & opportunity (top)
           'tfp-flow-convergence-pulse',
           'tfp-flow-convergence',
@@ -4355,9 +4420,26 @@ function DeerIntelContent() {
       
       try {
         if (map.getLayer('tfp-flow-primary')) {
+          // v3.8.1 — Activate flowing dash pattern (was computed but never applied before)
+          map.setPaintProperty('tfp-flow-primary', 'line-dasharray', shiftedDash);
+          
           // Subtle pulsing glow opacity through convergence
           const glowOpacity = 0.20 + 0.08 * Math.sin(phase * Math.PI * 2);
           map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', glowOpacity);
+        }
+        
+        // v3.8.1 — Convergence point brightening pulse (slow breathing)
+        if (map.getLayer('tfp-flow-convergence-pulse')) {
+          const convPulseOpacity = 0.18 + 0.10 * Math.sin(phase * Math.PI * 2);
+          const convPulseRadius = 0.75 + 0.15 * Math.sin(phase * Math.PI * 2);
+          map.setPaintProperty('tfp-flow-convergence-pulse', 'circle-opacity', convPulseOpacity);
+          map.setPaintProperty('tfp-flow-convergence-pulse', 'circle-radius', ['*', ['get', 'radiusM'], convPulseRadius]);
+        }
+        
+        // v3.8.1 — Stand emphasis glow gentle pulse
+        if (map.getLayer('tfp-stand-emphasis-glow')) {
+          const standGlowOpacity = 0.06 + 0.04 * Math.sin(phase * Math.PI * 2);
+          map.setPaintProperty('tfp-stand-emphasis-glow', 'circle-opacity', standGlowOpacity);
         }
       } catch (err) {
         // Ignore errors if layer doesn't exist
@@ -4368,7 +4450,7 @@ function DeerIntelContent() {
     
     // Start animation
     flowAnimationRef.current = requestAnimationFrame(animateFlow);
-    console.log('[MAP] v3.5.1 flow animation started');
+    console.log('[MAP] v3.8.1 flow animation started (directional emphasis)');
     
     return () => {
       if (flowAnimationRef.current !== null) {
@@ -5036,13 +5118,31 @@ function DeerIntelContent() {
     }
     if (!mapRef.current || !mapReady || !alignedStands.length) return;
     addStandMarkers();
+    
+    // v3.8.1 — Update stand emphasis glow source with top stand position
+    const emphasisSrc = mapRef.current.getSource('tfp-stand-emphasis') as mapboxgl.GeoJSONSource | undefined;
+    if (emphasisSrc && alignedStands[0]) {
+      emphasisSrc.setData({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: alignedStands[0].coords },
+          properties: { rank: 1 },
+        }],
+      });
+    }
   }, [alignedStands, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Toggle visibility of HTML markers
+  // Toggle visibility of HTML markers + stand emphasis glow
   useEffect(() => {
     markersRef.current.forEach(marker => {
       marker.getElement().style.display = visibility.stands ? 'block' : 'none';
     });
+    // v3.8.1 — Toggle stand emphasis glow with stands visibility
+    const map = mapRef.current;
+    if (map && map.getLayer('tfp-stand-emphasis-glow')) {
+      map.setLayoutProperty('tfp-stand-emphasis-glow', 'visibility', visibility.stands ? 'visible' : 'none');
+    }
   }, [visibility.stands]);
 
   const cleanupMarkers = () => {
