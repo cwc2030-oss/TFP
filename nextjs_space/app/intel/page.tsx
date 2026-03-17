@@ -3498,18 +3498,18 @@ function DeerIntelContent() {
               'circle-blur': 0.5,
             },
           });
-          // Inner marker
+          // Inner marker — tight focal icon (v3.8.5)
           map.addLayer({
             id: 'tfp-flow-convergence',
             type: 'circle',
             source: 'tfp-flow-convergence',
             paint: {
               'circle-radius': 8,
-              'circle-color': LAYER_COLORS.flowConvergence,
-              'circle-opacity': 0.70,
-              'circle-stroke-color': '#fff',
-              'circle-stroke-width': 2,
-              'circle-stroke-opacity': 0.80,
+              'circle-blur': 0.4,
+              'circle-opacity': 0.85,
+              'circle-color': '#00ffcc',
+              'circle-stroke-width': 1.5,
+              'circle-stroke-color': '#ffffff',
             },
           });
         }

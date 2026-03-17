@@ -718,13 +718,18 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  const features: GeoJSON.Feature[] = [];
+  // v3.5 — raised hard floor to 0.65 so only the hottest ~10-20% of cells survive
+  const HARD_PRESSURE_FLOOR = 0.65;
+  let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
       const raw = cell.pressure;
 
-      // Apply focus mode floor
+      // Apply hard pressure floor (filters ~80-90% of cells)
+      if (raw < HARD_PRESSURE_FLOOR) continue;
+
+      // Apply focus mode floor on top of hard floor
       if (raw < focus.scoreFloor) continue;
 
       // Normalize and apply gamma
@@ -748,6 +753,12 @@ export function buildTerrainRaster(input: RasterInput): {
         },
       });
     }
+  }
+
+  // Hard cap: keep only the top 500 highest-scoring cells
+  if (features.length > 500) {
+    features.sort((a, b) => (b.properties?.score ?? 0) - (a.properties?.score ?? 0));
+    features = features.slice(0, 500);
   }
 
   // Extract Prime Stand Sites using Kill Window model
