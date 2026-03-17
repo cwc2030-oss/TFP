@@ -20,6 +20,7 @@ import {
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
 import { buildStandInputs, windDirectionToDeg, smallestAngleDiffDeg } from '@/lib/scoring/stand-inputs';
+import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -4505,40 +4506,8 @@ function DeerIntelContent() {
     };
   }, []); // Empty deps - only mount once
   
-  // ========== v3.9 — ANIMATED FLOW CORRIDOR EFFECT (setInterval) ==========
-  // Lightweight dash animation using Mapbox's own line-dasharray transition
-  // No requestAnimationFrame — avoids lockup seen with rAF after ~60s
-  useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
-    const map = mapRef.current;
-
-    let step = 0;
-    const steps = [
-      [6, 4], [5, 4, 1], [4, 4, 2], [3, 4, 3],
-      [2, 4, 4], [1, 4, 5], [0.5, 4, 5.5]
-    ];
-
-    const interval = setInterval(() => {
-      if (!mapRef.current || mapRef.current !== map) {
-        clearInterval(interval);
-        return;
-      }
-      try {
-        if (map.getLayer('tfp-flow-primary') && !map.isMoving() && !map.isZooming()) {
-          map.setPaintProperty(
-            'tfp-flow-primary',
-            'line-dasharray',
-            steps[step % steps.length]
-          );
-          step++;
-        }
-      } catch (e) {
-        clearInterval(interval);
-      }
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [mapReady]);
+  // v3.9 — Flow corridor dash animation (extracted to hook)
+  useFlowAnimation(mapReady, mapRef);
 
   // Run analysis once on mount — season/wind changes are handled by local alignment rescore
   useEffect(() => {
