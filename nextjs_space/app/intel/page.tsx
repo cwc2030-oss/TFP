@@ -4509,6 +4509,9 @@ function DeerIntelContent() {
   // Slow, calm dash animation along primary travel corridors
   // Animation brightens slightly through convergence nodes
   useEffect(() => {
+    // Temporarily disabled — animation loop causing lockup after ~60s
+    // eslint-disable-next-line no-constant-condition
+    if (true as boolean) return;
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
 
