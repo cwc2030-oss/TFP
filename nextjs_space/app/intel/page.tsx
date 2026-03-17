@@ -5279,7 +5279,7 @@ function DeerIntelContent() {
           top ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: top.coords }, properties: {} }] } : EMPTY_FC
         );
       }
-    }, 150);
+    }, 350);
 
     return () => clearTimeout(timer);
   }, [alignedStands, mapReady]); // eslint-disable-line
