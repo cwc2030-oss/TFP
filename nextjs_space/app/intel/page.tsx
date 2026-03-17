@@ -3284,8 +3284,7 @@ function DeerIntelContent() {
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
           
-          // v3.8.3 — Glow layer: restrained halo to avoid spine dominance
-          // Narrower glow prevents high-likelihood lines from blooming into a single blob
+          // v3.5.1 — Animated glow layer (soft teal glow behind main line)
           map.addLayer({
             id: 'tfp-flow-primary-glow',
             type: 'line',
@@ -3294,16 +3293,15 @@ function DeerIntelContent() {
               'line-color': LAYER_COLORS.flowAnimated, // Teal-400 glow
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 4,      // v3.8.3 — tighter halo (was 6)
-                0.75, 7      // v3.8.3 — less bloom (was 10)
+                0.4, 6,      // Wider glow halo
+                0.75, 10
               ],
-              'line-opacity': 0.18, // v3.8.3 — dimmer (was 0.25) to suppress dominance
+              'line-opacity': 0.25,
               'line-blur': 3,
             },
           });
           
-          // v3.8.3 — Main flow line: flatter width curve so all corridors read equally
-          // Reduces the visual gap between strong and weak corridors (movement neighborhoods)
+          // v3.5.1 — Main animated flow line (teal/cyan with dashes for animation)
           map.addLayer({
             id: 'tfp-flow-primary',
             type: 'line',
@@ -3318,19 +3316,18 @@ function DeerIntelContent() {
                 LAYER_COLORS.flowAnimated,     // Teal-400 — moderate
                 LAYER_COLORS.flowSecondary     // Teal-300 — weak
               ],
-              // v3.8.3 — Flatter width curve: strong corridors no longer dwarf weak ones
+              // Bolder widths for visibility
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 1.8,    // Weak: slightly thinner (was 2)
-                0.55, 2.5,   // Moderate: clear (was 3)
-                0.75, 3.2    // Strong: visible but not overpowering (was 4)
+                0.4, 2,      // Weak: visible
+                0.55, 3,     // Moderate: clear
+                0.75, 4      // Strong: bold corridor
               ],
-              // v3.8.3 — Flatter opacity curve: all corridors clearly visible
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
                 0.4, 0.55,
-                0.55, 0.65,  // was 0.70
-                0.75, 0.78   // was 0.85 — less dominance at top end
+                0.55, 0.70,
+                0.75, 0.85
               ],
               // Dashed pattern for animation (will be animated via dasharray-offset)
               'line-dasharray': [6, 4],
@@ -3376,8 +3373,7 @@ function DeerIntelContent() {
           });
         }
         
-        // v3.8.3 — Secondary flow lines: boosted visibility to read as equal neighborhoods
-        // Previously too faint (1.5px, 0.45 opacity) — now a clear peer to primary
+        // Secondary flow lines: visible but clearly subordinate feeders
         if (!map.getSource('tfp-flow-secondary')) {
           map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3386,8 +3382,8 @@ function DeerIntelContent() {
             source: 'tfp-flow-secondary',
             paint: {
               'line-color': LAYER_COLORS.flowSecondary, // Teal-300
-              'line-width': 2.0,     // v3.8.3 — was 1.5, now a peer to primary
-              'line-opacity': 0.55,  // v3.8.3 — was 0.45, visible as distinct neighborhood
+              'line-width': 1.5,
+              'line-opacity': 0.45,
               'line-dasharray': [4, 3],
             },
           });
@@ -5516,7 +5512,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.6.1 | bedding probability v2 tightening | 2026-03-15 | cp:bedding-v2';
+  const BUILD_STAMP = 'v3.8.3 | stability recovery — parcel dedup + flicker fix | 2026-03-17';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -5899,8 +5895,10 @@ function DeerIntelContent() {
       )}
 
       {/* Left Panel - Controls (hidden in export mode) */}
+      {/* v3.8.3 — transition only width+opacity (not 'all') to prevent flicker on React re-renders */}
       <div className={`
-        absolute top-16 bottom-4 left-4 z-10 transition-all duration-300
+        absolute top-16 bottom-4 left-4 z-10
+        transition-[width,opacity] duration-300 will-change-[width]
         ${panelCollapsed ? 'w-12' : 'w-80'}
         ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}
       `}>
@@ -6028,8 +6026,10 @@ function DeerIntelContent() {
       </div>
 
       {/* Right Panel - Layer Filters + Top 2 Stands (hidden in export mode) */}
+      {/* v3.8.3 — transition only width+opacity (not 'all') to prevent flicker on React re-renders */}
       <div className={`
-        absolute top-16 bottom-4 right-4 z-10 transition-all duration-300
+        absolute top-16 bottom-4 right-4 z-10
+        transition-[width,opacity] duration-300 will-change-[width]
         ${rightPanelCollapsed ? 'w-12' : 'w-72'}
         ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}
       `}>
