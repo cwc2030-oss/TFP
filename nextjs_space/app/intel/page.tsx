@@ -887,7 +887,8 @@ function DeerIntelContent() {
   const [season, setSeason] = useState<SeasonProfile>('rut');
   const [pressureFocus, setPressureFocus] = useState<PressureFocus>('balanced');
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
-  const [windLastUpdated, setWindLastUpdated] = useState<Date>(new Date());
+  const [windLastUpdated, setWindLastUpdated] = useState<Date>(() => new Date(0));
+  const [windMinAgo, setWindMinAgo] = useState(0);
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
   // ========== TERRAIN WORK MODE ==========
   // A terrain study tool for verifying terrain anatomy before deer interpretation layers.
@@ -1268,6 +1269,17 @@ function DeerIntelContent() {
     setPrevWindDirection(windDirection);
     computeAlignmentScores();
   }, [layers?.standPoints, windDirection, season, computeAlignmentScores, prevWindDirection]);
+
+  // v3.8.4 — Keep "X min ago" out of render body; update via interval only
+  useEffect(() => {
+    setWindLastUpdated(new Date()); // hydration-safe: set real time client-side
+  }, []);
+  useEffect(() => {
+    const calc = () => Math.round((Date.now() - windLastUpdated.getTime()) / 60000);
+    setWindMinAgo(calc());
+    const id = setInterval(() => setWindMinAgo(calc()), 30_000);
+    return () => clearInterval(id);
+  }, [windLastUpdated]);
 
   // Track user interaction for panel collapse
   const handleUserInteraction = useCallback(() => {
@@ -2300,9 +2312,14 @@ function DeerIntelContent() {
   }, [terrainFlowData, terrainFlowLoading, ridgeSpineData, qaParcel, parcelPolygon]);
 
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
+  // v3.8.4 — debounce 80ms so rapid season/wind clicks coalesce into one setData pass
+  const terrainFlowDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
+
+    if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
+    terrainFlowDebounceRef.current = setTimeout(() => {
     
     // Select data source based on comparison mode
     const flowData = flowComparisonMode && legacySyntheticData 
@@ -2433,6 +2450,11 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
+    }, 80); // end debounce setTimeout
+
+    return () => {
+      if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
+    };
   }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, pressureFocus, parcelPolygon, ridgeSpineData]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
@@ -5512,7 +5534,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.8.3 | stability recovery — parcel dedup + flicker fix | 2026-03-17';
+  const BUILD_STAMP = 'v3.8.4 | season/wind UI lockup fix | 2026-03-17';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -5562,7 +5584,7 @@ function DeerIntelContent() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
       {/* Map Container - z-0 ensures it's behind UI but visible */}
-      <div ref={mapContainerRef} className="absolute inset-0 z-0" style={{ minHeight: '100vh', minWidth: '100vw' }} />
+      <div ref={mapContainerRef} className="absolute inset-0 z-0" />
 
       {/* BUILD STAMP - visible debug marker (hidden in export mode) */}
       <div className={`absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg transition-opacity duration-300 ${exportMode ? 'opacity-0' : 'opacity-100'}`}>
@@ -5945,7 +5967,7 @@ function DeerIntelContent() {
                         setSeason(s.value);
                       }}
                       className={`
-                        p-2 rounded-lg text-center transition-all
+                        p-2 rounded-lg text-center transition-colors duration-150
                         ${season === s.value
                           ? 'bg-amber-500/30 border-2 border-amber-500 text-white'
                           : 'bg-white/5 border border-white/10 text-white/70 hover:bg-white/10'}
@@ -6057,7 +6079,7 @@ function DeerIntelContent() {
                     <span className="text-sm font-medium text-white">Wind: {windDirection}</span>
                   </div>
                   <span className="text-xs text-stone-500">
-                    {Math.round((Date.now() - windLastUpdated.getTime()) / 60000)} min ago
+                    {windMinAgo} min ago
                   </span>
                 </div>
                 {/* Compact compass selector */}
@@ -6072,7 +6094,7 @@ function DeerIntelContent() {
                           setWindLastUpdated(new Date());
                         }}
                         className={`
-                          w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-all
+                          w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-colors duration-150
                           ${isSelected
                             ? 'bg-stone-600 text-white'
                             : 'bg-stone-800/50 text-stone-400 hover:bg-stone-700 hover:text-white'}
