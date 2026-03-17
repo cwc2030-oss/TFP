@@ -4511,6 +4511,17 @@ function DeerIntelContent() {
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
+
+    // Pause animation when browser tab is not visible
+    const onVisibilityChange = () => {
+      if (document.hidden && flowAnimationRef.current !== null) {
+        cancelAnimationFrame(flowAnimationRef.current);
+        flowAnimationRef.current = null;
+      } else if (!document.hidden) {
+        flowAnimationRef.current = requestAnimationFrame(animateFlow);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     
     // Cancel any existing animation
     if (flowAnimationRef.current !== null) {
@@ -4577,6 +4588,7 @@ function DeerIntelContent() {
     console.log('[MAP] v3.8.3 flow animation started (1 paint call/frame, ~10fps)');
     
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       map.off('zoomstart', onZoomStart);
       map.off('zoomend', onZoomEnd);
       if (flowAnimationRef.current !== null) {
