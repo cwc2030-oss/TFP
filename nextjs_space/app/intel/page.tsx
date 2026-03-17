@@ -1568,6 +1568,11 @@ function DeerIntelContent() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !parcelPolygon || hasFitToParcel.current) return;
+    // v3.8.4-fix — guard: style must be loaded before fitBounds
+    if (!map.isStyleLoaded()) {
+      console.warn('[MAP] fitBounds deferred — style not yet loaded');
+      return;
+    }
     
     try {
       // Extract bounds from parcel geometry
@@ -2688,23 +2693,58 @@ function DeerIntelContent() {
     }
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
+    const container = mapContainerRef.current;
+
+    // v3.8.4-fix — Ensure container has non-zero dimensions before creating the map.
+    // Mapbox GL caches the viewport at creation time; a 0-height container means
+    // no tiles are requested and the canvas stays black forever.
+    const initMap = () => {
+      const rect = container.getBoundingClientRect();
+      console.log('[MAP] Container dimensions at init:', rect.width, 'x', rect.height);
+      if (rect.width === 0 || rect.height === 0) {
+        console.warn('[MAP] Container has 0 dimensions — deferring init via rAF');
+        requestAnimationFrame(() => {
+          if (mountIdRef.current !== mountId) return; // unmounted
+          initMap();
+        });
+        return;
+      }
+      createMap(mountId);
+    };
+
+    const createMap = (mId: string) => {
     let map: mapboxgl.Map;
 
-    console.log('[MAP] BEFORE new mapboxgl.Map() id=' + mountId + ' center=[' + lng + ',' + lat + ']');
+    // v3.8.4-fix — Force container dimensions before Mapbox init.
+    // Mapbox overrides position:absolute→relative, breaking CSS inset-0 sizing.
+    // Setting explicit inline dimensions ensures the map fills its parent.
+    container.style.width = '100%';
+    container.style.height = '100%';
+    container.style.position = 'absolute';
+    container.style.top = '0';
+    container.style.left = '0';
+    console.log('[MAP] Container style forced: w/h=100%, position=absolute');
+    console.log('[MAP] BEFORE new mapboxgl.Map() id=' + mId + ' center=[' + lng + ',' + lat + ']');
     try {
       map = new mapboxgl.Map({
-        container: mapContainerRef.current,
+        container: container,
         style: 'mapbox://styles/mapbox/satellite-streets-v12',
         center: [lng, lat],
         zoom: 14,
         pitch: 0,    // Flat 2D view - no 3D terrain
         bearing: 0,  // North up
       });
-      console.log('[MAP] AFTER new mapboxgl.Map() id=' + mountId + ' map exists=' + !!map);
+      console.log('[MAP] AFTER new mapboxgl.Map() id=' + mId + ' map exists=' + !!map);
+
+      // v3.8.4-fix — Mapbox overrides position to 'relative'. Force it back AFTER creation.
+      container.style.position = 'absolute';
+      container.style.top = '0';
+      container.style.left = '0';
       
       // Expose for debugging
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = map;
+        console.log('[MAP] __TFP_MAP__ SET to', !!map);
       }
     } catch (err) {
       console.error("[MAP] FAILED to create Map:", err);
@@ -2713,10 +2753,13 @@ function DeerIntelContent() {
       return;
     }
 
-    // Error handler - log ALL map errors
+    // v3.8.4-fix — Detailed error handler: log full error object + stack
     map.on('error', (e: any) => {
-      console.error("[MAP ERROR]", e?.error || e);
-      if (e?.error?.status === 401 || e?.error?.status === 403) {
+      const err = e?.error || e;
+      console.error("[MAP ERROR] message:", err?.message, "status:", err?.status, "url:", err?.url);
+      console.error("[MAP ERROR] full:", JSON.stringify(err, null, 2));
+      if (err?.stack) console.error("[MAP ERROR] stack:", err.stack);
+      if (err?.status === 401 || err?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
       }
     });
@@ -2733,7 +2776,7 @@ function DeerIntelContent() {
       }
     });
 
-    // v3.8.4 — Diagnostic: log style load lifecycle
+    // v3.8.4-fix — Diagnostic: log full style load lifecycle
     map.on('styledata', () => {
       console.log('[MAP DIAG] styledata event — style metadata received');
     });
@@ -2741,6 +2784,23 @@ function DeerIntelContent() {
       if (e.isSourceLoaded && e.sourceId) {
         console.log('[MAP DIAG] sourcedata loaded:', e.sourceId);
       }
+    });
+    // v3.8.4-fix — CRITICAL: Force resize IMMEDIATELY on style.load so Mapbox
+    // recalculates its internal viewport and actually requests tiles.
+    map.once('style.load', () => {
+      console.log('[MAP] style.load event — forcing resize() to trigger tile requests');
+      try {
+        map.resize();
+        console.log('[MAP] style.load resize() completed');
+      } catch (resErr) {
+        console.warn('[MAP] style.load resize() failed:', resErr);
+      }
+    });
+    // Also listen for 'idle' once — by then all initial tiles should be painted
+    map.once('idle', () => {
+      const canvas = map.getCanvas();
+      console.log('[MAP DIAG] idle event — canvas:', canvas?.width, 'x', canvas?.height,
+        'loaded:', map.loaded(), 'areTilesLoaded:', map.areTilesLoaded());
     });
 
     // Handler for when map is fully loaded
@@ -4401,18 +4461,20 @@ function DeerIntelContent() {
       setMapReady(true);
       console.log('[MAP] AFTER setMapReady(true) - map should now be interactive');
       
-      // Resize map to ensure proper tile loading after navigation
-      // (prevents "checkered calendar" tile corruption on layout changes)
-      setTimeout(() => {
-        try {
-          if (map && mapRef.current === map) {
-            (map as any).resize();
-            console.log('[MAP] map.resize() called to fix tile rendering');
+      // v3.8.4-fix — Resize cascade: 100ms, 500ms, 1500ms after onMapLoad
+      // First resize triggers tile requests; later ones catch deferred layout shifts.
+      [100, 500, 1500].forEach((delay) => {
+        setTimeout(() => {
+          try {
+            if (map && mapRef.current === map) {
+              map.resize();
+              console.log('[MAP] map.resize() @' + delay + 'ms — canvas:', map.getCanvas()?.width, 'x', map.getCanvas()?.height);
+            }
+          } catch (e) {
+            console.log('[MAP] map.resize() @' + delay + 'ms skipped:', e);
           }
-        } catch (e) {
-          console.log('[MAP] map.resize() skipped - map may be disposed');
-        }
-      }, 100);
+        }, delay);
+      });
     };
     
     // Register load handler
@@ -4426,7 +4488,11 @@ function DeerIntelContent() {
     }
 
     mapRef.current = map;
-    console.log('[MAP] mapRef.current set, useEffect setup complete id=' + mountId);
+    console.log('[MAP] mapRef.current set, useEffect setup complete id=' + mId);
+    }; // end createMap
+
+    // Kick off dimension-aware init
+    initMap();
 
     return () => {
       console.log('[LIFECYCLE] CLEANUP id=' + mountId + ' (current=' + mountIdRef.current + ')');
@@ -4439,8 +4505,16 @@ function DeerIntelContent() {
         cancelAnimationFrame(flowAnimationRef.current);
         flowAnimationRef.current = null;
       }
-      map.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      // v3.8.4-fix — Purge any orphaned Mapbox DOM children so a Strict-Mode
+      // re-mount starts with a clean container (prevents double-canvas issues)
+      if (container && container.childNodes.length > 0) {
+        console.log('[LIFECYCLE] Clearing', container.childNodes.length, 'orphaned children from map container');
+        container.innerHTML = '';
+      }
     };
   }, []); // Empty deps - only mount once
   
@@ -5562,7 +5636,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.8.4 | season/wind UI lockup fix | 2026-03-17';
+  const BUILD_STAMP = 'v3.8.4-fix2 | double-div + cleanup | 2026-03-17';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
@@ -5611,9 +5685,13 @@ function DeerIntelContent() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
-      {/* Map Container - z-0 ensures it's behind UI but visible */}
-      {/* v3.8.4 — w-full h-full keeps map sized to parent even after Mapbox overrides position to relative */}
-      <div ref={mapContainerRef} className="absolute inset-0 z-0 w-full h-full" />
+      {/* Map Container — double-div pattern: outer div owns layout (absolute inset-0),
+           inner div is the Mapbox target. Mapbox overrides position to 'relative' on its
+           container, which breaks inset-0 sizing. By giving the inner div explicit 100%
+           width/height it fills the outer regardless of Mapbox's override. */}
+      <div className="absolute inset-0 z-0" style={{ overflow: 'hidden' }}>
+        <div ref={mapContainerRef} style={{ width: '100%', height: '100%', position: 'relative' }} />
+      </div>
 
       {/* BUILD STAMP - visible debug marker (hidden in export mode) */}
       <div className={`absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg transition-opacity duration-300 ${exportMode ? 'opacity-0' : 'opacity-100'}`}>

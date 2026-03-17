@@ -306,36 +306,11 @@ export default function Terrain3DView({
         }
       }, 200);
       
-      // ═══ "CATCH YOUR BREATH" FOCUS ANIMATION ═══
-      // After ~2s, gently focus on the parcel (user already has context)
-      setTimeout(() => {
-        if (mapRef.current !== map) return;
-        
-        // If we have parcel bounds, use fitBounds; else zoom to center
-        if (parcelBounds && parcelBounds.length >= 3) {
-          const bounds = new mapboxgl.LngLatBounds();
-          parcelBounds.forEach(p => bounds.extend([p.lng, p.lat]));
-          
-          map.fitBounds(bounds, {
-            padding: 110,
-            duration: 2200,
-            pitch: 60,
-            bearing: -20,
-            essential: true,
-          });
-          console.log('[Terrain3D] Gentle focus animation → fitBounds');
-        } else {
-          // Fallback: zoom to center if no bounds
-          map.flyTo({
-            center: [parcelCenter.lng, parcelCenter.lat],
-            zoom: 15.5,
-            pitch: 60,
-            bearing: -20,
-            duration: 2000,
-          });
-          console.log('[Terrain3D] Gentle focus animation → flyTo center');
-        }
-      }, 2000);
+      // ═══ "CATCH YOUR BREATH" FOCUS ANIMATION — DISABLED v3.8.4-fix ═══
+      // Temporarily disabled to rule out fitBounds as the black-map trigger.
+      // The map stays at the wide context view (zoom 13.5) so the user can
+      // still see the parcel; re-enable once basemap tile loading is confirmed stable.
+      console.log('[Terrain3D] Gentle focus animation DISABLED for v3.8.4-fix debugging');
     });
 
     map.on("pitchend", () => setCurrentPitch(Math.round(map.getPitch())));
