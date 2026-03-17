@@ -6216,6 +6216,7 @@ function DeerIntelContent() {
                       <button
                         key={dir}
                         onClick={() => {
+                          if (terrainFlowDebounceRef.current) return;
                           setWindDirection(dir);
                           setWindLastUpdated(new Date());
                         }}
