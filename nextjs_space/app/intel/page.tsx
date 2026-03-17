@@ -1511,6 +1511,13 @@ function DeerIntelContent() {
         }
       }
 
+      // v3.8.3 — Clear QA parcel source when main parcel updates to prevent boundary duplication
+      // The authoritative boundary is tfp-parcel (gold); QA (cyan) must never overlap it
+      const qaParcelSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
+      if (qaParcelSource && parcelPolygon) {
+        qaParcelSource.setData(EMPTY_FC);
+      }
+
       // Update bedding polygons
       const beddingSource = map.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
       if (beddingSource) {
@@ -3277,7 +3284,8 @@ function DeerIntelContent() {
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
           
-          // v3.5.1 — Animated glow layer (soft teal glow behind main line)
+          // v3.8.3 — Glow layer: restrained halo to avoid spine dominance
+          // Narrower glow prevents high-likelihood lines from blooming into a single blob
           map.addLayer({
             id: 'tfp-flow-primary-glow',
             type: 'line',
@@ -3286,15 +3294,16 @@ function DeerIntelContent() {
               'line-color': LAYER_COLORS.flowAnimated, // Teal-400 glow
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 6,      // Wider glow halo
-                0.75, 10
+                0.4, 4,      // v3.8.3 — tighter halo (was 6)
+                0.75, 7      // v3.8.3 — less bloom (was 10)
               ],
-              'line-opacity': 0.25,
+              'line-opacity': 0.18, // v3.8.3 — dimmer (was 0.25) to suppress dominance
               'line-blur': 3,
             },
           });
           
-          // v3.5.1 — Main animated flow line (teal/cyan with dashes for animation)
+          // v3.8.3 — Main flow line: flatter width curve so all corridors read equally
+          // Reduces the visual gap between strong and weak corridors (movement neighborhoods)
           map.addLayer({
             id: 'tfp-flow-primary',
             type: 'line',
@@ -3309,18 +3318,19 @@ function DeerIntelContent() {
                 LAYER_COLORS.flowAnimated,     // Teal-400 — moderate
                 LAYER_COLORS.flowSecondary     // Teal-300 — weak
               ],
-              // Bolder widths for visibility
+              // v3.8.3 — Flatter width curve: strong corridors no longer dwarf weak ones
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 2,      // Weak: visible
-                0.55, 3,     // Moderate: clear
-                0.75, 4      // Strong: bold corridor
+                0.4, 1.8,    // Weak: slightly thinner (was 2)
+                0.55, 2.5,   // Moderate: clear (was 3)
+                0.75, 3.2    // Strong: visible but not overpowering (was 4)
               ],
+              // v3.8.3 — Flatter opacity curve: all corridors clearly visible
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
                 0.4, 0.55,
-                0.55, 0.70,
-                0.75, 0.85
+                0.55, 0.65,  // was 0.70
+                0.75, 0.78   // was 0.85 — less dominance at top end
               ],
               // Dashed pattern for animation (will be animated via dasharray-offset)
               'line-dasharray': [6, 4],
@@ -3366,7 +3376,8 @@ function DeerIntelContent() {
           });
         }
         
-        // Secondary flow lines: visible but clearly subordinate feeders
+        // v3.8.3 — Secondary flow lines: boosted visibility to read as equal neighborhoods
+        // Previously too faint (1.5px, 0.45 opacity) — now a clear peer to primary
         if (!map.getSource('tfp-flow-secondary')) {
           map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3375,8 +3386,8 @@ function DeerIntelContent() {
             source: 'tfp-flow-secondary',
             paint: {
               'line-color': LAYER_COLORS.flowSecondary, // Teal-300
-              'line-width': 1.5,
-              'line-opacity': 0.45,
+              'line-width': 2.0,     // v3.8.3 — was 1.5, now a peer to primary
+              'line-opacity': 0.55,  // v3.8.3 — was 0.45, visible as distinct neighborhood
               'line-dasharray': [4, 3],
             },
           });
@@ -3821,14 +3832,16 @@ function DeerIntelContent() {
               'line-opacity': 0.45,       // Faint but readable
             },
           });
-          // Highlight layer (intensifies on hover)
+          // v3.8.3 — Highlight layer: uses layout visibility toggle instead of paint
+          // property animation to avoid Mapbox repaint cascades on hover
           map.addLayer({
             id: 'tfp-edge-boundary-highlight',
             type: 'line',
             source: 'tfp-edge-boundary',
+            layout: { visibility: 'none' }, // v3.8.3 — hidden via layout, not paint
             paint: {
               'line-color': LAYER_COLORS.edgeBoundaryHighlight,
-              'line-width': 0, // Hidden by default, shows on hover
+              'line-width': 3,       // v3.8.3 — always 3px when visible
               'line-opacity': 0.6,
             },
           });
@@ -4193,18 +4206,19 @@ function DeerIntelContent() {
           hoverPopup.remove();
         });
         
-        // Adjacent boundary hover (show highlight)
-        map.on('mouseenter', 'tfp-edge-boundary-fill', (e) => {
+        // v3.8.3 — Adjacent boundary hover: uses layout visibility toggle
+        // instead of setPaintProperty to avoid Mapbox repaint cascades
+        map.on('mouseenter', 'tfp-edge-boundary-fill', () => {
           map.getCanvas().style.cursor = 'pointer';
-          // Show boundary highlight on hover
-          map.setPaintProperty('tfp-edge-boundary-highlight', 'line-width', 3);
-          map.setPaintProperty('tfp-edge-boundary-fill', 'fill-opacity', 0.15);
+          if (map.getLayer('tfp-edge-boundary-highlight')) {
+            map.setLayoutProperty('tfp-edge-boundary-highlight', 'visibility', 'visible');
+          }
         });
         map.on('mouseleave', 'tfp-edge-boundary-fill', () => {
           map.getCanvas().style.cursor = '';
-          // Hide boundary highlight
-          map.setPaintProperty('tfp-edge-boundary-highlight', 'line-width', 0);
-          map.setPaintProperty('tfp-edge-boundary-fill', 'fill-opacity', 0);
+          if (map.getLayer('tfp-edge-boundary-highlight')) {
+            map.setLayoutProperty('tfp-edge-boundary-highlight', 'visibility', 'none');
+          }
         });
         
         console.log('[MAP] Hover interactions registered');
@@ -4396,10 +4410,10 @@ function DeerIntelContent() {
       cancelAnimationFrame(flowAnimationRef.current);
     }
     
-    // v3.8.2 — Animation parameters: calm, slow movement (~4 second cycle)
-    // ONLY animates dash pattern on flow lines + subtle glow pulse.
-    // Convergence and stand emphasis are static — no per-frame churn on those layers
-    // to prevent Mapbox repaint cascades that cause parcel/panel flicker.
+    // v3.8.3 — Animation parameters: minimal repaint (1 paint call/frame)
+    // ONLY animates dash pattern on primary flow lines.
+    // Glow opacity is now STATIC — eliminated the second setPaintProperty call
+    // that was causing Mapbox repaint cascades affecting parcel/panel layers.
     const ANIMATION_DURATION = 4000; // ms for full dash cycle (slower = calmer)
     const DASH_PATTERN = [6, 4]; // Matches layer definition
     const TOTAL_DASH_LENGTH = DASH_PATTERN[0] + DASH_PATTERN[1]; // 10
@@ -4407,8 +4421,8 @@ function DeerIntelContent() {
     let lastTime = 0;
     
     const animateFlow = (currentTime: number) => {
-      // Throttle to ~12fps — minimal repaints, still smooth enough for slow dash drift
-      if (currentTime - lastTime < 80) {
+      // Throttle to ~10fps — even fewer repaints, still smooth for slow dash drift
+      if (currentTime - lastTime < 100) {
         flowAnimationRef.current = requestAnimationFrame(animateFlow);
         return;
       }
@@ -4428,15 +4442,11 @@ function DeerIntelContent() {
       
       try {
         if (map.getLayer('tfp-flow-primary')) {
-          // v3.8.1 — Flowing dash pattern along primary corridors
+          // v3.8.3 — Single paint call: dash animation only (glow is static)
           map.setPaintProperty('tfp-flow-primary', 'line-dasharray', shiftedDash);
-          
-          // Subtle pulsing glow opacity (only 2 paint calls per frame — minimal)
-          const glowOpacity = 0.20 + 0.06 * Math.sin(phase * Math.PI * 2);
-          map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', glowOpacity);
         }
-        // v3.8.2 — NO per-frame updates on convergence or stand emphasis layers.
-        // Those are static paint properties set once at layer creation time.
+        // v3.8.3 — Glow opacity is static (set at layer creation). NO per-frame update.
+        // Convergence and stand emphasis are also static — zero per-frame churn.
       } catch (err) {
         // Ignore errors if layer doesn't exist
       }
@@ -4446,7 +4456,7 @@ function DeerIntelContent() {
     
     // Start animation
     flowAnimationRef.current = requestAnimationFrame(animateFlow);
-    console.log('[MAP] v3.8.2 flow animation started (stabilized, 2 paint calls/frame)');
+    console.log('[MAP] v3.8.3 flow animation started (1 paint call/frame, ~10fps)');
     
     return () => {
       if (flowAnimationRef.current !== null) {
