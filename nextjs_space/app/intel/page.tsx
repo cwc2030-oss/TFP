@@ -2739,12 +2739,14 @@ function DeerIntelContent() {
         }
         
         // QA Parcel boundary source (for KS/MO validation workflow)
+        // v3.8.3 — Default hidden; toggled visible only when qaParcelLookupMode is active
         if (!map.getSource('tfp-qa-parcel')) {
           map.addSource('tfp-qa-parcel', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-qa-parcel-fill',
             type: 'fill',
             source: 'tfp-qa-parcel',
+            layout: { visibility: 'none' }, // v3.8.3 — hidden by default
             paint: {
               'fill-color': '#22d3ee', // Cyan-400
               'fill-opacity': 0.08,
@@ -2754,6 +2756,7 @@ function DeerIntelContent() {
             id: 'tfp-qa-parcel-outline',
             type: 'line',
             source: 'tfp-qa-parcel',
+            layout: { visibility: 'none' }, // v3.8.3 — hidden by default
             paint: {
               'line-color': '#06b6d4', // Cyan-500
               'line-width': 3,
@@ -2764,6 +2767,7 @@ function DeerIntelContent() {
             id: 'tfp-qa-parcel-outline-glow',
             type: 'line',
             source: 'tfp-qa-parcel',
+            layout: { visibility: 'none' }, // v3.8.3 — hidden by default
             paint: {
               'line-color': '#22d3ee', // Cyan-400
               'line-width': 8,
@@ -4816,6 +4820,30 @@ function DeerIntelContent() {
       }
     }
   }, [geometryDebugMode, mapReady, qaParcel, rawRegridCoords, analysisCoords]);
+
+  // v3.8.3 — Toggle QA parcel layer visibility when QA mode changes
+  // Prevents stale cyan outlines from overlapping the gold parcel boundary
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const qaVis = qaParcelLookupMode ? 'visible' : 'none';
+    const QA_LAYERS = ['tfp-qa-parcel-fill', 'tfp-qa-parcel-outline', 'tfp-qa-parcel-outline-glow'];
+    for (const layerId of QA_LAYERS) {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', qaVis);
+      }
+    }
+
+    // When turning QA mode OFF, also clear the source data to prevent carryover
+    if (!qaParcelLookupMode) {
+      const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
+      if (qaSource) qaSource.setData(EMPTY_FC);
+      console.log('[v3.8.3] QA parcel layers hidden + source cleared');
+    } else {
+      console.log('[v3.8.3] QA parcel layers made visible');
+    }
+  }, [qaParcelLookupMode, mapReady]);
 
   const handleQaParcelCopyInfo = useCallback(() => {
     if (!qaParcel) return;
