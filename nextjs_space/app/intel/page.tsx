@@ -2459,7 +2459,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
-    }, 300); // end debounce setTimeout
+    }, 250); // end debounce setTimeout
 
     return () => {
       if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
@@ -5291,7 +5291,7 @@ function DeerIntelContent() {
           top ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: top.coords }, properties: {} }] } : EMPTY_FC
         );
       }
-    }, 350);
+    }, 400);
 
     return () => clearTimeout(timer);
   }, [alignedStands, mapReady]); // eslint-disable-line
