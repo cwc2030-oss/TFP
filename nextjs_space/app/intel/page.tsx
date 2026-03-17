@@ -5249,26 +5249,23 @@ function DeerIntelContent() {
   // v3.8: Uses alignedStands (wind-sorted) so markers react to wind changes
   // Skip entirely in Terrain Work Mode - deer interpretation layer
   useEffect(() => {
-    if (TERRAIN_WORK_MODE) {
-      cleanupMarkers(); // Ensure no stale markers
-      return;
-    }
-    if (!mapRef.current || !mapReady || !alignedStands.length) return;
-    addStandMarkers();
-    
-    // v3.8.1 — Update stand emphasis glow source with top stand position
-    const emphasisSrc = mapRef.current.getSource('tfp-stand-emphasis') as mapboxgl.GeoJSONSource | undefined;
-    if (emphasisSrc && alignedStands[0]) {
-      emphasisSrc.setData({
-        type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: alignedStands[0].coords },
-          properties: { rank: 1 },
-        }],
-      });
-    }
-  }, [alignedStands, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (TERRAIN_WORK_MODE) return;
+    if (!mapReady || !alignedStands.length) return;
+
+    const timer = setTimeout(() => {
+      if (!mapRef.current) return;
+      addStandMarkers();
+      const map = mapRef.current;
+      if (map.getSource('tfp-stand-emphasis')) {
+        const top = alignedStands[0];
+        (map.getSource('tfp-stand-emphasis') as mapboxgl.GeoJSONSource).setData(
+          top ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: top.coords }, properties: {} }] } : EMPTY_FC
+        );
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [alignedStands, mapReady]); // eslint-disable-line
 
   // Toggle visibility of HTML markers + stand emphasis glow
   useEffect(() => {
