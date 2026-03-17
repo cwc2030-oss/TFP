@@ -2695,9 +2695,6 @@ function DeerIntelContent() {
     mapboxgl.accessToken = MAPBOX_TOKEN;
     const container = mapContainerRef.current;
 
-    // Hoisted so cleanup can disconnect even though it's created inside onMapLoad
-    let resizeObserver: ResizeObserver | null = null;
-
     // v3.8.4-fix — Ensure container has non-zero dimensions before creating the map.
     // Mapbox GL caches the viewport at creation time; a 0-height container means
     // no tiles are requested and the canvas stays black forever.
@@ -4461,25 +4458,6 @@ function DeerIntelContent() {
         }
       }, 100);
 
-      // ResizeObserver — notifies Mapbox whenever the container changes size
-      // (e.g. when side panels collapse or expand)
-      let lastWidth = container.getBoundingClientRect().width;
-      resizeObserver = new ResizeObserver((entries) => {
-        try {
-          if (!entries || entries.length === 0 || !mapRef.current || mapRef.current !== map) return;
-          if (!document.body.contains(container)) return;
-          const rect = entries[0].contentRect;
-          if (!rect) return;
-          const newWidth = rect.width;
-          if (Math.abs(newWidth - lastWidth) > 10) {
-            lastWidth = newWidth;
-            map.resize();
-          }
-        } catch (e) {
-          // Observer fired during teardown — safe to ignore
-        }
-      });
-      resizeObserver.observe(container);
     };
     
     // Register load handler
@@ -4512,7 +4490,6 @@ function DeerIntelContent() {
       }
       // v3.8.4-fix3 — Let Mapbox properly release WebGL context FIRST,
       // THEN purge orphaned DOM so Strict-Mode re-mount gets a clean container.
-      resizeObserver?.disconnect();
       if (mapRef.current) {
         try { mapRef.current.remove(); } catch (e) { console.warn('[LIFECYCLE] map.remove() error:', e); }
         mapRef.current = null;
@@ -6040,7 +6017,10 @@ function DeerIntelContent() {
         <div className="h-full bg-gray-900/95 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden flex flex-col shadow-2xl">
           {/* Collapse Toggle */}
           <button
-            onClick={() => setPanelCollapsed(!panelCollapsed)}
+            onClick={() => {
+              setPanelCollapsed(v => !v);
+              setTimeout(() => mapRef.current?.resize(), 310);
+            }}
             className="absolute -right-3 top-1/2 -translate-y-1/2 z-20 bg-gray-800 border border-white/20 rounded-full p-1.5 hover:bg-gray-700 transition-colors"
           >
             {panelCollapsed ? <ChevronRight className="h-4 w-4 text-white" /> : <ChevronLeft className="h-4 w-4 text-white" />}
@@ -6171,7 +6151,10 @@ function DeerIntelContent() {
         <div className="h-full bg-gray-900/95 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden flex flex-col shadow-2xl">
           {/* Collapse Toggle */}
           <button
-            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            onClick={() => {
+              setRightPanelCollapsed(v => !v);
+              setTimeout(() => mapRef.current?.resize(), 310);
+            }}
             className="absolute -left-3 top-1/2 -translate-y-1/2 z-20 bg-gray-800 border border-white/20 rounded-full p-1.5 hover:bg-gray-700 transition-colors"
           >
             {rightPanelCollapsed ? <ChevronLeft className="h-4 w-4 text-white" /> : <ChevronRight className="h-4 w-4 text-white" />}
