@@ -4447,20 +4447,16 @@ function DeerIntelContent() {
       setMapReady(true);
       console.log('[MAP] AFTER setMapReady(true) - map should now be interactive');
       
-      // v3.8.4-fix — Resize cascade: 100ms, 500ms, 1500ms after onMapLoad
-      // First resize triggers tile requests; later ones catch deferred layout shifts.
-      [100, 500, 1500].forEach((delay) => {
-        setTimeout(() => {
-          try {
-            if (map && mapRef.current === map) {
-              map.resize();
-              console.log('[MAP] map.resize() @' + delay + 'ms — canvas:', map.getCanvas()?.width, 'x', map.getCanvas()?.height);
-            }
-          } catch (e) {
-            console.log('[MAP] map.resize() @' + delay + 'ms skipped:', e);
+      setTimeout(() => {
+        try {
+          if (map && mapRef.current === map) {
+            map.resize();
+            console.log('[MAP] map.resize() @100ms');
           }
-        }, delay);
-      });
+        } catch (e) {
+          console.warn('[MAP] resize() @100ms failed:', e);
+        }
+      }, 100);
     };
     
     // Register load handler
