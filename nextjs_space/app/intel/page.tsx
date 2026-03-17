@@ -21,6 +21,10 @@ import {
 } from '@/lib/scoring/stand-alignment';
 import { buildStandInputs, windDirectionToDeg, smallestAngleDiffDeg } from '@/lib/scoring/stand-inputs';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
+import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
+import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
+import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
+import { StandAlignmentPanel, type AlignedStand } from '@/components/intel/StandAlignmentPanel';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -229,12 +233,7 @@ function filterByGeometryType(
   };
 }
 
-const WIND_DIRECTIONS: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-const SEASONS: { value: SeasonProfile; label: string; dates: string; icon: string }[] = [
-  { value: 'early', label: 'Early Season', dates: 'Sept-Oct', icon: '🌿' },
-  { value: 'rut', label: 'Rut', dates: 'Nov', icon: '🦌' },
-  { value: 'late', label: 'Late Season', dates: 'Dec-Jan', icon: '❄️' },
-];
+// SEASONS & WIND_DIRECTIONS now imported from components/intel/*
 
 // ========== V2 STYLING RULES (Tiered Corridors + Funnels) ==========
 // Corridors: Tiered based on relative likelihood
@@ -1083,14 +1082,7 @@ function DeerIntelContent() {
   const [huntabilityLoading, setHuntabilityLoading] = useState(false);
 
   // ========== ALIGNMENT ENGINE STATE ==========
-  type AlignedStand = {
-    rank: number;
-    name: string; // Auto-generated or user-assigned
-    props: StandPointProperties;
-    inputs: StandInputs;
-    alignment: StandScore;
-    coords: [number, number];
-  };
+  // AlignedStand type now imported from components/intel/StandAlignmentPanel
   
   // Auto-suggest stand names based on position/features
   const STAND_NAME_POOL = [
@@ -5990,32 +5982,7 @@ function DeerIntelContent() {
               </div>
 
               {/* Season Selector */}
-              <div className="p-4 border-b border-white/10">
-                <div className="flex items-center gap-2 mb-3">
-                  <Calendar className="h-4 w-4 text-amber-500" />
-                  <span className="text-sm font-medium text-white">Season Profile</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {SEASONS.map((s) => (
-                    <button
-                      key={s.value}
-                      onClick={() => {
-                        setSeason(s.value);
-                      }}
-                      className={`
-                        p-2 rounded-lg text-center transition-colors duration-150
-                        ${season === s.value
-                          ? 'bg-amber-500/30 border-2 border-amber-500 text-white'
-                          : 'bg-white/5 border border-white/10 text-white/70 hover:bg-white/10'}
-                      `}
-                    >
-                      <span className="text-lg block">{s.icon}</span>
-                      <span className="text-xs font-medium block mt-1">{s.label}</span>
-                      <span className="text-[10px] text-white/50 block">{s.dates}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <SeasonPanel season={season} onSeasonChange={setSeason} />
 
               {/* Analysis Summary */}
               {summary && (
@@ -6111,41 +6078,15 @@ function DeerIntelContent() {
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
               {/* ========== WIND GAUGE (UNIFIED - RIGHT SIDE) ========== */}
-              <div className="p-3 border-b border-white/10">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Wind className="h-4 w-4 text-stone-400" />
-                    <span className="text-sm font-medium text-white">Wind: {windDirection}</span>
-                  </div>
-                  <span className="text-xs text-stone-500">
-                    {windMinAgo} min ago
-                  </span>
-                </div>
-                {/* Compact compass selector */}
-                <div className="flex flex-wrap gap-1 justify-center">
-                  {WIND_DIRECTIONS.map((dir) => {
-                    const isSelected = windDirection === dir;
-                    return (
-                      <button
-                        key={dir}
-                        onClick={() => {
-                          if (terrainFlowDebounceRef.current) return;
-                          setWindDirection(dir);
-                          setWindLastUpdated(new Date());
-                        }}
-                        className={`
-                          w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-colors duration-150
-                          ${isSelected
-                            ? 'bg-stone-600 text-white'
-                            : 'bg-stone-800/50 text-stone-400 hover:bg-stone-700 hover:text-white'}
-                        `}
-                      >
-                        {dir}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <WindCompass
+                windDirection={windDirection}
+                windMinAgo={windMinAgo}
+                debouncing={!!terrainFlowDebounceRef.current}
+                onWindChange={(dir) => {
+                  setWindDirection(dir);
+                  setWindLastUpdated(new Date());
+                }}
+              />
 
               {/* ========== TERRAIN STRUCTURE / DEER MOVEMENT PANEL ========== */}
               {(() => {
@@ -6906,29 +6847,7 @@ function DeerIntelContent() {
               )}
 
               {/* ========== TERRAIN WORK MODE NOTICE ========== */}
-              {TERRAIN_WORK_MODE && (
-                <div className="p-3 border-b border-amber-700/30 bg-amber-900/20">
-                  <div className="flex items-start gap-2 text-xs text-amber-400/90">
-                    <Mountain className="h-4 w-4 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-medium">Terrain Work Mode</p>
-                      <p className="text-amber-400/70 mt-1">
-                        Verifying terrain anatomy. Showing physical structure only — deer interpretation layers disabled.
-                      </p>
-                      <div className="mt-2 space-y-1 text-[10px] text-amber-400/60">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-green-500/60" />
-                          <span>Backbone, Draws, Saddles, Flow</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-stone-600" />
-                          <span>Corridors, Stands, Alignment (paused)</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {TERRAIN_WORK_MODE && <TerrainWorkModeNotice />}
 
               {/* Other Layers */}
               <div className="p-3 border-b border-white/10">
@@ -6963,118 +6882,21 @@ function DeerIntelContent() {
 
               {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
               {!TERRAIN_WORK_MODE && (
-              <div className="border-b border-white/10">
-                {/* Header - Always visible, NO auto-expand */}
-                {(() => {
-                  // Check if top two stands are within ≤3 pts (comparable)
-                  const isComparable = alignedStands.length >= 2 && 
-                    Math.abs(alignedStands[0].alignment.score - alignedStands[1].alignment.score) <= 3;
-                  // When comparable: "Comparable Alignment Today" - removes "Most Aligned" entirely
-                  const headerTitle = isComparable ? 'Comparable Alignment Today' : 'Stand Alignment';
-                  // Collapsed summary: just show the top stand name (no "Most Aligned" or rankings)
-                  const collapsedSummary = alignedStands.length > 0 
-                    ? alignedStands[0].name
-                    : 'Stand Alignment';
-                  
-                  return (
-                    <button
-                      onClick={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
-                      className="w-full p-3 flex items-center justify-between hover:bg-white/5 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Target className="h-4 w-4 text-stone-400" />
-                        <span className="font-medium text-white text-sm">
-                          {alignmentPanelExpanded ? headerTitle : collapsedSummary}
-                        </span>
-                      </div>
-                      <ChevronRight 
-                        className={`h-4 w-4 text-white/50 transition-transform duration-200 ${alignmentPanelExpanded ? 'rotate-90' : ''}`} 
-                      />
-                    </button>
-                  );
-                })()}
-
-                {/* Expanded Content - Top 3 Stands (Compact Tiles V2 - Equal Typography) */}
-                {alignmentPanelExpanded && (
-                  <div className="px-2 pb-2 space-y-1">
-                    {alignedStands.slice(0, 3).map((stand) => {
-                      const isHighlighted = highlightedStandRank === stand.rank;
-                      const isExpanded = selectedStand === stand.rank;
-                      
-                      // 3 tiers only - earth-tone accent colors (left bar)
-                      // Open Ground maps to Field Stone for display
-                      const tierLabel = stand.alignment.label === 'Open Ground' ? 'Field Stone' : stand.alignment.label;
-                      const accentColors: Record<string, string> = {
-                        'Deep Moss': '#4a7c59',      // muted forest green
-                        'Weathered Oak': '#8b7355',  // warm brown
-                        'Field Stone': '#708090',    // slate gray
-                      };
-                      const accentColor = accentColors[tierLabel] || '#708090';
-
-                      return (
-                        <div
-                          key={stand.rank}
-                          className={`
-                            relative rounded-lg overflow-hidden transition-colors
-                            ${isHighlighted ? 'bg-stone-800/60' : 'bg-stone-900/40 hover:bg-stone-800/40'}
-                          `}
-                        >
-                          {/* Thin left accent bar */}
-                          <div 
-                            className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
-                            style={{ background: accentColor }}
-                          />
-                          
-                          {/* Main card content - stand NAME only (no numbering) */}
-                          <button
-                            onClick={() => {
-                              handleUserInteraction();
-                              setHighlightedStandRank(stand.rank);
-                              // Toggle inline expand instead of popup
-                              setSelectedStand(selectedStand === stand.rank ? null : stand.rank);
-                              mapRef.current?.flyTo({ center: stand.coords, zoom: 16, duration: 800 });
-                            }}
-                            className="w-full pl-3 pr-2 py-2 text-left"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1 min-w-0">
-                                {/* Stand name - equal typography, no "best" styling */}
-                                <span className="text-white text-sm font-medium truncate block">{stand.name}</span>
-                                {/* Tier label - equal styling across all tiers */}
-                                <span className="text-stone-500 text-xs">{tierLabel}</span>
-                              </div>
-                              {/* Score - small, understated, monospace */}
-                              <span className="text-stone-600 text-[11px] font-mono ml-2">{stand.alignment.score}</span>
-                            </div>
-                          </button>
-                          
-                          {/* Inline expanded details (no popup) */}
-                          {isExpanded && (
-                            <div className="pl-3 pr-2 pb-2 pt-1 border-t border-white/5 text-xs text-stone-400 space-y-1">
-                              <div className="flex justify-between">
-                                <span>Face:</span>
-                                <span className="text-white">{stand.props.windOk[0] || 'N'}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Intrusion:</span>
-                                <span className="text-white capitalize">{stand.props.approachRisk}</span>
-                              </div>
-                              {stand.props.distToCorridorMeters > 0 && (
-                                <div className="flex justify-between">
-                                  <span>To corridor:</span>
-                                  <span className="text-white">{stand.props.distToCorridorMeters}m</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              )}
-              {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
+               <StandAlignmentPanel
+                 alignedStands={alignedStands}
+                 highlightedStandRank={highlightedStandRank}
+                 selectedStand={selectedStand}
+                 expanded={alignmentPanelExpanded}
+                 onToggleExpanded={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
+                 onStandClick={(stand) => {
+                   handleUserInteraction();
+                   setHighlightedStandRank(stand.rank);
+                   setSelectedStand(selectedStand === stand.rank ? null : stand.rank);
+                   mapRef.current?.flyTo({ center: stand.coords, zoom: 16, duration: 800 });
+                 }}
+               />
+               )}
+               {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
 
               {/* ========== PARCEL-HUNT FILE DOWNLOAD ========== */}
               <div className="p-3 border-t border-white/10">
