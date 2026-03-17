@@ -4465,7 +4465,10 @@ function DeerIntelContent() {
       // (e.g. when side panels collapse or expand)
       let lastWidth = container.getBoundingClientRect().width;
       resizeObserver = new ResizeObserver((entries) => {
-        const newWidth = entries[0]?.contentRect?.width ?? 0;
+        if (!entries || entries.length === 0) return;
+        const rect = entries[0].contentRect;
+        if (!rect) return;
+        const newWidth = rect.width;
         if (mapRef.current === map && Math.abs(newWidth - lastWidth) > 10) {
           lastWidth = newWidth;
           map.resize();
