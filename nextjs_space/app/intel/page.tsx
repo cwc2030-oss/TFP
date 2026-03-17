@@ -4601,6 +4601,10 @@ function DeerIntelContent() {
   const handleQaParcelLookup = useCallback(async (clickLng: number, clickLat: number) => {
     if (qaParcelLoading) return;
     
+    // Clear previous overlays and parcel before loading new one
+    clearAllOverlaySources();
+    setParcelPolygon(null);
+    
     setQaParcelLoading(true);
     setQaParcelError(null);
     setQaParcel(null);
@@ -4733,7 +4737,7 @@ function DeerIntelContent() {
     } finally {
       setQaParcelLoading(false);
     }
-  }, [qaParcelLoading, geometryDebugMode]);
+  }, [qaParcelLoading, geometryDebugMode, clearAllOverlaySources]);
 
   const handleQaParcelAnalyze = useCallback(async () => {
     if (!qaParcel || qaParcelAnalyzing) return;
