@@ -4513,6 +4513,13 @@ function DeerIntelContent() {
       cancelAnimationFrame(flowAnimationRef.current);
     }
     
+    // Pause animation during zoom to avoid repaint contention with tile loading
+    let isZooming = false;
+    const onZoomStart = () => { isZooming = true; };
+    const onZoomEnd = () => { isZooming = false; };
+    map.on('zoomstart', onZoomStart);
+    map.on('zoomend', onZoomEnd);
+    
     // v3.8.3 — Animation parameters: minimal repaint (1 paint call/frame)
     // ONLY animates dash pattern on primary flow lines.
     // Glow opacity is now STATIC — eliminated the second setPaintProperty call
@@ -4526,6 +4533,10 @@ function DeerIntelContent() {
     const animateFlow = (currentTime: number) => {
       // Throttle to ~10fps — even fewer repaints, still smooth for slow dash drift
       if (currentTime - lastTime < 100) {
+        flowAnimationRef.current = requestAnimationFrame(animateFlow);
+        return;
+      }
+      if (isZooming) {
         flowAnimationRef.current = requestAnimationFrame(animateFlow);
         return;
       }
@@ -4562,6 +4573,8 @@ function DeerIntelContent() {
     console.log('[MAP] v3.8.3 flow animation started (1 paint call/frame, ~10fps)');
     
     return () => {
+      map.off('zoomstart', onZoomStart);
+      map.off('zoomend', onZoomEnd);
       if (flowAnimationRef.current !== null) {
         cancelAnimationFrame(flowAnimationRef.current);
         flowAnimationRef.current = null;
