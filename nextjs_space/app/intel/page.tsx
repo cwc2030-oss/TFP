@@ -10,7 +10,7 @@ import {
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
-  Unlock, Sparkles, Settings, Download, FileText
+  Unlock, Sparkles, Settings, Download, FileText, Grid3X3
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -3981,15 +3981,16 @@ function DeerIntelContent() {
               'line-dasharray': [4, 2],
             },
           });
-          // Hover highlight (thicker outline)
+          // Hover highlight layer (toggled via layout visibility by mousemove handler)
           map.addLayer({
             id: 'tfp-adjacent-parcels-hover',
             type: 'line',
             source: 'tfp-adjacent-parcels',
+            layout: { visibility: 'none' },
             paint: {
               'line-color': '#60a5fa', // blue-400
               'line-width': 2.5,
-              'line-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.8, 0],
+              'line-opacity': 0.8,
             },
           });
           console.log('[MAP] Adjacent parcels source + layers created');
@@ -4399,7 +4400,6 @@ function DeerIntelContent() {
         console.log('[MAP] Edge intelligence click handlers registered');
 
         // ========== ADJACENT PARCELS CLICK + HOVER HANDLERS ==========
-        let hoveredAdjacentId: string | number | null = null;
         map.on('click', 'tfp-adjacent-parcels-fill', (e) => {
           if (!e.features || !e.features[0]) return;
           const props = e.features[0].properties || {};
@@ -4419,23 +4419,14 @@ function DeerIntelContent() {
         });
         map.on('mouseenter', 'tfp-adjacent-parcels-fill', () => {
           map.getCanvas().style.cursor = 'pointer';
+          if (map.getLayer('tfp-adjacent-parcels-hover')) {
+            map.setLayoutProperty('tfp-adjacent-parcels-hover', 'visibility', 'visible');
+          }
         });
         map.on('mouseleave', 'tfp-adjacent-parcels-fill', () => {
           map.getCanvas().style.cursor = '';
-          if (hoveredAdjacentId !== null) {
-            map.setFeatureState({ source: 'tfp-adjacent-parcels', id: hoveredAdjacentId }, { hover: false });
-            hoveredAdjacentId = null;
-          }
-        });
-        map.on('mousemove', 'tfp-adjacent-parcels-fill', (e) => {
-          if (e.features && e.features[0]) {
-            if (hoveredAdjacentId !== null) {
-              map.setFeatureState({ source: 'tfp-adjacent-parcels', id: hoveredAdjacentId }, { hover: false });
-            }
-            hoveredAdjacentId = e.features[0].id ?? null;
-            if (hoveredAdjacentId !== null) {
-              map.setFeatureState({ source: 'tfp-adjacent-parcels', id: hoveredAdjacentId }, { hover: true });
-            }
+          if (map.getLayer('tfp-adjacent-parcels-hover')) {
+            map.setLayoutProperty('tfp-adjacent-parcels-hover', 'visibility', 'none');
           }
         });
 
