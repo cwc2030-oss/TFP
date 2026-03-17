@@ -47,7 +47,7 @@ import { buildTerrainRaster, primeStandSitesToGeoJSON } from '@/lib/terrain-rast
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
-import OpportunityZoneTooltip from '@/components/terrain/opportunity-zone-tooltip';
+// OpportunityZoneTooltip removed — convergence IS opportunity
 import TerrainReasonsPanel, { 
   extractStandReasons, 
   extractCorridorReasons, 
@@ -300,7 +300,7 @@ const LAYER_COLORS = {
   // v3.8.1 — Directional flow emphasis
   flowDirectionChevron: '#14b8a6', // Teal-500: directional chevrons along flow
   standEmphasisGlow: '#2dd4bf',    // Teal-400: subtle glow bias toward top stand
-  flowOpportunity: '#fbbf24',     // Amber-400: opportunity zone markers (gold)
+  // flowOpportunity removed — convergence IS opportunity (use flowConvergence instead)
   // v3.6.0 — Bedding Probability colors (muted earthy/plum tones)
   beddingProbability: '#7c3aed', // Violet-600: bedding zone fill
   beddingProbabilityGlow: '#a855f7', // Purple-500: bedding zone glow/halo
@@ -925,8 +925,7 @@ function DeerIntelContent() {
     pressureHeatmap: true,  // PRIMARY: Terrain pressure heat map (the main visual)
     flowPrimary: true,      // Primary flow corridors (validates heat map)
     flowSecondary: true,    // Secondary feeder lines (terrain-justified only)
-    convergenceZones: true, // Convergence zone markers
-    opportunityZones: true, // Opportunity zone markers
+    convergenceZones: true, // Convergence zone markers (convergence IS opportunity)
   });
   
   // v3.6.0 — Terrain Reasons toggle (shows explanations when clicking features)
@@ -1029,13 +1028,13 @@ function DeerIntelContent() {
     flow_primary: GeoJSON.FeatureCollection;
     flow_secondary: GeoJSON.FeatureCollection;
     convergence_zones: GeoJSON.FeatureCollection;
-    opportunity_zones: GeoJSON.FeatureCollection;
+    opportunity_zones?: GeoJSON.FeatureCollection; // kept for API compat, not rendered
     isSynthetic: boolean;
     metadata?: {
       flow_count_primary: number;
       flow_count_secondary: number;
       convergence_count: number;
-      opportunity_count: number;
+      opportunity_count?: number; // kept for API compat
       total_flow_length_m: number;
       mode?: string;
       dem_source?: string;
@@ -1050,12 +1049,12 @@ function DeerIntelContent() {
     flow_primary: GeoJSON.FeatureCollection;
     flow_secondary: GeoJSON.FeatureCollection;
     convergence_zones: GeoJSON.FeatureCollection;
-    opportunity_zones: GeoJSON.FeatureCollection;
+    opportunity_zones?: GeoJSON.FeatureCollection; // kept for API compat
     metadata?: {
       flow_count_primary: number;
       flow_count_secondary: number;
       convergence_count: number;
-      opportunity_count: number;
+      opportunity_count?: number;
       mode?: string;
     };
   } | null>(null);
@@ -1070,9 +1069,7 @@ function DeerIntelContent() {
   const [flowSegmentExplainLoading, setFlowSegmentExplainLoading] = useState(false);
   const [flowSegmentClickPosition, setFlowSegmentClickPosition] = useState<{ x: number; y: number } | null>(null);
   
-  // Prime Stand Site Tooltip State
-  const [selectedOpportunityZone, setSelectedOpportunityZone] = useState<OpportunityZoneProperties | null>(null);
-  const [opportunityZonePosition, setOpportunityZonePosition] = useState<{ x: number; y: number } | null>(null);
+  // (Opportunity tooltip removed — convergence IS opportunity)
 
   // Terrain Story State (structural narrative)
   const [terrainStory, setTerrainStory] = useState<TerrainStorySummary | null>(null);
@@ -1359,7 +1356,7 @@ function DeerIntelContent() {
       'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
       'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
       'tfp-pressure-heatmap',
-      'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-convergence', 'tfp-flow-opportunity',
+      'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-convergence',
       'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
       'tfp-huntability-corridors', 'tfp-huntability-convergence',
       'tfp-bedding-probability',
@@ -2252,14 +2249,13 @@ function DeerIntelContent() {
         });
       }
       
-      // Get convergence/opportunity zone counts
+      // Get convergence zone count (convergence IS opportunity)
       const convergenceCount = terrainFlowData.convergence_zones?.features?.length || 0;
-      const opportunityCount = terrainFlowData.opportunity_zones?.features?.length || 0;
       
-      // Get max intensity from opportunity zones
+      // Get max intensity from convergence zones
       let maxOverlapIntensity = 0;
-      if (terrainFlowData.opportunity_zones?.features) {
-        terrainFlowData.opportunity_zones.features.forEach((feature: any) => {
+      if (terrainFlowData.convergence_zones?.features) {
+        terrainFlowData.convergence_zones.features.forEach((feature: any) => {
           const score = feature.properties?.score ?? feature.properties?.intensity ?? 0;
           if (score > maxOverlapIntensity) maxOverlapIntensity = score;
         });
@@ -2288,7 +2284,7 @@ function DeerIntelContent() {
       // Compute broker score
       const input: BrokerScoreInput = {
         flowSegments,
-        convergenceZoneCount: Math.max(convergenceCount, opportunityCount),
+        convergenceZoneCount: convergenceCount,
         maxOverlapIntensity,
         ridgeSupport,
         saddleSupport,
@@ -2367,7 +2363,6 @@ function DeerIntelContent() {
       }
 
       const heatmapSource = map.getSource('tfp-pressure-heatmap') as mapboxgl.GeoJSONSource;
-      const opportunitySource = map.getSource('tfp-flow-opportunity') as mapboxgl.GeoJSONSource;
 
       // Try raster-based approach if we have parcel coords
       if (parcelCoordsForGrid && parcelCoordsForGrid.length >= 3) {
@@ -2383,12 +2378,6 @@ function DeerIntelContent() {
           // Update heat map from raster surface
           if (heatmapSource) {
             heatmapSource.setData(rasterResult.heatPoints);
-          }
-
-          // Update Prime Stand Sites from raster local maxima
-          if (opportunitySource) {
-            const oppGeoJSON = primeStandSitesToGeoJSON(rasterResult.primeStandSites);
-            opportunitySource.setData(oppGeoJSON);
           }
 
           console.log('[TerrainRaster] Built pressure surface:', {
@@ -2411,16 +2400,6 @@ function DeerIntelContent() {
             });
             heatmapSource.setData(heatMapData);
           }
-          if (opportunitySource) {
-            const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
-              beddingPolygons: layers?.beddingPolygons || undefined,
-              funnels: layers?.funnels || undefined,
-              ridgeSpineData: ridgeSpineData || undefined,
-              season,
-              convergenceMode: 'light',
-            });
-            opportunitySource.setData(rescoredOpp);
-          }
         }
       } else {
         // No parcel coords — use legacy feature-based approach
@@ -2435,16 +2414,6 @@ function DeerIntelContent() {
             focusMode: pressureFocus,
           });
           heatmapSource.setData(heatMapData);
-        }
-        if (opportunitySource) {
-          const rescoredOpp = rescoreStandSites(flowData?.opportunity_zones, {
-            beddingPolygons: layers?.beddingPolygons || undefined,
-            funnels: layers?.funnels || undefined,
-            ridgeSpineData: ridgeSpineData || undefined,
-            season,
-            convergenceMode: 'light',
-          });
-          opportunitySource.setData(rescoredOpp);
         }
       }
 
@@ -2576,13 +2545,6 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-flow-convergence-pulse')) {
         map.setLayoutProperty('tfp-flow-convergence-pulse', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
       }
-      if (map.getLayer('tfp-flow-opportunity')) {
-        map.setLayoutProperty('tfp-flow-opportunity', 'visibility', flowVisibility.opportunityZones ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-flow-opportunity-glow')) {
-        map.setLayoutProperty('tfp-flow-opportunity-glow', 'visibility', flowVisibility.opportunityZones ? 'visible' : 'none');
-      }
-      
       // v3.6.0: Bedding Probability visibility
       if (map.getLayer('tfp-bedding-probability-glow')) {
         map.setLayoutProperty('tfp-bedding-probability-glow', 'visibility', showBeddingProbability ? 'visible' : 'none');
@@ -2632,22 +2594,6 @@ function DeerIntelContent() {
         // Opacity: reduce when ridge spines are visible so skeleton shows through
         const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', baseOpacity);
-      }
-
-      // Opportunity zones: hide weaker ones in focused mode
-      if (map.getLayer('tfp-flow-opportunity')) {
-        if (fp.oppZoneMaxCount < 3) {
-          // Filter to only the highest-scoring zone(s)
-          map.setFilter('tfp-flow-opportunity', ['>=', ['get', 'score'], 0.5]);
-          if (map.getLayer('tfp-flow-opportunity-glow')) {
-            map.setFilter('tfp-flow-opportunity-glow', ['>=', ['get', 'score'], 0.5]);
-          }
-        } else {
-          map.setFilter('tfp-flow-opportunity', null);
-          if (map.getLayer('tfp-flow-opportunity-glow')) {
-            map.setFilter('tfp-flow-opportunity-glow', null);
-          }
-        }
       }
 
       console.log('[PressureFocus]', pressureFocus, fp, 'ridgeSpines:', visibility.ridgeSpines);
@@ -3479,13 +3425,13 @@ function DeerIntelContent() {
         // Convergence zones: where flows overlap or pinch
         if (!map.getSource('tfp-flow-convergence')) {
           map.addSource('tfp-flow-convergence', { type: 'geojson', data: EMPTY_FC });
-          // v3.8.2 — Static outer halo (precise, no animation/breathing)
+          // v3.8.2 — Static outer halo (precise, capped at 25px)
           map.addLayer({
             id: 'tfp-flow-convergence-pulse',
             type: 'circle',
             source: 'tfp-flow-convergence',
             paint: {
-              'circle-radius': ['*', ['get', 'radiusM'], 0.6],
+              'circle-radius': ['min', ['*', ['get', 'radiusM'], 0.3], 25],
               'circle-color': LAYER_COLORS.flowConvergence,
               'circle-opacity': 0.15,
               'circle-blur': 0.5,
@@ -3507,36 +3453,7 @@ function DeerIntelContent() {
           });
         }
         
-        // Opportunity zones: high-value strategic locations
-        if (!map.getSource('tfp-flow-opportunity')) {
-          map.addSource('tfp-flow-opportunity', { type: 'geojson', data: EMPTY_FC });
-          // Outer glow
-          map.addLayer({
-            id: 'tfp-flow-opportunity-glow',
-            type: 'circle',
-            source: 'tfp-flow-opportunity',
-            paint: {
-              'circle-radius': 18,
-              'circle-color': LAYER_COLORS.flowOpportunity,
-              'circle-opacity': 0.25,
-              'circle-blur': 1,
-            },
-          });
-          // Inner star marker
-          map.addLayer({
-            id: 'tfp-flow-opportunity',
-            type: 'circle',
-            source: 'tfp-flow-opportunity',
-            paint: {
-              'circle-radius': 10,
-              'circle-color': LAYER_COLORS.flowOpportunity,
-              'circle-opacity': 0.90,
-              'circle-stroke-color': '#fff',
-              'circle-stroke-width': 2.5,
-              'circle-stroke-opacity': 0.95,
-            },
-          });
-        }
+        // (Opportunity layers removed — convergence IS opportunity)
         
         // ========== v3.8.1/v3.8.2 — TOP-STAND ATTENTION BIAS ==========
         // Subtle STATIC radial glow near the #1 wind-aligned stand ("Today's Sit")
@@ -4002,11 +3919,9 @@ function DeerIntelContent() {
           'tfp-flow-primary-glow',      // Animated glow below main line
           'tfp-flow-primary',
           'tfp-flow-direction-chevrons', // v3.8.1 — directional chevrons along flow
-          // Convergence & opportunity (top)
+          // Convergence (top — convergence IS opportunity)
           'tfp-flow-convergence-pulse',
           'tfp-flow-convergence',
-          'tfp-flow-opportunity-glow',
-          'tfp-flow-opportunity',
           'tfp-huntability-convergence-glow',
           'tfp-huntability-convergence',
         ];
@@ -4364,32 +4279,9 @@ function DeerIntelContent() {
           }));
         };
         
-        // Opportunity zone click - triggers tooltip
-        const handleOpportunityClick = (e: mapboxgl.MapLayerMouseEvent) => {
-          if (!e.features || !e.features[0]) return;
-          
-          const props = e.features[0].properties || {};
-          
-          window.dispatchEvent(new CustomEvent('tfp-opportunity-click', {
-            detail: {
-              id: props.id,
-              score: props.score || 0.5,
-              flowIntensity: props.flowIntensity || 0.3,
-              convergenceBonus: props.convergenceBonus || 0.2,
-              benchBonus: props.benchBonus || 0.15,
-              saddleBonus: props.saddleBonus || 0.1,
-              radiusM: props.radiusM || 50,
-              screenX: e.point.x,
-              screenY: e.point.y,
-            }
-          }));
-        };
-        
         // Register flow click handlers
         map.on('click', 'tfp-flow-primary', (e) => handleFlowSegmentClick(e, 'primary'));
         map.on('click', 'tfp-flow-secondary', (e) => handleFlowSegmentClick(e, 'secondary'));
-        map.on('click', 'tfp-flow-opportunity', handleOpportunityClick);
-        map.on('click', 'tfp-flow-opportunity-glow', handleOpportunityClick);
         
         // v3.6.1: Bedding probability click handler (for terrain reasons)
         const handleBeddingClick = (e: mapboxgl.MapLayerMouseEvent) => {
@@ -4420,7 +4312,7 @@ function DeerIntelContent() {
         map.on('click', 'tfp-bedding-probability-glow', handleBeddingClick);
         
         // Cursor changes for clickable layers
-        const flowLayers = ['tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-opportunity', 'tfp-flow-opportunity-glow', 'tfp-bedding-probability-fill', 'tfp-bedding-probability-glow'];
+        const flowLayers = ['tfp-flow-primary', 'tfp-flow-secondary', 'tfp-bedding-probability-fill', 'tfp-bedding-probability-glow'];
         flowLayers.forEach(layerId => {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
           map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -4986,7 +4878,7 @@ function DeerIntelContent() {
       // Don't trigger if clicking on existing features
       const features = map.queryRenderedFeatures(e.point, {
         layers: [
-          'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-opportunity',
+          'tfp-flow-primary', 'tfp-flow-secondary',
           'tfp-bedding-fill', 'tfp-funnels-lines-draws', 'tfp-funnels-polys-fill'
         ].filter(l => map.getLayer(l))
       });
@@ -5091,11 +4983,9 @@ function DeerIntelContent() {
     };
     
     window.addEventListener('tfp-flow-segment-click', handleFlowSegmentClick);
-    window.addEventListener('tfp-opportunity-click', handleOpportunityClick);
     
     return () => {
       window.removeEventListener('tfp-flow-segment-click', handleFlowSegmentClick);
-      window.removeEventListener('tfp-opportunity-click', handleOpportunityClick);
     };
   }, []);
 
@@ -5108,23 +4998,6 @@ function DeerIntelContent() {
       setTerrainReasonPosition(null);
       return;
     }
-    
-    // Handle opportunity zone clicks for terrain reasons
-    const handleOpportunityReasons = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      const reasons = extractStandReasons(
-        {
-          score: detail.score,
-          flowIntensity: detail.flowIntensity,
-          convergenceBonus: detail.convergenceBonus,
-          benchBonus: detail.benchBonus,
-          saddleBonus: detail.saddleBonus,
-        },
-        { lng: 0, lat: 0 } // Position from event not available directly
-      );
-      setTerrainReasonData(reasons);
-      setTerrainReasonPosition({ x: detail.screenX, y: detail.screenY });
-    };
     
     // Handle corridor clicks for terrain reasons
     const handleCorridorReasons = (e: Event) => {
@@ -5166,12 +5039,10 @@ function DeerIntelContent() {
       setTerrainReasonPosition({ x: detail.screenX, y: detail.screenY });
     };
     
-    window.addEventListener('tfp-opportunity-click', handleOpportunityReasons);
     window.addEventListener('tfp-flow-segment-click', handleCorridorReasons);
     window.addEventListener('tfp-bedding-click', handleBeddingReasons);
     
     return () => {
-      window.removeEventListener('tfp-opportunity-click', handleOpportunityReasons);
       window.removeEventListener('tfp-flow-segment-click', handleCorridorReasons);
       window.removeEventListener('tfp-bedding-click', handleBeddingReasons);
     };
@@ -5907,10 +5778,6 @@ function DeerIntelContent() {
                     <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelDraw }} />
                     <span className="text-white/80">Draw</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowOpportunity }} />
-                    <span className="text-amber-300">Opportunity</span>
-                  </div>
                 </div>
               </div>
 
@@ -6539,29 +6406,6 @@ function DeerIntelContent() {
                     );
                   })()}
                   
-                  {/* Prime Stand Sites Toggle */}
-                  {(() => {
-                    const opportunityCount = terrainFlowData?.metadata?.opportunity_count || 0;
-                    const hasData = opportunityCount > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setFlowVisibility(v => ({ ...v, opportunityZones: !v.opportunityZones }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          flowVisibility.opportunityZones ? 'bg-amber-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowOpportunity, opacity: flowVisibility.opportunityZones ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.opportunityZones ? 'text-white' : 'text-stone-500'}`}>Prime Stand Sites</span>
-                        {hasData && (
-                          <span className="text-[9px] text-amber-300 px-1.5 py-0.5 bg-amber-800/40 rounded">
-                            {opportunityCount}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
-                  
                   {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
                   {(() => {
                     const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
@@ -6618,15 +6462,14 @@ function DeerIntelContent() {
                 </div>
                 
                 {/* Expanded details when any flow toggle is on */}
-                {(flowVisibility.flowPrimary || flowVisibility.flowSecondary || flowVisibility.convergenceZones || flowVisibility.opportunityZones) && (
+                {(flowVisibility.flowPrimary || flowVisibility.flowSecondary || flowVisibility.convergenceZones) && (
                   <div className="mt-2 space-y-2 px-1">
                     {(() => {
                       const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
                       const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
                       const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
-                      const opportunityCount = terrainFlowData?.metadata?.opportunity_count || 0;
                       const totalFlowLength = terrainFlowData?.metadata?.total_flow_length_m || 0;
-                      const totalFeatures = primaryCount + secondaryCount + convergenceCount + opportunityCount;
+                      const totalFeatures = primaryCount + secondaryCount + convergenceCount;
                       const isSynthetic = terrainFlowData?.isSynthetic || false;
                       const mode = (terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode;
                       
@@ -6671,7 +6514,7 @@ function DeerIntelContent() {
                                   flow_count_primary: primaryCount,
                                   flow_count_secondary: secondaryCount,
                                   convergence_count: convergenceCount,
-                                  opportunity_count: opportunityCount,
+                                  opportunity_count: 0, // merged into convergence
                                   total_flow_length_m: totalFlowLength,
                                   coverage_pct: 0,
                                 },

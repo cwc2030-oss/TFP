@@ -149,8 +149,7 @@ export interface TerrainFlowVisibility {
   pressureHeatmap: boolean;   // PRIMARY: Terrain pressure heat map
   flowPrimary: boolean;       // Secondary: Primary flow lines (supporting evidence)
   flowSecondary: boolean;     // Secondary: Secondary flow lines
-  convergenceZones: boolean;  // Convergence zone markers
-  opportunityZones: boolean;  // Opportunity zone markers
+  convergenceZones: boolean;  // Convergence zone markers (convergence IS opportunity)
 }
 
 // ========== Comparison Mode ==========

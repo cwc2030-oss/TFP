@@ -95,7 +95,7 @@ export const SPATIAL_SCALING_BASE = {
   convergence_base_radius: 30,       // Base convergence zone display radius (m)
   opportunity_radius: 25,            // Base opportunity zone radius (m)
   gaussian_smooth_cells: 3,          // Base smoothing kernel radius (cells)
-  max_convergence_zones: 5,          // Base max convergence zones
+  max_convergence_zones: 3,          // Base max convergence zones (convergence IS opportunity)
   max_opportunity_zones: 3,          // Base max opportunity zones
 };
 
