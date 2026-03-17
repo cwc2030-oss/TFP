@@ -2464,7 +2464,7 @@ function DeerIntelContent() {
     return () => {
       if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
     };
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, season, pressureFocus, parcelPolygon, ridgeSpineData]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, pressureFocus, parcelPolygon, ridgeSpineData]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
