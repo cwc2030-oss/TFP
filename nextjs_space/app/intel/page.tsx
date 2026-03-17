@@ -5321,7 +5321,8 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map || !alignedStands.length) return;
 
-    cleanupMarkers();
+    const oldMarkers = [...markersRef.current];
+    markersRef.current = [];
 
     // v3.8: Use wind-sorted alignedStands — top 2 by current alignment score
     const topTwo = alignedStands.slice(0, 2);
@@ -5465,6 +5466,7 @@ function DeerIntelContent() {
       };
 
       markersRef.current.push(marker);
+      oldMarkers.forEach(m => m.remove());
     });
   };
 
