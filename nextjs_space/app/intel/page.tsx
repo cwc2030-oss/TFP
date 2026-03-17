@@ -4505,100 +4505,39 @@ function DeerIntelContent() {
     };
   }, []); // Empty deps - only mount once
   
-  // ========== v3.5.1 — ANIMATED FLOW CORRIDOR EFFECT ==========
-  // Slow, calm dash animation along primary travel corridors
-  // Animation brightens slightly through convergence nodes
+  // ========== v3.9 — ANIMATED FLOW CORRIDOR EFFECT (setInterval) ==========
+  // Lightweight dash animation using Mapbox's own line-dasharray transition
+  // No requestAnimationFrame — avoids lockup seen with rAF after ~60s
   useEffect(() => {
-    // Temporarily disabled — animation loop causing lockup after ~60s
-    // eslint-disable-next-line no-constant-condition
-    if (true as boolean) return;
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
 
-    // Pause animation when browser tab is not visible
-    const onVisibilityChange = () => {
-      if (document.hidden && flowAnimationRef.current !== null) {
-        cancelAnimationFrame(flowAnimationRef.current);
-        flowAnimationRef.current = null;
-      } else if (!document.hidden) {
-        flowAnimationRef.current = requestAnimationFrame(animateFlow);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    
-    // Cancel any existing animation
-    if (flowAnimationRef.current !== null) {
-      cancelAnimationFrame(flowAnimationRef.current);
-    }
-    
-    // Pause animation during zoom to avoid repaint contention with tile loading
-    let isZooming = false;
-    const onZoomStart = () => { isZooming = true; };
-    const onZoomEnd = () => { isZooming = false; };
-    map.on('zoomstart', onZoomStart);
-    map.on('zoomend', onZoomEnd);
-    
-    // v3.8.3 — Animation parameters: minimal repaint (1 paint call/frame)
-    // ONLY animates dash pattern on primary flow lines.
-    // Glow opacity is now STATIC — eliminated the second setPaintProperty call
-    // that was causing Mapbox repaint cascades affecting parcel/panel layers.
-    const ANIMATION_DURATION = 4000; // ms for full dash cycle (slower = calmer)
-    const DASH_PATTERN = [6, 4]; // Matches layer definition
-    const TOTAL_DASH_LENGTH = DASH_PATTERN[0] + DASH_PATTERN[1]; // 10
-    
-    let lastTime = 0;
-    
-    const animateFlow = (currentTime: number) => {
-      // Throttle to ~10fps — even fewer repaints, still smooth for slow dash drift
-      if (currentTime - lastTime < 100) {
-        flowAnimationRef.current = requestAnimationFrame(animateFlow);
+    let step = 0;
+    const steps = [
+      [6, 4], [5, 4, 1], [4, 4, 2], [3, 4, 3],
+      [2, 4, 4], [1, 4, 5], [0.5, 4, 5.5]
+    ];
+
+    const interval = setInterval(() => {
+      if (!mapRef.current || mapRef.current !== map) {
+        clearInterval(interval);
         return;
       }
-      if (isZooming) {
-        flowAnimationRef.current = requestAnimationFrame(animateFlow);
-        return;
-      }
-      lastTime = currentTime;
-      
-      // Calculate offset based on time (slow, smooth movement)
-      const phase = (currentTime % ANIMATION_DURATION) / ANIMATION_DURATION;
-      const offset = phase * TOTAL_DASH_LENGTH;
-      
-      // Update dash pattern to create movement effect
-      // Mapbox doesn't support dasharray-offset, so we shift the pattern
-      const shiftedDash = [
-        Math.max(0.5, DASH_PATTERN[0] - offset),
-        DASH_PATTERN[1],
-        Math.min(TOTAL_DASH_LENGTH - 0.5, offset),
-      ].filter(v => v > 0.1);
-      
       try {
-        if (map.getLayer('tfp-flow-primary')) {
-          // v3.8.3 — Single paint call: dash animation only (glow is static)
-          map.setPaintProperty('tfp-flow-primary', 'line-dasharray', shiftedDash);
+        if (map.getLayer('tfp-flow-primary') && !map.isMoving() && !map.isZooming()) {
+          map.setPaintProperty(
+            'tfp-flow-primary',
+            'line-dasharray',
+            steps[step % steps.length]
+          );
+          step++;
         }
-        // v3.8.3 — Glow opacity is static (set at layer creation). NO per-frame update.
-        // Convergence and stand emphasis are also static — zero per-frame churn.
-      } catch (err) {
-        // Ignore errors if layer doesn't exist
+      } catch (e) {
+        clearInterval(interval);
       }
-      
-      flowAnimationRef.current = requestAnimationFrame(animateFlow);
-    };
-    
-    // Start animation
-    flowAnimationRef.current = requestAnimationFrame(animateFlow);
-    console.log('[MAP] v3.8.3 flow animation started (1 paint call/frame, ~10fps)');
-    
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      map.off('zoomstart', onZoomStart);
-      map.off('zoomend', onZoomEnd);
-      if (flowAnimationRef.current !== null) {
-        cancelAnimationFrame(flowAnimationRef.current);
-        flowAnimationRef.current = null;
-      }
-    };
+    }, 500);
+
+    return () => clearInterval(interval);
   }, [mapReady]);
 
   // Run analysis once on mount — season/wind changes are handled by local alignment rescore

@@ -99,6 +99,8 @@ declare module 'mapbox-gl' {
     hasImage(id: string): boolean;
     addImage(id: string, image: any, options?: any): void;
     areTilesLoaded(): boolean;
+    isMoving(): boolean;
+    isZooming(): boolean;
     isStyleLoaded(): boolean;
     loaded(): boolean;
     getCenter(): LngLatLike;
