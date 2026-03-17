@@ -4463,8 +4463,11 @@ function DeerIntelContent() {
 
       // ResizeObserver — notifies Mapbox whenever the container changes size
       // (e.g. when side panels collapse or expand)
-      resizeObserver = new ResizeObserver(() => {
-        if (mapRef.current === map) {
+      let lastWidth = container.getBoundingClientRect().width;
+      resizeObserver = new ResizeObserver((entries) => {
+        const newWidth = entries[0]?.contentRect?.width ?? 0;
+        if (mapRef.current === map && Math.abs(newWidth - lastWidth) > 10) {
+          lastWidth = newWidth;
           map.resize();
         }
       });
