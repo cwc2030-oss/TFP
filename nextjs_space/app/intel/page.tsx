@@ -2695,6 +2695,9 @@ function DeerIntelContent() {
     mapboxgl.accessToken = MAPBOX_TOKEN;
     const container = mapContainerRef.current;
 
+    // Hoisted so cleanup can disconnect even though it's created inside onMapLoad
+    let resizeObserver: ResizeObserver | null = null;
+
     // v3.8.4-fix — Ensure container has non-zero dimensions before creating the map.
     // Mapbox GL caches the viewport at creation time; a 0-height container means
     // no tiles are requested and the canvas stays black forever.
@@ -4457,6 +4460,15 @@ function DeerIntelContent() {
           console.warn('[MAP] resize() @100ms failed:', e);
         }
       }, 100);
+
+      // ResizeObserver — notifies Mapbox whenever the container changes size
+      // (e.g. when side panels collapse or expand)
+      resizeObserver = new ResizeObserver(() => {
+        if (mapRef.current === map) {
+          map.resize();
+        }
+      });
+      resizeObserver.observe(container);
     };
     
     // Register load handler
@@ -4489,6 +4501,7 @@ function DeerIntelContent() {
       }
       // v3.8.4-fix3 — Let Mapbox properly release WebGL context FIRST,
       // THEN purge orphaned DOM so Strict-Mode re-mount gets a clean container.
+      resizeObserver?.disconnect();
       if (mapRef.current) {
         try { mapRef.current.remove(); } catch (e) { console.warn('[LIFECYCLE] map.remove() error:', e); }
         mapRef.current = null;
