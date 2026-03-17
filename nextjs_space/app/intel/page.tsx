@@ -2459,7 +2459,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[TerrainFlow] Error updating map sources (non-fatal):', err);
     }
-    }, 80); // end debounce setTimeout
+    }, 300); // end debounce setTimeout
 
     return () => {
       if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
