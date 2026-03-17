@@ -4465,13 +4465,18 @@ function DeerIntelContent() {
       // (e.g. when side panels collapse or expand)
       let lastWidth = container.getBoundingClientRect().width;
       resizeObserver = new ResizeObserver((entries) => {
-        if (!entries || entries.length === 0) return;
-        const rect = entries[0].contentRect;
-        if (!rect) return;
-        const newWidth = rect.width;
-        if (mapRef.current === map && Math.abs(newWidth - lastWidth) > 10) {
-          lastWidth = newWidth;
-          map.resize();
+        try {
+          if (!entries || entries.length === 0 || !mapRef.current || mapRef.current !== map) return;
+          if (!document.body.contains(container)) return;
+          const rect = entries[0].contentRect;
+          if (!rect) return;
+          const newWidth = rect.width;
+          if (Math.abs(newWidth - lastWidth) > 10) {
+            lastWidth = newWidth;
+            map.resize();
+          }
+        } catch (e) {
+          // Observer fired during teardown — safe to ignore
         }
       });
       resizeObserver.observe(container);
