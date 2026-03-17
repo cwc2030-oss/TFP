@@ -2721,6 +2721,28 @@ function DeerIntelContent() {
       }
     });
 
+    // v3.8.4 — Provide a 1×1 transparent placeholder for any missing sprite images
+    // (e.g. "us-state-missouri-2") so Mapbox doesn't break the render pipeline
+    map.on('styleimagemissing', (e: any) => {
+      const id = e?.id;
+      console.warn('[MAP] styleimagemissing:', id);
+      if (id && !map.hasImage(id)) {
+        // 1×1 transparent pixel
+        map.addImage(id, { width: 1, height: 1, data: new Uint8Array([0, 0, 0, 0]) });
+        console.log('[MAP] Registered placeholder for missing image:', id);
+      }
+    });
+
+    // v3.8.4 — Diagnostic: log style load lifecycle
+    map.on('styledata', () => {
+      console.log('[MAP DIAG] styledata event — style metadata received');
+    });
+    map.on('sourcedata', (e: any) => {
+      if (e.isSourceLoaded && e.sourceId) {
+        console.log('[MAP DIAG] sourcedata loaded:', e.sourceId);
+      }
+    });
+
     // Handler for when map is fully loaded
     const onMapLoad = () => {
       console.log('[MAP] LOAD EVENT FIRED id=' + mountId + ' map.loaded()=' + map.loaded());
@@ -4368,6 +4390,12 @@ function DeerIntelContent() {
         // Continue anyway - panels must render even if map overlays fail
       }
       
+      // v3.8.4 — Diagnostic: log layer/source count after setup
+      try {
+        const style = map.getStyle();
+        console.log('[MAP DIAG] After layer setup — sources:', Object.keys(style?.sources || {}).length, 'layers:', (style?.layers || []).length);
+      } catch (_) { /* ignore */ }
+
       // ALWAYS set map ready - even if source setup failed
       console.log('[MAP] BEFORE setMapReady(true)');
       setMapReady(true);
@@ -5584,7 +5612,8 @@ function DeerIntelContent() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
       {/* Map Container - z-0 ensures it's behind UI but visible */}
-      <div ref={mapContainerRef} className="absolute inset-0 z-0" />
+      {/* v3.8.4 — w-full h-full keeps map sized to parent even after Mapbox overrides position to relative */}
+      <div ref={mapContainerRef} className="absolute inset-0 z-0 w-full h-full" />
 
       {/* BUILD STAMP - visible debug marker (hidden in export mode) */}
       <div className={`absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg transition-opacity duration-300 ${exportMode ? 'opacity-0' : 'opacity-100'}`}>
