@@ -1374,9 +1374,17 @@ function DeerIntelContent() {
       'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
       'tfp-stand-emphasis', // v3.8.1 — top-stand attention glow
     ];
-    for (const id of ALL_TFP_SOURCES) {
-      const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
-      if (src) src.setData(EMPTY_FC);
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < ALL_TFP_SOURCES.length; i += BATCH_SIZE) {
+      const batch = ALL_TFP_SOURCES.slice(i, i + BATCH_SIZE);
+      setTimeout(() => {
+        const m = mapRef.current;
+        if (!m) return;
+        for (const id of batch) {
+          const src = m.getSource(id) as mapboxgl.GeoJSONSource | undefined;
+          if (src) src.setData(EMPTY_FC);
+        }
+      }, Math.floor(i / BATCH_SIZE) * 50);
     }
     console.log('[OVERLAY RESET] Cleared all', ALL_TFP_SOURCES.length, 'tfp-* sources');
   }, []);
