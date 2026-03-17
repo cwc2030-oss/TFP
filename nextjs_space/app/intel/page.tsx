@@ -4491,15 +4491,15 @@ function DeerIntelContent() {
         cancelAnimationFrame(flowAnimationRef.current);
         flowAnimationRef.current = null;
       }
-      // v3.8.4-fix — Purge any orphaned Mapbox DOM children BEFORE remove()
-      // so a Strict-Mode re-mount starts with a clean container
+      // v3.8.4-fix3 — Let Mapbox properly release WebGL context FIRST,
+      // THEN purge orphaned DOM so Strict-Mode re-mount gets a clean container.
+      if (mapRef.current) {
+        try { mapRef.current.remove(); } catch (e) { console.warn('[LIFECYCLE] map.remove() error:', e); }
+        mapRef.current = null;
+      }
       if (container && container.childNodes.length > 0) {
         console.log('[LIFECYCLE] Clearing', container.childNodes.length, 'orphaned children from map container');
         container.innerHTML = '';
-      }
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
       }
     };
   }, []); // Empty deps - only mount once
@@ -5622,7 +5622,7 @@ function DeerIntelContent() {
   };
 
   // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.8.4-fix2 | double-div + cleanup | 2026-03-17';
+  const BUILD_STAMP = 'v3.8.4-fix3 | webgl-context-fix | 2026-03-17';
 
   // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
   if (globalError) {
