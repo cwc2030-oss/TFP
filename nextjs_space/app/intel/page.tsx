@@ -964,6 +964,23 @@ function DeerIntelContent() {
   const [qaShowAnalytics, setQaShowAnalytics] = useState(false); // Show analytics panel
   const [qaBrokerScore, setQaBrokerScore] = useState<BrokerScoreResult | null>(null); // Broker scoring
 
+  // ========== ADJACENT PARCELS STATE ==========
+  interface AdjacentParcelInfo {
+    parcelId: string;
+    address: string;
+    owner: string;
+    acreage: number;
+    county: string;
+    state: string;
+    centroid: [number, number];
+    geometry: GeoJSON.Geometry;
+  }
+  const [adjacentParcels, setAdjacentParcels] = useState<AdjacentParcelInfo[]>([]);
+  const [adjacentParcelsLoading, setAdjacentParcelsLoading] = useState(false);
+  const [showAdjacentParcels, setShowAdjacentParcels] = useState(true);
+  const [selectedAdjacentParcel, setSelectedAdjacentParcel] = useState<AdjacentParcelInfo | null>(null);
+  const [adjacentParcelPopupPos, setAdjacentParcelPopupPos] = useState<{ x: number; y: number } | null>(null);
+
   // ========== GEOMETRY DEBUG STATE ==========
   const [geometryDebugMode, setGeometryDebugMode] = useState(false); // Toggle to show 3-boundary overlay
   const [geometryTrace, setGeometryTrace] = useState<GeometryTrace | null>(null);
@@ -2137,13 +2154,11 @@ function DeerIntelContent() {
           const primaryCount = result.data.flow_primary.features.length;
           const secondaryCount = result.data.flow_secondary.features.length;
           const convergenceCount = result.data.convergence_zones.features.length;
-          const opportunityCount = result.data.opportunity_zones.features.length;
           
           console.log('[TerrainFlow] Result:', {
             primary: primaryCount,
             secondary: secondaryCount,
             convergence: convergenceCount,
-            opportunity: opportunityCount,
             mode: result.data.metadata?.mode || 'unknown',
             buffer_m: result.data.metadata?.buffer_m || 1000,
             synthetic: result.isSynthetic,
@@ -2308,6 +2323,98 @@ function DeerIntelContent() {
       setQaBrokerScore(null);
     }
   }, [terrainFlowData, terrainFlowLoading, ridgeSpineData, qaParcel, parcelPolygon]);
+
+  // ========== FETCH ADJACENT PARCELS ==========
+  const adjacentFetchRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!parcelPolygon || !mapReady) {
+      setAdjacentParcels([]);
+      return;
+    }
+
+    // Calculate centroid from parcel polygon
+    const geom = parcelPolygon.geometry;
+    let coords: number[][] = [];
+    if (geom.type === 'Polygon') {
+      coords = geom.coordinates[0] as number[][];
+    } else if (geom.type === 'MultiPolygon') {
+      let maxLen = 0;
+      for (const poly of geom.coordinates as number[][][][]) {
+        if (poly[0] && poly[0].length > maxLen) {
+          maxLen = poly[0].length;
+          coords = poly[0];
+        }
+      }
+    }
+    if (coords.length === 0) return;
+
+    const centroidLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+    const centroidLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+    const subjectId = (parcelPolygon.properties as Record<string, unknown>)?.parcelnumb as string || '';
+
+    // Abort previous fetch
+    if (adjacentFetchRef.current) adjacentFetchRef.current.abort();
+    const controller = new AbortController();
+    adjacentFetchRef.current = controller;
+
+    setAdjacentParcelsLoading(true);
+    setSelectedAdjacentParcel(null);
+    setAdjacentParcelPopupPos(null);
+
+    fetch(`/api/parcels/adjacent?lat=${centroidLat}&lng=${centroidLng}&subjectId=${encodeURIComponent(subjectId)}&radius=500`, {
+      signal: controller.signal,
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (!controller.signal.aborted && data.success) {
+          console.log('[Adjacent] Loaded', data.parcels.length, 'adjacent parcels');
+          setAdjacentParcels(data.parcels);
+        }
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.warn('[Adjacent] Fetch error:', err.message);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAdjacentParcelsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [parcelPolygon, mapReady]);
+
+  // ========== UPDATE ADJACENT PARCELS MAP SOURCE ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const source = map.getSource('tfp-adjacent-parcels') as mapboxgl.GeoJSONSource;
+    if (!source) return;
+
+    if (!showAdjacentParcels || adjacentParcels.length === 0) {
+      source.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: adjacentParcels.map(p => ({
+        type: 'Feature' as const,
+        properties: {
+          parcelId: p.parcelId,
+          address: p.address,
+          owner: p.owner,
+          acreage: p.acreage,
+          county: p.county,
+          state: p.state,
+        },
+        geometry: p.geometry,
+      })),
+    };
+
+    source.setData(fc);
+    console.log('[Adjacent] Updated map source with', fc.features.length, 'parcels');
+  }, [adjacentParcels, showAdjacentParcels, mapReady]);
 
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
   // v3.8.4 — debounce 300ms so rapid season/wind clicks coalesce into one setData pass
@@ -3848,6 +3955,45 @@ function DeerIntelContent() {
         }
         
         console.log('[MAP] Edge intelligence sources created');
+
+        // ========== ADJACENT PARCELS SOURCE + LAYERS ==========
+        if (!map.getSource('tfp-adjacent-parcels')) {
+          map.addSource('tfp-adjacent-parcels', { type: 'geojson', data: EMPTY_FC });
+          // Semi-transparent fill
+          map.addLayer({
+            id: 'tfp-adjacent-parcels-fill',
+            type: 'fill',
+            source: 'tfp-adjacent-parcels',
+            paint: {
+              'fill-color': '#94a3b8', // slate-400
+              'fill-opacity': 0.08,
+            },
+          });
+          // Outline
+          map.addLayer({
+            id: 'tfp-adjacent-parcels-outline',
+            type: 'line',
+            source: 'tfp-adjacent-parcels',
+            paint: {
+              'line-color': '#94a3b8',
+              'line-width': 1.5,
+              'line-opacity': 0.5,
+              'line-dasharray': [4, 2],
+            },
+          });
+          // Hover highlight (thicker outline)
+          map.addLayer({
+            id: 'tfp-adjacent-parcels-hover',
+            type: 'line',
+            source: 'tfp-adjacent-parcels',
+            paint: {
+              'line-color': '#60a5fa', // blue-400
+              'line-width': 2.5,
+              'line-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.8, 0],
+            },
+          });
+          console.log('[MAP] Adjacent parcels source + layers created');
+        }
         
         overlaySourcesCreated.current = true;
         console.log('[MAP] Native Mapbox sources created successfully');
@@ -4251,7 +4397,48 @@ function DeerIntelContent() {
         map.on('click', 'tfp-edge-boundary-fill', (e) => handleEdgeClick(e, 'boundary'));
         
         console.log('[MAP] Edge intelligence click handlers registered');
-        
+
+        // ========== ADJACENT PARCELS CLICK + HOVER HANDLERS ==========
+        let hoveredAdjacentId: string | number | null = null;
+        map.on('click', 'tfp-adjacent-parcels-fill', (e) => {
+          if (!e.features || !e.features[0]) return;
+          const props = e.features[0].properties || {};
+          const detail = {
+            parcelId: props.parcelId || '',
+            address: props.address || 'Unknown',
+            owner: props.owner || 'Unknown',
+            acreage: parseFloat(props.acreage) || 0,
+            county: props.county || '',
+            state: props.state || '',
+            screenX: e.point.x,
+            screenY: e.point.y,
+            lng: e.lngLat.lng,
+            lat: e.lngLat.lat,
+          };
+          window.dispatchEvent(new CustomEvent('tfp-adjacent-parcel-click', { detail }));
+        });
+        map.on('mouseenter', 'tfp-adjacent-parcels-fill', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'tfp-adjacent-parcels-fill', () => {
+          map.getCanvas().style.cursor = '';
+          if (hoveredAdjacentId !== null) {
+            map.setFeatureState({ source: 'tfp-adjacent-parcels', id: hoveredAdjacentId }, { hover: false });
+            hoveredAdjacentId = null;
+          }
+        });
+        map.on('mousemove', 'tfp-adjacent-parcels-fill', (e) => {
+          if (e.features && e.features[0]) {
+            if (hoveredAdjacentId !== null) {
+              map.setFeatureState({ source: 'tfp-adjacent-parcels', id: hoveredAdjacentId }, { hover: false });
+            }
+            hoveredAdjacentId = e.features[0].id ?? null;
+            if (hoveredAdjacentId !== null) {
+              map.setFeatureState({ source: 'tfp-adjacent-parcels', id: hoveredAdjacentId }, { hover: true });
+            }
+          }
+        });
+
         // ========== TERRAIN FLOW CLICK HANDLERS ==========
         // Flow segment click - triggers inspector panel
         const handleFlowSegmentClick = (e: mapboxgl.MapLayerMouseEvent, tier: 'primary' | 'secondary') => {
@@ -4953,39 +5140,28 @@ function DeerIntelContent() {
       }
     };
     
-    // Opportunity zone click handler
-    const handleOpportunityClick = (e: Event) => {
-      const customEvent = e as CustomEvent<{
-        id: string;
-        score: number;
-        flowIntensity: number;
-        convergenceBonus: number;
-        benchBonus: number;
-        saddleBonus: number;
-        radiusM: number;
-        screenX: number;
-        screenY: number;
-      }>;
-      
-      const { id, score, flowIntensity, convergenceBonus, benchBonus, saddleBonus, radiusM, screenX, screenY } = customEvent.detail;
-      console.log('[OPPORTUNITY ZONE] Click event received:', { id, score });
-      
-      setOpportunityZonePosition({ x: screenX, y: screenY });
-      setSelectedOpportunityZone({
-        id,
-        score,
-        flowIntensity,
-        convergenceBonus,
-        benchBonus,
-        saddleBonus,
-        radiusM,
-      });
-    };
-    
     window.addEventListener('tfp-flow-segment-click', handleFlowSegmentClick);
+    
+    // Adjacent parcel click handler
+    const handleAdjacentParcelClick = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setSelectedAdjacentParcel({
+        parcelId: detail.parcelId,
+        address: detail.address,
+        owner: detail.owner,
+        acreage: detail.acreage,
+        county: detail.county,
+        state: detail.state,
+        centroid: [detail.lng, detail.lat],
+        geometry: { type: 'Point', coordinates: [detail.lng, detail.lat] }, // placeholder
+      });
+      setAdjacentParcelPopupPos({ x: detail.screenX, y: detail.screenY });
+    };
+    window.addEventListener('tfp-adjacent-parcel-click', handleAdjacentParcelClick);
     
     return () => {
       window.removeEventListener('tfp-flow-segment-click', handleFlowSegmentClick);
+      window.removeEventListener('tfp-adjacent-parcel-click', handleAdjacentParcelClick);
     };
   }, []);
 
@@ -5529,6 +5705,28 @@ function DeerIntelContent() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Adjacent Parcels Toggle */}
+            {adjacentParcels.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`${showAdjacentParcels 
+                  ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40' 
+                  : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+                onClick={() => {
+                  setShowAdjacentParcels(!showAdjacentParcels);
+                  if (showAdjacentParcels) {
+                    setSelectedAdjacentParcel(null);
+                    setAdjacentParcelPopupPos(null);
+                  }
+                }}
+                title={`${showAdjacentParcels ? 'Hide' : 'Show'} ${adjacentParcels.length} adjacent parcels`}
+              >
+                <Grid3X3 className="h-4 w-4 mr-1" />
+                {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
+              </Button>
+            )}
             {/* QA Parcel Lookup Toggle */}
             <Button
               size="sm"
@@ -6557,12 +6755,7 @@ function DeerIntelContent() {
                                   <span className="text-amber-400">{convergenceCount}</span>
                                 </div>
                               )}
-                              {opportunityCount > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Prime Stand Sites</span>
-                                  <span className="text-amber-300">{opportunityCount}</span>
-                                </div>
-                              )}
+
                             </div>
                             
                             {/* Click instruction - highlighted when inspect mode is on */}
@@ -6627,7 +6820,7 @@ function DeerIntelContent() {
                           flow_count_primary: terrainFlowData.flow_primary?.features?.length || 0,
                           flow_count_secondary: terrainFlowData.flow_secondary?.features?.length || 0,
                           convergence_count: terrainFlowData.convergence_zones?.features?.length || 0,
-                          opportunity_count: terrainFlowData.opportunity_zones?.features?.length || 0,
+                          opportunity_count: 0, // merged into convergence
                           total_flow_length_m: 0,
                           coverage_pct: 0,
                         },
@@ -6668,10 +6861,7 @@ function DeerIntelContent() {
                       return undefined;
                     })()}
                     isLoading={terrainFlowLoading}
-                    onHighlightOpportunity={(oppId) => {
-                      // Could highlight opportunity on map
-                      console.log('[Intel] Highlight opportunity:', oppId);
-                    }}
+                    onHighlightOpportunity={() => {}}
                   />
                 </div>
               )}
@@ -7000,17 +7190,7 @@ function DeerIntelContent() {
         />
       )}
       
-      {/* ========== OPPORTUNITY ZONE TOOLTIP ========== */}
-      {selectedOpportunityZone && opportunityZonePosition && !showTerrainReasons && (
-        <OpportunityZoneTooltip
-          properties={selectedOpportunityZone}
-          position={opportunityZonePosition}
-          onClose={() => {
-            setSelectedOpportunityZone(null);
-            setOpportunityZonePosition(null);
-          }}
-        />
-      )}
+
       
       {/* ========== v3.6.0: TERRAIN REASONS PANEL ========== */}
       {showTerrainReasons && terrainReasonData && terrainReasonPosition && (
@@ -7068,6 +7248,56 @@ function DeerIntelContent() {
           <span>#2</span>
         </div>
       </div>
+
+      {/* ========== ADJACENT PARCEL POPUP ========== */}
+      {selectedAdjacentParcel && adjacentParcelPopupPos && (
+        <div
+          className="fixed z-[9999] pointer-events-auto"
+          style={{
+            left: Math.min(adjacentParcelPopupPos.x, typeof window !== 'undefined' ? window.innerWidth - 280 : 600),
+            top: Math.max(adjacentParcelPopupPos.y - 10, 10),
+            transform: 'translateY(-100%)',
+          }}
+        >
+          <div className="bg-stone-900/95 backdrop-blur-sm border border-stone-700/60 rounded-lg shadow-xl p-3 min-w-[240px] max-w-[300px]">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-medium text-blue-400 uppercase tracking-wider">Adjacent Parcel</span>
+              <button
+                onClick={() => { setSelectedAdjacentParcel(null); setAdjacentParcelPopupPos(null); }}
+                className="text-stone-500 hover:text-white text-xs p-0.5"
+              >✕</button>
+            </div>
+            <div className="text-xs text-white/90 font-medium mb-1 leading-tight">
+              {selectedAdjacentParcel.address}
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-stone-400 mt-2">
+              <div>Owner</div>
+              <div className="text-white/80 truncate">{selectedAdjacentParcel.owner}</div>
+              <div>Acreage</div>
+              <div className="text-white/80">{selectedAdjacentParcel.acreage > 0 ? `${selectedAdjacentParcel.acreage} ac` : '\u2014'}</div>
+              {selectedAdjacentParcel.county && (
+                <>
+                  <div>County</div>
+                  <div className="text-white/80">{selectedAdjacentParcel.county}</div>
+                </>
+              )}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-stone-700/40">
+              <button
+                onClick={() => {
+                  const lat = selectedAdjacentParcel.centroid[1];
+                  const lng = selectedAdjacentParcel.centroid[0];
+                  const addr = encodeURIComponent(selectedAdjacentParcel.address);
+                  window.location.href = `/intel?lat=${lat}&lng=${lng}&address=${addr}`;
+                }}
+                className="w-full text-[10px] text-center py-1.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 hover:text-blue-300 transition-colors font-medium"
+              >
+                View Terrain Intel &rarr;
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
