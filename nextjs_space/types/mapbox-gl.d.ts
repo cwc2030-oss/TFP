@@ -48,6 +48,7 @@ declare module 'mapbox-gl' {
 
   export interface Style {
     layers?: StyleLayer[];
+    sources?: Record<string, any>;
   }
 
   // GeoJSON Source interface
@@ -94,6 +95,10 @@ declare module 'mapbox-gl' {
     fitBounds(bounds: LngLatBounds | [[number, number], [number, number]], options?: { padding?: number | { top?: number; bottom?: number; left?: number; right?: number }; duration?: number; pitch?: number; bearing?: number; maxZoom?: number; essential?: boolean }): this;
     getCanvas(): HTMLCanvasElement;
     addControl(control: any, position?: string): void;
+    resize(): void;
+    hasImage(id: string): boolean;
+    addImage(id: string, image: any, options?: any): void;
+    areTilesLoaded(): boolean;
     isStyleLoaded(): boolean;
     loaded(): boolean;
     getCenter(): LngLatLike;

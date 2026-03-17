@@ -2715,15 +2715,6 @@ function DeerIntelContent() {
     const createMap = (mId: string) => {
     let map: mapboxgl.Map;
 
-    // v3.8.4-fix — Force container dimensions before Mapbox init.
-    // Mapbox overrides position:absolute→relative, breaking CSS inset-0 sizing.
-    // Setting explicit inline dimensions ensures the map fills its parent.
-    container.style.width = '100%';
-    container.style.height = '100%';
-    container.style.position = 'absolute';
-    container.style.top = '0';
-    container.style.left = '0';
-    console.log('[MAP] Container style forced: w/h=100%, position=absolute');
     console.log('[MAP] BEFORE new mapboxgl.Map() id=' + mId + ' center=[' + lng + ',' + lat + ']');
     try {
       map = new mapboxgl.Map({
@@ -2735,11 +2726,6 @@ function DeerIntelContent() {
         bearing: 0,  // North up
       });
       console.log('[MAP] AFTER new mapboxgl.Map() id=' + mId + ' map exists=' + !!map);
-
-      // v3.8.4-fix — Mapbox overrides position to 'relative'. Force it back AFTER creation.
-      container.style.position = 'absolute';
-      container.style.top = '0';
-      container.style.left = '0';
       
       // Expose for debugging
       if (typeof window !== 'undefined') {
@@ -4505,15 +4491,15 @@ function DeerIntelContent() {
         cancelAnimationFrame(flowAnimationRef.current);
         flowAnimationRef.current = null;
       }
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-      // v3.8.4-fix — Purge any orphaned Mapbox DOM children so a Strict-Mode
-      // re-mount starts with a clean container (prevents double-canvas issues)
+      // v3.8.4-fix — Purge any orphaned Mapbox DOM children BEFORE remove()
+      // so a Strict-Mode re-mount starts with a clean container
       if (container && container.childNodes.length > 0) {
         console.log('[LIFECYCLE] Clearing', container.childNodes.length, 'orphaned children from map container');
         container.innerHTML = '';
+      }
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
       }
     };
   }, []); // Empty deps - only mount once
