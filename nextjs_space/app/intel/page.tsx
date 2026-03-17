@@ -2321,7 +2321,7 @@ function DeerIntelContent() {
   }, [terrainFlowData, terrainFlowLoading, ridgeSpineData, qaParcel, parcelPolygon]);
 
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
-  // v3.8.4 — debounce 80ms so rapid season/wind clicks coalesce into one setData pass
+  // v3.8.4 — debounce 300ms so rapid season/wind clicks coalesce into one setData pass
   const terrainFlowDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const map = mapRef.current;
