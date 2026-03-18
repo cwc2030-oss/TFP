@@ -910,7 +910,7 @@ function DeerIntelContent() {
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Deer interpretation - HIDE in Terrain Work Mode
     bedding: !TERRAIN_WORK_MODE,   // Bedding circles = deer interpretation
-    stands: !TERRAIN_WORK_MODE,     // Stand markers = deer interpretation
+    stands: true,                   // Stand markers always visible
     corridors: !TERRAIN_WORK_MODE,  // Corridor lines = deer interpretation
     // Physical terrain structure - SHOW in Terrain Work Mode
     funnels: true,    // Legacy combined key (kept for compat)
@@ -5230,9 +5230,7 @@ function DeerIntelContent() {
 
   // ========== HTML STAND MARKERS (top 2 by alignment) ==========
   // v3.8: Uses alignedStands (wind-sorted) so markers react to wind changes
-  // Skip entirely in Terrain Work Mode - deer interpretation layer
   useEffect(() => {
-    if (TERRAIN_WORK_MODE) return;
     if (!mapReady || !alignedStands.length) return;
 
     const timer = setTimeout(() => {
