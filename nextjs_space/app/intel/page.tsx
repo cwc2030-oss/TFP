@@ -1019,12 +1019,24 @@ function DeerIntelContent() {
   const flowAnimationRef = useRef<number | null>(null);
   const flowAnimationPhase = useRef<number>(0);
 
-  // URL params
-  const lat = parseFloat(searchParams.get('lat') || '38.7958');
-  const lng = parseFloat(searchParams.get('lng') || '-94.2733');
-  const address = searchParams.get('address') || 'Sample Property';
-  const acreageParam = searchParams.get('acreage');
+  // URL params (initial values)
+  const urlLat = parseFloat(searchParams.get('lat') || '38.7958');
+  const urlLng = parseFloat(searchParams.get('lng') || '-94.2733');
+  const urlAddress = searchParams.get('address') || 'Sample Property';
+  const urlAcreage = searchParams.get('acreage');
   const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features
+
+  // Active coordinates — start from URL, updated by Exploration Mode clicks
+  const [activeLat, setActiveLat] = useState(urlLat);
+  const [activeLng, setActiveLng] = useState(urlLng);
+  const [activeAddress, setActiveAddress] = useState(urlAddress);
+  const [activeAcreage, setActiveAcreage] = useState(urlAcreage);
+  
+  // Derived aliases for backward compatibility throughout the file
+  const lat = activeLat;
+  const lng = activeLng;
+  const address = activeAddress;
+  const acreageParam = activeAcreage;
 
   // Analysis state
   const [isLoading, setIsLoading] = useState(true);
@@ -1107,8 +1119,8 @@ function DeerIntelContent() {
   // Export/Screenshot Mode state (clean map for broker demos)
   const [exportMode, setExportMode] = useState(false);
 
-  // ========== QA PARCEL LOOKUP STATE (KS/MO validation) ==========
-  const [qaParcelLookupMode, setQaParcelLookupMode] = useState(false); // Enable click-to-lookup
+  // ========== EXPLORATION MODE STATE (unified parcel lookup) ==========
+  const [explorationMode, setExplorationMode] = useState(false); // Enable click-to-lookup
   const [qaParcelLoading, setQaParcelLoading] = useState(false);
   const [qaParcel, setQaParcel] = useState<LookupParcel | null>(null);
   const [qaParcelError, setQaParcelError] = useState<string | null>(null);
@@ -1117,7 +1129,9 @@ function DeerIntelContent() {
   const [qaSessionEntries, setQaSessionEntries] = useState<QAEntry[]>([]); // QA validation log
   const [qaShowScorecard, setQaShowScorecard] = useState(false); // Show rating UI after analysis
   const [qaShowAnalytics, setQaShowAnalytics] = useState(false); // Show analytics panel
-  const [qaBrokerScore, setQaBrokerScore] = useState<BrokerScoreResult | null>(null); // Broker scoring
+  const [qaBrokerScore, setQaBrokerScore] = useState<BrokerScoreResult | null>(null); // Broker/terrain scoring
+  // Backward compat alias — all QA mode references now route through exploration mode
+  const qaParcelLookupMode = explorationMode;
 
   // ========== ADJACENT PARCELS STATE ==========
   interface AdjacentParcelInfo {
@@ -1666,7 +1680,10 @@ function DeerIntelContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [lat, lng, season, windDirection, acreageParam, clearAllOverlaySources]);
+  // NOTE: season and windDirection intentionally excluded from deps.
+  // Season/wind changes only affect the heatmap repaint (handled by the terrain flow painting effect),
+  // NOT the full terrain analysis pipeline. This prevents data loss on season/wind toggle.
+  }, [lat, lng, acreageParam, clearAllOverlaySources]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== NATIVE MAPBOX SOURCES INITIALIZED FLAG ==========
   const overlaySourcesCreated = useRef(false);
@@ -2386,7 +2403,7 @@ function DeerIntelContent() {
     generateFlowData();
   }, [parcelPolygon]);
 
-  // ========== COMPUTE BROKER SCORE (QA MODE) ==========
+  // ========== COMPUTE TERRAIN RATING (BROKER SCORE) ==========
   useEffect(() => {
     if (!terrainFlowData || terrainFlowLoading) {
       setQaBrokerScore(null);
@@ -4806,7 +4823,7 @@ function DeerIntelContent() {
     return () => window.removeEventListener('tfp-edge-click', handleEdgeClick);
   }, []);
 
-  // ========== QA PARCEL LOOKUP HANDLERS ==========
+  // ========== EXPLORATION PARCEL LOOKUP HANDLERS ==========
   const handleQaParcelLookup = useCallback(async (clickLng: number, clickLat: number) => {
     if (qaParcelLoading) return;
     
@@ -4864,7 +4881,7 @@ function DeerIntelContent() {
         const validation = validateForAnalysis(data.parcel.coordinates);
         if (!validation.valid) {
           setGeometryValidationError(validation.error);
-          console.warn('[QA PARCEL] Geometry validation failed:', validation.error);
+          console.warn('[EXPLORE] Geometry validation failed:', validation.error);
         }
         
         // Track visited parcel (keep last 20)
@@ -4872,7 +4889,7 @@ function DeerIntelContent() {
           const updated = [data.parcel.parcelId, ...prev.filter((id: string) => id !== data.parcel.parcelId)];
           return updated.slice(0, 20);
         });
-        console.log('[QA PARCEL] Found:', data.parcel.parcelId, data.parcel.acreage, 'ac');
+        console.log('[EXPLORE] Found:', data.parcel.parcelId, data.parcel.acreage, 'ac');
         
         // Update map to show parcel boundary
         const map = mapRef.current;
@@ -4941,7 +4958,7 @@ function DeerIntelContent() {
         }
       }
     } catch (err) {
-      console.error('[QA PARCEL] Lookup error:', err);
+      console.error('[EXPLORE] Lookup error:', err);
       setQaParcelError('Failed to lookup parcel');
     } finally {
       setQaParcelLoading(false);
@@ -4959,16 +4976,15 @@ function DeerIntelContent() {
     
     setQaParcelAnalyzing(true);
     setQaShowScorecard(false); // Reset scorecard for new analysis
-    console.log('[QA PARCEL] Analyzing:', qaParcel.parcelId);
+    console.log('[EXPLORE] Analyzing via full pipeline:', qaParcel.parcelId);
     
     try {
-      // Create parcel polygon feature for terrain flow
+      // ========== GEOMETRY TRACE: Step 2 - Analysis coords ==========
       const coords = [...qaParcel.coordinates];
       if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
         coords.push(coords[0]);
       }
       
-      // ========== GEOMETRY TRACE: Step 2 - Analysis coords ==========
       const analysisStep = createTraceStep(
         '2_ANALYSIS_INPUT',
         coords,
@@ -4977,13 +4993,9 @@ function DeerIntelContent() {
       
       if (geometryTrace) {
         addTraceStep(geometryTrace, analysisStep);
-        
-        // Print updated trace
         if (geometryDebugMode) {
           printGeometryTrace(geometryTrace);
         }
-        
-        // Check for mismatch
         if (geometryTrace.mismatchDetected) {
           console.error('⚠️ GEOMETRY MISMATCH DETECTED:', geometryTrace.mismatchDetails);
         }
@@ -4991,19 +5003,6 @@ function DeerIntelContent() {
       
       // Store analysis coords for debug comparison
       setAnalysisCoords(coords);
-      
-      const parcelFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
-        type: 'Feature',
-        properties: {
-          parcelId: qaParcel.parcelId,
-          address: qaParcel.address,
-          acreage: qaParcel.acreage,
-        },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [coords]
-        }
-      };
       
       // ========== DEBUG LAYER: Analysis geometry (yellow) ==========
       const map = mapRef.current;
@@ -5020,34 +5019,24 @@ function DeerIntelContent() {
       
       // CRITICAL: Reset hasFitToParcel so the new parcel bounds fit occurs
       hasFitToParcel.current = false;
-      console.log('[QA PARCEL] Reset hasFitToParcel for new parcel orientation');
+      console.log('[EXPLORE] Reset hasFitToParcel for new parcel orientation');
       
-      // Update the parcelPolygon state - this triggers terrain flow analysis
-      setParcelPolygon(parcelFeature);
-      console.log('[QA PARCEL] setParcelPolygon called with:', parcelFeature.properties?.parcelId || qaParcel.parcelId);
+      // ========== UNIFIED PIPELINE: Update active coords and trigger runAnalysis ==========
+      // This routes the exploration click through the SAME full analysis pipeline
+      // that the initial page load uses, ensuring complete terrain state is retained.
+      setActiveLat(qaParcel.centroid[1]);
+      setActiveLng(qaParcel.centroid[0]);
+      setActiveAddress(qaParcel.address);
+      setActiveAcreage(qaParcel.acreage.toString());
       
-      // Reset terrain flow data to trigger re-fetch (sources will be cleared by effect)
-      setTerrainFlowData(null);
-      setTerrainFlowLoading(true);
-      setTerrainStory(null);
+      console.log('[EXPLORE] Updated active coords to:', qaParcel.centroid[1], qaParcel.centroid[0]);
+      console.log('[EXPLORE] Full analysis pipeline will trigger via lat/lng dep change');
       
-      // Also clear ridge spine data for clean slate
-      setRidgeSpineData(null);
+      // Show scorecard after analysis completes
+      setTimeout(() => setQaShowScorecard(true), 2000);
       
-      // Clear tiered corridor data
-      setTieredCorridorData(null);
-      
-      // Clear edge intel data  
-      setEdgeIntelData(null);
-      
-      // Show scorecard after a short delay (analysis will complete)
-      setTimeout(() => setQaShowScorecard(true), 500);
-      
-      console.log('[QA PARCEL] Analysis triggered for', qaParcel.address);
-      console.log('[QA PARCEL] Analysis coords sample:', coords.slice(0, 3));
-      console.log('[QA PARCEL] Cleared: terrainFlowData, ridgeSpineData, tieredCorridorData, edgeIntelData');
     } catch (err) {
-      console.error('[QA PARCEL] Analysis error:', err);
+      console.error('[EXPLORE] Analysis error:', err);
       setQaParcelError('Failed to analyze parcel');
     } finally {
       setQaParcelAnalyzing(false);
@@ -5055,7 +5044,7 @@ function DeerIntelContent() {
   }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode]);
 
   const handleQaParcelClear = useCallback(() => {
-    console.log('[QA PARCEL] === CLEARING PARCEL STATE ===');
+    console.log('[EXPLORE] === CLEARING EXPLORE PARCEL STATE ===');
     
     setQaParcel(null);
     setQaParcelError(null);
@@ -5065,23 +5054,18 @@ function DeerIntelContent() {
     setRawRegridCoords(null);
     setAnalysisCoords(null);
     
-    // Clear all terrain analysis data
-    setTerrainFlowData(null);
-    setTerrainStory(null);
-    setRidgeSpineData(null);
-    setTieredCorridorData(null);
-    setEdgeIntelData(null);
-    setTerrainFlowLoading(false);
-    
-    // Reset parcelPolygon to null (this will clear boundary via effect)
-    setParcelPolygon(null);
+    // Restore original URL coordinates — this triggers runAnalysis to
+    // reload the original parcel, preserving the full analysis pipeline
+    setActiveLat(urlLat);
+    setActiveLng(urlLng);
+    setActiveAddress(urlAddress);
+    setActiveAcreage(urlAcreage);
     
     // Reset fit flag for next parcel
     hasFitToParcel.current = false;
     
-    // Clear ALL map overlay sources (full reset — no carryover between parcels)
-    clearAllOverlaySources();
-  }, [clearAllOverlaySources]);
+    console.log('[EXPLORE] Restored to original URL coords:', urlLat, urlLng);
+  }, [urlLat, urlLng, urlAddress, urlAcreage]);
   
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
@@ -5147,7 +5131,7 @@ function DeerIntelContent() {
     }
   }, [geometryDebugMode, mapReady, qaParcel, rawRegridCoords, analysisCoords]);
 
-  // v3.8.3 — Toggle QA parcel layer visibility when QA mode changes
+  // v3.8.3 — Toggle QA parcel layer visibility when exploration mode changes
   // Prevents stale cyan outlines from overlapping the gold parcel boundary
   useEffect(() => {
     const map = mapRef.current;
@@ -5165,9 +5149,9 @@ function DeerIntelContent() {
     if (!qaParcelLookupMode) {
       const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
       if (qaSource) qaSource.setData(EMPTY_FC);
-      console.log('[v3.8.3] QA parcel layers hidden + source cleared');
+      console.log('[v3.8.3] Explore parcel layers hidden + source cleared');
     } else {
-      console.log('[v3.8.3] QA parcel layers made visible');
+      console.log('[v3.8.3] Explore parcel layers made visible');
     }
   }, [qaParcelLookupMode, mapReady]);
 
@@ -5191,7 +5175,7 @@ function DeerIntelContent() {
   // QA Scorecard handlers
   const handleQaRatingSubmit = useCallback((entry: QAEntry) => {
     setQaSessionEntries(prev => [...prev, entry]);
-    console.log('[QA] Rating submitted:', entry.rating, entry.parcelId);
+    console.log('[EXPLORE] Rating submitted:', entry.rating, entry.parcelId);
   }, []);
 
   const handleQaScorecardSkip = useCallback(() => {
@@ -5274,11 +5258,11 @@ function DeerIntelContent() {
     };
     
     map.on('click', handleMapClick);
-    console.log('[QA PARCEL] Click handler registered');
+    console.log('[EXPLORE] Click handler registered');
     
     return () => {
       map.off('click', handleMapClick);
-      console.log('[QA PARCEL] Click handler removed');
+      console.log('[EXPLORE] Click handler removed');
     };
   }, [mapReady, qaParcelLookupMode, handleQaParcelLookup]);
 
@@ -5948,25 +5932,25 @@ function DeerIntelContent() {
                 {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
               </Button>
             )}
-            {/* QA Parcel Lookup Toggle */}
+            {/* Exploration Mode Toggle */}
             <Button
               size="sm"
               variant="ghost"
-              className={`${qaParcelLookupMode 
+              className={`${explorationMode 
                 ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50' 
                 : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
               onClick={() => {
-                setQaParcelLookupMode(!qaParcelLookupMode);
-                if (qaParcelLookupMode) {
+                setExplorationMode(!explorationMode);
+                if (explorationMode) {
                   // Turning off - clear any selected parcel
                   handleQaParcelClear();
                 }
               }}
-              title="QA Mode - Click anywhere in KS/MO to lookup parcels"
+              title="Explore Mode - Click anywhere in KS/MO to analyze parcels"
             >
               <Layers className="h-4 w-4 mr-1" />
-              {qaParcelLookupMode ? 'QA Mode ON' : 'QA Mode'}
+              {explorationMode ? 'Explore ON' : 'Explore'}
             </Button>
             {/* Geometry Debug Toggle (only show when QA Mode is on) */}
             {qaParcelLookupMode && (
@@ -6128,7 +6112,7 @@ function DeerIntelContent() {
             <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-cyan-900/90 backdrop-blur rounded-lg px-4 py-2 border border-cyan-500/40 shadow-lg">
               <div className="flex items-center gap-2 text-sm text-cyan-100">
                 <MapPin className="h-4 w-4 text-cyan-400" />
-                <span>Click anywhere in <strong>Kansas</strong> or <strong>Missouri</strong> to lookup a parcel</span>
+                <span>Click anywhere in <strong>Kansas</strong> or <strong>Missouri</strong> to explore a parcel</span>
               </div>
             </div>
           )}
@@ -7097,6 +7081,34 @@ function DeerIntelContent() {
                     showNarrative={true}
                     compact={true}
                   />
+                </div>
+              )}
+
+              {/* ========== TERRAIN RATING PANEL (always visible after analysis) ========== */}
+              {!exportMode && qaBrokerScore && !terrainFlowLoading && (
+                <div className="p-3 border-b border-white/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium text-white flex items-center gap-2 text-sm">
+                      <Target className="h-4 w-4 text-amber-400" />
+                      Terrain Rating
+                    </h3>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      qaBrokerScore.brokerClass === 'A' ? 'bg-emerald-900/60 text-emerald-400' :
+                      qaBrokerScore.brokerClass === 'B' ? 'bg-amber-900/60 text-amber-400' :
+                      qaBrokerScore.brokerClass === 'C' ? 'bg-orange-900/60 text-orange-400' :
+                      'bg-red-900/60 text-red-400'
+                    }`}>
+                      Class {qaBrokerScore.brokerClass} — {qaBrokerScore.brokerScore}/100
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {qaBrokerScore.components && Object.entries(qaBrokerScore.components).map(([key, val]) => (
+                      <div key={key} className="flex items-center justify-between text-xs">
+                        <span className="text-stone-400 capitalize">{key.replace(/_/g, ' ')}</span>
+                        <span className="text-white font-medium">{typeof val === 'number' ? val.toFixed(1) : String(val)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
