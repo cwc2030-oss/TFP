@@ -1054,6 +1054,13 @@ function DeerIntelContent() {
   const [season, setSeason] = useState<SeasonProfile>('rut');
   const [pressureFocus, setPressureFocus] = useState<PressureFocus>('balanced');
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
+  // Refs that always mirror the latest season/wind values.
+  // runAnalysis reads from these so it never captures stale closures,
+  // while remaining excluded from its dep array to avoid auto-re-triggers.
+  const seasonRef = useRef<SeasonProfile>(season);
+  const windDirectionRef = useRef<WindDirection>(windDirection);
+  useEffect(() => { seasonRef.current = season; }, [season]);
+  useEffect(() => { windDirectionRef.current = windDirection; }, [windDirection]);
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(() => new Date(0));
   const [windMinAgo, setWindMinAgo] = useState(0);
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
@@ -1572,10 +1579,15 @@ function DeerIntelContent() {
     setProgress(10);
     setProgressStep('Fetching parcel boundary...');
     
+    // Read current season/wind from refs so we always get the latest values
+    // even though these are intentionally excluded from the dep array.
+    const currentSeason = seasonRef.current;
+    const currentWind = windDirectionRef.current;
+    
     const startTime = Date.now();
     console.log('[INTEL] === ANALYSIS START ===');
     console.log('[INTEL] Coordinates:', lat, lng);
-    console.log('[INTEL] Season:', season, 'Wind:', windDirection);
+    console.log('[INTEL] Season:', currentSeason, 'Wind:', currentWind);
     console.log('[INTEL] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
 
     try {
@@ -1600,8 +1612,8 @@ function DeerIntelContent() {
         const result = await fetchTerrainAnalysis(
           {
             parcel: syntheticParcel,
-            seasonProfile: season,
-            prevailingWinds: [windDirection],
+            seasonProfile: currentSeason,
+            prevailingWinds: [currentWind],
             bufferMeters: 800,
           },
           (step, prog) => {
@@ -1640,8 +1652,8 @@ function DeerIntelContent() {
       const result = await fetchTerrainAnalysis(
         {
           parcel,
-          seasonProfile: season,
-          prevailingWinds: [windDirection],
+          seasonProfile: currentSeason,
+          prevailingWinds: [currentWind],
           bufferMeters: 800,
         },
         (step, prog) => {
@@ -7093,12 +7105,11 @@ function DeerIntelContent() {
                       Terrain Rating
                     </h3>
                     <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                      qaBrokerScore.brokerClass === 'A' ? 'bg-emerald-900/60 text-emerald-400' :
-                      qaBrokerScore.brokerClass === 'B' ? 'bg-amber-900/60 text-amber-400' :
-                      qaBrokerScore.brokerClass === 'C' ? 'bg-orange-900/60 text-orange-400' :
-                      'bg-red-900/60 text-red-400'
+                      qaBrokerScore.brokerClass === 'broker_ready' ? 'bg-emerald-900/60 text-emerald-400' :
+                      qaBrokerScore.brokerClass === 'potential_demo' ? 'bg-amber-900/60 text-amber-400' :
+                      'bg-slate-900/60 text-slate-400'
                     }`}>
-                      Class {qaBrokerScore.brokerClass} — {qaBrokerScore.brokerScore}/100
+                      {qaBrokerScore.brokerScore}/100
                     </span>
                   </div>
                   <div className="space-y-1">
