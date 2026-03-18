@@ -107,11 +107,74 @@ const BENCH_INFLUENCE_M  = 80;   // how far bench influence extends
 const SADDLE_INFLUENCE_M = 120;  // saddles have wider influence
 const RIDGE_INFLUENCE_M  = 60;   // ridge influence is tighter
 
-// ============ SEASON PROFILES ============
-const SEASON_WEIGHTS: Record<SeasonProfile, { bench: number; saddle: number; ridge: number }> = {
-  early: { bench: 1.3, saddle: 0.8, ridge: 0.9 },
-  rut:   { bench: 0.8, saddle: 1.4, ridge: 1.2 },
-  late:  { bench: 1.2, saddle: 0.9, ridge: 0.8 },
+// ============ SEASON PROFILES (v4.0 — Seasonal Terrain Weighting) ============
+// Each season adjusts:
+//   1. Base factor weights (bench/saddle/ridge) — existing
+//   2. Influence radii multipliers — how far each terrain factor projects
+//   3. Sidehill bonus ceiling — overall strength of slope/shelter layer
+//   4. Slope preference weight — relative importance of moderate slopes
+//   5. Shelter weight — relative importance of leeward thermal cover
+//   6. Aspect bias strength — how strongly NW/N/NE aspects are favored
+//
+// These weights compound through the existing scoring pipeline so that
+// corridor extraction and convergence detection shift with season.
+
+interface SeasonWeightProfile {
+  // Base terrain factor multipliers (applied to W_BENCH / W_SADDLE / W_RIDGE)
+  bench: number;
+  saddle: number;
+  ridge: number;
+  // Influence radius multipliers (scale BENCH_INFLUENCE_M etc.)
+  benchInfluenceScale: number;
+  saddleInfluenceScale: number;
+  ridgeInfluenceScale: number;
+  // Sidehill bonus ceiling (replaces SIDEHILL_BONUS_MAX per season)
+  sidehillMax: number;
+  // Component weights inside sidehill computation (must sum to ~1)
+  slopeWeight: number;     // importance of moderate slope bands
+  ridgeOffsetWeight: number; // importance of ridge shoulder positioning
+  shelterWeight: number;   // importance of leeward/thermal aspect
+  // Aspect scoring curve adjustment
+  aspectBiasStrength: number; // 1.0 = default curve, >1 = stronger leeward preference
+}
+
+const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
+  early: {
+    // Early season: food-adjacent travel on benches, less territorial compression
+    bench: 1.3,  saddle: 0.8,  ridge: 0.9,
+    benchInfluenceScale: 1.25,   // wider bench projection (food/browse patterns)
+    saddleInfluenceScale: 0.85,  // saddles less relevant (not funneling hard yet)
+    ridgeInfluenceScale: 0.90,   // slightly tighter ridge influence
+    sidehillMax: 0.08,           // modest sidehill bonus (warm weather)
+    slopeWeight: 0.25,           // moderate slopes less critical
+    ridgeOffsetWeight: 0.35,     // ridge-shoulder still matters for security
+    shelterWeight: 0.40,         // some shelter preference (shade, not thermal)
+    aspectBiasStrength: 0.6,     // weak leeward bias (warm temps, variable winds)
+  },
+  rut: {
+    // Rut: cruising through saddles and along ridges, scent-checking
+    bench: 0.8,  saddle: 1.4,  ridge: 1.2,
+    benchInfluenceScale: 0.80,   // tighter bench (abandoning food patterns)
+    saddleInfluenceScale: 1.35,  // wider saddle projection (cruising funnels)
+    ridgeInfluenceScale: 1.15,   // ridges important (scent advantage from height)
+    sidehillMax: 0.14,           // strong sidehill bonus (ridge running)
+    slopeWeight: 0.35,           // moderate slopes good for intercept angles
+    ridgeOffsetWeight: 0.40,     // ridge shoulder is prime (scent from above)
+    shelterWeight: 0.25,         // shelter less critical (bucks moving regardless)
+    aspectBiasStrength: 0.9,     // moderate leeward bias (wind still matters)
+  },
+  late: {
+    // Late season: thermal cover, sheltered terrain, energy conservation
+    bench: 1.2,  saddle: 0.9,  ridge: 0.8,
+    benchInfluenceScale: 1.05,   // normal bench influence (food return)
+    saddleInfluenceScale: 0.90,  // moderate saddle influence
+    ridgeInfluenceScale: 0.85,   // less ridge running (exposed to wind)
+    sidehillMax: 0.18,           // maximum sidehill bonus (thermal cover is king)
+    slopeWeight: 0.20,           // slopes matter less (deer aren't picky)
+    ridgeOffsetWeight: 0.25,     // further below crest for wind protection
+    shelterWeight: 0.55,         // dominant factor: leeward thermal cover
+    aspectBiasStrength: 1.5,     // very strong leeward bias (survival mode)
+  },
 };
 
 // ============ FOCUS MODE CONFIG ============
@@ -331,10 +394,12 @@ function proximityScore(dist: number, radius: number): number {
 
 /**
  * Compute bench score for a cell based on proximity to bedding polygons.
+ * @param influenceRadius Season-adjusted influence radius
  */
 function computeBenchScore(
   cell: RasterCell,
-  beddingPolygons: GeoJSON.FeatureCollection | undefined
+  beddingPolygons: GeoJSON.FeatureCollection | undefined,
+  influenceRadius: number = BENCH_INFLUENCE_M
 ): number {
   if (!beddingPolygons?.features?.length) return 0;
 
@@ -349,7 +414,7 @@ function computeBenchScore(
     
     for (const pt of points) {
       const dist = distanceMeters(cellCoord, pt);
-      const prox = proximityScore(dist, BENCH_INFLUENCE_M);
+      const prox = proximityScore(dist, influenceRadius);
       const score = prox * confidence;
       maxScore = Math.max(maxScore, score);
     }
@@ -360,10 +425,12 @@ function computeBenchScore(
 
 /**
  * Compute saddle score for a cell based on proximity to saddle nodes.
+ * @param influenceRadius Season-adjusted influence radius
  */
 function computeSaddleScore(
   cell: RasterCell,
-  saddleNodes: GeoJSON.FeatureCollection | undefined
+  saddleNodes: GeoJSON.FeatureCollection | undefined,
+  influenceRadius: number = SADDLE_INFLUENCE_M
 ): number {
   if (!saddleNodes?.features?.length) return 0;
 
@@ -374,7 +441,7 @@ function computeSaddleScore(
     if (f.geometry.type !== 'Point') continue;
     const coord = f.geometry.coordinates as [number, number];
     const dist = distanceMeters(cellCoord, coord);
-    const prox = proximityScore(dist, SADDLE_INFLUENCE_M);
+    const prox = proximityScore(dist, influenceRadius);
     const prominence = (f.properties?.prominence as number) || 0.7;
     const score = prox * Math.min(1, prominence);
     maxScore = Math.max(maxScore, score);
@@ -385,11 +452,13 @@ function computeSaddleScore(
 
 /**
  * Compute ridge score for a cell based on proximity to ridge lines.
+ * @param influenceRadius Season-adjusted influence radius
  */
 function computeRidgeScore(
   cell: RasterCell,
   ridgesPrimary: GeoJSON.FeatureCollection | undefined,
-  ridgesSecondary: GeoJSON.FeatureCollection | undefined
+  ridgesSecondary: GeoJSON.FeatureCollection | undefined,
+  influenceRadius: number = RIDGE_INFLUENCE_M
 ): number {
   const cellCoord: [number, number] = [cell.lng, cell.lat];
   let maxScore = 0;
@@ -403,7 +472,7 @@ function computeRidgeScore(
       
       for (const pt of points) {
         const dist = distanceMeters(cellCoord, pt);
-        const prox = proximityScore(dist, RIDGE_INFLUENCE_M);
+        const prox = proximityScore(dist, influenceRadius);
         maxScore = Math.max(maxScore, prox * 1.0);
       }
     }
@@ -418,7 +487,7 @@ function computeRidgeScore(
       
       for (const pt of points) {
         const dist = distanceMeters(cellCoord, pt);
-        const prox = proximityScore(dist, RIDGE_INFLUENCE_M * 0.8);
+        const prox = proximityScore(dist, influenceRadius * 0.8);
         maxScore = Math.max(maxScore, prox * 0.6);
       }
     }
@@ -433,42 +502,53 @@ function computeRidgeScore(
  * Compute sidehill/leeward bonus for a cell.
  * 
  * This bonus favors ridge shoulders and leeward benches — ideal for mature buck movement.
- * Three components:
- *   1. Slope band: moderate slopes (8-25%) are rewarded
- *   2. Ridge offset: cells 20-60m below ridge crest get bonus
- *   3. Aspect: NW/N/NE aspects (leeward bedding tendency) get bonus
+ * Three components with season-dependent weighting:
+ *   1. Slope band: moderate slopes (8-25%) — stronger in Rut
+ *   2. Ridge offset: cells 20-60m below ridge crest — strongest in Rut
+ *   3. Aspect/shelter: NW/N/NE aspects — dominant in Late season (thermal cover)
  * 
- * Returns 0-1 score that gets scaled by SIDEHILL_BONUS_MAX.
+ * v4.0: Season weights shift component balance so the sidehill layer
+ *       emphasizes thermal cover in Late, slope intercepts in Rut,
+ *       and stays modest in Early.
+ * 
+ * Returns 0-1 score that gets scaled by seasonal sidehillMax.
  */
 function computeSidehillBonus(
   cell: RasterCell,
   grid: RasterGrid,
   ridgesPrimary: GeoJSON.FeatureCollection | undefined,
-  ridgesSecondary: GeoJSON.FeatureCollection | undefined
+  ridgesSecondary: GeoJSON.FeatureCollection | undefined,
+  seasonProfile?: SeasonWeightProfile
 ): number {
   // Component 1: Slope band score
-  // Estimate local slope from elevation proxy (grid position as rough elevation indicator)
-  // In absence of DEM, we use ridge proximity gradient as slope proxy
   const slopeScore = computeSlopeProxy(cell, grid);
   
   // Component 2: Ridge offset score
-  // Favor cells slightly below ridge crest (not on top, not at bottom)
   const ridgeOffsetScore = computeRidgeOffsetScore(cell, ridgesPrimary, ridgesSecondary);
   
-  // Component 3: Aspect score (leeward tendency)
-  // NW/N/NE aspects favor thermal bedding and fall travel
-  const aspectScore = computeAspectScore(cell, grid);
+  // Component 3: Aspect score (leeward tendency) with seasonal bias
+  const rawAspect = computeAspectScore(cell, grid);
+  // Apply seasonal bias strength: >1 amplifies leeward preference, <1 flattens it
+  const biasStrength = seasonProfile?.aspectBiasStrength ?? 1.0;
+  const aspectScore = biasStrength >= 1.0
+    ? Math.pow(rawAspect, 1 / biasStrength) // amplify: push scores toward 1
+    : rawAspect * biasStrength + (1 - biasStrength) * 0.5; // flatten toward neutral 0.5
   
-  // Combine with diminishing returns — need at least 2 of 3 to score well
-  // Use geometric mean to reward combinations
-  const combined = Math.pow(
-    Math.max(0.01, slopeScore) *
-    Math.max(0.01, ridgeOffsetScore) *
-    Math.max(0.01, aspectScore),
-    1/3
-  );
+  // Seasonal weighted combination (replaces equal-weight geometric mean)
+  const wSlope = seasonProfile?.slopeWeight ?? 0.33;
+  const wRidgeOff = seasonProfile?.ridgeOffsetWeight ?? 0.34;
+  const wShelter = seasonProfile?.shelterWeight ?? 0.33;
   
-  return Math.min(1, combined);
+  // Weighted power mean — rewards the seasonally important components
+  // When shelter weight is high (Late), aspect score dominates
+  // When slope weight is high (Rut), moderate slopes dominate
+  const combined = 
+    wSlope * Math.max(0.01, slopeScore) +
+    wRidgeOff * Math.max(0.01, ridgeOffsetScore) +
+    wShelter * Math.max(0.01, aspectScore);
+  
+  // Apply soft diminishing returns to prevent over-saturation
+  return Math.min(1, Math.pow(combined, 0.85));
 }
 
 /**
@@ -664,23 +744,31 @@ export function buildTerrainRaster(input: RasterInput): {
   const sw = SEASON_WEIGHTS[input.season] || SEASON_WEIGHTS.rut;
   const focus = FOCUS_CONFIG[input.focusMode ?? 'balanced'];
 
-  // Pass 1: Compute base terrain scores for each cell
+  // Compute season-adjusted influence radii
+  const benchRadius = BENCH_INFLUENCE_M * sw.benchInfluenceScale;
+  const saddleRadius = SADDLE_INFLUENCE_M * sw.saddleInfluenceScale;
+  const ridgeRadius = RIDGE_INFLUENCE_M * sw.ridgeInfluenceScale;
+
+  console.log(`[TerrainRaster] Season: ${input.season} | Influence radii — bench: ${benchRadius.toFixed(0)}m, saddle: ${saddleRadius.toFixed(0)}m, ridge: ${ridgeRadius.toFixed(0)}m | Sidehill max: ${(sw.sidehillMax * 100).toFixed(0)}%`);
+
+  // Pass 1: Compute base terrain scores for each cell with seasonal influence radii
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
 
-      // Compute raw terrain component scores
-      cell.bench = computeBenchScore(cell, input.beddingPolygons);
-      cell.saddle = computeSaddleScore(cell, input.ridgeSpineData?.saddle_nodes);
+      // Compute raw terrain component scores with season-adjusted radii
+      cell.bench = computeBenchScore(cell, input.beddingPolygons, benchRadius);
+      cell.saddle = computeSaddleScore(cell, input.ridgeSpineData?.saddle_nodes, saddleRadius);
       cell.ridge = computeRidgeScore(
         cell,
         input.ridgeSpineData?.ridges_primary,
-        input.ridgeSpineData?.ridges_secondary
+        input.ridgeSpineData?.ridges_secondary,
+        ridgeRadius
       );
     }
   }
 
-  // Pass 2: Compute sidehill bonus (needs ridge scores from all cells)
+  // Pass 2: Compute sidehill bonus with seasonal component weights
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
@@ -688,12 +776,13 @@ export function buildTerrainRaster(input: RasterInput): {
         cell,
         grid,
         input.ridgeSpineData?.ridges_primary,
-        input.ridgeSpineData?.ridges_secondary
+        input.ridgeSpineData?.ridges_secondary,
+        sw
       );
     }
   }
 
-  // Pass 3: Combine scores with weights and sidehill bonus
+  // Pass 3: Combine scores with weights and seasonal sidehill bonus
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
@@ -704,9 +793,9 @@ export function buildTerrainRaster(input: RasterInput): {
       const ridgeW = cell.ridge * sw.ridge * W_RIDGE;
       const basePressure = benchW + saddleW + ridgeW;
 
-      // Add sidehill bonus (scaled by base pressure — only boost where there's terrain)
+      // Add sidehill bonus (scaled by seasonal ceiling and base pressure)
       // This ensures sidehill doesn't create heat on empty cells
-      const sidehillBonus = cell.sidehill * SIDEHILL_BONUS_MAX * Math.min(1, basePressure * 2);
+      const sidehillBonus = cell.sidehill * sw.sidehillMax * Math.min(1, basePressure * 2);
 
       cell.pressure = basePressure + sidehillBonus;
     }
