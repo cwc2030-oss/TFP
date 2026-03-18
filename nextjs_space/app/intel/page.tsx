@@ -2425,7 +2425,9 @@ function DeerIntelContent() {
 
     if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
     terrainFlowDebounceRef.current = setTimeout(() => {
-    
+    // Clear ref so WindCompass debouncing prop goes false
+    terrainFlowDebounceRef.current = null;
+
     // Select data source based on comparison mode
     const flowData = flowComparisonMode && legacySyntheticData 
       ? legacySyntheticData 
@@ -2533,7 +2535,7 @@ function DeerIntelContent() {
     return () => {
       if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
     };
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, pressureFocus, parcelPolygon, ridgeSpineData]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, pressureFocus, parcelPolygon, ridgeSpineData, season]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
