@@ -266,9 +266,14 @@ const LAYER_COLORS = {
   funnelSlight: '#CD853F',         // Peru/tan - slight compression zones
   // Intrusion overlay
   intrusionHigh: '#DC143C',        // Crimson tint for high intrusion areas
-  standHigh: '#ef4444',            // #2+ stands: red
-  standGold: '#fbbf24',            // #1 Today's Sit: gold highlight ring
-  standMed: '#f59e0b',
+  // Stand Visualization v1.1 — muted blaze-orange palette (gun-season context)
+  standPrimary: '#e2712a',         // #1 Today's Sit: muted blaze-orange
+  standPrimaryRing: '#f09048',     // Today's Sit outer ring: warm highlight
+  standSecondary: '#c45d22',       // #2 stand: deeper burnt orange
+  standTertiary: '#a0522d',        // #3+ faint dot: sienna (earthy, low-key)
+  standHigh: '#e2712a',            // alias for backward compat
+  standGold: '#f09048',            // alias for backward compat
+  standMed: '#c45d22',
   standLow: '#6b7280',
   // v3.5.1 — Selected parcel boundary (gold/amber with glow)
   parcelBoundary: '#f59e0b',       // Amber-500 — gold/amber for clear visibility
@@ -440,10 +445,12 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
   return { point: closestPoint, segment: closestSegment, index: closestIndex };
 }
 
-// ========== HUNT POCKET GEOMETRY BUILDER ==========
-// Generates terrain-aware elliptical polygons around stand sites.
-// The pocket stretches toward the nearest corridor to reflect the huntable zone
-// aligned with deer movement, not a generic circle.
+// ========== HUNT POCKET GEOMETRY BUILDER (v1.1) ==========
+// Generates terrain-aware asymmetric polygons around stand sites.
+// The pocket stretches along the nearest corridor/flow direction and fades
+// asymmetrically: stronger forward (toward intercept) and weaker rearward.
+// Organic jitter + concentric rings create a natural transition that blends
+// into the terrain heatmap rather than appearing as a fixed oval.
 function buildHuntPocketFeatures(
   stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
   funnels: GeoJSON.FeatureCollection | null | undefined,
@@ -453,11 +460,12 @@ function buildHuntPocketFeatures(
   if (!stands.length) return { type: 'FeatureCollection', features };
 
   // Ring count and radii for concentric fade (meters)
-  const RINGS = 5;
-  const BASE_RADIUS = 55;  // core ring in meters
-  const MAX_RADIUS = 140;  // outermost ring
-  const ELONGATION = 1.6;  // stretch factor toward corridor
-  const SEGMENTS = 28;     // polygon smoothness
+  const RINGS = 6;             // v1.1: 6 rings for smoother fade (was 5)
+  const BASE_RADIUS = 45;     // v1.1: tighter core (was 55)
+  const MAX_RADIUS = 155;     // v1.1: wider outer reach for blending (was 140)
+  const ELONGATION_FWD = 1.8; // v1.1: asymmetric — forward stretch along flow
+  const ELONGATION_BWD = 1.1; // v1.1: asymmetric — rear barely stretches
+  const SEGMENTS = 36;        // v1.1: smoother polygon (was 28)
 
   // Extract corridor LineStrings for bearing computation
   const corridorLines: [number, number][][] = [];
@@ -479,8 +487,7 @@ function buildHuntPocketFeatures(
     }
   }
 
-  // Extract ridge lines for perpendicular bias (ridges run along high ground, 
-  // pockets should extend perpendicular into the draw/valley)
+  // Extract ridge lines for perpendicular bias
   const ridgeLines: [number, number][][] = [];
   if (ridges?.ridges_primary?.features) {
     for (const f of ridges.ridges_primary.features) {
@@ -494,9 +501,8 @@ function buildHuntPocketFeatures(
     const center = stand.coords;
 
     // Determine stretch bearing: corridor > draw > ridge-perpendicular > default NW
-    let stretchBearing = 315; // default NW
+    let stretchBearing = 315;
 
-    // 1) Nearest corridor
     let nearestCorridorDist = Infinity;
     let corridorBearing: number | null = null;
     for (const line of corridorLines) {
@@ -504,7 +510,6 @@ function buildHuntPocketFeatures(
       const result = closestPointOnLineString(center, line);
       if (result.dist < nearestCorridorDist) {
         nearestCorridorDist = result.dist;
-        // Use the bearing OF the corridor segment, not toward it
         const seg = line[result.segIndex];
         const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
         corridorBearing = calculateBearing(seg, segEnd);
@@ -514,7 +519,6 @@ function buildHuntPocketFeatures(
     if (corridorBearing !== null && nearestCorridorDist < 500) {
       stretchBearing = corridorBearing;
     } else {
-      // 2) Nearest draw bearing
       let nearestDrawDist = Infinity;
       for (const line of drawLines) {
         if (line.length < 2) continue;
@@ -528,7 +532,6 @@ function buildHuntPocketFeatures(
       }
 
       if (nearestDrawDist >= 500) {
-        // 3) Nearest ridge — stretch perpendicular to ridge
         let nearestRidgeDist = Infinity;
         for (const line of ridgeLines) {
           if (line.length < 2) continue;
@@ -537,13 +540,13 @@ function buildHuntPocketFeatures(
             nearestRidgeDist = result.dist;
             const seg = line[result.segIndex];
             const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-            stretchBearing = (calculateBearing(seg, segEnd) + 90) % 360; // perpendicular
+            stretchBearing = (calculateBearing(seg, segEnd) + 90) % 360;
           }
         }
       }
     }
 
-    // Build concentric elliptical rings (inside-out)
+    // Build concentric asymmetric rings (inside-out)
     for (let ring = RINGS; ring >= 1; ring--) {
       const t = ring / RINGS;
       const radius = BASE_RADIUS + (MAX_RADIUS - BASE_RADIUS) * t;
@@ -551,29 +554,35 @@ function buildHuntPocketFeatures(
 
       for (let i = 0; i <= SEGMENTS; i++) {
         const angle = (i / SEGMENTS) * 2 * Math.PI;
-        // Ellipse: stretch along stretchBearing axis
         const bearingRad = stretchBearing * Math.PI / 180;
+
         // Rotate angle into corridor-aligned frame
         const localX = Math.cos(angle);
         const localY = Math.sin(angle);
-        // Apply elongation along bearing axis
-        const stretchedX = localX * ELONGATION;
+
+        // v1.1: Asymmetric elongation — forward (along bearing) stretches more
+        // localX > 0 means forward hemisphere in the corridor-aligned frame
+        const elongation = localX > 0 ? ELONGATION_FWD : ELONGATION_BWD;
+        const stretchedX = localX * elongation;
         const stretchedY = localY;
+
         // Rotate back to geographic bearing
         const geoX = stretchedX * Math.cos(bearingRad) - stretchedY * Math.sin(bearingRad);
         const geoY = stretchedX * Math.sin(bearingRad) + stretchedY * Math.cos(bearingRad);
-        // Convert to geographic bearing for movePoint
+
         const ptBearing = (Math.atan2(geoX, geoY) * 180 / Math.PI + 360) % 360;
-        const ptDist = radius * Math.sqrt(geoX * geoX + geoY * geoY) / Math.max(ELONGATION, 1);
+        const ptDist = radius * Math.sqrt(geoX * geoX + geoY * geoY) / Math.max(elongation, 1);
 
         coords.push(movePoint(center, ptBearing, ptDist));
       }
 
-      // Add slight organic jitter (Perlin-esque noise via sin harmonics)
+      // Organic jitter — stronger on outer rings for natural terrain blending
       const jitteredCoords = coords.map((c, i) => {
         if (i === coords.length - 1) return coords[0]; // close ring
-        const jitterScale = radius * 0.06 * t; // more jitter on outer rings
-        const noise = Math.sin(i * 3.7 + ring * 1.3) * 0.5 + Math.sin(i * 7.1 + ring * 2.1) * 0.3;
+        const jitterScale = radius * 0.08 * t; // v1.1: slightly more jitter (was 0.06)
+        const noise = Math.sin(i * 3.7 + ring * 1.3) * 0.5
+                    + Math.sin(i * 7.1 + ring * 2.1) * 0.3
+                    + Math.sin(i * 11.3 + ring * 0.7) * 0.15; // v1.1: extra harmonic
         const jitterBearing = (i / SEGMENTS) * 360;
         return movePoint(c, jitterBearing, noise * jitterScale);
       });
@@ -584,12 +593,147 @@ function buildHuntPocketFeatures(
         properties: {
           standRank: stand.rank,
           ring,
-          ringNorm: t, // 0.2 (innermost) to 1.0 (outermost)
+          ringNorm: t,
           isTopStand: stand.rank === stands[0]?.rank,
           score: stand.alignment.score,
+          stretchBearing, // v1.1: stored for directional reference
         },
       });
     }
+  }
+
+  return { type: 'FeatureCollection', features };
+}
+
+// ========== STAND INTERCEPT DIRECTION BUILDER (v1.1) ==========
+// Generates a thin vector line from each stand toward the nearest corridor/flow
+// indicating expected intercept direction. This is a visualization-only feature.
+function buildStandDirectionFeatures(
+  stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
+  funnels: GeoJSON.FeatureCollection | null | undefined,
+  ridges: { ridges_primary?: GeoJSON.FeatureCollection; ridges_secondary?: GeoJSON.FeatureCollection } | null | undefined,
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  if (!stands.length) return { type: 'FeatureCollection', features };
+
+  // Extract corridor/draw/ridge lines (same logic as hunt pocket)
+  const corridorLines: [number, number][][] = [];
+  const drawLines: [number, number][][] = [];
+  if (funnels?.features) {
+    for (const f of funnels.features) {
+      if (f.geometry?.type !== 'LineString') continue;
+      if (f.properties?.funnelType === 'corridor') {
+        corridorLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      } else if (f.properties?.funnelType === 'draw') {
+        drawLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      }
+    }
+  }
+  const ridgeLines: [number, number][][] = [];
+  if (ridges?.ridges_primary?.features) {
+    for (const f of ridges.ridges_primary.features) {
+      if (f.geometry?.type === 'LineString') {
+        ridgeLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      }
+    }
+  }
+
+  for (const stand of stands) {
+    const center = stand.coords;
+
+    // Find intercept bearing: toward nearest corridor point
+    let faceBearing: number | null = null;
+    let nearestDist = Infinity;
+    let nearestPt: [number, number] | null = null;
+
+    for (const line of corridorLines) {
+      if (line.length < 2) continue;
+      const result = closestPointOnLineString(center, line);
+      if (result.dist < nearestDist) {
+        nearestDist = result.dist;
+        nearestPt = result.point;
+      }
+    }
+    if (nearestPt && nearestDist < 500) {
+      faceBearing = calculateBearing(center, nearestPt);
+    }
+
+    // Fallback: draw
+    if (faceBearing === null) {
+      nearestDist = Infinity;
+      nearestPt = null;
+      for (const line of drawLines) {
+        if (line.length < 2) continue;
+        const result = closestPointOnLineString(center, line);
+        if (result.dist < nearestDist) {
+          nearestDist = result.dist;
+          nearestPt = result.point;
+        }
+      }
+      if (nearestPt && nearestDist < 500) {
+        faceBearing = calculateBearing(center, nearestPt);
+      }
+    }
+
+    // Fallback: perpendicular to nearest ridge
+    if (faceBearing === null) {
+      nearestDist = Infinity;
+      for (const line of ridgeLines) {
+        if (line.length < 2) continue;
+        const result = closestPointOnLineString(center, line);
+        if (result.dist < nearestDist) {
+          nearestDist = result.dist;
+          const seg = line[result.segIndex];
+          const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+          faceBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+        }
+      }
+    }
+
+    if (faceBearing === null) faceBearing = 315; // fallback NW
+
+    // Build a thin wedge: center → tip, with two flanking lines at ±12°
+    const WEDGE_LENGTH = 55; // meters — subtle, not overpowering
+    const WEDGE_HALF_ANGLE = 12; // degrees
+    const OFFSET = 12; // start 12m from center (outside the marker)
+
+    const tipMain = movePoint(center, faceBearing, WEDGE_LENGTH);
+    const startPt = movePoint(center, faceBearing, OFFSET);
+    const tipLeft = movePoint(center, (faceBearing - WEDGE_HALF_ANGLE + 360) % 360, WEDGE_LENGTH * 0.85);
+    const tipRight = movePoint(center, (faceBearing + WEDGE_HALF_ANGLE) % 360, WEDGE_LENGTH * 0.85);
+
+    // Main vector line
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [startPt, tipMain] },
+      properties: {
+        standRank: stand.rank,
+        isTopStand: stand.rank === stands[0]?.rank,
+        type: 'main',
+      },
+    });
+
+    // Left flank
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [startPt, tipLeft] },
+      properties: {
+        standRank: stand.rank,
+        isTopStand: stand.rank === stands[0]?.rank,
+        type: 'flank',
+      },
+    });
+
+    // Right flank
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [startPt, tipRight] },
+      properties: {
+        standRank: stand.rank,
+        isTopStand: stand.rank === stands[0]?.rank,
+        type: 'flank',
+      },
+    });
   }
 
   return { type: 'FeatureCollection', features };
@@ -1545,6 +1689,8 @@ function DeerIntelContent() {
       'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
       'tfp-stand-emphasis', // v3.8.1 — top-stand attention glow
       'tfp-hunt-pockets', // Hunt pocket halos around stands
+      'tfp-stand-direction', // v1.1 — intercept direction wedge
+      'tfp-stand-tertiary', // v1.1 — tertiary stand dots
     ];
     for (const id of ALL_TFP_SOURCES) {
       try {
@@ -3736,12 +3882,11 @@ function DeerIntelContent() {
         
         // (Opportunity layers removed — convergence IS opportunity)
         
-        // ========== HUNT POCKET LAYER ==========
-        // Warm amber/gold elliptical halos around stand sites showing huntable zone
-        // Rendered as concentric rings with decreasing opacity for natural fade
+        // ========== HUNT POCKET LAYER (v1.1) ==========
+        // Muted blaze-orange asymmetric halos around stand sites showing huntable zone.
+        // Concentric rings with asymmetric fade blend into terrain heatmap.
         if (!map.getSource('tfp-hunt-pockets')) {
           map.addSource('tfp-hunt-pockets', { type: 'geojson', data: EMPTY_FC });
-          // Outer glow fill — warm amber, opacity driven by ring position
           map.addLayer({
             id: 'tfp-hunt-pockets-fill',
             type: 'fill',
@@ -3750,19 +3895,21 @@ function DeerIntelContent() {
               'fill-color': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
-                '#d97706',  // amber-600 for Today's Sit
-                '#b45309',  // amber-700 for secondary
+                LAYER_COLORS.standPrimary,    // muted blaze-orange
+                LAYER_COLORS.standSecondary,  // deeper burnt orange
               ],
               'fill-opacity': [
                 'interpolate', ['linear'], ['get', 'ringNorm'],
-                0.2, 0.22,   // innermost ring: warmest glow
-                0.5, 0.12,
-                0.8, 0.06,
-                1.0, 0.02,   // outermost ring: barely visible
+                0.17, 0.18,   // innermost ring: warm glow (slightly softer than v1.0)
+                0.33, 0.12,
+                0.50, 0.08,
+                0.67, 0.05,
+                0.83, 0.025,
+                1.0,  0.01,   // outermost ring: barely visible terrain blend
               ],
             },
           });
-          // Subtle inner stroke on the innermost ring only
+          // Subtle inner stroke on innermost ring only
           map.addLayer({
             id: 'tfp-hunt-pockets-stroke',
             type: 'line',
@@ -3772,12 +3919,76 @@ function DeerIntelContent() {
               'line-color': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
-                '#fbbf24',  // amber-400
-                '#d97706',  // amber-600
+                LAYER_COLORS.standPrimaryRing,
+                LAYER_COLORS.standSecondary,
               ],
-              'line-width': 1.5,
+              'line-width': 1.2,
+              'line-opacity': 0.30,
+              'line-blur': 1.5,
+            },
+          });
+        }
+
+        // ========== STAND DIRECTION WEDGE LAYER (v1.1) ==========
+        // Thin vector/wedge extending from stand toward expected intercept direction.
+        if (!map.getSource('tfp-stand-direction')) {
+          map.addSource('tfp-stand-direction', { type: 'geojson', data: EMPTY_FC });
+          // Main vector line
+          map.addLayer({
+            id: 'tfp-stand-direction-main',
+            type: 'line',
+            source: 'tfp-stand-direction',
+            filter: ['==', ['get', 'type'], 'main'],
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                LAYER_COLORS.standPrimaryRing,
+                LAYER_COLORS.standSecondary,
+              ],
+              'line-width': 2.5,
+              'line-opacity': 0.55,
+            },
+          });
+          // Flank lines (thinner)
+          map.addLayer({
+            id: 'tfp-stand-direction-flank',
+            type: 'line',
+            source: 'tfp-stand-direction',
+            filter: ['==', ['get', 'type'], 'flank'],
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                LAYER_COLORS.standPrimaryRing,
+                LAYER_COLORS.standSecondary,
+              ],
+              'line-width': 1.2,
               'line-opacity': 0.35,
-              'line-blur': 1,
+            },
+          });
+        }
+
+        // ========== TERTIARY STAND DOTS LAYER (v1.1) ==========
+        // Faint circle dots for stands 3+ showing additional huntable opportunities
+        if (!map.getSource('tfp-stand-tertiary')) {
+          map.addSource('tfp-stand-tertiary', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-stand-tertiary-dot',
+            type: 'circle',
+            source: 'tfp-stand-tertiary',
+            paint: {
+              'circle-radius': [
+                'interpolate', ['linear'], ['zoom'],
+                13, 4,
+                15, 6,
+                17, 8,
+              ],
+              'circle-color': LAYER_COLORS.standTertiary,
+              'circle-opacity': 0.45,
+              'circle-stroke-color': '#ffffff',
+              'circle-stroke-width': 1,
+              'circle-stroke-opacity': 0.25,
             },
           });
         }
@@ -4280,9 +4491,12 @@ function DeerIntelContent() {
           'tfp-ridges-primary',
           'tfp-ridges-secondary-casing',
           'tfp-ridges-secondary',
-          // Hunt pockets (warm amber halos around stands)
+          // Hunt pockets + stand direction wedges (v1.1)
           'tfp-hunt-pockets-fill',
           'tfp-hunt-pockets-stroke',
+          'tfp-stand-direction-flank',   // v1.1 — intercept wedge flanks
+          'tfp-stand-direction-main',    // v1.1 — intercept wedge main vector
+          'tfp-stand-tertiary-dot',      // v1.1 — faint tertiary stand dots
           // Flow lines (animated) — v3.5.1
           'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
           'tfp-flow-secondary',
@@ -5416,8 +5630,9 @@ function DeerIntelContent() {
     };
   }, [showTerrainReasons]);
 
-  // ========== HTML STAND MARKERS (top 2 by alignment) ==========
-  // v3.8: Uses alignedStands (wind-sorted) so markers react to wind changes
+  // ========== HTML STAND MARKERS + DIRECTION WEDGES + TERTIARY DOTS (v1.1) ==========
+  // Uses alignedStands (wind-sorted) so markers react to wind changes.
+  // Primary + secondary get full markers, tertiary gets faint dots on map.
   useEffect(() => {
     if (!mapReady || !alignedStands.length) return;
 
@@ -5425,18 +5640,45 @@ function DeerIntelContent() {
       if (!mapRef.current) return;
       addStandMarkers();
       const map = mapRef.current;
+
+      // Top-stand emphasis glow
       if (map.getSource('tfp-stand-emphasis')) {
         const top = alignedStands[0];
         (map.getSource('tfp-stand-emphasis') as mapboxgl.GeoJSONSource).setData(
           top ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: top.coords }, properties: {} }] } : EMPTY_FC
         );
       }
-      // Build and set hunt pocket halos around top 2 stands
+
+      // Hunt pocket halos for top 2 stands
       if (map.getSource('tfp-hunt-pockets')) {
         const topStands = alignedStands.slice(0, 2);
         const pocketFC = buildHuntPocketFeatures(topStands, layers?.funnels, ridgeSpineData);
         (map.getSource('tfp-hunt-pockets') as mapboxgl.GeoJSONSource).setData(pocketFC);
-        console.log('[HuntPocket] Built', pocketFC.features.length, 'pocket rings for', topStands.length, 'stands');
+      }
+
+      // v1.1: Intercept direction wedges for top 2 stands
+      if (map.getSource('tfp-stand-direction')) {
+        const topStands = alignedStands.slice(0, 2);
+        const dirFC = buildStandDirectionFeatures(topStands, layers?.funnels, ridgeSpineData);
+        (map.getSource('tfp-stand-direction') as mapboxgl.GeoJSONSource).setData(dirFC);
+      }
+
+      // v1.1: Tertiary stand dots (stands 3+ as faint map dots)
+      if (map.getSource('tfp-stand-tertiary')) {
+        const tertiaryStands = alignedStands.slice(2); // everything after top 2
+        const tertiaryFC: GeoJSON.FeatureCollection = {
+          type: 'FeatureCollection',
+          features: tertiaryStands.map(s => ({
+            type: 'Feature' as const,
+            geometry: { type: 'Point' as const, coordinates: s.coords },
+            properties: {
+              rank: s.rank,
+              score: s.alignment.score,
+              name: s.name,
+            },
+          })),
+        };
+        (map.getSource('tfp-stand-tertiary') as mapboxgl.GeoJSONSource).setData(tertiaryFC);
       }
     }, 400);
 
@@ -5459,6 +5701,17 @@ function DeerIntelContent() {
     }
     if (map && map.getLayer('tfp-hunt-pockets-stroke')) {
       map.setLayoutProperty('tfp-hunt-pockets-stroke', 'visibility', visibility.stands ? 'visible' : 'none');
+    }
+    // v1.1: Toggle direction wedge layers with stands
+    if (map && map.getLayer('tfp-stand-direction-main')) {
+      map.setLayoutProperty('tfp-stand-direction-main', 'visibility', visibility.stands ? 'visible' : 'none');
+    }
+    if (map && map.getLayer('tfp-stand-direction-flank')) {
+      map.setLayoutProperty('tfp-stand-direction-flank', 'visibility', visibility.stands ? 'visible' : 'none');
+    }
+    // v1.1: Toggle tertiary stand dots with stands
+    if (map && map.getLayer('tfp-stand-tertiary-dot')) {
+      map.setLayoutProperty('tfp-stand-tertiary-dot', 'visibility', visibility.stands ? 'visible' : 'none');
     }
   }, [visibility.stands]);
 
@@ -5487,10 +5740,10 @@ function DeerIntelContent() {
       const alignScore = stand.alignment.score;
       const tierLabel = stand.alignment.label === 'Open Ground' ? 'Field Stone' : stand.alignment.label;
 
-      // Index 0 in aligned order gets gold highlight ring = "Today's Sit"
+      // Index 0 in aligned order gets blaze-orange highlight = "Today's Sit"
       const isTopStand = idx === 0;
-      const markerColor = isTopStand ? LAYER_COLORS.standHigh : LAYER_COLORS.standHigh;
-      const ringColor = isTopStand ? LAYER_COLORS.standGold : 'white';
+      const markerColor = isTopStand ? LAYER_COLORS.standPrimary : LAYER_COLORS.standSecondary;
+      const ringColor = isTopStand ? LAYER_COLORS.standPrimaryRing : '#d4a574';
       const ringWidth = isTopStand ? 6 : 4;
       const markerSize = isTopStand ? 56 : 48;
       const fontSize = isTopStand ? 22 : 20;
@@ -5514,9 +5767,9 @@ function DeerIntelContent() {
           width: ${markerSize}px;
           height: ${markerSize}px;
           ${isTopStand ? `
-            background: linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b);
-            border: ${ringWidth}px solid ${LAYER_COLORS.standGold};
-            box-shadow: 0 0 20px ${LAYER_COLORS.standGold}80, 0 6px 20px rgba(0,0,0,0.5);
+            background: linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing});
+            border: ${ringWidth}px solid ${LAYER_COLORS.standPrimaryRing};
+            box-shadow: 0 0 20px ${LAYER_COLORS.standPrimary}80, 0 6px 20px rgba(0,0,0,0.5);
           ` : `
             background: ${markerColor};
             border: ${ringWidth}px solid ${ringColor};
@@ -5540,8 +5793,8 @@ function DeerIntelContent() {
             bottom: -10px;
             left: 50%;
             transform: translateX(-50%);
-            background: linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b);
-            color: #1a1a1a;
+            background: linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing});
+            color: #fff;
             font-size: 10px;
             font-weight: 700;
             padding: 2px 8px;
@@ -5575,7 +5828,7 @@ function DeerIntelContent() {
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
       `;
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
-      const tooltipColor = isTopStand ? LAYER_COLORS.standGold : LAYER_COLORS.standHigh;
+      const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : LAYER_COLORS.standPrimary;
       const standLabel = isTopStand ? "⭐ Today's Sit" : stand.name;
       hoverTooltip.innerHTML = `
         <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 4px;">
@@ -5710,8 +5963,8 @@ function DeerIntelContent() {
 
     // #1 = Today's Sit with gold styling
     const isTodaysSit = props.rank === 1;
-    const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)` : 
-      props.rank <= 3 ? LAYER_COLORS.standHigh : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow;
+    const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing})` : 
+      props.rank <= 3 ? LAYER_COLORS.standPrimary : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow;
     const popupBadgeLabel = isTodaysSit ? "⭐ Today's Sit" : `Stand #${props.rank}`;
     const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
     
