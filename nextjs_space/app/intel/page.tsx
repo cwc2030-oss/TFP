@@ -5137,6 +5137,16 @@ function DeerIntelContent() {
     const handleAdjacentParcelClick = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       clearAllOverlaySources();
+      // Null out React state so useEffects don't repaint stale saddles/draws/ridges
+      setLayers(null);
+      setTerrainFlowData(null);
+      setRidgeSpineData(null);
+      setLegacySyntheticData(null);
+      setTieredCorridorData(null);
+      setEdgeIntelData(null);
+      setTerrainStory(null);
+      setTerrainFlowLoading(false);
+      setHuntabilityData(null);
       setSelectedAdjacentParcel({
         parcelId: detail.parcelId,
         address: detail.address,
