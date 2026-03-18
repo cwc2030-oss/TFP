@@ -5133,9 +5133,10 @@ function DeerIntelContent() {
     
     window.addEventListener('tfp-flow-segment-click', handleFlowSegmentClick);
     
-    // Adjacent parcel click handler
+    // Adjacent parcel click handler — clear terrain features from current parcel first
     const handleAdjacentParcelClick = (e: Event) => {
       const detail = (e as CustomEvent).detail;
+      clearAllOverlaySources();
       setSelectedAdjacentParcel({
         parcelId: detail.parcelId,
         address: detail.address,
@@ -5154,7 +5155,7 @@ function DeerIntelContent() {
       window.removeEventListener('tfp-flow-segment-click', handleFlowSegmentClick);
       window.removeEventListener('tfp-adjacent-parcel-click', handleAdjacentParcelClick);
     };
-  }, []);
+  }, [clearAllOverlaySources]);
 
   // ========== v3.6.0: TERRAIN REASONS EVENT LISTENER ==========
   // When showTerrainReasons is ON, clicking features shows terrain factor explanations
