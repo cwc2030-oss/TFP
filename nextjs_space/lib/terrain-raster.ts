@@ -1,5 +1,5 @@
 /**
- * Terrain Raster Pressure Surface v3.5 — Season Profiles v1.1 Visibility Tuning
+ * Terrain Raster Pressure Surface v3.6 — Season Profiles v1.2 Heatmap Balance Pass
  * 
  * Computes a grid-based terrain pressure map at 10-20m resolution.
  * Each cell gets bench/saddle/ridge scores based on proximity to terrain features,
@@ -108,9 +108,11 @@ const WEAK_PARCEL_CONFIG = {
 };
 
 // ============ INFLUENCE RADII (meters) ============
-const BENCH_INFLUENCE_M  = 80;   // how far bench influence extends
-const SADDLE_INFLUENCE_M = 120;  // saddles have wider influence
-const RIDGE_INFLUENCE_M  = 60;   // ridge influence is tighter
+// v1.2 — widened base radii so neighbouring features overlap and the heat
+//         surface reads as connected movement pressure rather than isolated kernels.
+const BENCH_INFLUENCE_M  = 110;  // was 80 — broader food/bed zone glow
+const SADDLE_INFLUENCE_M = 150;  // was 120 — saddles cast wider funnels
+const RIDGE_INFLUENCE_M  = 85;   // was 60 — ridge influence bridges gaps
 
 // ============ SEASON PROFILES (v4.0 — Seasonal Terrain Weighting) ============
 // Each season adjusts:
@@ -145,13 +147,13 @@ interface SeasonWeightProfile {
 
 const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
   early: {
-    // Early season v1.1: bench-dominant, food-adjacent browsing, broad softer heat
-    // Benches are THE feature — deer are on food-to-bed patterns across wide areas.
-    // Saddles and ridges barely register because territorial funneling hasn't started.
-    bench: 1.65,  saddle: 0.55,  ridge: 0.70,
-    benchInfluenceScale: 1.55,   // wide bench glow (browse/food patterns cast broadly)
-    saddleInfluenceScale: 0.65,  // saddles nearly dormant (no funneling pressure yet)
-    ridgeInfluenceScale: 0.75,   // ridges faint (cover matters, not travel spines)
+    // Early season v1.2: bench-dominant, food-adjacent browsing, broad connected heat
+    // Benches lead but saddles/ridges still contribute bridging pressure so the
+    // surface reads as continuous movement zones rather than isolated food blobs.
+    bench: 1.55,  saddle: 0.65,  ridge: 0.75,
+    benchInfluenceScale: 1.45,   // wide bench glow (browse/food patterns cast broadly)
+    saddleInfluenceScale: 0.80,  // saddles contribute background connectivity
+    ridgeInfluenceScale: 0.85,   // ridges provide light travel-spine bridging
     sidehillMax: 0.06,           // minimal sidehill bonus (warm weather, open movement)
     slopeWeight: 0.20,           // moderate slopes barely relevant
     ridgeOffsetWeight: 0.35,     // ridge-shoulder still matters for security cover
@@ -159,33 +161,32 @@ const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
     aspectBiasStrength: 0.4,     // very weak leeward bias (warm, variable winds)
   },
   rut: {
-    // Rut v1.1: saddle-dominant, ridge-crossing cruising, tight pinch-point heat
-    // Saddles and ridges are everything — bucks cruise through pinch points
-    // checking does. Benches nearly vanish because food patterns are abandoned.
-    bench: 0.50,  saddle: 1.80,  ridge: 1.50,
-    benchInfluenceScale: 0.60,   // benches recede (food irrelevant during rut)
-    saddleInfluenceScale: 1.70,  // saddles project widely (cruising funnels)
-    ridgeInfluenceScale: 1.40,   // ridges prominent (scent advantage from height)
-    sidehillMax: 0.20,           // strong sidehill bonus (ridge running / slope travel)
+    // Rut v1.2: saddle-dominant, ridge-crossing cruising, connected pinch-point heat
+    // Saddles and ridges dominate — benches recede but still emit light background
+    // heat so the surface connects across terrain gaps rather than isolated kernels.
+    bench: 0.60,  saddle: 1.70,  ridge: 1.40,
+    benchInfluenceScale: 0.70,   // benches recede but still contribute bridging
+    saddleInfluenceScale: 1.55,  // saddles project widely (cruising funnels)
+    ridgeInfluenceScale: 1.30,   // ridges prominent (scent advantage from height)
+    sidehillMax: 0.18,           // strong sidehill bonus (ridge running / slope travel)
     slopeWeight: 0.40,           // moderate slopes important for intercept angles
     ridgeOffsetWeight: 0.42,     // ridge shoulder is prime (scent-check from above)
     shelterWeight: 0.18,         // shelter barely matters (bucks move regardless)
     aspectBiasStrength: 0.75,    // mild leeward bias (wind matters but movement > shelter)
   },
   late: {
-    // Late season v1.1: shelter-dominant, leeward thermal cover, tight survival zones
-    // Thermal cover and wind protection are life-or-death. Deer conserve energy
-    // in sheltered leeward pockets near food. Exposed ridges and open saddles
-    // are actively avoided. Heat should pool in sheltered draws and NW/N/NE slopes.
-    bench: 1.35,  saddle: 0.60,  ridge: 0.50,
+    // Late season v1.2: shelter-dominant, leeward thermal cover, connected survival zones
+    // Thermal cover drives everything but saddles/ridges still provide enough
+    // background heat to keep the surface continuous and realistic.
+    bench: 1.30,  saddle: 0.70,  ridge: 0.60,
     benchInfluenceScale: 1.15,   // moderate bench reach (food-return near cover)
-    saddleInfluenceScale: 0.70,  // saddles subdued (exposed travel avoided)
-    ridgeInfluenceScale: 0.60,   // ridge crests avoided (wind exposure)
-    sidehillMax: 0.30,           // very high sidehill bonus (thermal cover is survival)
+    saddleInfluenceScale: 0.80,  // saddles contribute light connectivity
+    ridgeInfluenceScale: 0.70,   // ridge crests avoided but still bridge gaps
+    sidehillMax: 0.28,           // very high sidehill bonus (thermal cover is survival)
     slopeWeight: 0.15,           // slopes barely relevant
     ridgeOffsetWeight: 0.20,     // well below crest for maximum wind protection
     shelterWeight: 0.65,         // dominant: leeward thermal cover drives everything
-    aspectBiasStrength: 2.0,     // very aggressive leeward bias (survival mode)
+    aspectBiasStrength: 1.8,     // strong leeward bias (survival mode)
   },
 };
 
@@ -395,13 +396,15 @@ export function generateRasterGrid(parcelCoords: number[][]): RasterGrid | null 
 
 /**
  * Compute proximity score: 1.0 at source, decaying to 0 at radius.
- * Uses inverse distance weighting with smooth falloff.
+ * v1.2 — changed from quadratic (1-t²) to cubic (1-t³) falloff.
+ * Cubic holds higher values longer before dropping off, which creates
+ * smoother overlap between neighbouring features and reduces the
+ * "isolated kernel" appearance on the heat map.
  */
 function proximityScore(dist: number, radius: number): number {
   if (dist >= radius) return 0;
-  // Smooth inverse quadratic falloff
   const t = dist / radius;
-  return Math.max(0, 1 - t * t);
+  return Math.max(0, 1 - t * t * t);  // cubic falloff — gentler than quadratic
 }
 
 /**
@@ -813,7 +816,10 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // Apply Gaussian smoothing (light, 1-cell radius)
+  // v1.2 — two passes of Gaussian smoothing (effectively ~2-cell blur).
+  // Single pass was 1-cell/15m, which left gaps between features 50-100m apart.
+  // Double pass bridges those gaps while preserving peak structure.
+  applyGaussianSmoothing(grid);
   applyGaussianSmoothing(grid);
 
   // Normalize pressure to 0-1 range
@@ -832,8 +838,10 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  // v3.5 — raised hard floor to 0.65 so only the hottest ~10-20% of cells survive
-  const HARD_PRESSURE_FLOOR = 0.65;
+  // v1.2 — lowered hard floor from 0.65 → 0.55 so ~25-35% of cells survive.
+  // Combined with wider radii and double smoothing, this creates connected
+  // heat surfaces instead of isolated kernels while still suppressing noise.
+  const HARD_PRESSURE_FLOOR = 0.55;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {

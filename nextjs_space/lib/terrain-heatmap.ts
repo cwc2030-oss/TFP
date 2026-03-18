@@ -1,5 +1,5 @@
 /**
- * Terrain-Driven Heat Map Builder v3
+ * Terrain-Driven Heat Map Builder v3.1 — Season Profiles v1.2 Balance Pass
  *
  * TERRAIN-FIRST architecture: heat comes only from terrain structure.
  * Convergence is DEMOTED to a local amplifier / tie-breaker — not a heat source.
@@ -33,25 +33,25 @@ const W_RIDGE  = 0.30;  // was 0.20 — promoted (spine of terrain story)
 const CONVERGENCE_AMP_MAX = 0.15; // max +15% boost on existing terrain heat
 const CONVERGENCE_AMP_RADIUS_M = 120; // how close convergence must be to boost
 
-// ============ SEASON WEIGHT PROFILES (v1.1 — aligned with terrain-raster.ts) ============
+// ============ SEASON WEIGHT PROFILES (v1.2 — aligned with terrain-raster.ts) ============
 const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
   early: {
     label: 'Early Season (Sept-Oct)',
-    bench: 1.65,         // Bench-dominant: food-adjacent browsing
-    saddle: 0.55,        // Saddles nearly dormant
-    ridge: 0.70,         // Ridges faint
+    bench: 1.55,         // Bench-dominant: food-adjacent browsing
+    saddle: 0.65,        // Saddles provide background connectivity
+    ridge: 0.75,         // Ridges bridge travel spines lightly
   },
   rut: {
     label: 'Rut (Nov)',
-    bench: 0.50,         // Benches recede
-    saddle: 1.80,        // Saddle crossings are king
-    ridge: 1.50,         // Ridgeline cruising prominent
+    bench: 0.60,         // Benches recede but still bridge gaps
+    saddle: 1.70,        // Saddle crossings dominate
+    ridge: 1.40,         // Ridgeline cruising prominent
   },
   late: {
     label: 'Late Season (Dec-Jan)',
-    bench: 1.35,         // Return to food-near-cover benches
-    saddle: 0.60,        // Exposed saddles avoided
-    ridge: 0.50,         // Ridge crests avoided (wind exposure)
+    bench: 1.30,         // Return to food-near-cover benches
+    saddle: 0.70,        // Saddles subdued but bridging
+    ridge: 0.60,         // Ridge crests avoided but connect surface
   },
 };
 
@@ -97,9 +97,10 @@ const FOCUS_CONFIG: Record<PressureFocus, { scoreFloor: number; scoreGamma: numb
 };
 
 // ============ INFLUENCE RADII (meters) ============
-const BENCH_INFLUENCE_M  = 75;
-const SADDLE_INFLUENCE_M = 120;
-const RIDGE_INFLUENCE_M  = 60;
+// v1.2 — widened to match terrain-raster.ts and reduce isolated kernels
+const BENCH_INFLUENCE_M  = 105;  // was 75
+const SADDLE_INFLUENCE_M = 150;  // was 120
+const RIDGE_INFLUENCE_M  = 85;   // was 60
 
 /**
  * Build terrain-driven heat map features.
@@ -144,8 +145,9 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
       if (f.geometry?.type === 'Point') {
         const coord = f.geometry.coordinates as [number, number];
         features.push(makeHeatPoint(coord, score, 'saddle'));
-        // Tight halo
-        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.5) / 111000;
+        // v1.2 — wider halo (0.7× radius) with gentler decay (0.65×) for smoother
+        //         saddle glow instead of tight isolated kernels
+        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.7) / 111000;
         const offsets: [number, number][] = [
           [haloOffsetDeg, 0], [-haloOffsetDeg, 0],
           [0, haloOffsetDeg], [0, -haloOffsetDeg],
@@ -153,7 +155,7 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
         for (const [dx, dy] of offsets) {
           features.push(makeHeatPoint(
             [coord[0] + dx, coord[1] + dy],
-            score * 0.55,
+            score * 0.65,
             'saddle_halo'
           ));
         }
@@ -178,11 +180,12 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
 
       const coords = (f.geometry as GeoJSON.LineString)?.coordinates || [];
       if (coords.length >= 2) {
-        const step = Math.max(1, Math.floor(coords.length / 10));
+        // v1.2 — denser sampling (16 pts instead of 10) for more continuous ridge heat
+        const step = Math.max(1, Math.floor(coords.length / 16));
         for (let i = 0; i < coords.length; i += step) {
           features.push(makeHeatPoint(
             coords[i] as [number, number],
-            score * (i === 0 || i >= coords.length - step ? 0.7 : 1.0),
+            score * (i === 0 || i >= coords.length - step ? 0.75 : 1.0),
             'ridge'
           ));
         }
