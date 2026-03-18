@@ -440,6 +440,161 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
   return { point: closestPoint, segment: closestSegment, index: closestIndex };
 }
 
+// ========== HUNT POCKET GEOMETRY BUILDER ==========
+// Generates terrain-aware elliptical polygons around stand sites.
+// The pocket stretches toward the nearest corridor to reflect the huntable zone
+// aligned with deer movement, not a generic circle.
+function buildHuntPocketFeatures(
+  stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
+  funnels: GeoJSON.FeatureCollection | null | undefined,
+  ridges: { ridges_primary?: GeoJSON.FeatureCollection; ridges_secondary?: GeoJSON.FeatureCollection } | null | undefined,
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  if (!stands.length) return { type: 'FeatureCollection', features };
+
+  // Ring count and radii for concentric fade (meters)
+  const RINGS = 5;
+  const BASE_RADIUS = 55;  // core ring in meters
+  const MAX_RADIUS = 140;  // outermost ring
+  const ELONGATION = 1.6;  // stretch factor toward corridor
+  const SEGMENTS = 28;     // polygon smoothness
+
+  // Extract corridor LineStrings for bearing computation
+  const corridorLines: [number, number][][] = [];
+  if (funnels?.features) {
+    for (const f of funnels.features) {
+      if (f.properties?.funnelType === 'corridor' && f.geometry?.type === 'LineString') {
+        corridorLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      }
+    }
+  }
+
+  // Extract draw LineStrings as secondary directional influence
+  const drawLines: [number, number][][] = [];
+  if (funnels?.features) {
+    for (const f of funnels.features) {
+      if (f.properties?.funnelType === 'draw' && f.geometry?.type === 'LineString') {
+        drawLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      }
+    }
+  }
+
+  // Extract ridge lines for perpendicular bias (ridges run along high ground, 
+  // pockets should extend perpendicular into the draw/valley)
+  const ridgeLines: [number, number][][] = [];
+  if (ridges?.ridges_primary?.features) {
+    for (const f of ridges.ridges_primary.features) {
+      if (f.geometry?.type === 'LineString') {
+        ridgeLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      }
+    }
+  }
+
+  for (const stand of stands) {
+    const center = stand.coords;
+
+    // Determine stretch bearing: corridor > draw > ridge-perpendicular > default NW
+    let stretchBearing = 315; // default NW
+
+    // 1) Nearest corridor
+    let nearestCorridorDist = Infinity;
+    let corridorBearing: number | null = null;
+    for (const line of corridorLines) {
+      if (line.length < 2) continue;
+      const result = closestPointOnLineString(center, line);
+      if (result.dist < nearestCorridorDist) {
+        nearestCorridorDist = result.dist;
+        // Use the bearing OF the corridor segment, not toward it
+        const seg = line[result.segIndex];
+        const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+        corridorBearing = calculateBearing(seg, segEnd);
+      }
+    }
+
+    if (corridorBearing !== null && nearestCorridorDist < 500) {
+      stretchBearing = corridorBearing;
+    } else {
+      // 2) Nearest draw bearing
+      let nearestDrawDist = Infinity;
+      for (const line of drawLines) {
+        if (line.length < 2) continue;
+        const result = closestPointOnLineString(center, line);
+        if (result.dist < nearestDrawDist) {
+          nearestDrawDist = result.dist;
+          const seg = line[result.segIndex];
+          const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+          stretchBearing = calculateBearing(seg, segEnd);
+        }
+      }
+
+      if (nearestDrawDist >= 500) {
+        // 3) Nearest ridge — stretch perpendicular to ridge
+        let nearestRidgeDist = Infinity;
+        for (const line of ridgeLines) {
+          if (line.length < 2) continue;
+          const result = closestPointOnLineString(center, line);
+          if (result.dist < nearestRidgeDist) {
+            nearestRidgeDist = result.dist;
+            const seg = line[result.segIndex];
+            const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+            stretchBearing = (calculateBearing(seg, segEnd) + 90) % 360; // perpendicular
+          }
+        }
+      }
+    }
+
+    // Build concentric elliptical rings (inside-out)
+    for (let ring = RINGS; ring >= 1; ring--) {
+      const t = ring / RINGS;
+      const radius = BASE_RADIUS + (MAX_RADIUS - BASE_RADIUS) * t;
+      const coords: [number, number][] = [];
+
+      for (let i = 0; i <= SEGMENTS; i++) {
+        const angle = (i / SEGMENTS) * 2 * Math.PI;
+        // Ellipse: stretch along stretchBearing axis
+        const bearingRad = stretchBearing * Math.PI / 180;
+        // Rotate angle into corridor-aligned frame
+        const localX = Math.cos(angle);
+        const localY = Math.sin(angle);
+        // Apply elongation along bearing axis
+        const stretchedX = localX * ELONGATION;
+        const stretchedY = localY;
+        // Rotate back to geographic bearing
+        const geoX = stretchedX * Math.cos(bearingRad) - stretchedY * Math.sin(bearingRad);
+        const geoY = stretchedX * Math.sin(bearingRad) + stretchedY * Math.cos(bearingRad);
+        // Convert to geographic bearing for movePoint
+        const ptBearing = (Math.atan2(geoX, geoY) * 180 / Math.PI + 360) % 360;
+        const ptDist = radius * Math.sqrt(geoX * geoX + geoY * geoY) / Math.max(ELONGATION, 1);
+
+        coords.push(movePoint(center, ptBearing, ptDist));
+      }
+
+      // Add slight organic jitter (Perlin-esque noise via sin harmonics)
+      const jitteredCoords = coords.map((c, i) => {
+        if (i === coords.length - 1) return coords[0]; // close ring
+        const jitterScale = radius * 0.06 * t; // more jitter on outer rings
+        const noise = Math.sin(i * 3.7 + ring * 1.3) * 0.5 + Math.sin(i * 7.1 + ring * 2.1) * 0.3;
+        const jitterBearing = (i / SEGMENTS) * 360;
+        return movePoint(c, jitterBearing, noise * jitterScale);
+      });
+
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [jitteredCoords] },
+        properties: {
+          standRank: stand.rank,
+          ring,
+          ringNorm: t, // 0.2 (innermost) to 1.0 (outermost)
+          isTopStand: stand.rank === stands[0]?.rank,
+          score: stand.alignment.score,
+        },
+      });
+    }
+  }
+
+  return { type: 'FeatureCollection', features };
+}
+
 // Generate corridor continuation arrows extending beyond parcel boundary
 function generateCorridorArrows(
   corridors: GeoJSON.FeatureCollection,
@@ -1380,6 +1535,7 @@ function DeerIntelContent() {
       'tfp-edge-arrows', 'tfp-edge-ghost', 'tfp-edge-ghost-saddles',
       'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
       'tfp-stand-emphasis', // v3.8.1 — top-stand attention glow
+      'tfp-hunt-pockets', // Hunt pocket halos around stands
     ];
     for (const id of ALL_TFP_SOURCES) {
       try {
@@ -3564,6 +3720,52 @@ function DeerIntelContent() {
         
         // (Opportunity layers removed — convergence IS opportunity)
         
+        // ========== HUNT POCKET LAYER ==========
+        // Warm amber/gold elliptical halos around stand sites showing huntable zone
+        // Rendered as concentric rings with decreasing opacity for natural fade
+        if (!map.getSource('tfp-hunt-pockets')) {
+          map.addSource('tfp-hunt-pockets', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow fill — warm amber, opacity driven by ring position
+          map.addLayer({
+            id: 'tfp-hunt-pockets-fill',
+            type: 'fill',
+            source: 'tfp-hunt-pockets',
+            paint: {
+              'fill-color': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                '#d97706',  // amber-600 for Today's Sit
+                '#b45309',  // amber-700 for secondary
+              ],
+              'fill-opacity': [
+                'interpolate', ['linear'], ['get', 'ringNorm'],
+                0.2, 0.22,   // innermost ring: warmest glow
+                0.5, 0.12,
+                0.8, 0.06,
+                1.0, 0.02,   // outermost ring: barely visible
+              ],
+            },
+          });
+          // Subtle inner stroke on the innermost ring only
+          map.addLayer({
+            id: 'tfp-hunt-pockets-stroke',
+            type: 'line',
+            source: 'tfp-hunt-pockets',
+            filter: ['==', ['get', 'ring'], 1],
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                '#fbbf24',  // amber-400
+                '#d97706',  // amber-600
+              ],
+              'line-width': 1.5,
+              'line-opacity': 0.35,
+              'line-blur': 1,
+            },
+          });
+        }
+
         // ========== v3.8.1/v3.8.2 — TOP-STAND ATTENTION BIAS ==========
         // Subtle STATIC radial glow near the #1 wind-aligned stand ("Today's Sit")
         // v3.8.2: reduced radius, no animation — just a calm fixed tint
@@ -4062,6 +4264,9 @@ function DeerIntelContent() {
           'tfp-ridges-primary',
           'tfp-ridges-secondary-casing',
           'tfp-ridges-secondary',
+          // Hunt pockets (warm amber halos around stands)
+          'tfp-hunt-pockets-fill',
+          'tfp-hunt-pockets-stroke',
           // Flow lines (animated) — v3.5.1
           'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
           'tfp-flow-secondary',
@@ -5243,10 +5448,17 @@ function DeerIntelContent() {
           top ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: top.coords }, properties: {} }] } : EMPTY_FC
         );
       }
+      // Build and set hunt pocket halos around top 2 stands
+      if (map.getSource('tfp-hunt-pockets')) {
+        const topStands = alignedStands.slice(0, 2);
+        const pocketFC = buildHuntPocketFeatures(topStands, layers?.funnels, ridgeSpineData);
+        (map.getSource('tfp-hunt-pockets') as mapboxgl.GeoJSONSource).setData(pocketFC);
+        console.log('[HuntPocket] Built', pocketFC.features.length, 'pocket rings for', topStands.length, 'stands');
+      }
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [alignedStands, mapReady]); // eslint-disable-line
+  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
   // Toggle visibility of HTML markers + stand emphasis glow
   useEffect(() => {
@@ -5257,6 +5469,13 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (map && map.getLayer('tfp-stand-emphasis-glow')) {
       map.setLayoutProperty('tfp-stand-emphasis-glow', 'visibility', visibility.stands ? 'visible' : 'none');
+    }
+    // Toggle hunt pocket visibility with stands
+    if (map && map.getLayer('tfp-hunt-pockets-fill')) {
+      map.setLayoutProperty('tfp-hunt-pockets-fill', 'visibility', visibility.stands ? 'visible' : 'none');
+    }
+    if (map && map.getLayer('tfp-hunt-pockets-stroke')) {
+      map.setLayoutProperty('tfp-hunt-pockets-stroke', 'visibility', visibility.stands ? 'visible' : 'none');
     }
   }, [visibility.stands]);
 
