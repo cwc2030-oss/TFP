@@ -40,6 +40,19 @@
 import type { SeasonProfile } from '@/types/terrain';
 import type { PressureFocus } from './terrain-heatmap';
 
+// ============ POINT-IN-POLYGON (ray casting) ============
+function pointInPolygon(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 // ============ GRID RESOLUTION ============
 const CELL_SIZE_M = 15; // 15 meter cells (between 10-20m as requested)
 const MIN_CELLS = 20;   // minimum grid dimension
@@ -720,6 +733,7 @@ export function buildTerrainRaster(input: RasterInput): {
   // Convert to GeoJSON heat points with focus mode filtering
   // v3.5 — raised hard floor to 0.65 so only the hottest ~10-20% of cells survive
   const HARD_PRESSURE_FLOOR = 0.65;
+  const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
@@ -731,6 +745,9 @@ export function buildTerrainRaster(input: RasterInput): {
 
       // Apply focus mode floor on top of hard floor
       if (raw < focus.scoreFloor) continue;
+
+      // Clip to parcel boundary — no heat bleed onto lakes/neighbors
+      if (parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
 
       // Normalize and apply gamma
       const norm = (raw - focus.scoreFloor) / (1 - focus.scoreFloor);
@@ -763,7 +780,7 @@ export function buildTerrainRaster(input: RasterInput): {
 
   // Extract Prime Stand Sites using Kill Window model
   // (offset from hotspot centers toward intercept edges)
-  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData);
+  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing);
 
   return {
     grid,
@@ -1003,7 +1020,8 @@ function extractPrimeStandSites(
     ridges_primary?: GeoJSON.FeatureCollection;
     ridges_secondary?: GeoJSON.FeatureCollection;
   } | null,
-  huntabilityScore?: number // Optional: pass score to apply weak parcel limits
+  huntabilityScore?: number, // Optional: pass score to apply weak parcel limits
+  parcelRing?: number[][]    // Optional: clip stand sites to parcel boundary
 ): PrimeStandSite[] {
   // Step 0: Determine effective max count based on huntability score
   let effectiveMaxCount = maxCount;
@@ -1042,6 +1060,8 @@ function extractPrimeStandSites(
       }
 
       if (isMax) {
+        // Skip candidates outside the parcel boundary
+        if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
         candidates.push({ row: r, col: c, pressure: center, cell });
       }
     }
