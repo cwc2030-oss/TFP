@@ -19,7 +19,7 @@ import {
   type StandInputs,
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
-import { buildStandInputs, windDirectionToDeg, smallestAngleDiffDeg } from '@/lib/scoring/stand-inputs';
+import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
@@ -1302,7 +1302,6 @@ function DeerIntelContent() {
   const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
   const [exceptionalIndex, setExceptionalIndex] = useState<number | null>(null);
   const [parcelStrength, setParcelStrength] = useState<number>(0);
-  const [prevWindDirection, setPrevWindDirection] = useState<WindDirection | null>(null);
   const [mostAlignedHint, setMostAlignedHint] = useState<{ standRank: number; name: string } | null>(null);
   const [alignmentPanelExpanded, setAlignmentPanelExpanded] = useState(false); // Collapsed by default
   const [userHasInteracted, setUserHasInteracted] = useState(false);
@@ -1350,12 +1349,14 @@ function DeerIntelContent() {
 
   // ========== ALIGNMENT ENGINE HELPERS ==========
   
-  // Wind direction to degrees mapping (for stability check)
-  const windToDegrees: Record<WindDirection, number> = {
-    N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315
-  };
+  // v1.2 wind-compass fix: read highlightedStandRank via ref so the scorer
+  // callback doesn't depend on it (avoids unnecessary identity changes).
+  const highlightedStandRankRef = useRef(highlightedStandRank);
+  useEffect(() => { highlightedStandRankRef.current = highlightedStandRank; }, [highlightedStandRank]);
 
-  // Compute alignment for all stands
+  // Compute alignment for all stands — depends ONLY on data + wind + season.
+  // v1.2: removed highlightedStandRank from deps (reads via ref) and removed
+  //        the prevWindDirection stability gate that could swallow compass clicks.
   const computeAlignmentScores = useCallback(() => {
     if (!layers?.standPoints?.features?.length) {
       setAlignedStands([]);
@@ -1379,7 +1380,6 @@ function DeerIntelContent() {
         {
           windDirDeg,
           season,
-          // timeFit: 0.5 (default, could add time selector later)
         }
       );
     });
@@ -1404,27 +1404,25 @@ function DeerIntelContent() {
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
     setParcelStrength(ps);
 
-    // Set initial highlighted stand to top
-    if (highlightedStandRank === null && aligned.length > 0) {
+    // Set initial highlighted stand to top (read via ref to avoid dep)
+    const currentHighlight = highlightedStandRankRef.current;
+    if (currentHighlight === null && aligned.length > 0) {
       setHighlightedStandRank(aligned[0].rank);
     }
 
-    // Check for "most aligned" hint
-    if (highlightedStandRank !== null && aligned.length > 0) {
-      const currentHighlighted = aligned.find(s => s.rank === highlightedStandRank);
+    // Check for "most aligned" hint (read highlighted via ref)
+    if (currentHighlight !== null && aligned.length > 0) {
+      const currentHighlighted = aligned.find(s => s.rank === currentHighlight);
       const newTop = aligned[0];
       
-      if (currentHighlighted && newTop.rank !== highlightedStandRank) {
+      if (currentHighlighted && newTop.rank !== currentHighlight) {
         const scoreDiff = newTop.alignment.score - currentHighlighted.alignment.score;
         
         if (scoreDiff >= 5) {
-          // Start 2s debounce for hint
           if (mostAlignedDebounceRef.current) clearTimeout(mostAlignedDebounceRef.current);
           mostAlignedDebounceRef.current = setTimeout(() => {
-            // Verify still true
             if (aligned[0].rank === newTop.rank && scoreDiff >= 5) {
               setMostAlignedHint({ standRank: newTop.rank, name: `Stand #${newTop.rank}` });
-              // Auto-fade after 6s
               if (hintFadeTimeoutRef.current) clearTimeout(hintFadeTimeoutRef.current);
               hintFadeTimeoutRef.current = setTimeout(() => setMostAlignedHint(null), 6000);
             }
@@ -1432,26 +1430,16 @@ function DeerIntelContent() {
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season, highlightedStandRank]);
+  }, [layers?.standPoints, windDirection, season]);
 
-  // Recompute alignment when layers, wind, or season change
+  // v1.2 wind-compass fix: fire alignment scorer directly when deps change.
+  // Removed the prevWindDirection stability gate — compass clicks are always 45°
+  // increments which far exceed any useful jitter threshold. The old gate could
+  // swallow valid clicks when React batched state updates.
   useEffect(() => {
     if (!layers?.standPoints) return;
-    
-    // Check wind stability using wrap-safe delta (handles 350° → 10° correctly)
-    if (prevWindDirection !== null) {
-      const prevDeg = windToDegrees[prevWindDirection];
-      const newDeg = windToDegrees[windDirection];
-      const delta = smallestAngleDiffDeg(prevDeg, newDeg);
-      if (delta <= 10) {
-        // Wind change too small, skip recompute to prevent jitter
-        return;
-      }
-    }
-    
-    setPrevWindDirection(windDirection);
     computeAlignmentScores();
-  }, [layers?.standPoints, windDirection, season, computeAlignmentScores, prevWindDirection]);
+  }, [layers?.standPoints, windDirection, season, computeAlignmentScores]);
 
   // v3.8.4 — Keep "X min ago" out of render body; update via interval only
   useEffect(() => {
@@ -2610,7 +2598,6 @@ function DeerIntelContent() {
 
     if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
     terrainFlowDebounceRef.current = setTimeout(() => {
-    // Clear ref so WindCompass debouncing prop goes false
     terrainFlowDebounceRef.current = null;
 
     // Select data source based on comparison mode
@@ -6363,7 +6350,6 @@ function DeerIntelContent() {
               <WindCompass
                 windDirection={windDirection}
                 windMinAgo={windMinAgo}
-                debouncing={!!terrainFlowDebounceRef.current}
                 onWindChange={(dir) => {
                   setWindDirection(dir);
                   setWindLastUpdated(new Date());

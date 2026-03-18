@@ -2,7 +2,6 @@
 
 import { Wind } from 'lucide-react';
 import type { WindDirection } from '@/types/terrain';
-import type { MutableRefObject } from 'react';
 
 const WIND_DIRECTIONS: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
@@ -12,11 +11,15 @@ interface WindCompassProps {
   windDirection: WindDirection;
   windMinAgo: number;
   onWindChange: (dir: WindDirection) => void;
-  /** When true, ignore clicks (debounce in progress) */
-  debouncing: boolean;
 }
 
-export function WindCompass({ windDirection, windMinAgo, onWindChange, debouncing }: WindCompassProps) {
+/**
+ * Wind compass selector — v1.2.
+ * Removed ref-based `debouncing` prop that could silently swallow clicks
+ * because refs don't trigger re-renders when cleared. Every click now
+ * fires immediately; downstream effects debounce themselves as needed.
+ */
+export function WindCompass({ windDirection, windMinAgo, onWindChange }: WindCompassProps) {
   return (
     <div className="p-3 border-b border-white/10">
       <div className="flex items-center justify-between mb-2">
@@ -35,10 +38,7 @@ export function WindCompass({ windDirection, windMinAgo, onWindChange, debouncin
           return (
             <button
               key={dir}
-              onClick={() => {
-                if (debouncing) return;
-                onWindChange(dir);
-              }}
+              onClick={() => onWindChange(dir)}
               className={`
                 w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-colors duration-150
                 ${isSelected
