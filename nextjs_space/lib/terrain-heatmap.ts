@@ -33,25 +33,25 @@ const W_RIDGE  = 0.30;  // was 0.20 — promoted (spine of terrain story)
 const CONVERGENCE_AMP_MAX = 0.15; // max +15% boost on existing terrain heat
 const CONVERGENCE_AMP_RADIUS_M = 120; // how close convergence must be to boost
 
-// ============ SEASON WEIGHT PROFILES ============
+// ============ SEASON WEIGHT PROFILES (v1.1 — aligned with terrain-raster.ts) ============
 const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
   early: {
     label: 'Early Season (Sept-Oct)',
-    bench: 1.3,          // Food-adjacent bedding is key
-    saddle: 0.8,         // Less travel through saddles
-    ridge: 0.9,          // Moderate ridge use
+    bench: 1.65,         // Bench-dominant: food-adjacent browsing
+    saddle: 0.55,        // Saddles nearly dormant
+    ridge: 0.70,         // Ridges faint
   },
   rut: {
     label: 'Rut (Nov)',
-    bench: 0.8,          // Bucks leave benches
-    saddle: 1.4,         // Saddle crossings are king
-    ridge: 1.2,          // Ridgeline travel increases
+    bench: 0.50,         // Benches recede
+    saddle: 1.80,        // Saddle crossings are king
+    ridge: 1.50,         // Ridgeline cruising prominent
   },
   late: {
     label: 'Late Season (Dec-Jan)',
-    bench: 1.2,          // Return to thermal benches
-    saddle: 0.9,         // Moderate saddle use
-    ridge: 0.8,          // Less ridge travel
+    bench: 1.35,         // Return to food-near-cover benches
+    saddle: 0.60,        // Exposed saddles avoided
+    ridge: 0.50,         // Ridge crests avoided (wind exposure)
   },
 };
 

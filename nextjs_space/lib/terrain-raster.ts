@@ -1,5 +1,5 @@
 /**
- * Terrain Raster Pressure Surface v3.4 — Cover Gating & Weak Parcel Limits
+ * Terrain Raster Pressure Surface v3.5 — Season Profiles v1.1 Visibility Tuning
  * 
  * Computes a grid-based terrain pressure map at 10-20m resolution.
  * Each cell gets bench/saddle/ridge scores based on proximity to terrain features,
@@ -9,7 +9,12 @@
  *   0.40 × bench_score +
  *   0.30 × saddle_score +
  *   0.30 × ridge_score +
- *   sidehill_bonus (up to +12%)
+ *   sidehill_bonus (up to +30% in Late season)
+ * 
+ * Season Profiles v1.1 — Visibility Tuning:
+ *   Early: bench 1.65×, saddle 0.55×, ridge 0.70× — softer, wider bench glow
+ *   Rut:   bench 0.50×, saddle 1.80×, ridge 1.50× — tight pinch-point heat
+ *   Late:  bench 1.35×, saddle 0.60×, ridge 0.50× — shelter-dominated pockets
  * 
  * Sidehill bonus favors:
  *   - Moderate slope bands (8-25%)
@@ -140,40 +145,47 @@ interface SeasonWeightProfile {
 
 const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
   early: {
-    // Early season: food-adjacent travel on benches, less territorial compression
-    bench: 1.3,  saddle: 0.8,  ridge: 0.9,
-    benchInfluenceScale: 1.25,   // wider bench projection (food/browse patterns)
-    saddleInfluenceScale: 0.85,  // saddles less relevant (not funneling hard yet)
-    ridgeInfluenceScale: 0.90,   // slightly tighter ridge influence
-    sidehillMax: 0.08,           // modest sidehill bonus (warm weather)
-    slopeWeight: 0.25,           // moderate slopes less critical
-    ridgeOffsetWeight: 0.35,     // ridge-shoulder still matters for security
-    shelterWeight: 0.40,         // some shelter preference (shade, not thermal)
-    aspectBiasStrength: 0.6,     // weak leeward bias (warm temps, variable winds)
+    // Early season v1.1: bench-dominant, food-adjacent browsing, broad softer heat
+    // Benches are THE feature — deer are on food-to-bed patterns across wide areas.
+    // Saddles and ridges barely register because territorial funneling hasn't started.
+    bench: 1.65,  saddle: 0.55,  ridge: 0.70,
+    benchInfluenceScale: 1.55,   // wide bench glow (browse/food patterns cast broadly)
+    saddleInfluenceScale: 0.65,  // saddles nearly dormant (no funneling pressure yet)
+    ridgeInfluenceScale: 0.75,   // ridges faint (cover matters, not travel spines)
+    sidehillMax: 0.06,           // minimal sidehill bonus (warm weather, open movement)
+    slopeWeight: 0.20,           // moderate slopes barely relevant
+    ridgeOffsetWeight: 0.35,     // ridge-shoulder still matters for security cover
+    shelterWeight: 0.45,         // shade preference, not thermal urgency
+    aspectBiasStrength: 0.4,     // very weak leeward bias (warm, variable winds)
   },
   rut: {
-    // Rut: cruising through saddles and along ridges, scent-checking
-    bench: 0.8,  saddle: 1.4,  ridge: 1.2,
-    benchInfluenceScale: 0.80,   // tighter bench (abandoning food patterns)
-    saddleInfluenceScale: 1.35,  // wider saddle projection (cruising funnels)
-    ridgeInfluenceScale: 1.15,   // ridges important (scent advantage from height)
-    sidehillMax: 0.14,           // strong sidehill bonus (ridge running)
-    slopeWeight: 0.35,           // moderate slopes good for intercept angles
-    ridgeOffsetWeight: 0.40,     // ridge shoulder is prime (scent from above)
-    shelterWeight: 0.25,         // shelter less critical (bucks moving regardless)
-    aspectBiasStrength: 0.9,     // moderate leeward bias (wind still matters)
+    // Rut v1.1: saddle-dominant, ridge-crossing cruising, tight pinch-point heat
+    // Saddles and ridges are everything — bucks cruise through pinch points
+    // checking does. Benches nearly vanish because food patterns are abandoned.
+    bench: 0.50,  saddle: 1.80,  ridge: 1.50,
+    benchInfluenceScale: 0.60,   // benches recede (food irrelevant during rut)
+    saddleInfluenceScale: 1.70,  // saddles project widely (cruising funnels)
+    ridgeInfluenceScale: 1.40,   // ridges prominent (scent advantage from height)
+    sidehillMax: 0.20,           // strong sidehill bonus (ridge running / slope travel)
+    slopeWeight: 0.40,           // moderate slopes important for intercept angles
+    ridgeOffsetWeight: 0.42,     // ridge shoulder is prime (scent-check from above)
+    shelterWeight: 0.18,         // shelter barely matters (bucks move regardless)
+    aspectBiasStrength: 0.75,    // mild leeward bias (wind matters but movement > shelter)
   },
   late: {
-    // Late season: thermal cover, sheltered terrain, energy conservation
-    bench: 1.2,  saddle: 0.9,  ridge: 0.8,
-    benchInfluenceScale: 1.05,   // normal bench influence (food return)
-    saddleInfluenceScale: 0.90,  // moderate saddle influence
-    ridgeInfluenceScale: 0.85,   // less ridge running (exposed to wind)
-    sidehillMax: 0.18,           // maximum sidehill bonus (thermal cover is king)
-    slopeWeight: 0.20,           // slopes matter less (deer aren't picky)
-    ridgeOffsetWeight: 0.25,     // further below crest for wind protection
-    shelterWeight: 0.55,         // dominant factor: leeward thermal cover
-    aspectBiasStrength: 1.5,     // very strong leeward bias (survival mode)
+    // Late season v1.1: shelter-dominant, leeward thermal cover, tight survival zones
+    // Thermal cover and wind protection are life-or-death. Deer conserve energy
+    // in sheltered leeward pockets near food. Exposed ridges and open saddles
+    // are actively avoided. Heat should pool in sheltered draws and NW/N/NE slopes.
+    bench: 1.35,  saddle: 0.60,  ridge: 0.50,
+    benchInfluenceScale: 1.15,   // moderate bench reach (food-return near cover)
+    saddleInfluenceScale: 0.70,  // saddles subdued (exposed travel avoided)
+    ridgeInfluenceScale: 0.60,   // ridge crests avoided (wind exposure)
+    sidehillMax: 0.30,           // very high sidehill bonus (thermal cover is survival)
+    slopeWeight: 0.15,           // slopes barely relevant
+    ridgeOffsetWeight: 0.20,     // well below crest for maximum wind protection
+    shelterWeight: 0.65,         // dominant: leeward thermal cover drives everything
+    aspectBiasStrength: 2.0,     // very aggressive leeward bias (survival mode)
   },
 };
 
