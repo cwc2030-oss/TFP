@@ -7273,7 +7273,7 @@ function DeerIntelContent() {
                 </>
               )}
             </div>
-            <div className="mt-2.5 pt-2 border-t border-stone-700/40">
+            <div className="mt-2.5 pt-2 border-t border-stone-700/40 space-y-1.5">
               <button
                 onClick={() => {
                   const lat = selectedAdjacentParcel.centroid[1];
@@ -7281,9 +7281,31 @@ function DeerIntelContent() {
                   const addr = encodeURIComponent(selectedAdjacentParcel.address);
                   window.location.href = `/intel?lat=${lat}&lng=${lng}&address=${addr}`;
                 }}
-                className="w-full text-[10px] text-center py-1.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 hover:text-blue-300 transition-colors font-medium"
+                className="w-full text-[10px] text-center py-1.5 rounded bg-stone-700/40 text-stone-300 hover:bg-stone-700/60 hover:text-white transition-colors font-medium"
               >
-                View Terrain Intel &rarr;
+                Scout This Parcel (Free)
+              </button>
+              <button
+                onClick={() => {
+                  const lat = selectedAdjacentParcel.centroid[1];
+                  const lng = selectedAdjacentParcel.centroid[0];
+                  const addr = encodeURIComponent(selectedAdjacentParcel.address);
+                  window.location.href = `/map?lat=${lat}&lng=${lng}&address=${addr}&product=hunting_intel`;
+                }}
+                className="w-full text-[10px] text-center py-1.5 rounded bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 hover:text-amber-200 transition-colors font-medium"
+              >
+                Hunting Intel — $79
+              </button>
+              <button
+                onClick={() => {
+                  const lat = selectedAdjacentParcel.centroid[1];
+                  const lng = selectedAdjacentParcel.centroid[0];
+                  const addr = encodeURIComponent(selectedAdjacentParcel.address);
+                  window.location.href = `/map?lat=${lat}&lng=${lng}&address=${addr}&product=full_report`;
+                }}
+                className="w-full text-[10px] text-center py-1.5 rounded bg-emerald-600/25 text-emerald-400 hover:bg-emerald-600/40 hover:text-emerald-300 transition-colors font-medium"
+              >
+                Full Report — $350
               </button>
             </div>
           </div>

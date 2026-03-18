@@ -22,12 +22,19 @@ interface SelectedParcel {
   bounds?: { lat: number; lng: number }[];
 }
 
+interface InitialParcel {
+  lat: number;
+  lng: number;
+  address: string;
+}
+
 interface InteractiveMapProps {
   onParcelSelect?: (parcel: SelectedParcel | null) => void;
   onLayersChange?: (layers: string[]) => void;
   onCheckout?: (product?: string) => void;
   initialLayers?: string[];
   autoOpen3D?: boolean;
+  initialParcel?: InitialParcel | null;
 }
 
 interface SearchResult {
@@ -72,6 +79,7 @@ export default function InteractiveMap({
   onCheckout,
   initialLayers = [],
   autoOpen3D = false,
+  initialParcel = null,
 }: InteractiveMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<google.maps.Map | null>(null);
@@ -170,6 +178,24 @@ export default function InteractiveMap({
       return () => clearTimeout(timer);
     }
   }, [autoOpen3D, onParcelSelect]);
+
+  // Auto-select parcel when initialParcel is provided (e.g. from adjacent parcel link)
+  const initialParcelTriggered = useRef(false);
+  useEffect(() => {
+    if (initialParcel && !initialParcelTriggered.current && mapLoaded) {
+      initialParcelTriggered.current = true;
+      const timer = setTimeout(() => {
+        selectParcel({
+          address: initialParcel.address,
+          lat: initialParcel.lat,
+          lng: initialParcel.lng,
+          placeId: `initial-${Date.now()}`,
+        });
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialParcel, mapLoaded]);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   

@@ -84,8 +84,21 @@ export default function MapPage() {
   const [error, setError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Read product type and demo mode from URL parameters
+  // Read product type, demo mode, and initial parcel from URL parameters
   const autoOpen3D = searchParams.get("demo") === "3d";
+  const initialParcel = (() => {
+    const lat = searchParams.get("lat");
+    const lng = searchParams.get("lng");
+    if (lat && lng) {
+      return {
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        address: searchParams.get("address") || "Selected Parcel",
+      };
+    }
+    return null;
+  })();
+
   useEffect(() => {
     const productParam = searchParams.get("product");
     if (productParam === "quick_look" || productParam === "full_report" || productParam === "hunting_intel") {
@@ -216,6 +229,7 @@ export default function MapPage() {
             onParcelSelect={handleParcelSelect}
             onCheckout={handleProceedToCheckout}
             autoOpen3D={autoOpen3D}
+            initialParcel={initialParcel}
           />
 
 {/* Order Summary card removed - checkout button now in parcel panel */}
