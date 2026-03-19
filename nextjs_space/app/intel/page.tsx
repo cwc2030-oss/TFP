@@ -761,6 +761,9 @@ function buildHuntPocketFeatures(
       // a constant representing the overall shape's corridor alignment.
       const corridorBias = 0.85; // teardrop is heavily corridor-aligned
 
+      // v-resilience: scale pocket opacity by stand resilience (0→50%, 1→100%)
+      const resilienceVal = stand.props?.standResilience ?? 0;
+      const resilienceFactor = 0.5 + 0.5 * resilienceVal;
       features.push({
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [jitteredCoords] },
@@ -773,6 +776,7 @@ function buildHuntPocketFeatures(
           stretchBearing,
           opacityScale,
           corridorBias, // v3.8.6: flow-axis intensity multiplier
+          resilienceFactor, // v-resilience: derived from standResilience
         },
       });
     }
@@ -1737,6 +1741,15 @@ function DeerIntelContent() {
         resilience,
       };
     }).sort((a, b) => b.alignment.score - a.alignment.score);
+
+    // Log stand resilience values for verification
+    if (aligned.length > 0) {
+      console.log('[StandResilience] Sample values:', aligned.slice(0, 5).map(s => ({
+        rank: s.rank, name: s.name,
+        standResilience: s.props?.standResilience?.toFixed(3) ?? 'N/A',
+        corridorResilience: s.resilience?.score?.toFixed(3) ?? 'N/A',
+      })));
+    }
 
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
@@ -4261,18 +4274,21 @@ function DeerIntelContent() {
                 LAYER_COLORS.standPrimary,
                 LAYER_COLORS.standSecondary,
               ],
-              // v3.8.6: opacity = base_curve × opacityScale × corridorBias
-              // Core reduced ~20% (0.14→0.11), outer edge nearly zero.
-              // Exponential base 2.2 for faster decay = more feathered edges.
+              // v3.8.6+resilience: opacity = base_curve × opacityScale × corridorBias × resilienceFactor
+              // resilienceFactor ranges 0.5 (no resilience) to 1.0 (max resilience)
               'fill-opacity': [
                 '*',
-                ['*', ['get', 'opacityScale'], ['get', 'corridorBias']],
+                ['get', 'resilienceFactor'],
                 [
-                  'interpolate', ['exponential', 2.2], ['get', 'ringNorm'],
-                  0.25, 0.11,   // innermost: reduced ~20% from 0.14
-                  0.50, 0.05,   // mid zone: softer
-                  0.75, 0.015,  // outer fade: very faint
-                  1.0,  0.004,  // outermost: barely perceptible
+                  '*',
+                  ['*', ['get', 'opacityScale'], ['get', 'corridorBias']],
+                  [
+                    'interpolate', ['exponential', 2.2], ['get', 'ringNorm'],
+                    0.25, 0.11,
+                    0.50, 0.05,
+                    0.75, 0.015,
+                    1.0,  0.004,
+                  ],
                 ],
               ],
             },

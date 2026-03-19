@@ -247,6 +247,8 @@ export interface PrimeStandSite {
   offsetDistanceM?: number; // actual offset applied
   offsetAngle?: number;     // direction of offset (degrees, 0=N, 90=E)
   interceptType?: 'gradient' | 'leeward' | 'sidehill' | 'combined';
+  // Pressure-based resilience (v1 — derived from movement_post, refuge, pressure)
+  standResilience?: number; // 0-1, how well the stand survives pressure
 }
 
 // ============ UTILITY FUNCTIONS ============
@@ -917,6 +919,63 @@ export function buildTerrainRaster(input: RasterInput): {
   // (offset from hotspot centers toward intercept edges)
   const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing);
 
+  // ============ STAND RESILIENCE SCORING ============
+  // For each stand, sample raster values within 60m radius and compute:
+  //   stand_resilience = clamp(0.5 * avg_post + 0.3 * avg_refuge - 0.4 * avg_pressure, 0, 1)
+  const RESILIENCE_RADIUS_M = 60;
+  const radiusCells = Math.ceil(RESILIENCE_RADIUS_M / grid.cellSizeM);
+  const mpd = metersPerDegree(grid.bounds.minLat + (grid.bounds.maxLat - grid.bounds.minLat) / 2);
+
+  for (const stand of primeStandSites) {
+    // Find the grid cell closest to this stand
+    const fracCol = (stand.lng - grid.bounds.minLng) / (grid.bounds.maxLng - grid.bounds.minLng) * grid.cols;
+    const fracRow = (stand.lat - grid.bounds.minLat) / (grid.bounds.maxLat - grid.bounds.minLat) * grid.rows;
+    const centerCol = Math.round(fracCol);
+    const centerRow = Math.round(fracRow);
+
+    let sumPost = 0, sumPressure = 0, sumRefuge = 0, count = 0;
+
+    for (let dr = -radiusCells; dr <= radiusCells; dr++) {
+      for (let dc = -radiusCells; dc <= radiusCells; dc++) {
+        const r = centerRow + dr;
+        const c = centerCol + dc;
+        if (r < 0 || r >= grid.rows || c < 0 || c >= grid.cols) continue;
+
+        // Check actual distance in meters
+        const cell = grid.cells[r][c];
+        const distM = Math.sqrt(
+          ((cell.lng - stand.lng) * mpd.lng) ** 2 +
+          ((cell.lat - stand.lat) * mpd.lat) ** 2
+        );
+        if (distM > RESILIENCE_RADIUS_M) continue;
+
+        const post = Math.min(1, Math.max(0, cell.terrain - 0.7 * cell.pressure));
+        const refuge = post * (1 - cell.pressure);
+
+        sumPost += post;
+        sumPressure += cell.pressure;
+        sumRefuge += refuge;
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      const avgPost = sumPost / count;
+      const avgPressure = sumPressure / count;
+      const avgRefuge = sumRefuge / count;
+      stand.standResilience = Math.min(1, Math.max(0,
+        0.5 * avgPost + 0.3 * avgRefuge - 0.4 * avgPressure
+      ));
+    } else {
+      stand.standResilience = 0;
+    }
+  }
+
+  // Debug log sample stand resilience values
+  for (const stand of primeStandSites.slice(0, 3)) {
+    console.log(`[StandResilience] rank=${stand.rank} score=${stand.score.toFixed(3)} resilience=${(stand.standResilience ?? 0).toFixed(3)}`);
+  }
+
   // ============ MOVEMENT DELTA LAYER ============
   // movement_delta = clamp(0.7 * pressure, 0, 1)
   // Shows where pressure "destroys" movement potential
@@ -1382,6 +1441,8 @@ export function primeStandSitesToGeoJSON(
         offsetDistanceM: s.offsetDistanceM,
         offsetAngle: s.offsetAngle,
         interceptType: s.interceptType,
+        // Pressure-based resilience score
+        standResilience: s.standResilience ?? 0,
       },
       geometry: {
         type: 'Point' as const,

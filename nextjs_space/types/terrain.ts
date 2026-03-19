@@ -169,6 +169,7 @@ export interface StandPointProperties {
   tpiLocal: number;               // TPI at 100m scale
   tpiLandscape: number;           // TPI at 500m scale
   reasoning: string;              // human-readable explanation
+  standResilience?: number;       // 0-1, pressure-based resilience score
 }
 
 // ============ Ridge Spine Types (Structure-First, DEM-Only) ============
