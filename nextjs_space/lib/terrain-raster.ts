@@ -224,7 +224,8 @@ export interface RasterCell {
   saddle: number;    // 0-1 saddle influence
   ridge: number;     // 0-1 ridge structure
   sidehill: number;  // 0-1 sidehill/leeward bonus
-  pressure: number;  // combined 0-1 pressure score
+  terrain: number;   // 0-1 season-independent terrain movement favorability
+  pressure: number;  // combined 0-1 pressure score (season-weighted)
 }
 
 export interface RasterGrid {
@@ -377,6 +378,7 @@ export function generateRasterGrid(parcelCoords: number[][]): RasterGrid | null 
         saddle: 0,
         ridge: 0,
         sidehill: 0,
+        terrain: 0,
         pressure: 0,
       });
     }
@@ -804,7 +806,13 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
 
-      // Apply season weights and combine base terrain
+      // Terrain movement: season-INDEPENDENT structural favorability
+      // Equal weighting of raw components — how much the terrain itself supports movement
+      const rawTerrain = W_BENCH * cell.bench + W_SADDLE * cell.saddle + W_RIDGE * cell.ridge;
+      const terrainSidehill = cell.sidehill * 0.10 * Math.min(1, rawTerrain * 2);
+      cell.terrain = rawTerrain + terrainSidehill;
+
+      // Apply season weights and combine base terrain (pressure)
       const benchW = cell.bench * sw.bench * W_BENCH;
       const saddleW = cell.saddle * sw.saddle * W_SADDLE;
       const ridgeW = cell.ridge * sw.ridge * W_RIDGE;
@@ -835,6 +843,21 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let r = 0; r < grid.rows; r++) {
       for (let c = 0; c < grid.cols; c++) {
         grid.cells[r][c].pressure /= maxPressure;
+      }
+    }
+  }
+
+  // Normalize terrain to 0-1 range (independent of pressure normalization)
+  let maxTerrain = 0;
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      maxTerrain = Math.max(maxTerrain, grid.cells[r][c].terrain);
+    }
+  }
+  if (maxTerrain > 0) {
+    for (let r = 0; r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) {
+        grid.cells[r][c].terrain /= maxTerrain;
       }
     }
   }
@@ -913,14 +936,23 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // ============ MOVEMENT POST LAYER ============
-  // movement_post = clamp(terrain - 0.7 * pressure, 0, 1)
-  // Shows remaining movement after pressure is applied
+  // movement_post = clamp(cell.terrain - 0.7 * cell.pressure, 0, 1)
+  // terrain = season-independent structural favorability (bench + saddle + ridge + sidehill)
+  // pressure = season-weighted combined score (after smoothing)
+  // movement_post shows remaining movement AFTER pressure is subtracted
   const postFeatures: GeoJSON.Feature[] = [];
+  let debugSamples = 0;
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
-      const terrain = cell.pressure; // terrain movement score
-      const post = Math.min(1, Math.max(0, terrain - 0.7 * cell.pressure));
+      const post = Math.min(1, Math.max(0, cell.terrain - 0.7 * cell.pressure));
+
+      // Debug logging for first few non-trivial cells
+      if (debugSamples < 8 && (cell.terrain > 0.1 || cell.pressure > 0.1)) {
+        console.log(`[MovementPost] cell(${r},${c}) terrain=${cell.terrain.toFixed(3)} pressure=${cell.pressure.toFixed(3)} → post=${post.toFixed(3)}`);
+        debugSamples++;
+      }
+
       if (post < 0.02) continue; // skip near-zero cells
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
