@@ -4358,10 +4358,15 @@ function DeerIntelContent() {
                 'case',
                 ['==', ['get', 'isTopStand'], true],
                 LAYER_COLORS.standPrimaryRing,
-                LAYER_COLORS.standSecondary,
+                '#f0a050',                        // Stand 2: brighter amber for satellite contrast
               ],
               'line-width': 2.5,
-              'line-opacity': 0.55,
+              'line-opacity': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                0.55,                             // Stand 1: unchanged
+                0.75,                             // Stand 2: boosted from 0.55
+              ],
             },
           });
           // Flank lines (thinner)
@@ -4375,10 +4380,15 @@ function DeerIntelContent() {
                 'case',
                 ['==', ['get', 'isTopStand'], true],
                 LAYER_COLORS.standPrimaryRing,
-                LAYER_COLORS.standSecondary,
+                '#f0a050',                        // Stand 2: brighter amber for satellite contrast
               ],
               'line-width': 1.2,
-              'line-opacity': 0.35,
+              'line-opacity': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                0.35,                             // Stand 1: unchanged
+                0.55,                             // Stand 2: boosted from 0.35
+              ],
             },
           });
         }
