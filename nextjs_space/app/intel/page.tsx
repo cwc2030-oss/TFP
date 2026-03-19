@@ -821,56 +821,51 @@ function buildStandDirectionFeatures(
   for (const stand of stands) {
     const center = stand.coords;
 
-    // Find intercept bearing: toward nearest corridor point
-    let faceBearing: number | null = null;
-    let nearestDist = Infinity;
-    let nearestPt: [number, number] | null = null;
-
+    // Use corridor-tangent bearing (same as hunt pocket stretchBearing)
+    // so the wedge aligns with the pocket's long axis.
+    let faceBearing = 315; // fallback NW
+    let nearestCorridorDist = Infinity;
+    let corridorBrg: number | null = null;
     for (const line of corridorLines) {
       if (line.length < 2) continue;
       const result = closestPointOnLineString(center, line);
-      if (result.dist < nearestDist) {
-        nearestDist = result.dist;
-        nearestPt = result.point;
+      if (result.dist < nearestCorridorDist) {
+        nearestCorridorDist = result.dist;
+        const seg = line[result.segIndex];
+        const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+        corridorBrg = calculateBearing(seg, segEnd);
       }
     }
-    if (nearestPt && nearestDist < 500) {
-      faceBearing = calculateBearing(center, nearestPt);
-    }
-
-    // Fallback: draw
-    if (faceBearing === null) {
-      nearestDist = Infinity;
-      nearestPt = null;
+    if (corridorBrg !== null && nearestCorridorDist < 500) {
+      faceBearing = corridorBrg;
+    } else {
+      // Fallback: draw segment tangent
+      let nearestDrawDist = Infinity;
       for (const line of drawLines) {
         if (line.length < 2) continue;
         const result = closestPointOnLineString(center, line);
-        if (result.dist < nearestDist) {
-          nearestDist = result.dist;
-          nearestPt = result.point;
-        }
-      }
-      if (nearestPt && nearestDist < 500) {
-        faceBearing = calculateBearing(center, nearestPt);
-      }
-    }
-
-    // Fallback: perpendicular to nearest ridge
-    if (faceBearing === null) {
-      nearestDist = Infinity;
-      for (const line of ridgeLines) {
-        if (line.length < 2) continue;
-        const result = closestPointOnLineString(center, line);
-        if (result.dist < nearestDist) {
-          nearestDist = result.dist;
+        if (result.dist < nearestDrawDist) {
+          nearestDrawDist = result.dist;
           const seg = line[result.segIndex];
           const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-          faceBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+          faceBearing = calculateBearing(seg, segEnd);
+        }
+      }
+      if (nearestDrawDist >= 500) {
+        // Fallback: perpendicular to nearest ridge
+        let nearestRidgeDist = Infinity;
+        for (const line of ridgeLines) {
+          if (line.length < 2) continue;
+          const result = closestPointOnLineString(center, line);
+          if (result.dist < nearestRidgeDist) {
+            nearestRidgeDist = result.dist;
+            const seg = line[result.segIndex];
+            const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+            faceBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+          }
         }
       }
     }
-
-    if (faceBearing === null) faceBearing = 315; // fallback NW
 
     // Build a thin wedge: center → tip, with two flanking lines at ±12°
     const WEDGE_LENGTH = 55; // meters — subtle, not overpowering
