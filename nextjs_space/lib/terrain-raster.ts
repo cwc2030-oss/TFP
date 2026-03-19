@@ -864,6 +864,16 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
+  // Soft-cap pressure to preserve internal variation in high-pressure zones.
+  // The exponential curve compresses extreme values while keeping ordering intact,
+  // preventing large flat saturated plates on the map.
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const p = grid.cells[r][c].pressure;
+      grid.cells[r][c].pressure = Math.min(1, Math.max(0, 1 - Math.exp(-1.35 * p)));
+    }
+  }
+
   // Normalize terrain to 0-1 range (independent of pressure normalization)
   let maxTerrain = 0;
   for (let r = 0; r < grid.rows; r++) {
