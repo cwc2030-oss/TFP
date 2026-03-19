@@ -7424,30 +7424,58 @@ function DeerIntelContent() {
                     </div>
                   )}
 
-                  {/* Layer Color Legend */}
+                  {/* Pressure View Selector */}
                   {flowVisibility.pressureHeatmap && (
                     <div className="px-2 py-2 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
-                      <span className="text-[9px] text-stone-500 uppercase tracking-wider font-medium block mb-1.5">Layer Legend</span>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-2 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316, #ef4444)' }} />
-                          <span className="text-[9px] text-stone-400">Pressure</span>
+                      <span className="text-[9px] text-stone-500 uppercase tracking-wider font-medium block mb-1.5">View</span>
+                      <div className="grid grid-cols-4 gap-0.5 bg-stone-800/60 rounded p-0.5">
+                        {([
+                          { key: 'pressure' as PressureView, label: 'Pressure', gradient: 'linear-gradient(90deg, #facc15, #ef4444)' },
+                          { key: 'damage' as PressureView, label: 'Damage', gradient: 'linear-gradient(90deg, #facc15, #f97316)' },
+                          { key: 'movement' as PressureView, label: 'Movement', gradient: 'linear-gradient(90deg, #facc15, #22c55e)' },
+                          { key: 'refuge' as PressureView, label: 'Refuge', gradient: 'linear-gradient(90deg, #06b6d4, #3b82f6)' },
+                        ]).map(v => (
+                          <button
+                            key={v.key}
+                            onClick={() => setPressureView(v.key)}
+                            className={`relative px-1 py-1.5 rounded text-center transition-all ${
+                              pressureView === v.key
+                                ? 'bg-stone-700/80 text-white shadow-sm'
+                                : 'text-stone-500 hover:text-stone-300 hover:bg-stone-700/30'
+                            }`}
+                          >
+                            <div
+                              className="w-full h-1 rounded-sm mx-auto mb-1"
+                              style={{ background: v.gradient, opacity: pressureView === v.key ? 1 : 0.35 }}
+                            />
+                            <span className="text-[8px] font-medium leading-none">{v.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Layer Color Legend — contextual to active pressureView */}
+                  {flowVisibility.pressureHeatmap && (
+                    <div className="px-2 py-1.5 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
+                      <div className="flex items-center gap-2">
+                        {pressureView === 'pressure' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316, #ef4444)' }} />}
+                        {pressureView === 'damage' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316)' }} />}
+                        {pressureView === 'movement' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #22c55e)' }} />}
+                        {pressureView === 'refuge' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #06b6d4, #3b82f6)' }} />}
+                        <span className="text-[8px] text-stone-500">
+                          {pressureView === 'pressure' && 'Low → High terrain pressure'}
+                          {pressureView === 'damage' && 'Low → High movement likelihood'}
+                          {pressureView === 'movement' && 'Low → High post-pressure quality'}
+                          {pressureView === 'refuge' && 'Low → High refuge value'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="w-10 h-1.5 rounded-sm flex">
+                          <div className="flex-1 rounded-l-sm bg-amber-700/40" />
+                          <div className="flex-1 rounded-r-sm bg-amber-400" />
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-2 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #22c55e)' }} />
-                          <span className="text-[9px] text-stone-400">Movement Post</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-2 rounded-sm" style={{ background: 'linear-gradient(90deg, #06b6d4, #3b82f6)' }} />
-                          <span className="text-[9px] text-stone-400">Refuge Zones</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-2 rounded-sm flex">
-                            <div className="flex-1 rounded-l-sm bg-amber-700/40" />
-                            <div className="flex-1 rounded-r-sm bg-amber-400" />
-                          </div>
-                          <span className="text-[9px] text-stone-400">Stand Resilience</span>
-                        </div>
+                        <span className="text-[8px] text-stone-500">Brighter stand = more resilient</span>
                       </div>
                     </div>
                   )}
