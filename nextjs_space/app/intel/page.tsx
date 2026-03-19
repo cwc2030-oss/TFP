@@ -654,7 +654,7 @@ function buildHuntPocketFeatures(
   for (let sIdx = 0; sIdx < stands.length; sIdx++) {
     const stand = stands[sIdx];
     const center = stand.coords;
-    const scaleFactor = sIdx === 0 ? 1.0 : 0.72;
+    const scaleFactor = sIdx === 0 ? 1.0 : 0.84;
     const opacityScale = sIdx === 0 ? 1.0 : 0.78;
 
     // ---- Determine flow bearing ----
