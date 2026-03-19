@@ -7538,6 +7538,48 @@ function DeerIntelContent() {
                       </div>
                     </div>
                   )}
+                  {/* ========== STAND COMPARE SELECTORS (v1.2) ==========
+                      Two compact dropdowns for selecting stands to compare.
+                      State-only — no calculations or layer changes yet. */}
+                  {flowVisibility.pressureHeatmap && alignedStands.length >= 2 && (
+                    <div className="px-2 py-2 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
+                      <span className="text-[9px] text-stone-500 uppercase tracking-wider font-medium block mb-1.5">Compare Stands</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Compare A */}
+                        <div>
+                          <label className="text-[8px] text-stone-500 block mb-0.5">A</label>
+                          <select
+                            value={compareStandA ?? ''}
+                            onChange={e => setCompareStandA(e.target.value === '' ? null : Number(e.target.value))}
+                            className="w-full text-[10px] bg-stone-800/80 border border-stone-700/40 rounded px-1.5 py-1 text-stone-300 focus:outline-none focus:border-amber-500/50"
+                          >
+                            <option value="">—</option>
+                            {alignedStands.map((s, i) => (
+                              <option key={i} value={i} disabled={compareStandB === i}>
+                                Stand {i + 1}{s.name ? ` · ${s.name}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {/* Compare B */}
+                        <div>
+                          <label className="text-[8px] text-stone-500 block mb-0.5">B</label>
+                          <select
+                            value={compareStandB ?? ''}
+                            onChange={e => setCompareStandB(e.target.value === '' ? null : Number(e.target.value))}
+                            className="w-full text-[10px] bg-stone-800/80 border border-stone-700/40 rounded px-1.5 py-1 text-stone-300 focus:outline-none focus:border-amber-500/50"
+                          >
+                            <option value="">—</option>
+                            {alignedStands.map((s, i) => (
+                              <option key={i} value={i} disabled={compareStandA === i}>
+                                Stand {i + 1}{s.name ? ` · ${s.name}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {/* Divider with "Supporting Evidence" label */}
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-stone-700/50" />
