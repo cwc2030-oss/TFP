@@ -191,10 +191,10 @@ const SEASON_WEIGHTS: Record<SeasonProfile, SeasonWeightProfile> = {
 };
 
 // ============ FOCUS MODE CONFIG ============
-const FOCUS_CONFIG: Record<PressureFocus, { scoreFloor: number; scoreGamma: number }> = {
-  broad:    { scoreFloor: 0.02, scoreGamma: 0.70 },
-  balanced: { scoreFloor: 0.08, scoreGamma: 1.00 },
-  focused:  { scoreFloor: 0.18, scoreGamma: 1.40 },
+const FOCUS_CONFIG: Record<PressureFocus, { scoreFloor: number; scoreGamma: number; pressureMultiplier: number }> = {
+  broad:    { scoreFloor: 0.02, scoreGamma: 0.70, pressureMultiplier: 0.85 },
+  balanced: { scoreFloor: 0.08, scoreGamma: 1.00, pressureMultiplier: 1.00 },
+  focused:  { scoreFloor: 0.18, scoreGamma: 1.40, pressureMultiplier: 1.20 },
 };
 
 // ============ TYPES ============
@@ -846,6 +846,20 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let r = 0; r < grid.rows; r++) {
       for (let c = 0; c < grid.cols; c++) {
         grid.cells[r][c].pressure /= maxPressure;
+      }
+    }
+  }
+
+  // Apply focus mode pressure multiplier AFTER normalization.
+  // Broad (0.85) softens pressure → movement_delta rises, refuge expands.
+  // Focus (1.2) intensifies pressure → movement_delta compresses, refuge shrinks.
+  // Terrain computation is NOT affected — only pressure field is scaled.
+  const pMul = focus.pressureMultiplier;
+  if (pMul !== 1.0) {
+    console.log(`[TerrainRaster] Applying focus pressure multiplier: ${pMul}`);
+    for (let r = 0; r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) {
+        grid.cells[r][c].pressure = Math.min(1, grid.cells[r][c].pressure * pMul);
       }
     }
   }
