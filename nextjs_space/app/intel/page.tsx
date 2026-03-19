@@ -43,7 +43,7 @@ import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corrid
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus, type PressureView } from '@/lib/terrain-heatmap';
-import { buildTerrainRaster, primeStandSitesToGeoJSON } from '@/lib/terrain-raster';
+import { buildTerrainRaster, primeStandSitesToGeoJSON, type RasterGrid } from '@/lib/terrain-raster';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
@@ -1462,6 +1462,9 @@ function DeerIntelContent() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
+
+  // Raster grid state — persisted so the compare card can sample nearby cells
+  const [rasterGrid, setRasterGrid] = useState<RasterGrid | null>(null);
 
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
@@ -3034,6 +3037,9 @@ function DeerIntelContent() {
         });
 
         if (rasterResult) {
+          // Persist grid for stand-compare sampling
+          setRasterGrid(rasterResult.grid);
+
           // Update heat map from raster surface
           if (heatmapSource) {
             heatmapSource.setData(rasterResult.heatPoints);
@@ -7581,7 +7587,7 @@ function DeerIntelContent() {
                     </div>
                   )}
                   {/* ========== STAND COMPARE CARD (v1.2) ==========
-                      Side-by-side summary using existing stand properties only.
+                      Side-by-side summary using existing stand properties + nearby raster samples.
                       Appears only when both Compare A and Compare B are selected. */}
                   {compareStandA !== null && compareStandB !== null && (() => {
                     const standA = alignedStands[compareStandA];
@@ -7593,17 +7599,57 @@ function DeerIntelContent() {
                     const alignA = standA.alignment.score;
                     const alignB = standB.alignment.score;
 
-                    // Helper: highlight color for the higher value
+                    // Helper: highlight the HIGHER value in amber
                     const hi = (a: number | null, b: number | null) => {
                       if (a === null || b === null) return { a: '', b: '' };
                       if (a > b) return { a: 'text-amber-400 font-semibold', b: '' };
                       if (b > a) return { a: '', b: 'text-amber-400 font-semibold' };
-                      return { a: '', b: '' }; // tie
+                      return { a: '', b: '' };
+                    };
+                    // Helper: highlight the LOWER value (for pressure — lower is better)
+                    const lo = (a: number | null, b: number | null) => {
+                      if (a === null || b === null) return { a: '', b: '' };
+                      if (a < b) return { a: 'text-amber-400 font-semibold', b: '' };
+                      if (b < a) return { a: '', b: 'text-amber-400 font-semibold' };
+                      return { a: '', b: '' };
                     };
                     const resHi = hi(resA, resB);
                     const alignHi = hi(alignA, alignB);
 
                     const fmt = (v: number | null) => v !== null ? v.toFixed(2) : '—';
+
+                    // ---- Sample raster cells within 60m of each stand ----
+                    const SAMPLE_RADIUS = 60; // meters
+                    const sampleNearby = (coords: [number, number]) => {
+                      if (!rasterGrid) return null;
+                      const [sLng, sLat] = coords;
+                      let sumP = 0, sumPost = 0, sumRefuge = 0, n = 0;
+                      for (let r = 0; r < rasterGrid.rows; r++) {
+                        for (let c = 0; c < rasterGrid.cols; c++) {
+                          const cell = rasterGrid.cells[r][c];
+                          // Fast lat/lng approximate distance (avoids full haversine per cell)
+                          const dLat = (cell.lat - sLat) * 111320;
+                          const dLng = (cell.lng - sLng) * 111320 * Math.cos(sLat * Math.PI / 180);
+                          const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+                          if (dist > SAMPLE_RADIUS) continue;
+                          sumP += cell.pressure;
+                          const post = Math.min(1, Math.max(0, cell.terrain - 0.7 * cell.pressure));
+                          const refuge = post * (1 - cell.pressure);
+                          sumPost += post;
+                          sumRefuge += refuge;
+                          n++;
+                        }
+                      }
+                      if (n === 0) return null;
+                      return { avgPressure: sumP / n, avgMovementPost: sumPost / n, avgRefugeScore: sumRefuge / n };
+                    };
+
+                    const rasterA = sampleNearby(standA.coords);
+                    const rasterB = sampleNearby(standB.coords);
+
+                    const pressHi = lo(rasterA?.avgPressure ?? null, rasterB?.avgPressure ?? null);
+                    const postHi = hi(rasterA?.avgMovementPost ?? null, rasterB?.avgMovementPost ?? null);
+                    const refugeHi = hi(rasterA?.avgRefugeScore ?? null, rasterB?.avgRefugeScore ?? null);
 
                     return (
                       <div className="px-2 py-2 bg-stone-900/50 rounded-lg border border-amber-700/20 mt-1">
@@ -7663,6 +7709,31 @@ function DeerIntelContent() {
                             <span className="text-[8px] text-stone-600 w-14 text-center">Grade</span>
                             <span className="text-[9px] text-stone-400 text-center italic">{standB.alignment.label}</span>
                           </div>
+
+                          {/* ---- Raster-sampled pressure metrics (60m radius) ---- */}
+                          {(rasterA || rasterB) && (
+                            <>
+                              <div className="border-t border-stone-700/30 my-1" />
+                              {/* Pressure — lower is better */}
+                              <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                                <span className={`text-[10px] text-stone-300 text-center ${pressHi.a}`}>{fmt(rasterA?.avgPressure ?? null)}</span>
+                                <span className="text-[8px] text-stone-600 w-14 text-center">Pressure</span>
+                                <span className={`text-[10px] text-stone-300 text-center ${pressHi.b}`}>{fmt(rasterB?.avgPressure ?? null)}</span>
+                              </div>
+                              {/* Movement Post — higher is better */}
+                              <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                                <span className={`text-[10px] text-stone-300 text-center ${postHi.a}`}>{fmt(rasterA?.avgMovementPost ?? null)}</span>
+                                <span className="text-[8px] text-stone-600 w-14 text-center">Mvmt Post</span>
+                                <span className={`text-[10px] text-stone-300 text-center ${postHi.b}`}>{fmt(rasterB?.avgMovementPost ?? null)}</span>
+                              </div>
+                              {/* Refuge Support — higher is better */}
+                              <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                                <span className={`text-[10px] text-stone-300 text-center ${refugeHi.a}`}>{fmt(rasterA?.avgRefugeScore ?? null)}</span>
+                                <span className="text-[8px] text-stone-600 w-14 text-center">Refuge</span>
+                                <span className={`text-[10px] text-stone-300 text-center ${refugeHi.b}`}>{fmt(rasterB?.avgRefugeScore ?? null)}</span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     );
