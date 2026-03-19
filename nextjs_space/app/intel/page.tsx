@@ -1427,6 +1427,9 @@ function DeerIntelContent() {
     convergenceZones: true, // Convergence zone markers (convergence IS opportunity)
   });
   
+  // Derived: true when the Pressure Map master toggle is ON
+  const isPressureMode = flowVisibility.pressureHeatmap === true;
+
   // v3.6.0 — Terrain Reasons toggle (shows explanations when clicking features)
   const [showTerrainReasons, setShowTerrainReasons] = useState(false);
   const [terrainReasonData, setTerrainReasonData] = useState<TerrainReasonData | null>(null);
