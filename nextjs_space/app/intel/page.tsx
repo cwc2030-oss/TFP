@@ -445,12 +445,12 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
   return { point: closestPoint, segment: closestSegment, index: closestIndex };
 }
 
-// ========== HUNT POCKET GEOMETRY BUILDER (v1.1) ==========
-// Generates terrain-aware asymmetric polygons around stand sites.
-// The pocket stretches along the nearest corridor/flow direction and fades
-// asymmetrically: stronger forward (toward intercept) and weaker rearward.
-// Organic jitter + concentric rings create a natural transition that blends
-// into the terrain heatmap rather than appearing as a fixed oval.
+// ========== HUNT POCKET GEOMETRY BUILDER (v3.8.5) ==========
+// Flow-native teardrop/fan-shaped intercept zones that smear along corridor
+// direction. The pocket is biased upstream of movement (forward-heavy), laterally
+// compressed across the corridor, and uses strong organic jitter to break up any
+// ring/circle identity. Heat intensity lives on the movement system rather than
+// floating as a separate radial blob around the stand point.
 function buildHuntPocketFeatures(
   stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
   funnels: GeoJSON.FeatureCollection | null | undefined,
@@ -459,35 +459,34 @@ function buildHuntPocketFeatures(
   const features: GeoJSON.Feature[] = [];
   if (!stands.length) return { type: 'FeatureCollection', features };
 
-  // Ring count and radii for concentric fade (meters)
-  const RINGS = 6;             // v1.1: 6 rings for smoother fade (was 5)
-  const BASE_RADIUS = 45;     // v1.1: tighter core (was 55)
-  const MAX_RADIUS = 155;     // v1.1: wider outer reach for blending (was 140)
-  const ELONGATION_FWD = 1.8; // v1.1: asymmetric — forward stretch along flow
-  const ELONGATION_BWD = 1.1; // v1.1: asymmetric — rear barely stretches
-  const SEGMENTS = 36;        // v1.1: smoother polygon (was 28)
+  // v3.8.5: Only top 2 stands get pockets; second stand gets a lighter treatment.
+  // Fewer rings (4) with smoother opacity gradient to eliminate visible ring banding.
+  const RINGS = 4;
+  const BASE_RADIUS = 35;       // tight core
+  const MAX_RADIUS = 170;       // wider reach but much softer outer
+  const SEGMENTS = 48;          // smooth enough to hide polygon edges
 
-  // Extract corridor LineStrings for bearing computation
+  // v3.8.5 Teardrop geometry constants:
+  // Forward = upstream of corridor flow (toward intercept zone)
+  // Backward = downstream / behind stand (minimal presence)
+  // Lateral = across corridor (compressed for flow alignment)
+  const FWD_STRETCH = 2.6;     // strong forward bias — teardrop tip
+  const BWD_STRETCH = 0.55;    // very short rear — not a circle
+  const LAT_COMPRESS = 0.6;    // lateral squeeze — elongated along corridor
+
+  // Extract corridor/draw/ridge lines for bearing computation (unchanged)
   const corridorLines: [number, number][][] = [];
-  if (funnels?.features) {
-    for (const f of funnels.features) {
-      if (f.properties?.funnelType === 'corridor' && f.geometry?.type === 'LineString') {
-        corridorLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
-      }
-    }
-  }
-
-  // Extract draw LineStrings as secondary directional influence
   const drawLines: [number, number][][] = [];
   if (funnels?.features) {
     for (const f of funnels.features) {
-      if (f.properties?.funnelType === 'draw' && f.geometry?.type === 'LineString') {
+      if (f.geometry?.type !== 'LineString') continue;
+      if (f.properties?.funnelType === 'corridor') {
+        corridorLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      } else if (f.properties?.funnelType === 'draw') {
         drawLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
       }
     }
   }
-
-  // Extract ridge lines for perpendicular bias
   const ridgeLines: [number, number][][] = [];
   if (ridges?.ridges_primary?.features) {
     for (const f of ridges.ridges_primary.features) {
@@ -497,12 +496,15 @@ function buildHuntPocketFeatures(
     }
   }
 
-  for (const stand of stands) {
+  for (let sIdx = 0; sIdx < stands.length; sIdx++) {
+    const stand = stands[sIdx];
     const center = stand.coords;
+    // v3.8.5: Second stand gets smaller, fainter pocket
+    const scaleFactor = sIdx === 0 ? 1.0 : 0.72;
+    const opacityScale = sIdx === 0 ? 1.0 : 0.55;
 
-    // Determine stretch bearing: corridor > draw > ridge-perpendicular > default NW
+    // ---- Determine flow bearing: corridor > draw > ridge-perp > default ----
     let stretchBearing = 315;
-
     let nearestCorridorDist = Infinity;
     let corridorBearing: number | null = null;
     for (const line of corridorLines) {
@@ -515,7 +517,6 @@ function buildHuntPocketFeatures(
         corridorBearing = calculateBearing(seg, segEnd);
       }
     }
-
     if (corridorBearing !== null && nearestCorridorDist < 500) {
       stretchBearing = corridorBearing;
     } else {
@@ -530,7 +531,6 @@ function buildHuntPocketFeatures(
           stretchBearing = calculateBearing(seg, segEnd);
         }
       }
-
       if (nearestDrawDist >= 500) {
         let nearestRidgeDist = Infinity;
         for (const line of ridgeLines) {
@@ -546,45 +546,54 @@ function buildHuntPocketFeatures(
       }
     }
 
-    // Build concentric asymmetric rings (inside-out)
+    const bearingRad = stretchBearing * Math.PI / 180;
+
+    // ---- Build concentric teardrop shells (outermost first for correct z-stacking) ----
     for (let ring = RINGS; ring >= 1; ring--) {
-      const t = ring / RINGS;
-      const radius = BASE_RADIUS + (MAX_RADIUS - BASE_RADIUS) * t;
+      const t = ring / RINGS; // 0.25 → 1.0
+      const radius = (BASE_RADIUS + (MAX_RADIUS - BASE_RADIUS) * t) * scaleFactor;
       const coords: [number, number][] = [];
 
       for (let i = 0; i <= SEGMENTS; i++) {
         const angle = (i / SEGMENTS) * 2 * Math.PI;
-        const bearingRad = stretchBearing * Math.PI / 180;
 
-        // Rotate angle into corridor-aligned frame
+        // Local frame: X = along corridor (forward), Y = across corridor (lateral)
         const localX = Math.cos(angle);
         const localY = Math.sin(angle);
 
-        // v1.1: Asymmetric elongation — forward (along bearing) stretches more
-        // localX > 0 means forward hemisphere in the corridor-aligned frame
-        const elongation = localX > 0 ? ELONGATION_FWD : ELONGATION_BWD;
-        const stretchedX = localX * elongation;
-        const stretchedY = localY;
+        // v3.8.5 Teardrop deformation:
+        // Forward hemisphere (localX > 0) stretches long; rear collapses.
+        // Use smooth cosine blend instead of hard if/else for organic transition.
+        const fwdBlend = (localX + 1) / 2; // 0 (full rear) → 1 (full forward)
+        const axialStretch = BWD_STRETCH + (FWD_STRETCH - BWD_STRETCH) * fwdBlend * fwdBlend; // cubic ease for sharper tip
+        const deformedX = localX * axialStretch;
+        const deformedY = localY * LAT_COMPRESS;
 
-        // Rotate back to geographic bearing
-        const geoX = stretchedX * Math.cos(bearingRad) - stretchedY * Math.sin(bearingRad);
-        const geoY = stretchedX * Math.sin(bearingRad) + stretchedY * Math.cos(bearingRad);
+        // Magnitude in deformed space
+        const mag = Math.sqrt(deformedX * deformedX + deformedY * deformedY);
+        if (mag < 0.001) { coords.push(center); continue; }
+
+        // Rotate from local frame back to geographic bearing
+        const geoX = deformedX * Math.cos(bearingRad) - deformedY * Math.sin(bearingRad);
+        const geoY = deformedX * Math.sin(bearingRad) + deformedY * Math.cos(bearingRad);
 
         const ptBearing = (Math.atan2(geoX, geoY) * 180 / Math.PI + 360) % 360;
-        const ptDist = radius * Math.sqrt(geoX * geoX + geoY * geoY) / Math.max(elongation, 1);
+        const ptDist = radius * mag / Math.max(axialStretch, LAT_COMPRESS);
 
         coords.push(movePoint(center, ptBearing, ptDist));
       }
 
-      // Organic jitter — stronger on outer rings for natural terrain blending
+      // v3.8.5: Heavy organic jitter — 4 harmonics + ring-dependent amplitude
+      // Outer rings get more distortion so edges dissolve into terrain
+      const jitterAmp = radius * (0.06 + 0.09 * t); // 6-15% of radius
       const jitteredCoords = coords.map((c, i) => {
         if (i === coords.length - 1) return coords[0]; // close ring
-        const jitterScale = radius * 0.08 * t; // v1.1: slightly more jitter (was 0.06)
-        const noise = Math.sin(i * 3.7 + ring * 1.3) * 0.5
-                    + Math.sin(i * 7.1 + ring * 2.1) * 0.3
-                    + Math.sin(i * 11.3 + ring * 0.7) * 0.15; // v1.1: extra harmonic
+        const noise = Math.sin(i * 2.9 + ring * 1.7) * 0.40
+                    + Math.sin(i * 5.3 + ring * 2.9) * 0.28
+                    + Math.sin(i * 9.7 + ring * 0.5) * 0.18
+                    + Math.sin(i * 14.1 + ring * 3.3) * 0.10;
         const jitterBearing = (i / SEGMENTS) * 360;
-        return movePoint(c, jitterBearing, noise * jitterScale);
+        return movePoint(c, jitterBearing, noise * jitterAmp);
       });
 
       features.push({
@@ -596,7 +605,8 @@ function buildHuntPocketFeatures(
           ringNorm: t,
           isTopStand: stand.rank === stands[0]?.rank,
           score: stand.alignment.score,
-          stretchBearing, // v1.1: stored for directional reference
+          stretchBearing,
+          opacityScale, // v3.8.5: per-stand opacity multiplier
         },
       });
     }
@@ -3882,9 +3892,9 @@ function DeerIntelContent() {
         
         // (Opportunity layers removed — convergence IS opportunity)
         
-        // ========== HUNT POCKET LAYER (v1.1) ==========
-        // Muted blaze-orange asymmetric halos around stand sites showing huntable zone.
-        // Concentric rings with asymmetric fade blend into terrain heatmap.
+        // ========== HUNT POCKET LAYER (v3.8.5) ==========
+        // Flow-native teardrop intercept zones — no visible ring banding.
+        // Opacity driven by ringNorm × opacityScale for per-stand intensity control.
         if (!map.getSource('tfp-hunt-pockets')) {
           map.addSource('tfp-hunt-pockets', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3898,18 +3908,23 @@ function DeerIntelContent() {
                 LAYER_COLORS.standPrimary,    // muted blaze-orange
                 LAYER_COLORS.standSecondary,  // deeper burnt orange
               ],
+              // v3.8.5: opacity = base curve × opacityScale (1.0 for top stand, 0.55 for secondary)
+              // Fewer stops (4 rings), much softer outer edge to eliminate ring banding
               'fill-opacity': [
-                'interpolate', ['linear'], ['get', 'ringNorm'],
-                0.17, 0.18,   // innermost ring: warm glow (slightly softer than v1.0)
-                0.33, 0.12,
-                0.50, 0.08,
-                0.67, 0.05,
-                0.83, 0.025,
-                1.0,  0.01,   // outermost ring: barely visible terrain blend
+                '*',
+                ['get', 'opacityScale'],
+                [
+                  'interpolate', ['exponential', 1.8], ['get', 'ringNorm'],
+                  0.25, 0.14,   // innermost shell: warm core
+                  0.50, 0.07,   // mid zone
+                  0.75, 0.025,  // outer fade
+                  1.0,  0.008,  // outermost: nearly invisible terrain dissolution
+                ],
               ],
             },
           });
-          // Subtle inner stroke on innermost ring only
+          // v3.8.5: Stroke removed — no visible ring outlines. The teardrop shape
+          // and jitter are sufficient directional cues without adding artificial edges.
           map.addLayer({
             id: 'tfp-hunt-pockets-stroke',
             type: 'line',
@@ -3922,9 +3937,9 @@ function DeerIntelContent() {
                 LAYER_COLORS.standPrimaryRing,
                 LAYER_COLORS.standSecondary,
               ],
-              'line-width': 1.2,
-              'line-opacity': 0.30,
-              'line-blur': 1.5,
+              'line-width': 0.8,
+              'line-opacity': 0.15,
+              'line-blur': 2.5,
             },
           });
         }
@@ -4003,10 +4018,10 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-stand-emphasis',
             paint: {
-              'circle-radius': 45,
+              'circle-radius': 35,           // v3.8.5: smaller, tighter glow
               'circle-color': LAYER_COLORS.standEmphasisGlow,
-              'circle-opacity': 0.07,
-              'circle-blur': 0.9,
+              'circle-opacity': 0.05,        // v3.8.5: subtler
+              'circle-blur': 0.95,
             },
           });
         }
