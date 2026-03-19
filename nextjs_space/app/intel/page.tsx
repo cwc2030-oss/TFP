@@ -3180,9 +3180,20 @@ function DeerIntelContent() {
       }
       
       // Terrain Flow visibility (movement likelihood layers)
-      // HEAT MAP (PRIMARY VISUAL)
+      // Pressure Simulation v1 — pressureView controls which of the 4 heat layers is active.
+      // All four share the master pressureHeatmap toggle; pressureView picks one.
+      const heatOn = flowVisibility.pressureHeatmap;
       if (map.getLayer('tfp-pressure-heatmap')) {
-        map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', flowVisibility.pressureHeatmap ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', heatOn && pressureView === 'pressure' ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-movement-delta')) {
+        map.setLayoutProperty('tfp-movement-delta', 'visibility', heatOn && pressureView === 'damage' ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-movement-post')) {
+        map.setLayoutProperty('tfp-movement-post', 'visibility', heatOn && pressureView === 'movement' ? 'visible' : 'none');
+      }
+      if (map.getLayer('tfp-refuge-zones')) {
+        map.setLayoutProperty('tfp-refuge-zones', 'visibility', heatOn && pressureView === 'refuge' ? 'visible' : 'none');
       }
       // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
       if (map.getLayer('tfp-flow-primary')) {
@@ -3217,7 +3228,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, showBeddingProbability, mapReady]);
+  }, [visibility, flowVisibility, showBeddingProbability, pressureView, mapReady]);
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   useEffect(() => {
