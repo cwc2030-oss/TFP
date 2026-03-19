@@ -749,6 +749,7 @@ export function buildTerrainRaster(input: RasterInput): {
   grid: RasterGrid;
   heatPoints: GeoJSON.FeatureCollection;
   movementDelta: GeoJSON.FeatureCollection;
+  movementPost: GeoJSON.FeatureCollection;
   primeStandSites: PrimeStandSite[];
 } | null {
   // Generate grid
@@ -911,10 +912,31 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
+  // ============ MOVEMENT POST LAYER ============
+  // movement_post = clamp(terrain - 0.7 * pressure, 0, 1)
+  // Shows remaining movement after pressure is applied
+  const postFeatures: GeoJSON.Feature[] = [];
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const cell = grid.cells[r][c];
+      const terrain = cell.pressure; // terrain movement score
+      const post = Math.min(1, Math.max(0, terrain - 0.7 * cell.pressure));
+      if (post < 0.02) continue; // skip near-zero cells
+      // Clip to parcel boundary
+      if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
+      postFeatures.push({
+        type: 'Feature',
+        properties: { movement_post: post, intensity: post },
+        geometry: { type: 'Point', coordinates: [cell.lng, cell.lat] },
+      });
+    }
+  }
+
   return {
     grid,
     heatPoints: { type: 'FeatureCollection', features },
     movementDelta: { type: 'FeatureCollection', features: deltaFeatures },
+    movementPost: { type: 'FeatureCollection', features: postFeatures },
     primeStandSites,
   };
 }
