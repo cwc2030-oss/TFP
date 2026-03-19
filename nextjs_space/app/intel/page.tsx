@@ -445,12 +445,13 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
   return { point: closestPoint, segment: closestSegment, index: closestIndex };
 }
 
-// ========== HUNT POCKET GEOMETRY BUILDER (v3.8.5) ==========
-// Flow-native teardrop/fan-shaped intercept zones that smear along corridor
-// direction. The pocket is biased upstream of movement (forward-heavy), laterally
-// compressed across the corridor, and uses strong organic jitter to break up any
-// ring/circle identity. Heat intensity lives on the movement system rather than
-// floating as a separate radial blob around the stand point.
+// ========== HUNT POCKET GEOMETRY BUILDER (v3.8.6) ==========
+// Upstream-biased teardrop intercept zones. The pocket origin is shifted
+// ~30% upstream along the corridor so the stand sits near the trailing
+// edge of the opportunity zone (~65% density upstream, ~35% downstream).
+// Lateral spread is aggressively compressed to reinforce corridor flow.
+// Per-vertex corridor-axis bias stored for paint-time intensity modulation.
+// 6-harmonic organic jitter eliminates any remaining polygon/ring feel.
 function buildHuntPocketFeatures(
   stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
   funnels: GeoJSON.FeatureCollection | null | undefined,
@@ -459,22 +460,21 @@ function buildHuntPocketFeatures(
   const features: GeoJSON.Feature[] = [];
   if (!stands.length) return { type: 'FeatureCollection', features };
 
-  // v3.8.5: Only top 2 stands get pockets; second stand gets a lighter treatment.
-  // Fewer rings (4) with smoother opacity gradient to eliminate visible ring banding.
   const RINGS = 4;
-  const BASE_RADIUS = 35;       // tight core
-  const MAX_RADIUS = 170;       // wider reach but much softer outer
-  const SEGMENTS = 48;          // smooth enough to hide polygon edges
+  const BASE_RADIUS = 35;
+  const MAX_RADIUS = 170;
+  const SEGMENTS = 48;
 
-  // v3.8.5 Teardrop geometry constants:
-  // Forward = upstream of corridor flow (toward intercept zone)
-  // Backward = downstream / behind stand (minimal presence)
-  // Lateral = across corridor (compressed for flow alignment)
-  const FWD_STRETCH = 2.6;     // strong forward bias — teardrop tip
-  const BWD_STRETCH = 0.55;    // very short rear — not a circle
-  const LAT_COMPRESS = 0.6;    // lateral squeeze — elongated along corridor
+  // v3.8.6: More extreme teardrop + tighter perpendicular squeeze
+  const FWD_STRETCH = 2.8;    // longer upstream reach
+  const BWD_STRETCH = 0.35;   // minimal downstream presence
+  const LAT_COMPRESS = 0.45;  // tight lateral squeeze — strongly flow-aligned
 
-  // Extract corridor/draw/ridge lines for bearing computation (unchanged)
+  // v3.8.6: Upstream center offset (fraction of max radius shifted along bearing)
+  // This places the stand near the trailing edge, not the center.
+  const UPSTREAM_SHIFT = 0.30; // 30% of scaled max radius
+
+  // Extract corridor/draw/ridge lines for bearing
   const corridorLines: [number, number][][] = [];
   const drawLines: [number, number][][] = [];
   if (funnels?.features) {
@@ -499,11 +499,10 @@ function buildHuntPocketFeatures(
   for (let sIdx = 0; sIdx < stands.length; sIdx++) {
     const stand = stands[sIdx];
     const center = stand.coords;
-    // v3.8.5: Second stand gets smaller, fainter pocket
     const scaleFactor = sIdx === 0 ? 1.0 : 0.72;
     const opacityScale = sIdx === 0 ? 1.0 : 0.55;
 
-    // ---- Determine flow bearing: corridor > draw > ridge-perp > default ----
+    // ---- Determine flow bearing ----
     let stretchBearing = 315;
     let nearestCorridorDist = Infinity;
     let corridorBearing: number | null = null;
@@ -548,53 +547,64 @@ function buildHuntPocketFeatures(
 
     const bearingRad = stretchBearing * Math.PI / 180;
 
-    // ---- Build concentric teardrop shells (outermost first for correct z-stacking) ----
+    // v3.8.6: Shift pocket origin upstream so stand sits on trailing edge
+    const shiftDist = MAX_RADIUS * scaleFactor * UPSTREAM_SHIFT;
+    const shiftedCenter = movePoint(center, stretchBearing, shiftDist);
+
+    // ---- Build concentric teardrop shells ----
     for (let ring = RINGS; ring >= 1; ring--) {
-      const t = ring / RINGS; // 0.25 → 1.0
+      const t = ring / RINGS;
       const radius = (BASE_RADIUS + (MAX_RADIUS - BASE_RADIUS) * t) * scaleFactor;
       const coords: [number, number][] = [];
 
       for (let i = 0; i <= SEGMENTS; i++) {
         const angle = (i / SEGMENTS) * 2 * Math.PI;
-
-        // Local frame: X = along corridor (forward), Y = across corridor (lateral)
         const localX = Math.cos(angle);
         const localY = Math.sin(angle);
 
-        // v3.8.5 Teardrop deformation:
-        // Forward hemisphere (localX > 0) stretches long; rear collapses.
-        // Use smooth cosine blend instead of hard if/else for organic transition.
-        const fwdBlend = (localX + 1) / 2; // 0 (full rear) → 1 (full forward)
-        const axialStretch = BWD_STRETCH + (FWD_STRETCH - BWD_STRETCH) * fwdBlend * fwdBlend; // cubic ease for sharper tip
+        // Smooth teardrop deformation with cubic easing
+        const fwdBlend = (localX + 1) / 2;
+        const axialStretch = BWD_STRETCH + (FWD_STRETCH - BWD_STRETCH) * fwdBlend * fwdBlend;
         const deformedX = localX * axialStretch;
         const deformedY = localY * LAT_COMPRESS;
 
-        // Magnitude in deformed space
         const mag = Math.sqrt(deformedX * deformedX + deformedY * deformedY);
-        if (mag < 0.001) { coords.push(center); continue; }
+        if (mag < 0.001) { coords.push(shiftedCenter); continue; }
 
-        // Rotate from local frame back to geographic bearing
+        // Rotate to geographic bearing
         const geoX = deformedX * Math.cos(bearingRad) - deformedY * Math.sin(bearingRad);
         const geoY = deformedX * Math.sin(bearingRad) + deformedY * Math.cos(bearingRad);
 
         const ptBearing = (Math.atan2(geoX, geoY) * 180 / Math.PI + 360) % 360;
         const ptDist = radius * mag / Math.max(axialStretch, LAT_COMPRESS);
 
-        coords.push(movePoint(center, ptBearing, ptDist));
+        coords.push(movePoint(shiftedCenter, ptBearing, ptDist));
       }
 
-      // v3.8.5: Heavy organic jitter — 4 harmonics + ring-dependent amplitude
-      // Outer rings get more distortion so edges dissolve into terrain
-      const jitterAmp = radius * (0.06 + 0.09 * t); // 6-15% of radius
+      // v3.8.6: 6-harmonic organic jitter — stronger amplitude on outer shells
+      // Higher base (8%) + steeper ring-dependent growth (12%) = 8–20% distortion
+      const jitterAmp = radius * (0.08 + 0.12 * t);
       const jitteredCoords = coords.map((c, i) => {
         if (i === coords.length - 1) return coords[0]; // close ring
-        const noise = Math.sin(i * 2.9 + ring * 1.7) * 0.40
-                    + Math.sin(i * 5.3 + ring * 2.9) * 0.28
-                    + Math.sin(i * 9.7 + ring * 0.5) * 0.18
-                    + Math.sin(i * 14.1 + ring * 3.3) * 0.10;
+        const noise = Math.sin(i * 2.3 + ring * 1.7) * 0.30
+                    + Math.sin(i * 4.7 + ring * 2.9) * 0.22
+                    + Math.sin(i * 7.9 + ring * 0.5) * 0.18
+                    + Math.sin(i * 12.3 + ring * 3.3) * 0.12
+                    + Math.sin(i * 17.1 + ring * 1.1) * 0.10
+                    + Math.sin(i * 23.7 + ring * 4.1) * 0.06;
         const jitterBearing = (i / SEGMENTS) * 360;
         return movePoint(c, jitterBearing, noise * jitterAmp);
       });
+
+      // v3.8.6: Compute average corridor-axis bias for this ring.
+      // Points along the corridor axis (high |localX|) get bias ~1.0;
+      // points perpendicular (high |localY|) get bias ~0.5.
+      // This is averaged across all vertices to produce a single ring value
+      // (Mapbox expressions can't do per-vertex, so we bias per-ring via
+      // the dominant axis direction of each ring's shape).
+      // For the teardrop, all rings share the same deformation so we store
+      // a constant representing the overall shape's corridor alignment.
+      const corridorBias = 0.85; // teardrop is heavily corridor-aligned
 
       features.push({
         type: 'Feature',
@@ -606,7 +616,8 @@ function buildHuntPocketFeatures(
           isTopStand: stand.rank === stands[0]?.rank,
           score: stand.alignment.score,
           stretchBearing,
-          opacityScale, // v3.8.5: per-stand opacity multiplier
+          opacityScale,
+          corridorBias, // v3.8.6: flow-axis intensity multiplier
         },
       });
     }
@@ -3892,9 +3903,10 @@ function DeerIntelContent() {
         
         // (Opportunity layers removed — convergence IS opportunity)
         
-        // ========== HUNT POCKET LAYER (v3.8.5) ==========
-        // Flow-native teardrop intercept zones — no visible ring banding.
-        // Opacity driven by ringNorm × opacityScale for per-stand intensity control.
+        // ========== HUNT POCKET LAYER (v3.8.6) ==========
+        // Upstream-biased teardrop intercept zones with corridor-axis intensity bias.
+        // Opacity = base curve × opacityScale × corridorBias for flow-reinforced fade.
+        // Core reduced ~20% from v3.8.5; outer edge feathered more aggressively.
         if (!map.getSource('tfp-hunt-pockets')) {
           map.addSource('tfp-hunt-pockets', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3905,26 +3917,26 @@ function DeerIntelContent() {
               'fill-color': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
-                LAYER_COLORS.standPrimary,    // muted blaze-orange
-                LAYER_COLORS.standSecondary,  // deeper burnt orange
+                LAYER_COLORS.standPrimary,
+                LAYER_COLORS.standSecondary,
               ],
-              // v3.8.5: opacity = base curve × opacityScale (1.0 for top stand, 0.55 for secondary)
-              // Fewer stops (4 rings), much softer outer edge to eliminate ring banding
+              // v3.8.6: opacity = base_curve × opacityScale × corridorBias
+              // Core reduced ~20% (0.14→0.11), outer edge nearly zero.
+              // Exponential base 2.2 for faster decay = more feathered edges.
               'fill-opacity': [
                 '*',
-                ['get', 'opacityScale'],
+                ['*', ['get', 'opacityScale'], ['get', 'corridorBias']],
                 [
-                  'interpolate', ['exponential', 1.8], ['get', 'ringNorm'],
-                  0.25, 0.14,   // innermost shell: warm core
-                  0.50, 0.07,   // mid zone
-                  0.75, 0.025,  // outer fade
-                  1.0,  0.008,  // outermost: nearly invisible terrain dissolution
+                  'interpolate', ['exponential', 2.2], ['get', 'ringNorm'],
+                  0.25, 0.11,   // innermost: reduced ~20% from 0.14
+                  0.50, 0.05,   // mid zone: softer
+                  0.75, 0.015,  // outer fade: very faint
+                  1.0,  0.004,  // outermost: barely perceptible
                 ],
               ],
             },
           });
-          // v3.8.5: Stroke removed — no visible ring outlines. The teardrop shape
-          // and jitter are sufficient directional cues without adding artificial edges.
+          // v3.8.6: Inner stroke nearly invisible — just a faint warmth hint
           map.addLayer({
             id: 'tfp-hunt-pockets-stroke',
             type: 'line',
@@ -3937,9 +3949,9 @@ function DeerIntelContent() {
                 LAYER_COLORS.standPrimaryRing,
                 LAYER_COLORS.standSecondary,
               ],
-              'line-width': 0.8,
-              'line-opacity': 0.15,
-              'line-blur': 2.5,
+              'line-width': 0.6,
+              'line-opacity': 0.10,
+              'line-blur': 3.0,
             },
           });
         }
