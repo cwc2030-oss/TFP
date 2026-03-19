@@ -3903,15 +3903,18 @@ function DeerIntelContent() {
                 16, 1.8,   // was ~1.35
                 18, 2.0    // was 1.5
               ],
-              // Color gradient: blue (low) → cyan → green → amber (high)
+              // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
-                0, 'rgba(0,0,0,0)',
-                0.12, 'rgba(15,118,110,0.25)',   // teal-700 (subtle)
-                0.30, 'rgba(6,182,212,0.40)',    // cyan-500
-                0.50, 'rgba(16,185,129,0.55)',   // emerald-500
-                0.72, 'rgba(245,158,11,0.68)',   // amber-500
-                1, 'rgba(239,68,68,0.80)'        // red-500 (hot)
+                0.00, 'rgba(0,0,0,0)',
+                0.10, 'rgba(254,240,138,0.22)',  // yellow-200
+                0.20, 'rgba(250,204,21,0.34)',   // yellow-400
+                0.35, 'rgba(245,158,11,0.46)',   // amber-500
+                0.50, 'rgba(249,115,22,0.56)',   // orange-500
+                0.65, 'rgba(239,68,68,0.65)',    // red-500
+                0.80, 'rgba(220,38,38,0.74)',    // red-600
+                0.92, 'rgba(185,28,28,0.80)',    // red-700
+                1.00, 'rgba(153,27,27,0.85)',    // red-800 (hot)
               ],
               // Radius: TIGHTENED ~45% to separate adjacent hotspots
               'heatmap-radius': [
@@ -3952,12 +3955,15 @@ function DeerIntelContent() {
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
-                0, 'rgba(0,0,0,0)',           // transparent (low)
-                0.15, 'rgba(255,237,160,0.3)', // faint yellow
-                0.35, 'rgba(254,178,76,0.5)',  // orange
-                0.55, 'rgba(252,78,42,0.65)',  // red-orange
-                0.75, 'rgba(220,30,30,0.75)',  // red
-                1, 'rgba(180,0,0,0.85)',       // deep red (high)
+                0.00, 'rgba(0,0,0,0)',
+                0.10, 'rgba(255,237,160,0.22)', // faint yellow
+                0.20, 'rgba(254,215,100,0.34)', // warm yellow
+                0.35, 'rgba(254,178,76,0.46)',  // orange-light
+                0.50, 'rgba(251,146,60,0.56)',  // orange-400
+                0.65, 'rgba(252,78,42,0.65)',   // red-orange
+                0.80, 'rgba(220,38,38,0.74)',   // red-600
+                0.92, 'rgba(185,28,28,0.80)',   // red-700
+                1.00, 'rgba(153,27,27,0.85)',   // deep red
               ],
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
@@ -4000,12 +4006,15 @@ function DeerIntelContent() {
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
-                0, 'rgba(0,0,0,0)',              // transparent (low)
-                0.15, 'rgba(254,240,138,0.30)',   // faint yellow
-                0.30, 'rgba(234,179,8,0.45)',     // yellow-500
-                0.50, 'rgba(132,204,22,0.55)',    // lime-500
-                0.70, 'rgba(34,197,94,0.65)',     // green-500
-                1, 'rgba(22,163,74,0.80)',        // green-600 (strong remaining movement)
+                0.00, 'rgba(0,0,0,0)',
+                0.10, 'rgba(254,240,138,0.22)',  // yellow-200
+                0.20, 'rgba(250,204,21,0.34)',   // yellow-400
+                0.35, 'rgba(234,179,8,0.44)',    // yellow-500
+                0.50, 'rgba(163,230,53,0.54)',   // lime-400
+                0.65, 'rgba(132,204,22,0.62)',   // lime-500
+                0.80, 'rgba(34,197,94,0.72)',    // green-500
+                0.92, 'rgba(22,163,74,0.80)',    // green-600
+                1.00, 'rgba(21,128,61,0.85)',    // green-700 (strong)
               ],
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
@@ -4048,12 +4057,15 @@ function DeerIntelContent() {
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
-                0, 'rgba(0,0,0,0)',               // transparent (low)
-                0.15, 'rgba(165,243,252,0.30)',    // cyan-200
-                0.30, 'rgba(34,211,238,0.45)',     // cyan-400
-                0.50, 'rgba(6,182,212,0.55)',      // cyan-500
-                0.70, 'rgba(59,130,246,0.68)',     // blue-500
-                1, 'rgba(37,99,235,0.80)',         // blue-600 (strong refuge)
+                0.00, 'rgba(0,0,0,0)',
+                0.10, 'rgba(207,250,254,0.22)',   // cyan-100
+                0.20, 'rgba(165,243,252,0.34)',   // cyan-200
+                0.35, 'rgba(34,211,238,0.44)',    // cyan-400
+                0.50, 'rgba(6,182,212,0.54)',     // cyan-500
+                0.65, 'rgba(14,165,233,0.63)',    // sky-500
+                0.80, 'rgba(59,130,246,0.72)',    // blue-500
+                0.92, 'rgba(37,99,235,0.80)',     // blue-600
+                1.00, 'rgba(29,78,216,0.85)',     // blue-700 (strong refuge)
               ],
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
