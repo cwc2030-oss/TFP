@@ -7411,7 +7411,34 @@ function DeerIntelContent() {
                       </p>
                     </div>
                   )}
-                  
+
+                  {/* Layer Color Legend */}
+                  {flowVisibility.pressureHeatmap && (
+                    <div className="px-2 py-2 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
+                      <span className="text-[9px] text-stone-500 uppercase tracking-wider font-medium block mb-1.5">Layer Legend</span>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-2 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316, #ef4444)' }} />
+                          <span className="text-[9px] text-stone-400">Pressure</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-2 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #22c55e)' }} />
+                          <span className="text-[9px] text-stone-400">Movement Post</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-2 rounded-sm" style={{ background: 'linear-gradient(90deg, #06b6d4, #3b82f6)' }} />
+                          <span className="text-[9px] text-stone-400">Refuge Zones</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-2 rounded-sm flex">
+                            <div className="flex-1 rounded-l-sm bg-amber-700/40" />
+                            <div className="flex-1 rounded-r-sm bg-amber-400" />
+                          </div>
+                          <span className="text-[9px] text-stone-400">Stand Resilience</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {/* Divider with "Supporting Evidence" label */}
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-stone-700/50" />
