@@ -655,7 +655,7 @@ function buildHuntPocketFeatures(
     const stand = stands[sIdx];
     const center = stand.coords;
     const scaleFactor = sIdx === 0 ? 1.0 : 0.72;
-    const opacityScale = sIdx === 0 ? 1.0 : 0.55;
+    const opacityScale = sIdx === 0 ? 1.0 : 0.78;
 
     // ---- Determine flow bearing ----
     let stretchBearing = 315;
@@ -4302,7 +4302,7 @@ function DeerIntelContent() {
                 'case',
                 ['==', ['get', 'isTopStand'], true],
                 LAYER_COLORS.standPrimary,
-                LAYER_COLORS.standSecondary,
+                '#e8943a',                        // Stand 2: brighter amber (was standSecondary #c45d22)
               ],
               // v3.8.6+resilience: opacity = base_curve × opacityScale × corridorBias × resilienceFactor
               // resilienceFactor ranges 0.5 (no resilience) to 1.0 (max resilience)
@@ -4334,10 +4334,15 @@ function DeerIntelContent() {
                 'case',
                 ['==', ['get', 'isTopStand'], true],
                 LAYER_COLORS.standPrimaryRing,
-                LAYER_COLORS.standSecondary,
+                '#e8943a',                        // Stand 2: brighter amber (was standSecondary #c45d22)
               ],
               'line-width': 0.6,
-              'line-opacity': 0.10,
+              'line-opacity': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                0.10,                             // Stand 1: unchanged
+                0.18,                             // Stand 2: boosted from 0.10
+              ],
               'line-blur': 3.0,
             },
           });
