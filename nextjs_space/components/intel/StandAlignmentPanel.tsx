@@ -11,6 +11,20 @@ export type AlignedStand = {
   inputs: StandInputs;
   alignment: StandScore;
   coords: [number, number];
+  resilience?: {
+    score: number;
+    corridorCount: number;
+    corridorCountScore: number;
+    angularSpread: number;
+    angularSpreadScore: number;
+    centralityDist: number;
+    centralityScore: number;
+    reentryPaths: number;
+    reentryScore: number;
+    downwindDirs: number;
+    downwindScore: number;
+    label: string;
+  };
 };
 
 interface StandAlignmentPanelProps {

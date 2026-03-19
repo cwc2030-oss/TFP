@@ -445,6 +445,161 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
   return { point: closestPoint, segment: closestSegment, index: closestIndex };
 }
 
+// ========== STAND RESILIENCE SCORING (v3.8.6) ==========
+// Pure scoring dimension — does NOT influence stand placement or ordering.
+// Measures how robust a stand is across variable conditions.
+//
+// Factors:
+//   Corridor Count  (~35%) — distinct flow lines within 60-100m
+//   Angular Spread  (~25%) — diversity of approach bearings
+//   Centrality      (~20%) — distance from parcel centroid (closer = higher)
+//   Re-entry Opp.   (~10%) — downstream corridor paths for post-disturbance recovery
+//   Downwind Recov. (~10%) — forgiveness if wind shifts slightly (windOk breadth)
+
+interface StandResilience {
+  score: number;        // 0–100 composite
+  corridorCount: number;
+  corridorCountScore: number;
+  angularSpread: number;     // degrees of arc covered
+  angularSpreadScore: number;
+  centralityDist: number;    // meters from parcel centroid
+  centralityScore: number;
+  reentryPaths: number;
+  reentryScore: number;
+  downwindDirs: number;      // count of windOk directions
+  downwindScore: number;
+  label: string;             // "High" | "Moderate" | "Low"
+}
+
+function computeStandResilience(
+  standCoords: [number, number],
+  standProps: StandPointProperties,
+  corridorLines: [number, number][][],
+  drawLines: [number, number][][],
+  parcelCentroid: [number, number],
+): StandResilience {
+  // ---- 1. Corridor Count (weight 0.35) ----
+  // Count distinct flow lines (corridors + draws) passing within 60–100m
+  const CORRIDOR_RADIUS_INNER = 60;  // minimum proximity
+  const CORRIDOR_RADIUS_OUTER = 100; // maximum proximity
+  let corridorCount = 0;
+  const approachBearings: number[] = [];
+
+  for (const line of corridorLines) {
+    if (line.length < 2) continue;
+    const result = closestPointOnLineString(standCoords, line);
+    if (result.dist <= CORRIDOR_RADIUS_OUTER) {
+      corridorCount++;
+      // Also capture bearing for angular spread
+      const seg = line[result.segIndex];
+      const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+      approachBearings.push(calculateBearing(seg, segEnd));
+    }
+  }
+  for (const line of drawLines) {
+    if (line.length < 2) continue;
+    const result = closestPointOnLineString(standCoords, line);
+    if (result.dist <= CORRIDOR_RADIUS_OUTER) {
+      corridorCount++;
+      const seg = line[result.segIndex];
+      const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+      approachBearings.push(calculateBearing(seg, segEnd));
+    }
+  }
+
+  // Score: 0 corridors = 0, 1 = 30, 2 = 60, 3 = 85, 4+ = 100
+  const corridorCountScore = corridorCount === 0 ? 0
+    : corridorCount === 1 ? 30
+    : corridorCount === 2 ? 60
+    : corridorCount === 3 ? 85
+    : 100;
+
+  // ---- 2. Angular Spread (weight 0.25) ----
+  // Measure how many distinct 45° sectors are covered by approach bearings
+  let angularSpread = 0;
+  if (approachBearings.length > 0) {
+    const sectors = new Set<number>();
+    for (const b of approachBearings) {
+      sectors.add(Math.floor(((b % 360) + 360) % 360 / 45));
+      // Also add the reverse bearing (deer can travel both directions)
+      sectors.add(Math.floor(((b + 180) % 360) / 45));
+    }
+    angularSpread = sectors.size * 45; // degrees of arc covered
+  }
+  // Score: 0° = 0, 90° = 25, 180° = 55, 270° = 80, 360° = 100
+  const angularSpreadScore = Math.min(100, Math.round((angularSpread / 360) * 110));
+
+  // ---- 3. Centrality (weight 0.20) ----
+  // Distance from parcel centroid — closer = more resilient (can access more of the property)
+  const centralityDist = distanceMeters(standCoords, parcelCentroid);
+  // Assume typical parcel radius ~300–500m; score falls off beyond 400m
+  const centralityScore = centralityDist <= 100 ? 100
+    : centralityDist >= 600 ? 10
+    : Math.round(100 - (centralityDist - 100) * 90 / 500);
+
+  // ---- 4. Re-entry Opportunity (weight 0.10) ----
+  // Count corridors/draws within a wider radius (150m) that are NOT the nearest one
+  // These represent alternative downstream paths for deer to re-enter after disturbance
+  let reentryPaths = 0;
+  const REENTRY_RADIUS = 150;
+  for (const line of corridorLines) {
+    if (line.length < 2) continue;
+    const result = closestPointOnLineString(standCoords, line);
+    if (result.dist > CORRIDOR_RADIUS_INNER && result.dist <= REENTRY_RADIUS) {
+      reentryPaths++;
+    }
+  }
+  for (const line of drawLines) {
+    if (line.length < 2) continue;
+    const result = closestPointOnLineString(standCoords, line);
+    if (result.dist > CORRIDOR_RADIUS_INNER && result.dist <= REENTRY_RADIUS) {
+      reentryPaths++;
+    }
+  }
+  // Score: 0 = 20 (still some chance), 1 = 55, 2 = 80, 3+ = 100
+  const reentryScore = reentryPaths === 0 ? 20
+    : reentryPaths === 1 ? 55
+    : reentryPaths === 2 ? 80
+    : 100;
+
+  // ---- 5. Downwind Recovery (weight 0.10) ----
+  // How many wind directions are "ok" — more = more forgiving of shifts
+  const downwindDirs = standProps.windOk.length;
+  // Score: 1 dir = 15, 2 = 35, 3 = 55, 4 = 75, 5+ = 90, 6+ = 100
+  const downwindScore = downwindDirs <= 1 ? 15
+    : downwindDirs === 2 ? 35
+    : downwindDirs === 3 ? 55
+    : downwindDirs === 4 ? 75
+    : downwindDirs === 5 ? 90
+    : 100;
+
+  // ---- Composite ----
+  const score = Math.round(
+    corridorCountScore * 0.35
+    + angularSpreadScore * 0.25
+    + centralityScore * 0.20
+    + reentryScore * 0.10
+    + downwindScore * 0.10
+  );
+
+  const label = score >= 75 ? 'High' : score >= 45 ? 'Moderate' : 'Low';
+
+  return {
+    score,
+    corridorCount,
+    corridorCountScore,
+    angularSpread,
+    angularSpreadScore,
+    centralityDist: Math.round(centralityDist),
+    centralityScore,
+    reentryPaths,
+    reentryScore,
+    downwindDirs,
+    downwindScore,
+    label,
+  };
+}
+
 // ========== HUNT POCKET GEOMETRY BUILDER (v3.8.6) ==========
 // Upstream-biased teardrop intercept zones. The pocket origin is shifted
 // ~30% upstream along the corridor so the stand sits near the trailing
@@ -1551,10 +1706,27 @@ function DeerIntelContent() {
 
     const { scores, parcelStrength: ps, exceptionalIndex: ei } = scoreStandsWithExceptional(inputs);
 
+    // ---- Extract corridor/draw lines for resilience scoring ----
+    const resCorridorLines: [number, number][][] = [];
+    const resDrawLines: [number, number][][] = [];
+    if (layers?.funnels?.features) {
+      for (const f of layers.funnels.features) {
+        if (f.geometry?.type !== 'LineString') continue;
+        if (f.properties?.funnelType === 'corridor') {
+          resCorridorLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+        } else if (f.properties?.funnelType === 'draw') {
+          resDrawLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+        }
+      }
+    }
+    const parcelCentroid: [number, number] = [lng, lat];
+
     // Build aligned stands array sorted by score desc
     const aligned: AlignedStand[] = stands.map((f, i) => {
       const props = f.properties as StandPointProperties;
       const coords = f.geometry.coordinates as [number, number];
+      // v3.8.6: Compute resilience (scoring only — no placement impact)
+      const resilience = computeStandResilience(coords, props, resCorridorLines, resDrawLines, parcelCentroid);
       return {
         rank: props.rank,
         name: generateStandName(props.rank, coords, props),
@@ -1562,6 +1734,7 @@ function DeerIntelContent() {
         inputs: inputs[i],
         alignment: scores[i],
         coords,
+        resilience,
       };
     }).sort((a, b) => b.alignment.score - a.alignment.score);
 
@@ -5857,6 +6030,10 @@ function DeerIntelContent() {
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
       const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : LAYER_COLORS.standPrimary;
       const standLabel = isTopStand ? "⭐ Today's Sit" : stand.name;
+      const resil = stand.resilience;
+      const resilLabel = resil ? resil.label : '—';
+      const resilScore = resil ? resil.score : 0;
+      const resilColor = resilScore >= 75 ? '#22c55e' : resilScore >= 45 ? '#eab308' : '#ef4444';
       hoverTooltip.innerHTML = `
         <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 4px;">
           ${standLabel} • ${alignScore}/100
@@ -5866,6 +6043,7 @@ function DeerIntelContent() {
           <div>🌬️ Best Wind: <b style="color: #22c55e">${props.windOk.slice(0, 2).join(', ')}</b></div>
           <div>⏰ Best Time: <b>${bestTime}</b></div>
           <div>🦌 To Corridor: <b>${props.distToCorridorMeters}m</b></div>
+          <div>🛡️ Resilience: <b style="color: ${resilColor}">${resilLabel} (${resilScore})</b></div>
         </div>
       `;
       el.style.position = 'relative';
@@ -5895,7 +6073,7 @@ function DeerIntelContent() {
       el.onclick = () => {
         hoverTooltip.style.opacity = '0'; // Hide tooltip on click
         setSelectedStand(stand.rank);
-        showStandPopup(coords, props);
+        showStandPopup(coords, props, stand.resilience);
         map.flyTo({ center: coords, zoom: 16 });
       };
 
@@ -5904,7 +6082,7 @@ function DeerIntelContent() {
     });
   };
 
-  const showStandPopup = (coords: [number, number], props: StandPointProperties) => {
+  const showStandPopup = (coords: [number, number], props: StandPointProperties, resilience?: StandResilience) => {
     const map = mapRef.current;
     if (!map) return;
 
@@ -6052,6 +6230,44 @@ function DeerIntelContent() {
             </span>
             <span style="color: #6b7280; font-size: 10px;">Elev: ${Math.round(props.elevation)}m</span>
           </div>
+          
+          ${resilience ? `
+          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px;">
+              <span style="font-weight: 600; font-size: 11px; color: #1f2937;">🛡️ Resilience</span>
+              <span style="
+                padding: 2px 7px;
+                border-radius: 10px;
+                font-weight: 600;
+                font-size: 10px;
+                background: ${resilience.score >= 75 ? '#dcfce7' : resilience.score >= 45 ? '#fef3c7' : '#fee2e2'};
+                color: ${resilience.score >= 75 ? '#166534' : resilience.score >= 45 ? '#92400e' : '#991b1b'};
+              ">${resilience.label} ${resilience.score}/100</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px; font-size: 10px;">
+              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
+                <span style="color: #6b7280;">Corridors</span>
+                <span style="float: right; font-weight: 600;">${resilience.corridorCount} (${resilience.corridorCountScore})</span>
+              </div>
+              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
+                <span style="color: #6b7280;">Spread</span>
+                <span style="float: right; font-weight: 600;">${resilience.angularSpread}° (${resilience.angularSpreadScore})</span>
+              </div>
+              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
+                <span style="color: #6b7280;">Central</span>
+                <span style="float: right; font-weight: 600;">${resilience.centralityDist}m (${resilience.centralityScore})</span>
+              </div>
+              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
+                <span style="color: #6b7280;">Re-entry</span>
+                <span style="float: right; font-weight: 600;">${resilience.reentryPaths} (${resilience.reentryScore})</span>
+              </div>
+              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px; grid-column: span 2;">
+                <span style="color: #6b7280;">Downwind</span>
+                <span style="float: right; font-weight: 600;">${resilience.downwindDirs} dirs (${resilience.downwindScore})</span>
+              </div>
+            </div>
+          </div>
+          ` : ''}
           
           <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
             <button
