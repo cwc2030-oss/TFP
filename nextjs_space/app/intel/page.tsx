@@ -7580,6 +7580,93 @@ function DeerIntelContent() {
                       </div>
                     </div>
                   )}
+                  {/* ========== STAND COMPARE CARD (v1.2) ==========
+                      Side-by-side summary using existing stand properties only.
+                      Appears only when both Compare A and Compare B are selected. */}
+                  {compareStandA !== null && compareStandB !== null && (() => {
+                    const standA = alignedStands[compareStandA];
+                    const standB = alignedStands[compareStandB];
+                    if (!standA || !standB) return null;
+
+                    const resA = standA.resilience?.score ?? null;
+                    const resB = standB.resilience?.score ?? null;
+                    const alignA = standA.alignment.score;
+                    const alignB = standB.alignment.score;
+
+                    // Helper: highlight color for the higher value
+                    const hi = (a: number | null, b: number | null) => {
+                      if (a === null || b === null) return { a: '', b: '' };
+                      if (a > b) return { a: 'text-amber-400 font-semibold', b: '' };
+                      if (b > a) return { a: '', b: 'text-amber-400 font-semibold' };
+                      return { a: '', b: '' }; // tie
+                    };
+                    const resHi = hi(resA, resB);
+                    const alignHi = hi(alignA, alignB);
+
+                    const fmt = (v: number | null) => v !== null ? v.toFixed(2) : '—';
+
+                    return (
+                      <div className="px-2 py-2 bg-stone-900/50 rounded-lg border border-amber-700/20 mt-1">
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[9px] text-amber-400/80 uppercase tracking-wider font-medium">Stand Compare</span>
+                          <button
+                            onClick={() => { setCompareStandA(null); setCompareStandB(null); }}
+                            className="text-[8px] text-stone-600 hover:text-stone-400 transition-colors"
+                          >✕ Clear</button>
+                        </div>
+                        {/* Column headers */}
+                        <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 mb-1.5">
+                          <span className="text-[9px] text-stone-400 font-medium truncate text-center">
+                            Stand {compareStandA + 1}{standA.name ? ` · ${standA.name}` : ''}
+                          </span>
+                          <span className="text-[8px] text-stone-600" />
+                          <span className="text-[9px] text-stone-400 font-medium truncate text-center">
+                            Stand {compareStandB + 1}{standB.name ? ` · ${standB.name}` : ''}
+                          </span>
+                        </div>
+                        {/* Rows */}
+                        <div className="space-y-1">
+                          {/* Rank */}
+                          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                            <span className="text-[10px] text-stone-300 text-center">#{standA.rank}</span>
+                            <span className="text-[8px] text-stone-600 w-14 text-center">Rank</span>
+                            <span className="text-[10px] text-stone-300 text-center">#{standB.rank}</span>
+                          </div>
+                          {/* Alignment Score */}
+                          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                            <span className={`text-[10px] text-stone-300 text-center ${alignHi.a}`}>{fmt(alignA)}</span>
+                            <span className="text-[8px] text-stone-600 w-14 text-center">Alignment</span>
+                            <span className={`text-[10px] text-stone-300 text-center ${alignHi.b}`}>{fmt(alignB)}</span>
+                          </div>
+                          {/* Resilience */}
+                          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                            <span className={`text-[10px] text-stone-300 text-center ${resHi.a}`}>{fmt(resA)}</span>
+                            <span className="text-[8px] text-stone-600 w-14 text-center">Resilience</span>
+                            <span className={`text-[10px] text-stone-300 text-center ${resHi.b}`}>{fmt(resB)}</span>
+                          </div>
+                          {/* Corridor Distance */}
+                          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                            <span className="text-[10px] text-stone-300 text-center">{Math.round(standA.props.distToCorridorMeters)}m</span>
+                            <span className="text-[8px] text-stone-600 w-14 text-center">Corridor</span>
+                            <span className="text-[10px] text-stone-300 text-center">{Math.round(standB.props.distToCorridorMeters)}m</span>
+                          </div>
+                          {/* Elevation */}
+                          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                            <span className="text-[10px] text-stone-300 text-center">{Math.round(standA.props.elevation)}m</span>
+                            <span className="text-[8px] text-stone-600 w-14 text-center">Elevation</span>
+                            <span className="text-[10px] text-stone-300 text-center">{Math.round(standB.props.elevation)}m</span>
+                          </div>
+                          {/* Alignment Label */}
+                          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 items-center">
+                            <span className="text-[9px] text-stone-400 text-center italic">{standA.alignment.label}</span>
+                            <span className="text-[8px] text-stone-600 w-14 text-center">Grade</span>
+                            <span className="text-[9px] text-stone-400 text-center italic">{standB.alignment.label}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* Divider with "Supporting Evidence" label */}
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-stone-700/50" />
