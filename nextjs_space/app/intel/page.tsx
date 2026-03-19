@@ -1399,6 +1399,14 @@ function DeerIntelContent() {
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(() => new Date(0));
   const [windMinAgo, setWindMinAgo] = useState(0);
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
+
+  // ========== STAND COMPARE STATE (v1.2) ==========
+  // Holds two stand selections for a future side-by-side comparison panel.
+  // Each value is the stand's index in the alignedStands array, or null if
+  // no stand is selected for that slot.  UI and wiring come in a later task.
+  const [compareStandA, setCompareStandA] = useState<number | null>(null);
+  const [compareStandB, setCompareStandB] = useState<number | null>(null);
+
   // ========== TERRAIN WORK MODE ==========
   // A terrain study tool for verifying terrain anatomy before deer interpretation layers.
   // 
