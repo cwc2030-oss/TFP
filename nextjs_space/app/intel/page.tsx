@@ -1875,6 +1875,7 @@ function DeerIntelContent() {
       'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
       'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
       'tfp-pressure-heatmap',
+      'tfp-movement-delta',
       'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-convergence',
       'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
       'tfp-huntability-corridors', 'tfp-huntability-convergence',
@@ -3001,9 +3002,16 @@ function DeerIntelContent() {
             heatmapSource.setData(rasterResult.heatPoints);
           }
 
+          // Update movement delta layer
+          const deltaSource = map.getSource('tfp-movement-delta') as mapboxgl.GeoJSONSource;
+          if (deltaSource) {
+            deltaSource.setData(rasterResult.movementDelta);
+          }
+
           console.log('[TerrainRaster] Built pressure surface:', {
             grid: `${rasterResult.grid.rows}×${rasterResult.grid.cols}`,
             heatPoints: rasterResult.heatPoints.features.length,
+            movementDelta: rasterResult.movementDelta.features.length,
             primeStandSites: rasterResult.primeStandSites.length,
           });
         } else {
@@ -3870,6 +3878,54 @@ function DeerIntelContent() {
           });
         }
         
+        // ========== MOVEMENT DELTA LAYER (post-pressure damage map) ==========
+        // movement_delta = clamp(0.7 * pressure, 0, 1) — red/orange heatmap
+        if (!map.getSource('tfp-movement-delta')) {
+          map.addSource('tfp-movement-delta', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-movement-delta',
+            type: 'heatmap',
+            source: 'tfp-movement-delta',
+            paint: {
+              'heatmap-weight': [
+                'interpolate', ['linear'],
+                ['coalesce', ['get', 'delta'], ['get', 'intensity'], 0],
+                0, 0,
+                0.2, 0.3,
+                0.5, 0.6,
+                0.8, 0.85,
+                1, 1,
+              ],
+              'heatmap-intensity': [
+                'interpolate', ['linear'], ['zoom'],
+                12, 1.0,
+                14, 1.3,
+                16, 1.6,
+                18, 1.8,
+              ],
+              'heatmap-color': [
+                'interpolate', ['linear'], ['heatmap-density'],
+                0, 'rgba(0,0,0,0)',           // transparent (low)
+                0.15, 'rgba(255,237,160,0.3)', // faint yellow
+                0.35, 'rgba(254,178,76,0.5)',  // orange
+                0.55, 'rgba(252,78,42,0.65)',  // red-orange
+                0.75, 'rgba(220,30,30,0.75)',  // red
+                1, 'rgba(180,0,0,0.85)',       // deep red (high)
+              ],
+              'heatmap-radius': [
+                'interpolate', ['linear'], ['zoom'],
+                12, 20,
+                14, 32,
+                16, 45,
+              ],
+              'heatmap-opacity': 0.5,
+            },
+            layout: {
+              visibility: 'visible',
+            },
+          });
+        }
+
         // ========== TERRAIN SPINE LAYERS (Skeleton — ABOVE heatmap, BELOW stand sites) ==========
         // Goal: When toggled on, the structural backbone is immediately obvious
         // Layers render AFTER heatmap for proper z-order
@@ -4686,6 +4742,8 @@ function DeerIntelContent() {
           'tfp-corridors-exploratory',
           // Pressure heatmap
           'tfp-pressure-heatmap',
+          // Movement delta (damage map)
+          'tfp-movement-delta',
           // Ridge spines
           'tfp-ridges-primary-casing',
           'tfp-ridges-primary',

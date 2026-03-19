@@ -748,6 +748,7 @@ function applyGaussianSmoothing(grid: RasterGrid): void {
 export function buildTerrainRaster(input: RasterInput): {
   grid: RasterGrid;
   heatPoints: GeoJSON.FeatureCollection;
+  movementDelta: GeoJSON.FeatureCollection;
   primeStandSites: PrimeStandSite[];
 } | null {
   // Generate grid
@@ -891,9 +892,29 @@ export function buildTerrainRaster(input: RasterInput): {
   // (offset from hotspot centers toward intercept edges)
   const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing);
 
+  // ============ MOVEMENT DELTA LAYER ============
+  // movement_delta = clamp(0.7 * pressure, 0, 1)
+  // Shows where pressure "destroys" movement potential
+  const deltaFeatures: GeoJSON.Feature[] = [];
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const cell = grid.cells[r][c];
+      const delta = Math.min(1, Math.max(0, 0.7 * cell.pressure));
+      if (delta < 0.05) continue; // skip near-zero cells
+      // Clip to parcel boundary
+      if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
+      deltaFeatures.push({
+        type: 'Feature',
+        properties: { delta, intensity: delta },
+        geometry: { type: 'Point', coordinates: [cell.lng, cell.lat] },
+      });
+    }
+  }
+
   return {
     grid,
     heatPoints: { type: 'FeatureCollection', features },
+    movementDelta: { type: 'FeatureCollection', features: deltaFeatures },
     primeStandSites,
   };
 }
