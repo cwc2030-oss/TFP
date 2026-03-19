@@ -7734,6 +7734,70 @@ function DeerIntelContent() {
                               </div>
                             </>
                           )}
+
+                          {/* ---- Best Overall Today (lightweight compare-only summary) ---- */}
+                          {(() => {
+                            // Normalise each metric to 0–1 before weighting.
+                            // Resilience is 0–100 → / 100.  Alignment is 0–100 → / 100.
+                            // Raster metrics are already 0–1.
+                            const norm = (v: number | null, scale: number) => (v !== null ? v / scale : null);
+
+                            const rA = norm(resA, 100);
+                            const rB = norm(resB, 100);
+                            const aA = norm(alignA, 100);
+                            const aB = norm(alignB, 100);
+                            const pA = rasterA?.avgPressure ?? null;
+                            const pB = rasterB?.avgPressure ?? null;
+                            const mA = rasterA?.avgMovementPost ?? null;
+                            const mB = rasterB?.avgMovementPost ?? null;
+                            const fA = rasterA?.avgRefugeScore ?? null;
+                            const fB = rasterB?.avgRefugeScore ?? null;
+
+                            const score = (res: number | null, align: number | null, press: number | null, mvmt: number | null, ref: number | null) => {
+                              // If any core metric is missing, return null
+                              if (res === null || align === null) return null;
+                              // Raster metrics optional — zero-weight if unavailable
+                              const p = press ?? 0;
+                              const m = mvmt ?? 0;
+                              const f = ref ?? 0;
+                              const hasRaster = press !== null;
+                              if (hasRaster) {
+                                return 0.30 * res + 0.20 * align + 0.20 * m + 0.20 * f - 0.10 * p;
+                              }
+                              // Fallback: only resilience + alignment (re-weighted to sum to 1)
+                              return 0.60 * res + 0.40 * align;
+                            };
+
+                            const sA = score(rA, aA, pA, mA, fA);
+                            const sB = score(rB, aB, pB, mB, fB);
+
+                            if (sA === null || sB === null) return null;
+
+                            const CLOSE_THRESHOLD = 0.03; // within 3% is "too close"
+                            const diff = sA - sB;
+                            let verdict: string;
+                            let verdictColor: string;
+                            if (Math.abs(diff) < CLOSE_THRESHOLD) {
+                              verdict = 'Too Close to Call';
+                              verdictColor = 'text-stone-400 italic';
+                            } else if (diff > 0) {
+                              verdict = `Stand ${compareStandA! + 1}`;
+                              verdictColor = 'text-amber-400 font-semibold';
+                            } else {
+                              verdict = `Stand ${compareStandB! + 1}`;
+                              verdictColor = 'text-amber-400 font-semibold';
+                            }
+
+                            return (
+                              <>
+                                <div className="border-t border-amber-700/30 my-1.5" />
+                                <div className="text-center">
+                                  <span className="text-[8px] text-stone-500 uppercase tracking-wider block mb-0.5">Best Overall Today</span>
+                                  <span className={`text-[11px] ${verdictColor}`}>{verdict}</span>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     );
