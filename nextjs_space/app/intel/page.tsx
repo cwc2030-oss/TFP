@@ -7464,6 +7464,12 @@ function DeerIntelContent() {
                   {/* Layer Color Legend — contextual to active pressureView */}
                   {flowVisibility.pressureHeatmap && (
                     <div className="px-2 py-1.5 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
+                      <span className="text-[9px] text-stone-400 font-semibold block mb-1">
+                        {pressureView === 'pressure' && 'Pressure View'}
+                        {pressureView === 'damage' && 'Damage View'}
+                        {pressureView === 'movement' && 'Movement View'}
+                        {pressureView === 'refuge' && 'Refuge View'}
+                      </span>
                       <div className="flex items-center gap-2">
                         {pressureView === 'pressure' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316, #ef4444)' }} />}
                         {pressureView === 'damage' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316)' }} />}
