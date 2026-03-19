@@ -42,6 +42,50 @@
  *   - Weak terrain should visually appear quiet
  */
 
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ * PRESSURE SIMULATION v1 — CHECKPOINT
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * Layers produced by buildTerrainRaster():
+ *
+ *   1. Pressure Surface (season-aware)
+ *      - Weighted bench/saddle/ridge/sidehill per season profile
+ *      - Gaussian-smoothed (2-pass, ~30m blur)
+ *      - Normalized 0–1, then focus multiplier applied:
+ *          Broad 0.85 · Balanced 1.0 · Focused 1.2
+ *      - Soft-capped via 1 − e^(−1.35·p) to preserve internal
+ *        variation in high-pressure regions
+ *
+ *   2. movement_delta
+ *      - clamp(0.7 × pressure, 0, 1)
+ *      - Indicates likelihood of deer movement through a cell
+ *
+ *   3. movement_post
+ *      - clamp(terrain − 0.7 × pressure, 0, 1)
+ *      - Structural terrain quality surviving pressure overlay
+ *
+ *   4. refuge_zones
+ *      - movement_post × (1 − pressure)
+ *      - Low-pressure pockets with good terrain = refuge
+ *
+ *   5. stand_resilience (per Prime Stand Site)
+ *      - 60m-radius neighborhood sample of post & refuge
+ *      - 0.5·avg_post + 0.3·avg_refuge − 0.4·avg_pressure
+ *      - Drives hunt-pocket opacity: 0.5 + 0.5 × resilience
+ *
+ * UI (app/intel/page.tsx):
+ *   - Compact Layer Legend: gradient swatches for pressure,
+ *     movement_post, refuge, and stand resilience
+ *   - Visible when Pressure Map toggle is active
+ *
+ * Constraints:
+ *   - Terrain extraction (saddles/ridges) is season-independent
+ *   - Focus multiplier scales pressure only, not structural terrain
+ *   - Soft-cap preserves ordering; no formula changes downstream
+ * ═══════════════════════════════════════════════════════════════════
+ */
+
 import type { SeasonProfile } from '@/types/terrain';
 import type { PressureFocus } from './terrain-heatmap';
 
