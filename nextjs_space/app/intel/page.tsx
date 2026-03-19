@@ -1877,6 +1877,7 @@ function DeerIntelContent() {
       'tfp-pressure-heatmap',
       'tfp-movement-delta',
       'tfp-movement-post',
+      'tfp-refuge-zones',
       'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-convergence',
       'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
       'tfp-huntability-corridors', 'tfp-huntability-convergence',
@@ -3015,11 +3016,18 @@ function DeerIntelContent() {
             postSource.setData(rasterResult.movementPost);
           }
 
+          // Update refuge zones layer
+          const refugeSource = map.getSource('tfp-refuge-zones') as mapboxgl.GeoJSONSource;
+          if (refugeSource) {
+            refugeSource.setData(rasterResult.refugeZones);
+          }
+
           console.log('[TerrainRaster] Built pressure surface:', {
             grid: `${rasterResult.grid.rows}×${rasterResult.grid.cols}`,
             heatPoints: rasterResult.heatPoints.features.length,
             movementDelta: rasterResult.movementDelta.features.length,
             movementPost: rasterResult.movementPost.features.length,
+            refugeZones: rasterResult.refugeZones.features.length,
             primeStandSites: rasterResult.primeStandSites.length,
           });
         } else {
@@ -3982,6 +3990,54 @@ function DeerIntelContent() {
           });
         }
 
+        // ========== REFUGE ZONES LAYER (low-pressure, high-movement safe areas) ==========
+        // refuge_score = movement_post * (1 - pressure) — blue/cyan heatmap
+        if (!map.getSource('tfp-refuge-zones')) {
+          map.addSource('tfp-refuge-zones', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-refuge-zones',
+            type: 'heatmap',
+            source: 'tfp-refuge-zones',
+            paint: {
+              'heatmap-weight': [
+                'interpolate', ['linear'],
+                ['coalesce', ['get', 'refuge_score'], ['get', 'intensity'], 0],
+                0, 0,
+                0.3, 0.25,
+                0.5, 0.5,
+                0.7, 0.75,
+                1, 1,
+              ],
+              'heatmap-intensity': [
+                'interpolate', ['linear'], ['zoom'],
+                12, 1.0,
+                14, 1.3,
+                16, 1.6,
+                18, 1.8,
+              ],
+              'heatmap-color': [
+                'interpolate', ['linear'], ['heatmap-density'],
+                0, 'rgba(0,0,0,0)',               // transparent (low)
+                0.15, 'rgba(165,243,252,0.30)',    // cyan-200
+                0.30, 'rgba(34,211,238,0.45)',     // cyan-400
+                0.50, 'rgba(6,182,212,0.55)',      // cyan-500
+                0.70, 'rgba(59,130,246,0.68)',     // blue-500
+                1, 'rgba(37,99,235,0.80)',         // blue-600 (strong refuge)
+              ],
+              'heatmap-radius': [
+                'interpolate', ['linear'], ['zoom'],
+                12, 20,
+                14, 32,
+                16, 45,
+              ],
+              'heatmap-opacity': 0.6,
+            },
+            layout: {
+              visibility: 'visible',
+            },
+          });
+        }
+
         // ========== TERRAIN SPINE LAYERS (Skeleton — ABOVE heatmap, BELOW stand sites) ==========
         // Goal: When toggled on, the structural backbone is immediately obvious
         // Layers render AFTER heatmap for proper z-order
@@ -4802,6 +4858,8 @@ function DeerIntelContent() {
           'tfp-movement-delta',
           // Movement post (remaining movement)
           'tfp-movement-post',
+          // Refuge zones (low pressure + high movement)
+          'tfp-refuge-zones',
           // Ridge spines
           'tfp-ridges-primary-casing',
           'tfp-ridges-primary',

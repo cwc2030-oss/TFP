@@ -752,6 +752,7 @@ export function buildTerrainRaster(input: RasterInput): {
   heatPoints: GeoJSON.FeatureCollection;
   movementDelta: GeoJSON.FeatureCollection;
   movementPost: GeoJSON.FeatureCollection;
+  refugeZones: GeoJSON.FeatureCollection;
   primeStandSites: PrimeStandSite[];
 } | null {
   // Generate grid
@@ -964,11 +965,32 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
+  // ============ REFUGE ZONES LAYER ============
+  // refuge_score = movement_post * (1 - cell.pressure)
+  // High where movement survives AND pressure is low — safe refuge areas
+  const refugeFeatures: GeoJSON.Feature[] = [];
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const cell = grid.cells[r][c];
+      const post = Math.min(1, Math.max(0, cell.terrain - 0.7 * cell.pressure));
+      const refuge = post * (1 - cell.pressure);
+      if (refuge <= 0.3) continue; // only include cells above threshold
+      // Clip to parcel boundary
+      if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
+      refugeFeatures.push({
+        type: 'Feature',
+        properties: { refuge_score: refuge, intensity: refuge },
+        geometry: { type: 'Point', coordinates: [cell.lng, cell.lat] },
+      });
+    }
+  }
+
   return {
     grid,
     heatPoints: { type: 'FeatureCollection', features },
     movementDelta: { type: 'FeatureCollection', features: deltaFeatures },
     movementPost: { type: 'FeatureCollection', features: postFeatures },
+    refugeZones: { type: 'FeatureCollection', features: refugeFeatures },
     primeStandSites,
   };
 }
