@@ -23,6 +23,9 @@ import type { SeasonProfile } from '@/types/terrain';
 export type ConvergenceMode = 'off' | 'light';
 export type PressureFocus = 'broad' | 'balanced' | 'focused';
 
+/** Active overlay mode for Pressure Simulation v1 */
+export type PressureView = 'pressure' | 'damage' | 'movement' | 'refuge';
+
 // ============ TERRAIN-FIRST WEIGHTS ============
 // No convergence/draw weight — redistro across bench/saddle/ridge
 const W_BENCH  = 0.40;  // was 0.35 — promoted (primary terrain structure)

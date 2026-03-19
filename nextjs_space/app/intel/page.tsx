@@ -42,7 +42,7 @@ import type {
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
-import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus } from '@/lib/terrain-heatmap';
+import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus, type PressureView } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON } from '@/lib/terrain-raster';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
@@ -1377,6 +1377,7 @@ function DeerIntelContent() {
   // User controls
   const [season, setSeason] = useState<SeasonProfile>('rut');
   const [pressureFocus, setPressureFocus] = useState<PressureFocus>('balanced');
+  const [pressureView, setPressureView] = useState<PressureView>('pressure');
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
   // Refs that always mirror the latest season/wind values.
   // runAnalysis reads from these so it never captures stale closures,
