@@ -7777,15 +7777,36 @@ function DeerIntelContent() {
                             const diff = sA - sB;
                             let verdict: string;
                             let verdictColor: string;
+                            let reason = '';
                             if (Math.abs(diff) < CLOSE_THRESHOLD) {
                               verdict = 'Too Close to Call';
                               verdictColor = 'text-stone-400 italic';
-                            } else if (diff > 0) {
-                              verdict = `Stand ${compareStandA! + 1}`;
-                              verdictColor = 'text-amber-400 font-semibold';
+                              reason = 'Choose based on wind, access, or preference';
                             } else {
-                              verdict = `Stand ${compareStandB! + 1}`;
+                              // Determine winner metrics for the reason line
+                              const winA = diff > 0;
+                              verdict = winA ? `Stand ${compareStandA! + 1}` : `Stand ${compareStandB! + 1}`;
                               verdictColor = 'text-amber-400 font-semibold';
+
+                              // Pick the most decisive advantage from displayed metrics
+                              const wP = (winA ? pA : pB) ?? 0;
+                              const lP = (winA ? pB : pA) ?? 0;
+                              const wM = (winA ? mA : mB) ?? 0;
+                              const lM = (winA ? mB : mA) ?? 0;
+                              const wF = (winA ? fA : fB) ?? 0;
+                              const lF = (winA ? fB : fA) ?? 0;
+
+                              const pressureEdge = lP - wP;   // positive = winner has lower pressure
+                              const movementEdge = wM - lM;   // positive = winner has higher movement
+                              const refugeEdge   = wF - lF;   // positive = winner has higher refuge
+
+                              if (pressureEdge >= movementEdge && pressureEdge >= refugeEdge && pressureEdge > 0) {
+                                reason = 'Cleaner pressure setup';
+                              } else if (refugeEdge >= movementEdge && refugeEdge > 0) {
+                                reason = 'Better recovery / refuge support';
+                              } else if (movementEdge > 0) {
+                                reason = 'Stronger surviving movement';
+                              }
                             }
 
                             return (
@@ -7794,6 +7815,7 @@ function DeerIntelContent() {
                                 <div className="text-center">
                                   <span className="text-[8px] text-stone-500 uppercase tracking-wider block mb-0.5">Best Overall Today</span>
                                   <span className={`text-[11px] ${verdictColor}`}>{verdict}</span>
+                                  {reason && <span className="text-[8px] text-stone-500 block mt-0.5">{reason}</span>}
                                 </div>
                               </>
                             );
