@@ -451,7 +451,9 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
 //
 // Factors:
 //   Corridor Count  (~35%) — distinct flow lines within 60-100m
-//   Angular Spread  (~25%) — diversity of approach bearings
+//   Angular Spread  (~25%) — diversity of movement-axis bearings from nearby corridors
+//                             (NOTE: these are corridor-tangent bearings representing
+//                              likely movement flow, NOT true approach vectors)
 //   Centrality      (~20%) — distance from parcel centroid (closer = higher)
 //   Re-entry Opp.   (~10%) — downstream corridor paths for post-disturbance recovery
 //   Downwind Recov. (~10%) — forgiveness if wind shifts slightly (windOk breadth)
@@ -515,7 +517,8 @@ function computeStandResilience(
     : 100;
 
   // ---- 2. Angular Spread (weight 0.25) ----
-  // Measure how many distinct 45° sectors are covered by approach bearings
+  // Measure how many distinct 45° sectors are covered by movement-axis bearings
+  // (corridor/draw tangent bearings — these indicate flow direction, not true approach)
   let angularSpread = 0;
   if (approachBearings.length > 0) {
     const sectors = new Set<number>();
@@ -785,9 +788,20 @@ function buildHuntPocketFeatures(
   return { type: 'FeatureCollection', features };
 }
 
-// ========== STAND INTERCEPT DIRECTION BUILDER (v1.1) ==========
-// Generates a thin vector line from each stand toward the nearest corridor/flow
-// indicating expected intercept direction. This is a visualization-only feature.
+// ========== STAND MOVEMENT-AXIS WEDGE BUILDER (v1.1) ==========
+// Generates a thin wedge from each stand along the corridor/draw tangent bearing,
+// representing the likely movement-flow axis past the stand.
+//
+// IMPORTANT — Semantic clarification:
+//   • The wedge uses the corridor-tangent (or draw-tangent) bearing of the nearest
+//     terrain feature, i.e. the direction the corridor/draw flows past the stand.
+//   • It aligns with the hunt pocket's long axis (both derive from the same bearing).
+//   • It represents the most probable movement flow past the stand — NOT a true
+//     approach-direction model.  We do not yet have convergence-vector data that
+//     would indicate which direction deer travel along the corridor to reach this
+//     stand.  A future approach-direction system would require upstream/downstream
+//     convergence analysis.
+//   • Treat this as "flow axis" / "movement axis" visualization only.
 function buildStandDirectionFeatures(
   stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
   funnels: GeoJSON.FeatureCollection | null | undefined,
@@ -821,8 +835,9 @@ function buildStandDirectionFeatures(
   for (const stand of stands) {
     const center = stand.coords;
 
-    // Use corridor-tangent bearing (same as hunt pocket stretchBearing)
-    // so the wedge aligns with the pocket's long axis.
+    // Movement-axis bearing: uses corridor-tangent (same as hunt pocket stretchBearing)
+    // so the wedge aligns with the pocket's long axis.  This is flow direction,
+    // not a true approach vector — see header comment on buildStandDirectionFeatures.
     let faceBearing = 315; // fallback NW
     let nearestCorridorDist = Infinity;
     let corridorBrg: number | null = null;
@@ -867,7 +882,7 @@ function buildStandDirectionFeatures(
       }
     }
 
-    // Build a thin wedge: center → tip, with two flanking lines at ±12°
+    // Build a thin flow-axis wedge: center → tip, with two flanking lines at ±12°
     const WEDGE_LENGTH = 55; // meters — subtle, not overpowering
     const WEDGE_HALF_ANGLE = 12; // degrees
     const OFFSET = 12; // start 12m from center (outside the marker)
@@ -1898,7 +1913,7 @@ function DeerIntelContent() {
       'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
       'tfp-stand-emphasis', // v3.8.1 — top-stand attention glow
       'tfp-hunt-pockets', // Hunt pocket halos around stands
-      'tfp-stand-direction', // v1.1 — intercept direction wedge
+      'tfp-stand-direction', // v1.1 — movement-axis / flow-axis wedge (not approach direction)
       'tfp-stand-tertiary', // v1.1 — tertiary stand dots
     ];
     for (const id of ALL_TFP_SOURCES) {
@@ -4343,8 +4358,10 @@ function DeerIntelContent() {
           });
         }
 
-        // ========== STAND DIRECTION WEDGE LAYER (v1.1) ==========
-        // Thin vector/wedge extending from stand toward expected intercept direction.
+        // ========== STAND MOVEMENT-AXIS WEDGE LAYER (v1.1) ==========
+        // Thin wedge extending from stand along the corridor/draw flow axis.
+        // Shows likely movement flow past the stand — NOT a true approach direction.
+        // See buildStandDirectionFeatures() header for full semantic notes.
         if (!map.getSource('tfp-stand-direction')) {
           map.addSource('tfp-stand-direction', { type: 'geojson', data: EMPTY_FC });
           // Main vector line
@@ -4921,11 +4938,11 @@ function DeerIntelContent() {
           'tfp-ridges-primary',
           'tfp-ridges-secondary-casing',
           'tfp-ridges-secondary',
-          // Hunt pockets + stand direction wedges (v1.1)
+          // Hunt pockets + stand movement-axis wedges (v1.1)
           'tfp-hunt-pockets-fill',
           'tfp-hunt-pockets-stroke',
-          'tfp-stand-direction-flank',   // v1.1 — intercept wedge flanks
-          'tfp-stand-direction-main',    // v1.1 — intercept wedge main vector
+          'tfp-stand-direction-flank',   // v1.1 — flow-axis wedge flanks
+          'tfp-stand-direction-main',    // v1.1 — flow-axis wedge main vector
           'tfp-stand-tertiary-dot',      // v1.1 — faint tertiary stand dots
           // Flow lines (animated) — v3.5.1
           'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
@@ -6086,7 +6103,7 @@ function DeerIntelContent() {
         (map.getSource('tfp-hunt-pockets') as mapboxgl.GeoJSONSource).setData(pocketFC);
       }
 
-      // v1.1: Intercept direction wedges for top 2 stands
+      // v1.1: Movement-axis wedges for top 2 stands (flow direction, not approach)
       if (map.getSource('tfp-stand-direction')) {
         const topStands = alignedStands.slice(0, 2);
         const dirFC = buildStandDirectionFeatures(topStands, layers?.funnels, ridgeSpineData);
@@ -6132,7 +6149,7 @@ function DeerIntelContent() {
     if (map && map.getLayer('tfp-hunt-pockets-stroke')) {
       map.setLayoutProperty('tfp-hunt-pockets-stroke', 'visibility', visibility.stands ? 'visible' : 'none');
     }
-    // v1.1: Toggle direction wedge layers with stands
+    // v1.1: Toggle movement-axis wedge layers with stands
     if (map && map.getLayer('tfp-stand-direction-main')) {
       map.setLayoutProperty('tfp-stand-direction-main', 'visibility', visibility.stands ? 'visible' : 'none');
     }
