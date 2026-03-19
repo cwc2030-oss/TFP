@@ -3214,9 +3214,12 @@ function DeerIntelContent() {
       }
       if (map.getLayer('tfp-flow-convergence')) {
         map.setLayoutProperty('tfp-flow-convergence', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
+        // Fade convergence blobs when Pressure Map is active so the new heat surface dominates
+        map.setPaintProperty('tfp-flow-convergence', 'circle-opacity', isPressureMode ? 0.1 : 0.85);
       }
       if (map.getLayer('tfp-flow-convergence-pulse')) {
         map.setLayoutProperty('tfp-flow-convergence-pulse', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
+        map.setPaintProperty('tfp-flow-convergence-pulse', 'circle-opacity', isPressureMode ? 0.1 : 0.15);
       }
       // v3.6.0: Bedding Probability visibility
       if (map.getLayer('tfp-bedding-probability-glow')) {
@@ -3231,7 +3234,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, showBeddingProbability, pressureView, mapReady]);
+  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady]);
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   useEffect(() => {
