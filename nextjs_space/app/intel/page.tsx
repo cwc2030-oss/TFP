@@ -1399,6 +1399,7 @@ function DeerIntelContent() {
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(() => new Date(0));
   const [windMinAgo, setWindMinAgo] = useState(0);
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
+  const [soloStandMode, setSoloStandMode] = useState(false);
 
   // ========== STAND COMPARE STATE (v1.2) ==========
   // Holds two stand selections for a future side-by-side comparison panel.
