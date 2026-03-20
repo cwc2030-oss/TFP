@@ -1423,7 +1423,7 @@ function DeerIntelContent() {
   //   • Alignment scoring - stand ranking
   //
   // Set to false once terrain structure is visually verified and ready for deer logic.
-  const TERRAIN_WORK_MODE = true;
+  const TERRAIN_WORK_MODE = false;
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Deer interpretation - HIDE in Terrain Work Mode
