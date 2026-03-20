@@ -3267,14 +3267,16 @@ function DeerIntelContent() {
     try {
       const fp = getFocusPaintParams(pressureFocus);
       if (map.getLayer('tfp-pressure-heatmap')) {
-        // Weight curve: reshape score-to-visual mapping
+        // Weight curve: 6-stop ramp — kills haze below 0.25, focus mode shapes mid-range
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
           'interpolate', ['linear'],
           ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
-          0, fp.weightCurve[0],
-          0.3, fp.weightCurve[1],
-          0.6, fp.weightCurve[2],
-          1, fp.weightCurve[3],
+          0.00, fp.weightCurve[0],
+          0.25, fp.weightCurve[1],
+          0.40, fp.weightCurve[2],
+          0.60, fp.weightCurve[3],
+          0.80, fp.weightCurve[4],
+          1.00, fp.weightCurve[5],
         ]);
         // Intensity: scaled per focus
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
@@ -3910,14 +3912,16 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-pressure-heatmap',
             paint: {
-              // Weight: sharper contrast between weak and strong signals
+              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
-                0, 0.1,    // was 0.2 — weaker floor
-                0.3, 0.45,
-                0.6, 0.8,
-                1, 1
+                0.00, 0.0,
+                0.25, 0.0,
+                0.40, 0.2,
+                0.60, 0.6,
+                0.80, 0.9,
+                1.00, 1.0,
               ],
               // Intensity: boosted to compensate for tighter radius
               'heatmap-intensity': [
@@ -3961,14 +3965,16 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-delta',
             paint: {
+              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'delta'], ['get', 'intensity'], 0],
-                0, 0,
-                0.2, 0.3,
-                0.5, 0.6,
-                0.8, 0.85,
-                1, 1,
+                0.00, 0.0,
+                0.25, 0.0,
+                0.40, 0.2,
+                0.60, 0.6,
+                0.80, 0.9,
+                1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
@@ -4012,14 +4018,16 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-post',
             paint: {
+              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'movement_post'], ['get', 'intensity'], 0],
-                0, 0,
-                0.1, 0.2,
-                0.3, 0.45,
-                0.6, 0.75,
-                1, 1,
+                0.00, 0.0,
+                0.25, 0.0,
+                0.40, 0.2,
+                0.60, 0.6,
+                0.80, 0.9,
+                1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
@@ -4063,14 +4071,16 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-refuge-zones',
             paint: {
+              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'refuge_score'], ['get', 'intensity'], 0],
-                0, 0,
-                0.3, 0.25,
-                0.5, 0.5,
-                0.7, 0.75,
-                1, 1,
+                0.00, 0.0,
+                0.25, 0.0,
+                0.40, 0.2,
+                0.60, 0.6,
+                0.80, 0.9,
+                1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],

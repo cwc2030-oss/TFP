@@ -298,19 +298,23 @@ export function getSeasonWeights(season: SeasonProfile): SeasonWeightProfile {
  * when the user changes the focus slider.
  */
 export function getFocusPaintParams(focus: PressureFocus): {
-  weightCurve: number[];       // [floor, low, mid, high] for heatmap-weight stops
+  weightCurve: number[];       // [0, 0.25, 0.40, 0.60, 0.80, 1.0] stops for heatmap-weight
   intensityMult: number;       // multiplier applied to heatmap-intensity at each zoom
   radiusOffset: number;        // px offset added to each zoom-level radius (negative = tighter)
   opacity: number;
   oppZoneMaxCount: number;     // max opportunity zones to show
 } {
+  // weightCurve: 6 stops at [0, 0.25, 0.40, 0.60, 0.80, 1.0]
+  // All modes kill values below ~0.25; modes differ in mid-range ramp steepness.
   switch (focus) {
     case 'broad':
-      return { weightCurve: [0.20, 0.50, 0.75, 1.0], intensityMult: 0.85, radiusOffset: 6, opacity: 0.65, oppZoneMaxCount: 3 };
+      // Gentler ramp — lets more mid-range through
+      return { weightCurve: [0.0, 0.0, 0.25, 0.55, 0.85, 1.0], intensityMult: 0.85, radiusOffset: 6, opacity: 0.65, oppZoneMaxCount: 3 };
     case 'focused':
-      return { weightCurve: [0.0, 0.20, 0.70, 1.0], intensityMult: 1.25, radiusOffset: -6, opacity: 0.85, oppZoneMaxCount: 1 };
+      // Aggressive — only strong values survive
+      return { weightCurve: [0.0, 0.0, 0.10, 0.50, 0.90, 1.0], intensityMult: 1.25, radiusOffset: -6, opacity: 0.85, oppZoneMaxCount: 1 };
     default: // balanced
-      return { weightCurve: [0.10, 0.45, 0.80, 1.0], intensityMult: 1.0, radiusOffset: 0, opacity: 0.75, oppZoneMaxCount: 3 };
+      return { weightCurve: [0.0, 0.0, 0.20, 0.60, 0.90, 1.0], intensityMult: 1.0, radiusOffset: 0, opacity: 0.75, oppZoneMaxCount: 3 };
   }
 }
 
