@@ -8110,6 +8110,21 @@ function DeerIntelContent() {
                     </button>
                   )}
 
+                  {/* Solo Selected Stand toggle */}
+                  {!TERRAIN_WORK_MODE && (
+                    <button
+                      onClick={() => setSoloStandMode(v => !v)}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                        soloStandMode ? 'bg-amber-900/40 border border-amber-600/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                      }`}
+                    >
+                      <span className="w-3 h-3 rounded-full" style={{ background: soloStandMode ? '#f59e0b' : '#78716c', opacity: soloStandMode ? 1 : 0.4 }} />
+                      <span className={`flex-1 text-left ${soloStandMode ? 'text-amber-200' : 'text-stone-500'}`}>
+                        {soloStandMode ? 'Show All Stands' : 'Solo Selected Stand'}
+                      </span>
+                    </button>
+                  )}
+
 
                   {/* ========== STAND COMPARE SELECTORS (v1.2) ==========
                       Two compact dropdowns for selecting stands to compare.
