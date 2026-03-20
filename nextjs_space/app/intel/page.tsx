@@ -3289,6 +3289,7 @@ function DeerIntelContent() {
           'interpolate', ['linear'], ['zoom'],
           10, Math.max(8, 18 + fp.radiusOffset),
           15, Math.max(12, 24 + fp.radiusOffset),
+          18, Math.max(18, 34 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
         const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
@@ -3944,6 +3945,7 @@ function DeerIntelContent() {
                 'interpolate', ['linear'], ['zoom'],
                 10, 18,
                 15, 24,
+                18, 34,
               ],
               'heatmap-opacity': 0.75, // slight boost from 0.7
             },
@@ -3991,6 +3993,7 @@ function DeerIntelContent() {
                 'interpolate', ['linear'], ['zoom'],
                 10, 18,
                 15, 24,
+                18, 34,
               ],
               'heatmap-opacity': 0.5,
             },
@@ -4041,6 +4044,7 @@ function DeerIntelContent() {
                 'interpolate', ['linear'], ['zoom'],
                 10, 18,
                 15, 24,
+                18, 34,
               ],
               'heatmap-opacity': 0.5,
             },
@@ -4091,6 +4095,7 @@ function DeerIntelContent() {
                 'interpolate', ['linear'], ['zoom'],
                 10, 18,
                 15, 24,
+                18, 34,
               ],
               'heatmap-opacity': 0.6,
             },
