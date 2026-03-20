@@ -3225,9 +3225,34 @@ function DeerIntelContent() {
       // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
       if (map.getLayer('tfp-flow-primary')) {
         map.setLayoutProperty('tfp-flow-primary', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+        // When Deer Flow is active, boost primary lines so the connective structure reads clearly
+        map.setPaintProperty('tfp-flow-primary', 'line-width', isPressureMode ? [
+          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+          0.4, 2.5,     // Weak: slightly bolder
+          0.55, 3.5,    // Moderate: clear
+          0.75, 5       // Strong: bold corridor
+        ] : [
+          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+          0.4, 2,
+          0.55, 3,
+          0.75, 4
+        ]);
+        map.setPaintProperty('tfp-flow-primary', 'line-opacity', isPressureMode ? [
+          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+          0.4, 0.65,
+          0.55, 0.80,
+          0.75, 0.95
+        ] : [
+          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+          0.4, 0.55,
+          0.55, 0.70,
+          0.75, 0.85
+        ]);
       }
       if (map.getLayer('tfp-flow-primary-glow')) {
         map.setLayoutProperty('tfp-flow-primary-glow', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+        // Widen glow slightly when Deer Flow is active for extra readability
+        map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', isPressureMode ? 0.35 : 0.25);
       }
       // v3.8.1 — Directional chevrons follow primary flow visibility
       if (map.getLayer('tfp-flow-direction-chevrons')) {
@@ -3235,6 +3260,9 @@ function DeerIntelContent() {
       }
       if (map.getLayer('tfp-flow-secondary')) {
         map.setLayoutProperty('tfp-flow-secondary', 'visibility', flowVisibility.flowSecondary ? 'visible' : 'none');
+        // When Deer Flow is active, subdue secondary so they don't overpower the heat surface
+        map.setPaintProperty('tfp-flow-secondary', 'line-opacity', isPressureMode ? 0.30 : 0.45);
+        map.setPaintProperty('tfp-flow-secondary', 'line-width', isPressureMode ? 1.2 : 1.5);
       }
       if (map.getLayer('tfp-flow-convergence')) {
         map.setLayoutProperty('tfp-flow-convergence', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
