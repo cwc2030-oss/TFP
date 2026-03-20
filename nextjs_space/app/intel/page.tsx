@@ -1916,7 +1916,7 @@ function DeerIntelContent() {
       'tfp-movement-delta',
       'tfp-movement-post',
       'tfp-refuge-zones',
-      'tfp-flow-primary', 'tfp-flow-secondary', 'tfp-flow-convergence',
+      'tfp-flow-primary', 'tfp-flow-nearest-highlight', 'tfp-flow-secondary', 'tfp-flow-convergence',
       'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
       'tfp-huntability-corridors', 'tfp-huntability-convergence',
       'tfp-bedding-probability',
@@ -3114,6 +3114,67 @@ function DeerIntelContent() {
     };
   }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, pressureFocus, parcelPolygon, ridgeSpineData, season]);
 
+  // ========== NEAREST CORRIDOR HIGHLIGHT (selected stand) ==========
+  // When a stand is selected, find the primary flow segment nearest to it
+  // and push that single feature into the highlight source.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const highlightSource = map.getSource('tfp-flow-nearest-highlight') as mapboxgl.GeoJSONSource | undefined;
+    if (!highlightSource) return;
+
+    const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+    // No stand selected → clear highlight
+    if (selectedStand === null) {
+      highlightSource.setData(emptyFC);
+      if (map.getLayer('tfp-flow-nearest-highlight')) {
+        map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'none');
+      }
+      return;
+    }
+
+    // Find the selected stand's coords
+    const stand = alignedStands.find(s => s.rank === selectedStand);
+    if (!stand) { highlightSource.setData(emptyFC); return; }
+
+    const [sLng, sLat] = stand.coords;
+    const primaryFeatures = terrainFlowData?.flow_primary?.features;
+    if (!primaryFeatures || primaryFeatures.length === 0) {
+      highlightSource.setData(emptyFC);
+      return;
+    }
+
+    // Find nearest primary segment by minimum distance from stand to any vertex
+    let nearestIdx = 0;
+    let nearestDist = Infinity;
+    primaryFeatures.forEach((f: any, idx: number) => {
+      const geom = f.geometry;
+      if (!geom || geom.type !== 'LineString') return;
+      const coords: number[][] = geom.coordinates;
+      for (const pt of coords) {
+        const dLng = (pt[0] - sLng) * 111320 * Math.cos(sLat * Math.PI / 180);
+        const dLat = (pt[1] - sLat) * 111320;
+        const dist = dLng * dLng + dLat * dLat; // squared is fine for comparison
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestIdx = idx;
+        }
+      }
+    });
+
+    // Push the nearest feature into the highlight source
+    highlightSource.setData({
+      type: 'FeatureCollection',
+      features: [primaryFeatures[nearestIdx]],
+    });
+
+    // Show the highlight layer (only if primary flow is visible)
+    if (map.getLayer('tfp-flow-nearest-highlight') && flowVisibility.flowPrimary) {
+      map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'visible');
+    }
+  }, [selectedStand, alignedStands, terrainFlowData, mapReady, flowVisibility.flowPrimary]);
+
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -3254,6 +3315,11 @@ function DeerIntelContent() {
         // Widen glow slightly when Deer Flow is active for extra readability
         map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', isPressureMode ? 0.35 : 0.25);
       }
+      // Nearest corridor highlight follows primary flow visibility + stand selection
+      if (map.getLayer('tfp-flow-nearest-highlight')) {
+        const showHighlight = flowVisibility.flowPrimary && selectedStand !== null;
+        map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', showHighlight ? 'visible' : 'none');
+      }
       // v3.8.1 — Directional chevrons follow primary flow visibility
       if (map.getLayer('tfp-flow-direction-chevrons')) {
         map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
@@ -3291,7 +3357,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady]);
+  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand]);
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   useEffect(() => {
@@ -4294,6 +4360,24 @@ function DeerIntelContent() {
             },
           });
         }
+
+        // ========== NEAREST CORRIDOR HIGHLIGHT (selected stand → nearest primary segment) ==========
+        // Separate source holding a single LineString: the primary segment closest to the selected stand.
+        if (!map.getSource('tfp-flow-nearest-highlight')) {
+          map.addSource('tfp-flow-nearest-highlight', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-flow-nearest-highlight',
+            type: 'line',
+            source: 'tfp-flow-nearest-highlight',
+            layout: { visibility: 'none' },
+            paint: {
+              'line-color': '#fbbf24',          // Amber-400 — warm stand accent
+              'line-width': 6,                  // Slightly wider than primary (4–5)
+              'line-opacity': 0.70,
+              'line-blur': 1.5,                 // Soft edge so it reads as a glow, not a new line
+            },
+          });
+        }
         
         // Secondary flow lines: visible but clearly subordinate feeders
         if (!map.getSource('tfp-flow-secondary')) {
@@ -4995,6 +5079,7 @@ function DeerIntelContent() {
           'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
           'tfp-flow-secondary',
           'tfp-flow-primary-glow',      // Animated glow below main line
+          'tfp-flow-nearest-highlight', // Nearest corridor to selected stand (amber glow)
           'tfp-flow-primary',
           'tfp-flow-direction-chevrons', // v3.8.1 — directional chevrons along flow
           // Convergence (top — convergence IS opportunity)
