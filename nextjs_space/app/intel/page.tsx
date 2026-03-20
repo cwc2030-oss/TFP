@@ -6292,7 +6292,11 @@ function DeerIntelContent() {
     if (map && map.getLayer('tfp-stand-tertiary-dot')) {
       map.setLayoutProperty('tfp-stand-tertiary-dot', 'visibility', visibility.stands ? 'visible' : 'none');
     }
-  }, [visibility.stands]);
+    // Nearest corridor highlight is stand-related — hide with stands
+    if (map && map.getLayer('tfp-flow-nearest-highlight')) {
+      map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', visibility.stands && selectedStand !== null ? 'visible' : 'none');
+    }
+  }, [visibility.stands, selectedStand]);
 
   const cleanupMarkers = () => {
     markersRef.current.forEach(m => m.remove());
@@ -8099,7 +8103,9 @@ function DeerIntelContent() {
                       }`}
                     >
                       <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standGold, opacity: visibility.stands ? 1 : 0.4 }} />
-                      <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>Stands</span>
+                      <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>
+                        {visibility.stands ? 'Hide Stands' : 'Show Stands'}
+                      </span>
                     </button>
                   )}
 
