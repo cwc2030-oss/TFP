@@ -3281,10 +3281,8 @@ function DeerIntelContent() {
         // Intensity: scaled per focus
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
           'interpolate', ['linear'], ['zoom'],
-          12, 1.1 * fp.intensityMult,
-          14, 1.5 * fp.intensityMult,
-          16, 1.8 * fp.intensityMult,
-          18, 2.0 * fp.intensityMult,
+          10, 0.7 * fp.intensityMult,
+          15, 1.3 * fp.intensityMult,
         ]);
         // Radius: tight lanes — offset per focus (tighter in focused, wider in broad)
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
@@ -3922,13 +3920,11 @@ function DeerIntelContent() {
                 0.80, 0.9,
                 1.00, 1.0,
               ],
-              // Intensity: boosted to compensate for tighter radius
+              // Intensity: peak contrast — strong areas pop above mid-range
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 1.1,   // was 0.8
-                14, 1.5,   // was ~1.0
-                16, 1.8,   // was ~1.35
-                18, 2.0    // was 1.5
+                10, 0.7,
+                15, 1.3,
               ],
               // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
@@ -3976,10 +3972,8 @@ function DeerIntelContent() {
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 1.0,
-                14, 1.3,
-                16, 1.6,
-                18, 1.8,
+                10, 0.7,
+                15, 1.3,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4028,10 +4022,8 @@ function DeerIntelContent() {
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 1.0,
-                14, 1.3,
-                16, 1.6,
-                18, 1.8,
+                10, 0.7,
+                15, 1.3,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4080,10 +4072,8 @@ function DeerIntelContent() {
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 1.0,
-                14, 1.3,
-                16, 1.6,
-                18, 1.8,
+                10, 0.7,
+                15, 1.3,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
