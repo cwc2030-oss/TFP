@@ -7491,7 +7491,7 @@ function DeerIntelContent() {
                       opacity: flowVisibility.pressureHeatmap ? 1 : 0.4 
                     }} />
                     <span className={`flex-1 text-left font-medium ${flowVisibility.pressureHeatmap ? 'text-amber-300' : 'text-stone-500'}`}>
-                      Pressure Map
+                      Deer Flow
                     </span>
                     <span className="text-[8px] text-amber-400 px-1 py-0.5 bg-amber-900/50 rounded uppercase tracking-wider">
                       Primary
@@ -7542,10 +7542,10 @@ function DeerIntelContent() {
                       <span className="text-[9px] text-stone-500 uppercase tracking-wider font-medium block mb-1.5">View</span>
                       <div className="grid grid-cols-4 gap-0.5 bg-stone-800/60 rounded p-0.5">
                         {([
-                          { key: 'pressure' as PressureView, label: 'Pressure', gradient: 'linear-gradient(90deg, #facc15, #ef4444)' },
-                          { key: 'damage' as PressureView, label: 'Damage', gradient: 'linear-gradient(90deg, #facc15, #f97316)' },
-                          { key: 'movement' as PressureView, label: 'Movement', gradient: 'linear-gradient(90deg, #facc15, #22c55e)' },
-                          { key: 'refuge' as PressureView, label: 'Refuge', gradient: 'linear-gradient(90deg, #06b6d4, #3b82f6)' },
+                          { key: 'pressure' as PressureView, label: 'Deer Flow', gradient: 'linear-gradient(90deg, #facc15, #ef4444)' },
+                          { key: 'damage' as PressureView, label: 'Flow Disruption', gradient: 'linear-gradient(90deg, #facc15, #f97316)' },
+                          { key: 'movement' as PressureView, label: 'Flow Survival', gradient: 'linear-gradient(90deg, #facc15, #22c55e)' },
+                          { key: 'refuge' as PressureView, label: 'Flow Refuge', gradient: 'linear-gradient(90deg, #06b6d4, #3b82f6)' },
                         ]).map(v => (
                           <button
                             key={v.key}
@@ -7571,10 +7571,10 @@ function DeerIntelContent() {
                   {flowVisibility.pressureHeatmap && (
                     <div className="px-2 py-1.5 bg-stone-900/40 rounded-lg border border-stone-700/30 mt-1">
                       <span className="text-[9px] text-stone-400 font-semibold block mb-1">
-                        {pressureView === 'pressure' && 'Pressure View'}
-                        {pressureView === 'damage' && 'Damage View'}
-                        {pressureView === 'movement' && 'Movement View'}
-                        {pressureView === 'refuge' && 'Refuge View'}
+                        {pressureView === 'pressure' && 'Deer Flow'}
+                        {pressureView === 'damage' && 'Flow Disruption'}
+                        {pressureView === 'movement' && 'Flow Survival'}
+                        {pressureView === 'refuge' && 'Flow Refuge'}
                       </span>
                       <div className="flex items-center gap-2">
                         {pressureView === 'pressure' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316, #ef4444)' }} />}
