@@ -3286,12 +3286,11 @@ function DeerIntelContent() {
           16, 1.8 * fp.intensityMult,
           18, 2.0 * fp.intensityMult,
         ]);
-        // Radius: offset per focus (tighter in focused, wider in broad)
+        // Radius: tight lanes — offset per focus (tighter in focused, wider in broad)
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
-          12, Math.max(10, 22 + fp.radiusOffset),
-          14, Math.max(15, 35 + fp.radiusOffset),
-          16, Math.max(20, 50 + fp.radiusOffset),
+          10, Math.max(8, 18 + fp.radiusOffset),
+          15, Math.max(12, 24 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
         const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
@@ -3944,12 +3943,11 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.80)',    // red-700
                 1.00, 'rgba(153,27,27,0.85)',    // red-800 (hot)
               ],
-              // Radius: TIGHTENED ~45% to separate adjacent hotspots
+              // Radius: tight lanes, not broad blobs
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 22,    // was 40
-                14, 35,    // was 60
-                16, 50     // was 80
+                10, 18,
+                15, 24,
               ],
               'heatmap-opacity': 0.75, // slight boost from 0.7
             },
@@ -3997,9 +3995,8 @@ function DeerIntelContent() {
               ],
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 20,
-                14, 32,
-                16, 45,
+                10, 18,
+                15, 24,
               ],
               'heatmap-opacity': 0.5,
             },
@@ -4050,9 +4047,8 @@ function DeerIntelContent() {
               ],
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 20,
-                14, 32,
-                16, 45,
+                10, 18,
+                15, 24,
               ],
               'heatmap-opacity': 0.5,
             },
@@ -4103,9 +4099,8 @@ function DeerIntelContent() {
               ],
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                12, 20,
-                14, 32,
-                16, 45,
+                10, 18,
+                15, 24,
               ],
               'heatmap-opacity': 0.6,
             },
