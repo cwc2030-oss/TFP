@@ -7108,6 +7108,15 @@ function DeerIntelContent() {
                 }}
               />
 
+              {/* ─── TERRAIN ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Terrain</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+
               {/* ========== TERRAIN STRUCTURE / DEER MOVEMENT PANEL ========== */}
               {(() => {
                 // Count terrain structure features
@@ -7350,7 +7359,56 @@ function DeerIntelContent() {
                   </div>
                 )}
               </div>
-              
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.bedding ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
+                  </button>
+                </div>
+              </div>
+              <div className="p-3 border-b border-white/10">
+                {/* v3.6.0: Terrain Reasons Toggle */}
+                <div className="mt-1">
+                  <button
+                    onClick={() => setShowTerrainReasons(v => !v)}
+                    className={`w-full flex items-center gap-2 px-2 py-2 rounded transition-all text-xs ${
+                      showTerrainReasons 
+                        ? 'bg-gradient-to-r from-purple-900/40 to-violet-900/40 border border-purple-700/40' 
+                        : 'bg-stone-800/40 hover:bg-stone-700/40 border border-transparent'
+                    }`}
+                  >
+                    <Info className={`h-4 w-4 ${showTerrainReasons ? 'text-purple-400' : 'text-stone-500'}`} />
+                    <span className={`flex-1 text-left font-medium ${showTerrainReasons ? 'text-purple-300' : 'text-stone-400'}`}>
+                      Show Terrain Reasons
+                    </span>
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      showTerrainReasons ? 'bg-purple-500/30 text-purple-300' : 'bg-stone-700/50 text-stone-500'
+                    }`}>
+                      {showTerrainReasons ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                  {showTerrainReasons && (
+                    <p className="text-[9px] text-purple-300/70 mt-1.5 px-2 leading-relaxed">
+                      Click any stand, corridor, or bedding zone to see why terrain factors make it significant.
+                    </p>
+                  )}
+                </div>
+              </div>
+              {/* ─── FLOW SYSTEM ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Flow System</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+
               {/* ========== TERRAIN FLOW LAYER (Movement Likelihood) ========== */}
               <div className="p-3 border-b border-white/10">
                 <div className="flex items-center justify-between mb-2">
@@ -7539,6 +7597,390 @@ function DeerIntelContent() {
                       </div>
                     </div>
                   )}
+                  {/* Divider with "Supporting Evidence" label */}
+                  <div className="flex items-center gap-2 py-1">
+                    <div className="flex-1 h-px bg-stone-700/50" />
+                    <span className="text-[8px] text-stone-600 uppercase tracking-wider">Supporting</span>
+                    <div className="flex-1 h-px bg-stone-700/50" />
+                  </div>
+                  
+                  {/* Primary Flow Toggle (now secondary) */}
+                  {(() => {
+                    const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
+                    const hasData = primaryCount > 0;
+                    const isLoading = terrainFlowLoading;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, flowPrimary: !v.flowPrimary }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1 rounded transition-all text-[11px] ${
+                          flowVisibility.flowPrimary ? 'bg-cyan-900/20' : 'bg-stone-800/20 hover:bg-stone-700/20'
+                        }`}
+                      >
+                        <span className="w-2.5 h-2.5 rounded" style={{ background: LAYER_COLORS.flowPrimary, opacity: flowVisibility.flowPrimary ? 1 : 0.3 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-stone-300' : 'text-stone-600'}`}>Flow Lines</span>
+                        {hasData ? (
+                          <span className="text-[8px] text-cyan-400/70 px-1 py-0.5 bg-cyan-900/30 rounded">
+                            {primaryCount}
+                          </span>
+                        ) : isLoading ? (
+                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">...</span>
+                        ) : (
+                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">—</span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  
+                  {/* Secondary Flow Toggle */}
+                  {(() => {
+                    const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
+                    const hasData = secondaryCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, flowSecondary: !v.flowSecondary }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          flowVisibility.flowSecondary ? 'bg-cyan-900/20' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.flowSecondary, opacity: flowVisibility.flowSecondary ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.flowSecondary ? 'text-white' : 'text-stone-500'}`}>Secondary Flow</span>
+                        {hasData && (
+                          <span className="text-[9px] text-cyan-300 px-1.5 py-0.5 bg-cyan-900/30 rounded">
+                            {secondaryCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  
+                  {/* Convergence Zones Toggle */}
+                  {(() => {
+                    const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
+                    const hasData = convergenceCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setFlowVisibility(v => ({ ...v, convergenceZones: !v.convergenceZones }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          flowVisibility.convergenceZones ? 'bg-amber-900/20' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowConvergence, opacity: flowVisibility.convergenceZones ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${flowVisibility.convergenceZones ? 'text-white' : 'text-stone-500'}`}>Convergence</span>
+                        {hasData && (
+                          <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/30 rounded">
+                            {convergenceCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                  
+                  {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
+                  {(() => {
+                    const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
+                    const hasData = beddingCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setShowBeddingProbability(v => !v)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          showBeddingProbability ? 'bg-purple-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.beddingProbability, opacity: showBeddingProbability ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
+                        {hasData ? (
+                          <span className="text-[9px] text-purple-300 px-1.5 py-0.5 bg-purple-800/40 rounded">
+                            {beddingCount}
+                          </span>
+                        ) : (
+                          <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
+                            v2
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                </div>
+
+                
+                {/* Expanded details when any flow toggle is on */}
+                {(flowVisibility.flowPrimary || flowVisibility.flowSecondary || flowVisibility.convergenceZones) && (
+                  <div className="mt-2 space-y-2 px-1">
+                    {(() => {
+                      const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
+                      const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
+                      const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
+                      const totalFlowLength = terrainFlowData?.metadata?.total_flow_length_m || 0;
+                      const totalFeatures = primaryCount + secondaryCount + convergenceCount;
+                      const isSynthetic = terrainFlowData?.isSynthetic || false;
+                      const mode = (terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode;
+                      
+                      if (terrainFlowLoading) {
+                        return (
+                          <div className="text-stone-500 bg-stone-800/30 rounded p-2 flex items-center gap-2">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span className="text-[10px]">Analyzing terrain flow...</span>
+                          </div>
+                        );
+                      }
+                      
+                      if (totalFeatures > 0) {
+                        return (
+                          <>
+                            {/* DEM Mode Badge */}
+                            <DEMModeBadge 
+                              mode={mode}
+                              metadata={terrainFlowData?.metadata ? {
+                                ...terrainFlowData.metadata,
+                                processing_time_seconds: terrainFlowData.metadata?.total_flow_length_m ? 0.5 : 0,
+                                buffer_m: 1000,
+                                mode: mode,
+                                dem_source: terrainFlowData.metadata.dem_source || 'unknown',
+                                resolution_m: 30,
+                                weights: {
+                                  bench_likelihood: 0.28,
+                                  saddle_proximity: 0.24,
+                                  spine_proximity: 0.20,
+                                  terrain_convergence: 0.18,
+                                  moderate_slope: 0.10,
+                                },
+                                thresholds: {
+                                  primary_min: 0.55,
+                                  secondary_min: 0.35,
+                                  min_length_m_primary: 150,
+                                  min_length_m_secondary: 80,
+                                  convergence_threshold: 0.5,
+                                  opportunity_threshold: 0.6,
+                                },
+                                stats: {
+                                  flow_count_primary: primaryCount,
+                                  flow_count_secondary: secondaryCount,
+                                  convergence_count: convergenceCount,
+                                  opportunity_count: 0, // merged into convergence
+                                  total_flow_length_m: totalFlowLength,
+                                  coverage_pct: 0,
+                                },
+                                fallback_reason: isSynthetic ? 'No terrain data available' : null,
+                              } : null}
+                            />
+                            
+                            {/* Confidence Legend */}
+                            <div className="p-2 bg-stone-800/30 rounded-lg">
+                              <div className="text-[9px] text-stone-500 uppercase tracking-wider mb-1.5 font-medium">
+                                Confidence Colors
+                              </div>
+                              <div className="flex items-center gap-3 text-[9px]">
+                                <div className="flex items-center gap-1">
+                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#10b981' }} />
+                                  <span className="text-emerald-400">Strong</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#22d3ee' }} />
+                                  <span className="text-cyan-400">Moderate</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#60a5fa' }} />
+                                  <span className="text-blue-400">Weak</span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Stats */}
+                            <div className="text-[10px] text-stone-400 space-y-0.5">
+                              {totalFlowLength > 0 && (
+                                <div className="flex justify-between">
+                                  <span>Total Flow Length</span>
+                                  <span className="text-white">{Math.round(totalFlowLength)}m</span>
+                                </div>
+                              )}
+                              {convergenceCount > 0 && (
+                                <div className="flex justify-between">
+                                  <span>Flow Convergences</span>
+                                  <span className="text-amber-400">{convergenceCount}</span>
+                                </div>
+                              )}
+
+                            </div>
+                            
+                            {/* Click instruction - highlighted when inspect mode is on */}
+                            <div className={`text-[9px] text-center pt-1 border-t border-white/5 ${
+                              inspectModeEnabled ? 'text-amber-400 bg-amber-900/20 -mx-2 px-2 py-1 rounded' : 'text-stone-600'
+                            }`}>
+                              {inspectModeEnabled ? (
+                                <span className="flex items-center justify-center gap-1">
+                                  <Crosshair className="h-3 w-3" />
+                                  Inspect mode ON — click any flow or zone
+                                </span>
+                              ) : (
+                                'Click any flow line for detailed analysis'
+                              )}
+                            </div>
+                          </>
+                        );
+                      }
+                      
+                      return (
+                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
+                          <p className="italic text-[10px]">Not detected on this parcel</p>
+                          <p className="text-stone-600 mt-1 text-[9px]">
+                            Terrain may be too flat or uniform for distinct flow patterns.
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* ========== HUNTING POTENTIAL CARD (PRIMARY ANSWER) ========== */}
+              {/* This is THE answer to "Does this parcel have hunting potential?" */}
+              {!exportMode && parcelPolygon && (
+                <div className="p-3 border-b border-white/10">
+                  <HuntingPotentialCard
+                    flowData={terrainFlowData ? (() => {
+                      // Build a TerrainFlowResponse-compatible object
+                      const defaultMetadata = {
+                        processing_time_seconds: 0,
+                        mode: 'terrain_driven' as const,
+                        dem_source: 'unknown',
+                        resolution_m: 30,
+                        buffer_m: 1000,
+                        weights: {
+                          bench_likelihood: 0.28,
+                          saddle_proximity: 0.24,
+                          spine_proximity: 0.20,
+                          terrain_convergence: 0.18,
+                          moderate_slope: 0.10,
+                        },
+                        thresholds: {
+                          primary_min: 0.55,
+                          secondary_min: 0.35,
+                          min_length_m_primary: 150,
+                          min_length_m_secondary: 80,
+                          convergence_threshold: 0.5,
+                          opportunity_threshold: 0.6,
+                        },
+                        stats: {
+                          flow_count_primary: terrainFlowData.flow_primary?.features?.length || 0,
+                          flow_count_secondary: terrainFlowData.flow_secondary?.features?.length || 0,
+                          convergence_count: terrainFlowData.convergence_zones?.features?.length || 0,
+                          opportunity_count: 0, // merged into convergence
+                          total_flow_length_m: 0,
+                          coverage_pct: 0,
+                        },
+                      };
+                      return {
+                        success: true,
+                        bbox: [0, 0, 0, 0] as [number, number, number, number],
+                        flow_primary: terrainFlowData.flow_primary,
+                        flow_secondary: terrainFlowData.flow_secondary,
+                        convergence_zones: terrainFlowData.convergence_zones,
+                        opportunity_zones: terrainFlowData.opportunity_zones,
+                        metadata: terrainFlowData.metadata ? { ...defaultMetadata, ...terrainFlowData.metadata } : defaultMetadata,
+                      } as TerrainFlowResponse;
+                    })() : null}
+                    acreage={(() => {
+                      // Extract acreage from URL params or calculate rough estimate
+                      const searchParams = new URLSearchParams(window.location.search);
+                      const acreageParam = searchParams.get('acreage');
+                      if (acreageParam) return parseFloat(acreageParam);
+                      // Rough estimate from parcel bbox
+                      if (parcelPolygon) {
+                        try {
+                          const coords = parcelPolygon.geometry.type === 'Polygon' 
+                            ? parcelPolygon.geometry.coordinates[0]
+                            : parcelPolygon.geometry.coordinates[0][0];
+                          if (coords && coords.length >= 4) {
+                            const lngs = coords.map(c => c[0]);
+                            const lats = coords.map(c => c[1]);
+                            const widthDeg = Math.max(...lngs) - Math.min(...lngs);
+                            const heightDeg = Math.max(...lats) - Math.min(...lats);
+                            const centerLat = (Math.max(...lats) + Math.min(...lats)) / 2;
+                            const widthM = widthDeg * 111320 * Math.cos(centerLat * Math.PI / 180);
+                            const heightM = heightDeg * 111320;
+                            return (widthM * heightM * 0.8) / 4046.86; // Approx acres
+                          }
+                        } catch {}
+                      }
+                      return undefined;
+                    })()}
+                    isLoading={terrainFlowLoading}
+                    onHighlightOpportunity={() => {}}
+                  />
+                </div>
+              )}
+
+              {/* ========== TERRAIN STORY PANEL (Secondary detail) ========== */}
+              {(terrainStory || terrainFlowLoading) && !exportMode && (
+                <div className="p-3 border-b border-white/10">
+                  <TerrainStoryPanel 
+                    story={terrainStory}
+                    isLoading={terrainFlowLoading}
+                    defaultExpanded={false}
+                    showNarrative={true}
+                    compact={true}
+                  />
+                </div>
+              )}
+
+              {/* ========== TERRAIN RATING PANEL (always visible after analysis) ========== */}
+              {!exportMode && qaBrokerScore && !terrainFlowLoading && (
+                <div className="p-3 border-b border-white/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium text-white flex items-center gap-2 text-sm">
+                      <Target className="h-4 w-4 text-amber-400" />
+                      Terrain Rating
+                    </h3>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      qaBrokerScore.brokerClass === 'broker_ready' ? 'bg-emerald-900/60 text-emerald-400' :
+                      qaBrokerScore.brokerClass === 'potential_demo' ? 'bg-amber-900/60 text-amber-400' :
+                      'bg-slate-900/60 text-slate-400'
+                    }`}>
+                      {qaBrokerScore.brokerScore}/100
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {qaBrokerScore.components && Object.entries(qaBrokerScore.components).map(([key, val]) => (
+                      <div key={key} className="flex items-center justify-between text-xs">
+                        <span className="text-stone-400 capitalize">{key.replace(/_/g, ' ')}</span>
+                        <span className="text-white font-medium">{typeof val === 'number' ? val.toFixed(1) : String(val)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ========== TERRAIN WORK MODE NOTICE ========== */}
+              {TERRAIN_WORK_MODE && <TerrainWorkModeNotice />}
+              {/* ─── STAND TOOLS ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Stand Tools</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-1">
+                  {/* Stands toggle - disabled during terrain refinement */}
+                  {!TERRAIN_WORK_MODE && (
+                    <button
+                      onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                        visibility.stands ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                      }`}
+                    >
+                      <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standGold, opacity: visibility.stands ? 1 : 0.4 }} />
+                      <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>Stands</span>
+                    </button>
+                  )}
+
+
                   {/* ========== STAND COMPARE SELECTORS (v1.2) ==========
                       Two compact dropdowns for selecting stands to compare.
                       State-only — no calculations or layer changes yet. */}
@@ -7819,420 +8261,6 @@ function DeerIntelContent() {
                       </div>
                     );
                   })()}
-                  {/* Divider with "Supporting Evidence" label */}
-                  <div className="flex items-center gap-2 py-1">
-                    <div className="flex-1 h-px bg-stone-700/50" />
-                    <span className="text-[8px] text-stone-600 uppercase tracking-wider">Supporting</span>
-                    <div className="flex-1 h-px bg-stone-700/50" />
-                  </div>
-                  
-                  {/* Primary Flow Toggle (now secondary) */}
-                  {(() => {
-                    const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
-                    const hasData = primaryCount > 0;
-                    const isLoading = terrainFlowLoading;
-                    
-                    return (
-                      <button
-                        onClick={() => setFlowVisibility(v => ({ ...v, flowPrimary: !v.flowPrimary }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1 rounded transition-all text-[11px] ${
-                          flowVisibility.flowPrimary ? 'bg-cyan-900/20' : 'bg-stone-800/20 hover:bg-stone-700/20'
-                        }`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded" style={{ background: LAYER_COLORS.flowPrimary, opacity: flowVisibility.flowPrimary ? 1 : 0.3 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-stone-300' : 'text-stone-600'}`}>Flow Lines</span>
-                        {hasData ? (
-                          <span className="text-[8px] text-cyan-400/70 px-1 py-0.5 bg-cyan-900/30 rounded">
-                            {primaryCount}
-                          </span>
-                        ) : isLoading ? (
-                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">...</span>
-                        ) : (
-                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">—</span>
-                        )}
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* Secondary Flow Toggle */}
-                  {(() => {
-                    const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
-                    const hasData = secondaryCount > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setFlowVisibility(v => ({ ...v, flowSecondary: !v.flowSecondary }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          flowVisibility.flowSecondary ? 'bg-cyan-900/20' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.flowSecondary, opacity: flowVisibility.flowSecondary ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.flowSecondary ? 'text-white' : 'text-stone-500'}`}>Secondary Flow</span>
-                        {hasData && (
-                          <span className="text-[9px] text-cyan-300 px-1.5 py-0.5 bg-cyan-900/30 rounded">
-                            {secondaryCount}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* Convergence Zones Toggle */}
-                  {(() => {
-                    const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
-                    const hasData = convergenceCount > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setFlowVisibility(v => ({ ...v, convergenceZones: !v.convergenceZones }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          flowVisibility.convergenceZones ? 'bg-amber-900/20' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.flowConvergence, opacity: flowVisibility.convergenceZones ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.convergenceZones ? 'text-white' : 'text-stone-500'}`}>Convergence</span>
-                        {hasData && (
-                          <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/30 rounded">
-                            {convergenceCount}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
-                  {(() => {
-                    const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
-                    const hasData = beddingCount > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setShowBeddingProbability(v => !v)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          showBeddingProbability ? 'bg-purple-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.beddingProbability, opacity: showBeddingProbability ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
-                        {hasData ? (
-                          <span className="text-[9px] text-purple-300 px-1.5 py-0.5 bg-purple-800/40 rounded">
-                            {beddingCount}
-                          </span>
-                        ) : (
-                          <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
-                            v2
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
-                </div>
-                
-                {/* v3.6.0: Terrain Reasons Toggle */}
-                <div className="mt-3 pt-3 border-t border-stone-700/50">
-                  <button
-                    onClick={() => setShowTerrainReasons(v => !v)}
-                    className={`w-full flex items-center gap-2 px-2 py-2 rounded transition-all text-xs ${
-                      showTerrainReasons 
-                        ? 'bg-gradient-to-r from-purple-900/40 to-violet-900/40 border border-purple-700/40' 
-                        : 'bg-stone-800/40 hover:bg-stone-700/40 border border-transparent'
-                    }`}
-                  >
-                    <Info className={`h-4 w-4 ${showTerrainReasons ? 'text-purple-400' : 'text-stone-500'}`} />
-                    <span className={`flex-1 text-left font-medium ${showTerrainReasons ? 'text-purple-300' : 'text-stone-400'}`}>
-                      Show Terrain Reasons
-                    </span>
-                    <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                      showTerrainReasons ? 'bg-purple-500/30 text-purple-300' : 'bg-stone-700/50 text-stone-500'
-                    }`}>
-                      {showTerrainReasons ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  {showTerrainReasons && (
-                    <p className="text-[9px] text-purple-300/70 mt-1.5 px-2 leading-relaxed">
-                      Click any stand, corridor, or bedding zone to see why terrain factors make it significant.
-                    </p>
-                  )}
-                </div>
-                
-                {/* Expanded details when any flow toggle is on */}
-                {(flowVisibility.flowPrimary || flowVisibility.flowSecondary || flowVisibility.convergenceZones) && (
-                  <div className="mt-2 space-y-2 px-1">
-                    {(() => {
-                      const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
-                      const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
-                      const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
-                      const totalFlowLength = terrainFlowData?.metadata?.total_flow_length_m || 0;
-                      const totalFeatures = primaryCount + secondaryCount + convergenceCount;
-                      const isSynthetic = terrainFlowData?.isSynthetic || false;
-                      const mode = (terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode;
-                      
-                      if (terrainFlowLoading) {
-                        return (
-                          <div className="text-stone-500 bg-stone-800/30 rounded p-2 flex items-center gap-2">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span className="text-[10px]">Analyzing terrain flow...</span>
-                          </div>
-                        );
-                      }
-                      
-                      if (totalFeatures > 0) {
-                        return (
-                          <>
-                            {/* DEM Mode Badge */}
-                            <DEMModeBadge 
-                              mode={mode}
-                              metadata={terrainFlowData?.metadata ? {
-                                ...terrainFlowData.metadata,
-                                processing_time_seconds: terrainFlowData.metadata?.total_flow_length_m ? 0.5 : 0,
-                                buffer_m: 1000,
-                                mode: mode,
-                                dem_source: terrainFlowData.metadata.dem_source || 'unknown',
-                                resolution_m: 30,
-                                weights: {
-                                  bench_likelihood: 0.28,
-                                  saddle_proximity: 0.24,
-                                  spine_proximity: 0.20,
-                                  terrain_convergence: 0.18,
-                                  moderate_slope: 0.10,
-                                },
-                                thresholds: {
-                                  primary_min: 0.55,
-                                  secondary_min: 0.35,
-                                  min_length_m_primary: 150,
-                                  min_length_m_secondary: 80,
-                                  convergence_threshold: 0.5,
-                                  opportunity_threshold: 0.6,
-                                },
-                                stats: {
-                                  flow_count_primary: primaryCount,
-                                  flow_count_secondary: secondaryCount,
-                                  convergence_count: convergenceCount,
-                                  opportunity_count: 0, // merged into convergence
-                                  total_flow_length_m: totalFlowLength,
-                                  coverage_pct: 0,
-                                },
-                                fallback_reason: isSynthetic ? 'No terrain data available' : null,
-                              } : null}
-                            />
-                            
-                            {/* Confidence Legend */}
-                            <div className="p-2 bg-stone-800/30 rounded-lg">
-                              <div className="text-[9px] text-stone-500 uppercase tracking-wider mb-1.5 font-medium">
-                                Confidence Colors
-                              </div>
-                              <div className="flex items-center gap-3 text-[9px]">
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#10b981' }} />
-                                  <span className="text-emerald-400">Strong</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#22d3ee' }} />
-                                  <span className="text-cyan-400">Moderate</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#60a5fa' }} />
-                                  <span className="text-blue-400">Weak</span>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            {/* Stats */}
-                            <div className="text-[10px] text-stone-400 space-y-0.5">
-                              {totalFlowLength > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Total Flow Length</span>
-                                  <span className="text-white">{Math.round(totalFlowLength)}m</span>
-                                </div>
-                              )}
-                              {convergenceCount > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Flow Convergences</span>
-                                  <span className="text-amber-400">{convergenceCount}</span>
-                                </div>
-                              )}
-
-                            </div>
-                            
-                            {/* Click instruction - highlighted when inspect mode is on */}
-                            <div className={`text-[9px] text-center pt-1 border-t border-white/5 ${
-                              inspectModeEnabled ? 'text-amber-400 bg-amber-900/20 -mx-2 px-2 py-1 rounded' : 'text-stone-600'
-                            }`}>
-                              {inspectModeEnabled ? (
-                                <span className="flex items-center justify-center gap-1">
-                                  <Crosshair className="h-3 w-3" />
-                                  Inspect mode ON — click any flow or zone
-                                </span>
-                              ) : (
-                                'Click any flow line for detailed analysis'
-                              )}
-                            </div>
-                          </>
-                        );
-                      }
-                      
-                      return (
-                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
-                          <p className="italic text-[10px]">Not detected on this parcel</p>
-                          <p className="text-stone-600 mt-1 text-[9px]">
-                            Terrain may be too flat or uniform for distinct flow patterns.
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
-
-              {/* ========== HUNTING POTENTIAL CARD (PRIMARY ANSWER) ========== */}
-              {/* This is THE answer to "Does this parcel have hunting potential?" */}
-              {!exportMode && parcelPolygon && (
-                <div className="p-3 border-b border-white/10">
-                  <HuntingPotentialCard
-                    flowData={terrainFlowData ? (() => {
-                      // Build a TerrainFlowResponse-compatible object
-                      const defaultMetadata = {
-                        processing_time_seconds: 0,
-                        mode: 'terrain_driven' as const,
-                        dem_source: 'unknown',
-                        resolution_m: 30,
-                        buffer_m: 1000,
-                        weights: {
-                          bench_likelihood: 0.28,
-                          saddle_proximity: 0.24,
-                          spine_proximity: 0.20,
-                          terrain_convergence: 0.18,
-                          moderate_slope: 0.10,
-                        },
-                        thresholds: {
-                          primary_min: 0.55,
-                          secondary_min: 0.35,
-                          min_length_m_primary: 150,
-                          min_length_m_secondary: 80,
-                          convergence_threshold: 0.5,
-                          opportunity_threshold: 0.6,
-                        },
-                        stats: {
-                          flow_count_primary: terrainFlowData.flow_primary?.features?.length || 0,
-                          flow_count_secondary: terrainFlowData.flow_secondary?.features?.length || 0,
-                          convergence_count: terrainFlowData.convergence_zones?.features?.length || 0,
-                          opportunity_count: 0, // merged into convergence
-                          total_flow_length_m: 0,
-                          coverage_pct: 0,
-                        },
-                      };
-                      return {
-                        success: true,
-                        bbox: [0, 0, 0, 0] as [number, number, number, number],
-                        flow_primary: terrainFlowData.flow_primary,
-                        flow_secondary: terrainFlowData.flow_secondary,
-                        convergence_zones: terrainFlowData.convergence_zones,
-                        opportunity_zones: terrainFlowData.opportunity_zones,
-                        metadata: terrainFlowData.metadata ? { ...defaultMetadata, ...terrainFlowData.metadata } : defaultMetadata,
-                      } as TerrainFlowResponse;
-                    })() : null}
-                    acreage={(() => {
-                      // Extract acreage from URL params or calculate rough estimate
-                      const searchParams = new URLSearchParams(window.location.search);
-                      const acreageParam = searchParams.get('acreage');
-                      if (acreageParam) return parseFloat(acreageParam);
-                      // Rough estimate from parcel bbox
-                      if (parcelPolygon) {
-                        try {
-                          const coords = parcelPolygon.geometry.type === 'Polygon' 
-                            ? parcelPolygon.geometry.coordinates[0]
-                            : parcelPolygon.geometry.coordinates[0][0];
-                          if (coords && coords.length >= 4) {
-                            const lngs = coords.map(c => c[0]);
-                            const lats = coords.map(c => c[1]);
-                            const widthDeg = Math.max(...lngs) - Math.min(...lngs);
-                            const heightDeg = Math.max(...lats) - Math.min(...lats);
-                            const centerLat = (Math.max(...lats) + Math.min(...lats)) / 2;
-                            const widthM = widthDeg * 111320 * Math.cos(centerLat * Math.PI / 180);
-                            const heightM = heightDeg * 111320;
-                            return (widthM * heightM * 0.8) / 4046.86; // Approx acres
-                          }
-                        } catch {}
-                      }
-                      return undefined;
-                    })()}
-                    isLoading={terrainFlowLoading}
-                    onHighlightOpportunity={() => {}}
-                  />
-                </div>
-              )}
-              
-              {/* ========== TERRAIN STORY PANEL (Secondary detail) ========== */}
-              {(terrainStory || terrainFlowLoading) && !exportMode && (
-                <div className="p-3 border-b border-white/10">
-                  <TerrainStoryPanel 
-                    story={terrainStory}
-                    isLoading={terrainFlowLoading}
-                    defaultExpanded={false}
-                    showNarrative={true}
-                    compact={true}
-                  />
-                </div>
-              )}
-
-              {/* ========== TERRAIN RATING PANEL (always visible after analysis) ========== */}
-              {!exportMode && qaBrokerScore && !terrainFlowLoading && (
-                <div className="p-3 border-b border-white/10">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-medium text-white flex items-center gap-2 text-sm">
-                      <Target className="h-4 w-4 text-amber-400" />
-                      Terrain Rating
-                    </h3>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                      qaBrokerScore.brokerClass === 'broker_ready' ? 'bg-emerald-900/60 text-emerald-400' :
-                      qaBrokerScore.brokerClass === 'potential_demo' ? 'bg-amber-900/60 text-amber-400' :
-                      'bg-slate-900/60 text-slate-400'
-                    }`}>
-                      {qaBrokerScore.brokerScore}/100
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    {qaBrokerScore.components && Object.entries(qaBrokerScore.components).map(([key, val]) => (
-                      <div key={key} className="flex items-center justify-between text-xs">
-                        <span className="text-stone-400 capitalize">{key.replace(/_/g, ' ')}</span>
-                        <span className="text-white font-medium">{typeof val === 'number' ? val.toFixed(1) : String(val)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* ========== TERRAIN WORK MODE NOTICE ========== */}
-              {TERRAIN_WORK_MODE && <TerrainWorkModeNotice />}
-
-              {/* Other Layers */}
-              <div className="p-3 border-b border-white/10">
-                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
-                  <Layers className="h-4 w-4 text-stone-400" />
-                  Other Layers
-                </h3>
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                      visibility.bedding ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
-                  </button>
-                  {/* Stands toggle - disabled during terrain refinement */}
-                  {!TERRAIN_WORK_MODE && (
-                    <button
-                      onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                        visibility.stands ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                      }`}
-                    >
-                      <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.standGold, opacity: visibility.stands ? 1 : 0.4 }} />
-                      <span className={`flex-1 text-left ${visibility.stands ? 'text-white' : 'text-stone-500'}`}>Stands</span>
-                    </button>
-                  )}
                 </div>
               </div>
 
