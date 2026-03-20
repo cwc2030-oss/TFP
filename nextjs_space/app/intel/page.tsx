@@ -3260,9 +3260,14 @@ function DeerIntelContent() {
       }
       if (map.getLayer('tfp-flow-secondary')) {
         map.setLayoutProperty('tfp-flow-secondary', 'visibility', flowVisibility.flowSecondary ? 'visible' : 'none');
-        // When Deer Flow is active, subdue secondary so they don't overpower the heat surface
-        map.setPaintProperty('tfp-flow-secondary', 'line-opacity', isPressureMode ? 0.30 : 0.45);
-        map.setPaintProperty('tfp-flow-secondary', 'line-width', isPressureMode ? 1.2 : 1.5);
+        // When Deer Flow is active, boost secondary enough to read as supporting routes
+        map.setPaintProperty('tfp-flow-secondary', 'line-opacity', isPressureMode ? 0.50 : 0.45);
+        map.setPaintProperty('tfp-flow-secondary', 'line-width', isPressureMode ? [
+          'interpolate', ['linear'], ['zoom'],
+          10, 1.8,
+          15, 2.2,
+          18, 2.8,
+        ] : 1.5);
       }
       if (map.getLayer('tfp-flow-convergence')) {
         map.setLayoutProperty('tfp-flow-convergence', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
