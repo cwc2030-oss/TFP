@@ -76,6 +76,9 @@ export async function POST(req: NextRequest) {
     const displayElevRange = elevRange > 0 ? elevRange : computedElevRange;
     const displayElevMin = standElevations.length ? Math.round(Math.min(...standElevations)) : 0;
     const displayElevMax = standElevations.length ? Math.round(Math.max(...standElevations)) : 0;
+    const displayElevAvg = standElevations.length 
+      ? Math.round(standElevations.reduce((a: number, b: number) => a + b, 0) / standElevations.length)
+      : 0;
 
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -204,7 +207,7 @@ export async function POST(req: NextRequest) {
       }
     </div>`).join('')}
   </div>
-  <div class="grid-3">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
     <div class="stat-box">
       <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'}</div>
       <div class="stat-label">Analysis Area (Acres)</div>
@@ -216,6 +219,10 @@ export async function POST(req: NextRequest) {
     <div class="stat-box">
       <div class="stat-value">${displayElevMin} – ${displayElevMax} ft</div>
       <div class="stat-label">Elevation Band</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${displayElevAvg} ft</div>
+      <div class="stat-label">Avg Elevation</div>
     </div>
   </div>
   <div class="footer">
