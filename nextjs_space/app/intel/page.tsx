@@ -1855,7 +1855,7 @@ function DeerIntelContent() {
         prevailingWind: windDirection,
         stands: top3.map((s, i) => ({
           rank: i + 1,
-          name: s.props?.name ?? `Stand ${i + 1}`,
+          name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
           score: s.alignment?.score ?? 0,
           tier: s.alignment?.label ?? 'Field Stone',
           reasoning: s.props?.reasoning ?? '',

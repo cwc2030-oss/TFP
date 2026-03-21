@@ -68,6 +68,16 @@ export async function POST(req: NextRequest) {
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
+    // Better county/state parsing from full address string
+    // e.g. "437 SE State Hwy Pp, Leeton, Johnson County, MO 64761, USA"
+    const addressParts = (address ?? '').split(',').map((s: string) => s.trim());
+    const parsedCounty = addressParts
+      .find((p: string) => p.toLowerCase().includes('county'))
+      ?.replace(/county/i, '').trim() ?? county ?? '';
+    const parsedState = addressParts
+      .find((p: string) => /\b[A-Z]{2}\b/.test(p))
+      ?.match(/\b[A-Z]{2}\b/)?.[0] ?? state ?? 'MO';
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -86,7 +96,7 @@ export async function POST(req: NextRequest) {
   <div style="text-align:center;margin-bottom:24px">
     <div style="font-size:28px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">HUNTING INTELLIGENCE REPORT</div>
     <div style="font-size:13px;color:#666;margin-top:6px">${address}</div>
-    <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${county} County, ${state}</div>
+    <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
   </div>
   <div class="gold-bar"></div>
   <div class="score-hero">
