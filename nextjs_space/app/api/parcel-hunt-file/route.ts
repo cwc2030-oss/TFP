@@ -212,11 +212,11 @@ export async function POST(req: NextRequest) {
           <div class="stand-stat-key">Approach Risk</div>
         </div>
         <div class="stand-stat">
-          <div class="stand-stat-val">${stand.distToCorridorM ? Math.round(stand.distToCorridorM) : '—'}m</div>
+          <div class="stand-stat-val">${stand.distToCorridorM ? Math.round(stand.distToCorridorM * 1.0936) : '—'} yds</div>
           <div class="stand-stat-key">To Corridor</div>
         </div>
         <div class="stand-stat">
-          <div class="stand-stat-val">${stand.distToBeddingM ? Math.round(stand.distToBeddingM) : '—'}m</div>
+          <div class="stand-stat-val">${stand.distToBeddingM ? Math.round(stand.distToBeddingM * 1.0936) : '—'} yds</div>
           <div class="stand-stat-key">To Bedding</div>
         </div>
         <div class="stand-stat">
