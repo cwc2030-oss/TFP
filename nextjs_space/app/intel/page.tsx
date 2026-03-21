@@ -1899,7 +1899,7 @@ function DeerIntelContent() {
           topScore: summary?.topStandScore ?? 0,
         },
         parcelCoords: parcelPolygon?.geometry?.type === 'Polygon' 
-          ? (parcelPolygon.geometry as any).coordinates[0].slice(0, 50)
+          ? (parcelPolygon.geometry as any).coordinates[0].slice(0, 20)
           : null,
       };
 

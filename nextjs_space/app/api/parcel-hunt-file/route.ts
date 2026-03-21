@@ -130,12 +130,16 @@ export async function POST(req: NextRequest) {
     let mapImageBase64 = '';
     try {
       const mapRes = await fetch(staticMapUrl);
+      console.log('[hunt-report] Static map status:', mapRes.status, 'URL length:', staticMapUrl.length);
       if (mapRes.ok) {
         const mapBuffer = await mapRes.arrayBuffer();
         mapImageBase64 = `data:image/png;base64,${Buffer.from(mapBuffer).toString('base64')}`;
+        console.log('[hunt-report] Static map loaded successfully');
+      } else {
+        console.warn('[hunt-report] Static map failed:', mapRes.status, await mapRes.text());
       }
     } catch (e) {
-      console.warn('[hunt-report] Static map fetch failed:', e);
+      console.error('[hunt-report] Static map fetch error:', e);
     }
 
     const html = `<!DOCTYPE html>
