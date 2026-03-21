@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     // Derive elevation range from stand elevations if demMetrics unavailable
     const standElevations = (stands ?? [])
-      .map((s: any) => s.elevation ?? 0)
+      .map((s: any) => s.elevation ? Math.round(s.elevation * 3.281) : 0)
       .filter((e: number) => e > 0);
     const computedElevRange = standElevations.length >= 2
       ? Math.round(Math.max(...standElevations) - Math.min(...standElevations))
@@ -110,16 +110,8 @@ export async function POST(req: NextRequest) {
       return `pin-s-s+${color}(${lngLat[0]},${lngLat[1]})`;
     }).filter(Boolean).join(',');
 
-    // Build parcel boundary overlay for static map
-    let geoJsonOverlay = '';
-    if (parcelCoords && parcelCoords.length >= 3) {
-      const parcelGeoJson = {
-        type: 'Feature',
-        properties: { stroke: '#c9a84c', 'stroke-width': 3, fill: '#c9a84c', 'fill-opacity': 0.1 },
-        geometry: { type: 'Polygon', coordinates: [parcelCoords] }
-      };
-      geoJsonOverlay = 'geojson(' + encodeURIComponent(JSON.stringify(parcelGeoJson)) + ')';
-    }
+    // Parcel boundary overlay disabled — GeoJSON encoding inflates URL past Mapbox 8192-char limit
+    const geoJsonOverlay = '';
 
     // Combine overlays
     const overlayStr = [geoJsonOverlay, markerOverlays].filter(Boolean).join(',') 
