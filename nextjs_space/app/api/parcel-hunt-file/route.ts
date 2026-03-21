@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
 
 <div class="page border">
   <div class="header">
-    <div><h1>TERRA FIRMA PARTNERS</h1><p>Satellite Intelligence for Landowners</p></div>
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
       <div>Report ID: ${reportId}</div><div>Generated: ${generated}</div>
     </div>
@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
 
 <div class="page border">
   <div class="header">
-    <div><h1>TERRA FIRMA PARTNERS</h1><p>Satellite Intelligence for Landowners</p></div>
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
       <div>Report ID: ${reportId}</div>
       <div>Prevailing Wind: ${prevailingWind ?? 'Not Set'}</div>
