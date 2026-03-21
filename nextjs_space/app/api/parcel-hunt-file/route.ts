@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
       <div class="stat-label">Analysis Area (Acres)</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${summary?.elevRange ? Math.round(summary.elevRange * 3.281) : 0} ft</div>
+      <div class="stat-value">${summary?.elevRange ? Math.round(summary.elevRange * 3.281) : summary?.elevMax && summary?.elevMin ? Math.round((summary.elevMax - summary.elevMin) * 3.281) : '—'} ft</div>
       <div class="stat-label">Elevation Range</div>
     </div>
   </div>
