@@ -78,6 +78,36 @@ export async function POST(req: NextRequest) {
       .find((p: string) => /\b[A-Z]{2}\b/.test(p))
       ?.match(/\b[A-Z]{2}\b/)?.[0] ?? state ?? 'MO';
 
+    // Fetch static satellite map with parcel marker
+    const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+    const zoom = 14;
+    const width = 720;
+    const height = 480;
+
+    // Build stand markers for the static map (up to 3)
+    const markerOverlays = (stands ?? []).slice(0, 3).map((s: any, i: number) => {
+      const colors = ['2d6a4f', 'c9a84c', '8b4513'];
+      const color = colors[i] ?? '2d6a4f';
+      const lngLat = s.coords;
+      if (!lngLat) return '';
+      return `pin-s-s+${color}(${lngLat[0]},${lngLat[1]})`;
+    }).filter(Boolean).join(',');
+
+    const overlayStr = markerOverlays || 'pin-s+2d6a4f(' + lng + ',' + lat + ')';
+    const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static';
+    const staticMapUrl = `${mapboxBase}/${overlayStr}/${lng},${lat},${zoom}/${width}x${height}@2x?access_token=${mapToken}`;
+
+    let mapImageBase64 = '';
+    try {
+      const mapRes = await fetch(staticMapUrl);
+      if (mapRes.ok) {
+        const mapBuffer = await mapRes.arrayBuffer();
+        mapImageBase64 = `data:image/png;base64,${Buffer.from(mapBuffer).toString('base64')}`;
+      }
+    } catch (e) {
+      console.warn('[hunt-report] Static map fetch failed:', e);
+    }
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
