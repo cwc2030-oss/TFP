@@ -1850,15 +1850,15 @@ function DeerIntelContent() {
         lat,
         lng,
         acreage: acreageParam ?? 40,
-        county: address?.split(',')[2]?.trim() ?? '',
-        state: address?.split(',')[3]?.trim()?.split(' ')[1] ?? 'MO',
+        county: parcelPolygon?.properties?.county ?? 
+          address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
+        state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
         prevailingWind: windDirection,
-        terrainStory: terrainStory ?? null,
-        elevRange: summary?.demMetrics
-          ? Math.round(((summary.demMetrics.elevMax ?? 0) - (summary.demMetrics.elevMin ?? 0)) * 3.281)
-          : 0,
-        elevMin: Math.round((summary?.demMetrics?.elevMin ?? 0) * 3.281),
-        elevMax: Math.round((summary?.demMetrics?.elevMax ?? 0) * 3.281),
+        terrainHeadline: terrainStory?.headline ?? null,
+        terrainNarrative: terrainStory?.narrative ?? null,
+        terrainDriver: terrainStory?.primaryDriver?.label ?? null,
+        terrainConfidence: terrainStory?.confidence ?? null,
+        elevRange: Math.round((summary?.demMetrics?.elevRange ?? 0) * 3.281),
         stands: top3.map((s, i) => ({
           rank: i + 1,
           name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
