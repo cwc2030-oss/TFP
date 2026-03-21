@@ -5623,6 +5623,13 @@ function DeerIntelContent() {
     // Clear previous overlays and parcel before loading new one
     clearAllOverlaySources();
     setParcelPolygon(null);
+
+    // Wipe all terrain state immediately so no stale data lingers
+    setTerrainFlowData(null);
+    setLayers(null);
+    setTieredCorridorData(null);
+    setRidgeSpineData(null);
+    setEdgeIntelData(null);
     
     setQaParcelLoading(true);
     setQaParcelError(null);
