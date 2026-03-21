@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
     const data = await req.json();
     const {
       address, lat, lng, acreage, county, state,
-      prevailingWind, stands, summary, corridors, seasonScores, parcelCoords
+      prevailingWind, stands, summary, corridors, seasonScores, parcelCoords,
+      terrainStory, elevRange, elevMin, elevMax
     } = data;
 
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
@@ -142,6 +143,21 @@ export async function POST(req: NextRequest) {
     <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
   </div>
   <div class="gold-bar"></div>
+  ${terrainStory?.summary ? `
+<div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:16px 20px;margin-bottom:24px">
+  <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a;margin-bottom:8px">
+    Terrain Character
+  </div>
+  <div style="font-size:12px;color:#333;line-height:1.8;font-style:italic">
+    "${terrainStory.summary}"
+  </div>
+  ${terrainStory?.highlights?.length ? `
+  <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+    ${terrainStory.highlights.slice(0,4).map((h: string) => `
+    <span style="background:#1a3a2a;color:white;padding:3px 10px;font-size:10px;letter-spacing:1px">${h}</span>
+    `).join('')}
+  </div>` : ''}
+</div>` : ''}
   <div class="score-hero">
     <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:8px">Overall Huntability Score</div>
     <div class="big-score" style="color:${scoreColor(summary?.topStandScore ?? 0)}">${summary?.topStandScore ?? 0}</div>
@@ -175,14 +191,18 @@ export async function POST(req: NextRequest) {
       }
     </div>`).join('')}
   </div>
-  <div class="grid-2">
+  <div class="grid-3">
     <div class="stat-box">
       <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'}</div>
       <div class="stat-label">Analysis Area (Acres)</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${summary?.elevRange ? Math.round(summary.elevRange * 3.281) : summary?.elevMax && summary?.elevMin ? Math.round((summary.elevMax - summary.elevMin) * 3.281) : '—'} ft</div>
+      <div class="stat-value">${elevRange ?? 0} ft</div>
       <div class="stat-label">Elevation Range</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${elevMin ?? '—'} – ${elevMax ?? '—'} ft</div>
+      <div class="stat-label">Elevation Band</div>
     </div>
   </div>
   <div class="footer">
