@@ -1844,35 +1844,58 @@ function DeerIntelContent() {
     
     setIsDownloading(true);
     try {
-      // Build stand data from alignedStands
-      const stands = alignedStands.slice(0, 3).map(s => ({
-        name: s.name,
-        tier: s.alignment.label === 'Open Ground' ? 'Field Stone' : s.alignment.label,
-        score: s.alignment.score,
-        face: s.props.windOk[0] || 'N',
-        intrusion: s.props.approachRisk,
-      }));
-
-      // Extract county/state from address if possible
-      const addressParts = address.split(',').map(p => p.trim());
-      const stateZip = addressParts[addressParts.length - 1] || '';
-      const stateMatch = stateZip.match(/^([A-Z]{2})/);
-      const state = stateMatch ? stateMatch[1] : 'MO';
-      const county = addressParts.length >= 3 ? addressParts[addressParts.length - 2].replace(' County', '') : 'Unknown';
+      const top3 = alignedStands.slice(0, 3);
+      const payload = {
+        address,
+        lat,
+        lng,
+        acreage: acreageParam ?? 40,
+        county: address?.split(',')[2]?.trim() ?? '',
+        state: address?.split(',')[3]?.trim()?.split(' ')[1] ?? 'MO',
+        prevailingWind: windDirection,
+        stands: top3.map((s, i) => ({
+          rank: i + 1,
+          name: s.props?.name ?? `Stand ${i + 1}`,
+          score: s.alignment?.score ?? 0,
+          tier: s.alignment?.label ?? 'Field Stone',
+          reasoning: s.props?.reasoning ?? '',
+          approachRisk: s.props?.approachRisk ?? 'medium',
+          windOk: s.props?.windOk ?? [],
+          windBad: s.props?.windBad ?? [],
+          distToCorridorM: s.props?.distToCorridorMeters ?? 0,
+          distToBeddingM: s.props?.distToBeddingMeters ?? 0,
+          elevation: s.props?.elevation ?? 0,
+          resilience: s.resilience?.label ?? 'Unknown',
+          resilienceScore: s.resilience?.score ?? 0,
+          coords: s.coords,
+        })),
+        summary: {
+          totalBeddingAcres: summary?.totalBeddingAcres ?? 0,
+          funnelCount: summary?.funnelCount ?? 0,
+          topStandScore: summary?.topStandScore ?? 0,
+          analysisAreaAcres: summary?.analysisAreaAcres ?? 0,
+          recommendedSeason: summary?.recommendedSeason ?? 'rut',
+          elevRange: summary?.demMetrics?.elevRange ?? 0,
+          slopeStd: summary?.demMetrics?.slopeStd ?? 0,
+          roughness: summary?.demMetrics?.roughness ?? 0,
+        },
+        corridors: {
+          primaryCount: tieredCorridorData?.corridors_primary?.features?.length ?? 0,
+          possibleCount: tieredCorridorData?.corridors_possible?.features?.length ?? 0,
+          hardFunnelCount: tieredCorridorData?.funnels_hard?.features?.length ?? 0,
+          slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
+          parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
+        },
+        seasonScores: {
+          recommended: summary?.recommendedSeason ?? 'rut',
+          topScore: summary?.topStandScore ?? 0,
+        },
+      };
 
       const response = await fetch('/api/parcel-hunt-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          county,
-          state,
-          acreage: parseFloat(acreageParam || '40'),
-          address,
-          lat,
-          lng,
-          stands,
-          prevailingWind: windDirection,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -1884,8 +1907,10 @@ function DeerIntelContent() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
+      const county = address?.split(',')[2]?.trim() ?? '';
+      const state = address?.split(',')[3]?.trim()?.split(' ')[1] ?? 'MO';
       a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') 
-        || `ParcelHuntFile_${county}${state}_${Math.round(parseFloat(acreageParam || '40'))}ac_TerraFirma.pdf`;
+        || `ParcelHuntFile_${county}${state}_${Math.round(parseFloat(String(acreageParam || '40')))}ac_TerraFirma.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -1896,7 +1921,7 @@ function DeerIntelContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection]);
+  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData]);
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
