@@ -68,8 +68,163 @@ export async function POST(req: NextRequest) {
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    // HTML will be added next
-    const html = `<html><body><h1>TFP Report ${reportId}</h1></body></html>`;
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>${css}</style>
+</head>
+<body>
+
+<div class="page border">
+  <div class="header">
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Satellite Intelligence for Landowners</p></div>
+    <div style="text-align:right;font-size:11px;opacity:0.8">
+      <div>Report ID: ${reportId}</div><div>Generated: ${generated}</div>
+    </div>
+  </div>
+  <div style="text-align:center;margin-bottom:24px">
+    <div style="font-size:28px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">HUNTING INTELLIGENCE REPORT</div>
+    <div style="font-size:13px;color:#666;margin-top:6px">${address}</div>
+    <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${county} County, ${state}</div>
+  </div>
+  <div class="gold-bar"></div>
+  <div class="score-hero">
+    <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:8px">Overall Huntability Score</div>
+    <div class="big-score" style="color:${scoreColor(summary?.topStandScore ?? 0)}">${summary?.topStandScore ?? 0}</div>
+    <div style="font-size:18px;letter-spacing:3px;margin-top:8px;color:${scoreColor(summary?.topStandScore ?? 0)}">${scoreLabel(summary?.topStandScore ?? 0)}</div>
+    <div class="score-sub">Based on terrain analysis, corridor strength, bedding proximity, and wind alignment</div>
+  </div>
+  <div class="grid-3">
+    <div class="stat-box">
+      <div class="stat-value">${summary?.totalBeddingAcres?.toFixed(1) ?? '0'}</div>
+      <div class="stat-label">Bedding Acres</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${corridors?.primaryCount ?? 0}</div>
+      <div class="stat-label">Primary Corridors</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${summary?.funnelCount ?? 0}</div>
+      <div class="stat-label">Funnel Zones</div>
+    </div>
+  </div>
+  <div class="section-title">Seasonal Huntability</div>
+  <div class="season-grid">
+    ${['early','rut','late'].map((s: string) => `
+    <div class="season-cell ${s === seasonScores?.recommended ? 'season-recommended' : ''}">
+      <div class="season-name">${seasonLabel(s)}</div>
+      ${s === seasonScores?.recommended
+        ? `<div style="font-size:24px;font-weight:bold;margin:8px 0">${seasonScores?.topScore ?? 0}</div>
+           <div style="display:inline-block;padding:4px 12px;font-size:11px;background:#c9a84c;color:#1a3a2a">★ RECOMMENDED</div>`
+        : `<div style="font-size:13px;margin:8px 0;color:#666">Run season analysis</div>
+           <div style="display:inline-block;padding:4px 12px;font-size:11px;background:#e0e0e0;color:#666">SELECT SEASON</div>`
+      }
+    </div>`).join('')}
+  </div>
+  <div class="grid-2">
+    <div class="stat-box">
+      <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'}</div>
+      <div class="stat-label">Analysis Area (Acres)</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${summary?.elevRange ? Math.round(summary.elevRange * 3.281) : 0} ft</div>
+      <div class="stat-label">Elevation Range</div>
+    </div>
+  </div>
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>
+
+<div class="page border">
+  <div class="header">
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Satellite Intelligence for Landowners</p></div>
+    <div style="text-align:right;font-size:11px;opacity:0.8">
+      <div>Report ID: ${reportId}</div>
+      <div>Prevailing Wind: ${prevailingWind ?? 'Not Set'}</div>
+    </div>
+  </div>
+  <div style="text-align:center;margin-bottom:24px">
+    <div style="font-size:22px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">STAND PLACEMENT ANALYSIS</div>
+    <div style="font-size:12px;color:#666;margin-top:6px">Top recommended stand locations based on terrain, wind, and deer movement intelligence</div>
+  </div>
+  <div class="gold-bar"></div>
+  ${(stands ?? []).map((stand: any, i: number) => `
+  <div class="stand-card">
+    <div class="stand-header" style="background:${i === 0 ? '#1a3a2a' : '#f8f6f0'};color:${i === 0 ? 'white' : '#1a1a1a'}">
+      <div style="display:flex;align-items:center">
+        <div class="stand-rank">#${stand.rank}</div>
+        <div>
+          <div class="stand-name">${stand.name}</div>
+          <div class="stand-tier">${stand.tier} · ${stand.resilience}</div>
+        </div>
+      </div>
+      <div class="stand-score-badge" style="background:${scoreColor(stand.score)}">${stand.score}</div>
+    </div>
+    <div class="stand-body">
+      <div class="stand-reasoning">"${stand.reasoning}"</div>
+      <div class="stand-stats">
+        <div class="stand-stat">
+          <div class="stand-stat-val" style="color:${riskColor(stand.approachRisk)}">${(stand.approachRisk ?? 'med').toUpperCase()}</div>
+          <div class="stand-stat-key">Approach Risk</div>
+        </div>
+        <div class="stand-stat">
+          <div class="stand-stat-val">${stand.distToCorridorM ? Math.round(stand.distToCorridorM) : '—'}m</div>
+          <div class="stand-stat-key">To Corridor</div>
+        </div>
+        <div class="stand-stat">
+          <div class="stand-stat-val">${stand.distToBeddingM ? Math.round(stand.distToBeddingM) : '—'}m</div>
+          <div class="stand-stat-key">To Bedding</div>
+        </div>
+        <div class="stand-stat">
+          <div class="stand-stat-val">${stand.elevation ? Math.round(stand.elevation * 3.281) : '—'}ft</div>
+          <div class="stand-stat-key">Elevation</div>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <div style="font-size:10px;text-transform:uppercase;color:#666;margin-bottom:4px">Wind Alignment</div>
+        <div class="wind-row">
+          ${(stand.windOk ?? []).map((w: string) => `<span class="wind-tag wind-good">✓ ${w}</span>`).join('')}
+          ${(stand.windBad ?? []).map((w: string) => `<span class="wind-tag wind-bad">✗ ${w}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>`).join('')}
+  <div class="section-title" style="margin-top:16px">Corridor Intelligence</div>
+  <div class="grid-2">
+    <div class="stat-box">
+      <div class="stat-value">${corridors?.primaryCount ?? 0} primary · ${corridors?.possibleCount ?? 0} possible</div>
+      <div class="stat-label">Movement Corridors Detected</div>
+      <div class="corridor-bar">
+        <div class="corridor-fill" style="width:${Math.min(100, (corridors?.parcelCoverage ?? 0) * 100)}%"></div>
+      </div>
+      <div style="font-size:10px;color:#666;margin-top:4px">${((corridors?.parcelCoverage ?? 0) * 100).toFixed(0)}% parcel corridor coverage</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${corridors?.hardFunnelCount ?? 0} hard · ${corridors?.slightFunnelCount ?? 0} slight</div>
+      <div class="stat-label">Funnel Zones Detected</div>
+      <div style="font-size:11px;color:#1a3a2a;margin-top:8px;font-weight:bold">
+        ${(corridors?.hardFunnelCount ?? 0) > 0 ? '★ Hard funnels present — high value stand locations' : 'Soft funnels only — terrain dependent movement'}
+      </div>
+    </div>
+  </div>
+  <div class="disclaimer">
+    This report is generated from satellite terrain analysis and predictive modeling. Stand placement recommendations are based on terrain geometry,
+    historical deer movement patterns, and wind modeling. Always scout properties in person before placing permanent stands.
+    Terra Firma Partners is not responsible for hunting outcomes. Data sources: Regrid, USGS DEM, USDA. Report ID: ${reportId}
+  </div>
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page 2 of 2</span>
+  </div>
+</div>
+
+</body>
+</html>`;
 
     return new NextResponse(html, {
       headers: {
