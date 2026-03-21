@@ -1853,6 +1853,12 @@ function DeerIntelContent() {
         county: address?.split(',')[2]?.trim() ?? '',
         state: address?.split(',')[3]?.trim()?.split(' ')[1] ?? 'MO',
         prevailingWind: windDirection,
+        terrainStory: terrainStory ?? null,
+        elevRange: summary?.demMetrics
+          ? Math.round(((summary.demMetrics.elevMax ?? 0) - (summary.demMetrics.elevMin ?? 0)) * 3.281)
+          : 0,
+        elevMin: Math.round((summary?.demMetrics?.elevMin ?? 0) * 3.281),
+        elevMax: Math.round((summary?.demMetrics?.elevMax ?? 0) * 3.281),
         stands: top3.map((s, i) => ({
           rank: i + 1,
           name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
@@ -1921,7 +1927,7 @@ function DeerIntelContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon]);
+  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory]);
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
