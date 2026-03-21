@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     const {
       address, lat, lng, acreage, county, state,
       prevailingWind, stands, summary, corridors, seasonScores, parcelCoords,
-      terrainStory, elevRange, elevMin, elevMax
+      terrainHeadline, terrainNarrative, terrainDriver, terrainConfidence, elevRange
     } = data;
 
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
@@ -143,19 +143,19 @@ export async function POST(req: NextRequest) {
     <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
   </div>
   <div class="gold-bar"></div>
-  ${terrainStory?.summary ? `
+  ${terrainNarrative ? `
 <div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:16px 20px;margin-bottom:24px">
-  <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a;margin-bottom:8px">
-    Terrain Character
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a">
+      Terrain Character
+    </div>
+    ${terrainConfidence ? `<span style="background:#1a3a2a;color:white;padding:2px 8px;font-size:9px;letter-spacing:1px">${terrainConfidence.toUpperCase()} CONFIDENCE</span>` : ''}
   </div>
-  <div style="font-size:12px;color:#333;line-height:1.8;font-style:italic">
-    "${terrainStory.summary}"
-  </div>
-  ${terrainStory?.highlights?.length ? `
-  <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
-    ${terrainStory.highlights.slice(0,4).map((h: string) => `
-    <span style="background:#1a3a2a;color:white;padding:3px 10px;font-size:10px;letter-spacing:1px">${h}</span>
-    `).join('')}
+  ${terrainHeadline ? `<div style="font-size:16px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">${terrainHeadline}</div>` : ''}
+  <div style="font-size:12px;color:#333;line-height:1.8;font-style:italic">"${terrainNarrative}"</div>
+  ${terrainDriver ? `
+  <div style="margin-top:10px">
+    <span style="background:#1a3a2a;color:white;padding:3px 10px;font-size:10px;letter-spacing:1px">PRIMARY DRIVER: ${terrainDriver}</span>
   </div>` : ''}
 </div>` : ''}
   <div class="score-hero">
@@ -201,8 +201,8 @@ export async function POST(req: NextRequest) {
       <div class="stat-label">Elevation Range</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${elevMin ?? '—'} – ${elevMax ?? '—'} ft</div>
-      <div class="stat-label">Elevation Band</div>
+      <div class="stat-value">${elevRange ?? 0} ft</div>
+      <div class="stat-label">Elevation Relief</div>
     </div>
   </div>
   <div class="footer">
