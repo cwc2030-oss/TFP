@@ -5827,6 +5827,9 @@ function DeerIntelContent() {
       
       // Show scorecard after analysis completes
       setTimeout(() => setQaShowScorecard(true), 2000);
+
+      // Trigger full analysis pipeline with new coords
+      setTimeout(() => runAnalysis(), 100);
       
     } catch (err) {
       console.error('[EXPLORE] Analysis error:', err);
@@ -5834,7 +5837,7 @@ function DeerIntelContent() {
     } finally {
       setQaParcelAnalyzing(false);
     }
-  }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode]);
+  }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode, runAnalysis]);
 
   const handleQaParcelClear = useCallback(() => {
     console.log('[EXPLORE] === CLEARING EXPLORE PARCEL STATE ===');
@@ -5856,9 +5859,12 @@ function DeerIntelContent() {
     
     // Reset fit flag for next parcel
     hasFitToParcel.current = false;
+
+    // Trigger full analysis pipeline to reload original parcel
+    setTimeout(() => runAnalysis(), 100);
     
     console.log('[EXPLORE] Restored to original URL coords:', urlLat, urlLng);
-  }, [urlLat, urlLng, urlAddress, urlAcreage]);
+  }, [urlLat, urlLng, urlAddress, urlAcreage, runAnalysis]);
   
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
