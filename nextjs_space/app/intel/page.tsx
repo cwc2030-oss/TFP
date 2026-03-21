@@ -1892,6 +1892,9 @@ function DeerIntelContent() {
           recommended: summary?.recommendedSeason ?? 'rut',
           topScore: summary?.topStandScore ?? 0,
         },
+        parcelCoords: parcelPolygon?.geometry?.type === 'Polygon' 
+          ? (parcelPolygon.geometry as any).coordinates[0].slice(0, 50)
+          : null,
       };
 
       const response = await fetch('/api/parcel-hunt-file', {
@@ -1918,7 +1921,7 @@ function DeerIntelContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData]);
+  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon]);
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');

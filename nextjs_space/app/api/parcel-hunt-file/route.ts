@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     const data = await req.json();
     const {
       address, lat, lng, acreage, county, state,
-      prevailingWind, stands, summary, corridors, seasonScores
+      prevailingWind, stands, summary, corridors, seasonScores, parcelCoords
     } = data;
 
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
@@ -93,7 +93,20 @@ export async function POST(req: NextRequest) {
       return `pin-s-s+${color}(${lngLat[0]},${lngLat[1]})`;
     }).filter(Boolean).join(',');
 
-    const overlayStr = markerOverlays || 'pin-s+2d6a4f(' + lng + ',' + lat + ')';
+    // Build parcel boundary overlay for static map
+    let geoJsonOverlay = '';
+    if (parcelCoords && parcelCoords.length >= 3) {
+      const parcelGeoJson = {
+        type: 'Feature',
+        properties: { stroke: '#c9a84c', 'stroke-width': 3, fill: '#c9a84c', 'fill-opacity': 0.1 },
+        geometry: { type: 'Polygon', coordinates: [parcelCoords] }
+      };
+      geoJsonOverlay = 'geojson(' + encodeURIComponent(JSON.stringify(parcelGeoJson)) + ')';
+    }
+
+    // Combine overlays
+    const overlayStr = [geoJsonOverlay, markerOverlays].filter(Boolean).join(',') 
+      || 'pin-s+2d6a4f(' + lng + ',' + lat + ')';
     const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static';
     const staticMapUrl = `${mapboxBase}/${overlayStr}/${lng},${lat},${zoom}/${width}x${height}@2x?access_token=${mapToken}`;
 
