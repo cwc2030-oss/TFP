@@ -1901,16 +1901,14 @@ function DeerIntelContent() {
       if (!response.ok) throw new Error('Report generation failed');
 
       const html = await response.text();
-      const blob = new Blob([html], { type: 'text/html' });
+      const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
       const url = URL.createObjectURL(blob);
-      const win = window.open(url, '_blank');
-      if (!win) {
-        // Fallback — direct download if popup blocked
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `TFP-Hunt-Report-${Date.now()}.html`;
-        a.click();
-      }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `TFP-Hunt-Report-${new Date().toISOString().slice(0,10)}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err) {
       console.error('[ParcelHuntFile] Download error:', err);
