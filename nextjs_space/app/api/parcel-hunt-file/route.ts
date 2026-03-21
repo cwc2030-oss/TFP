@@ -66,18 +66,31 @@ export async function POST(req: NextRequest) {
       terrainHeadline, terrainNarrative, terrainDriver, terrainConfidence, elevRange
     } = data;
 
+    // Derive elevation range from stand elevations if demMetrics unavailable
+    const standElevations = (stands ?? [])
+      .map((s: any) => s.elevation ?? 0)
+      .filter((e: number) => e > 0);
+    const computedElevRange = standElevations.length >= 2
+      ? Math.round(Math.max(...standElevations) - Math.min(...standElevations))
+      : 0;
+    const displayElevRange = elevRange > 0 ? elevRange : computedElevRange;
+    const displayElevMin = standElevations.length ? Math.round(Math.min(...standElevations)) : 0;
+    const displayElevMax = standElevations.length ? Math.round(Math.max(...standElevations)) : 0;
+
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     // Better county/state parsing from full address string
-    // e.g. "437 SE State Hwy Pp, Leeton, Johnson County, MO 64761, USA"
+    // Google format: "437 SE State Hwy Pp, Leeton, MO 64761, USA"
+    // Regrid format: "437 SE STATE HWY PP, LEETON, MO 64761"
     const addressParts = (address ?? '').split(',').map((s: string) => s.trim());
     const parsedCounty = addressParts
       .find((p: string) => p.toLowerCase().includes('county'))
       ?.replace(/county/i, '').trim() ?? county ?? '';
-    const parsedState = addressParts
-      .find((p: string) => /\b[A-Z]{2}\b/.test(p))
-      ?.match(/\b[A-Z]{2}\b/)?.[0] ?? state ?? 'MO';
+    // Match state as 2-letter code immediately before a 5-digit ZIP to avoid
+    // matching directional abbreviations like "SE" in street names
+    const stateZipMatch = (address ?? '').match(/\b([A-Z]{2})\s+\d{5}\b/);
+    const parsedState = stateZipMatch?.[1] ?? state ?? 'MO';
 
     // Fetch static satellite map with parcel marker
     const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
@@ -197,12 +210,12 @@ export async function POST(req: NextRequest) {
       <div class="stat-label">Analysis Area (Acres)</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${elevRange ?? 0} ft</div>
-      <div class="stat-label">Elevation Range</div>
+      <div class="stat-value">${displayElevRange} ft</div>
+      <div class="stat-label">Elevation Relief</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${elevRange ?? 0} ft</div>
-      <div class="stat-label">Elevation Relief</div>
+      <div class="stat-value">${displayElevMin} – ${displayElevMax} ft</div>
+      <div class="stat-label">Elevation Band</div>
     </div>
   </div>
   <div class="footer">
