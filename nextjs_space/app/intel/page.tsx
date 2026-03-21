@@ -5767,6 +5767,14 @@ function DeerIntelContent() {
 
   const handleQaParcelAnalyze = useCallback(async () => {
     if (!qaParcel || qaParcelAnalyzing) return;
+
+    // Wipe all visual data before running new analysis
+    clearAllOverlaySources();
+    setTerrainFlowData(null);
+    setLayers(null);
+    setTieredCorridorData(null);
+    setRidgeSpineData(null);
+    setEdgeIntelData(null);
     
     // Check for geometry validation error - block analysis if invalid
     if (geometryValidationError) {
@@ -5844,7 +5852,7 @@ function DeerIntelContent() {
     } finally {
       setQaParcelAnalyzing(false);
     }
-  }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode, runAnalysis]);
+  }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode, runAnalysis, clearAllOverlaySources]);
 
   const handleQaParcelClear = useCallback(() => {
     console.log('[EXPLORE] === CLEARING EXPLORE PARCEL STATE ===');
