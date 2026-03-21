@@ -47,12 +47,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Product pricing configuration
-const PRODUCT_PRICING = {
-  full_report: 350,
-  quick_look: 49,
-  hunting_intel: 79,
-} as const;
+// Product pricing configuration (in cents)
+const PRICES: Record<string, number> = {
+  hunt_report: 14900,  // $149.00
+  land_report: 4900,   // $49.00
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -77,15 +76,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate product type
-    if (!["full_report", "quick_look", "hunting_intel"].includes(productType)) {
-      return NextResponse.json(
-        { error: "Invalid product type" },
-        { status: 400 }
-      );
+    const validTypes = ['hunt_report', 'land_report'];
+    if (!validTypes.includes(productType)) {
+      return NextResponse.json({ error: 'Invalid product type' }, { status: 400 });
     }
 
-    // Get price based on product type
-    const price = PRODUCT_PRICING[productType as keyof typeof PRODUCT_PRICING];
+    // Get price based on product type (in cents)
+    const price = PRICES[productType] ?? 14900;
 
     // Get user ID if logged in
     let userId = null;

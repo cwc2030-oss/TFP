@@ -42,19 +42,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const selectedLayers = JSON.parse(order.selectedLayers || "[]");
-
-    // Determine product name based on product type
-    let productName = "Terra Firma Land Analysis Report";
-    let productDescription = `Property: ${order.parcelAddress}\nLayers: ${selectedLayers.join(", ")}`;
-    
-    if (order.productType === "quick_look") {
-      productName = "Terra Firma Broker Quick Look";
-      productDescription = `Property: ${order.parcelAddress}\n2-page deal-killer checklist`;
-    } else if (order.productType === "hunting_intel") {
-      productName = "Terra Firma Hunting Intelligence Report";
-      productDescription = `Property: ${order.parcelAddress}\n7-layer deer intel with stand sites & methodology`;
-    }
+    const PRODUCT_INFO: Record<string, { name: string; description: string }> = {
+      hunt_report: {
+        name: 'TerraFirma Hunt Intelligence Report',
+        description: 'Complete terrain analysis, stand placement, wind strategy, and satellite hunt map. Indefinite parcel access included.',
+      },
+      land_report: {
+        name: 'TerraFirma Land Intelligence Report',
+        description: 'Comprehensive land analysis including terrain, water, access, valuation, and market data.',
+      },
+    };
+    const productInfo = PRODUCT_INFO[order.productType] ?? { name: 'TerraFirma Report', description: '' };
 
     const checkoutSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
@@ -64,10 +62,10 @@ export async function POST(request: NextRequest) {
           price_data: {
             currency: "usd",
             product_data: {
-              name: productName,
-              description: productDescription,
+              name: productInfo.name,
+              description: `Property: ${order.parcelAddress}\n${productInfo.description}`,
             },
-            unit_amount: Math.round(order.price * 100),
+            unit_amount: order.price,
           },
           quantity: 1,
         },
