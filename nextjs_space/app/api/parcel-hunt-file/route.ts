@@ -264,6 +264,20 @@ export async function POST(req: NextRequest) {
       </div>
     </div>
   </div>
+  <div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:14px 16px;margin-top:12px;margin-bottom:12px">
+    <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a;margin-bottom:6px">
+      Understanding Funnel Zones
+    </div>
+    <div style="font-size:11px;color:#333;line-height:1.7">
+      <strong>Hard Funnels</strong> are tight terrain pinch points — saddles, creek crossings, ridge gaps — that physically 
+      force deer through a narrow zone. Stands near hard funnels intercept nearly all deer movement in that area.<br><br>
+      <strong>Slight Funnels</strong> are softer compressions — benches, field edges, gentle draws — where deer prefer 
+      to travel but aren't forced. These are excellent stand locations but require more precise wind management.<br><br>
+      <strong>Pro Tip:</strong> ${(corridors?.hardFunnelCount ?? 0) > 0 
+        ? `This property has ${corridors.hardFunnelCount} hard funnel${corridors.hardFunnelCount > 1 ? 's' : ''} — prioritize stand placement within 50 yards of these natural pinch points for maximum encounter rates.`
+        : 'Focus stands on slight funnels with favorable wind — approach from downwind for best results.'}
+    </div>
+  </div>
   <div class="disclaimer">
     This report is generated from satellite terrain analysis and predictive modeling. Stand placement recommendations are based on terrain geometry,
     historical deer movement patterns, and wind modeling. Always scout properties in person before placing permanent stands.
