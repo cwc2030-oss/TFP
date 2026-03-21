@@ -369,6 +369,14 @@ ${mapImageBase64 ? `
     </div>`).join('')}
   </div>
 
+  ${terrainNarrative ? `
+<div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:14px 16px;margin-bottom:16px">
+  <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a;margin-bottom:6px">
+    Terrain Intelligence — ${terrainHeadline ?? 'Analysis Summary'}
+  </div>
+  <div style="font-size:11px;color:#333;line-height:1.7;font-style:italic">"${terrainNarrative}"</div>
+  ${terrainDriver ? `<div style="margin-top:8px"><span style="background:#1a3a2a;color:white;padding:2px 8px;font-size:9px;letter-spacing:1px">PRIMARY DRIVER: ${terrainDriver}</span></div>` : ''}
+</div>` : ''}
   <div class="section-title">Approach & Wind Strategy</div>
   <div style="background:#f8f6f0;border:1px solid #ddd;padding:16px;margin-bottom:16px">
     <div style="font-size:12px;color:#333;line-height:1.8">
