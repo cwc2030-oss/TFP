@@ -1898,23 +1898,20 @@ function DeerIntelContent() {
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate PDF');
-      }
+      if (!response.ok) throw new Error('Report generation failed');
 
-      // Download the PDF
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const county = address?.split(',')[2]?.trim() ?? '';
-      const state = address?.split(',')[3]?.trim()?.split(' ')[1] ?? 'MO';
-      a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') 
-        || `ParcelHuntFile_${county}${state}_${Math.round(parseFloat(String(acreageParam || '40')))}ac_TerraFirma.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      const html = await response.text();
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (!win) {
+        // Fallback — direct download if popup blocked
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `TFP-Hunt-Report-${Date.now()}.html`;
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err) {
       console.error('[ParcelHuntFile] Download error:', err);
       setError('Failed to download Parcel-Hunt File');
