@@ -259,9 +259,71 @@ export async function POST(req: NextRequest) {
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 2 of 2</span>
+    <span>Page 2 of ${mapImageBase64 ? '3' : '2'}</span>
   </div>
 </div>
+
+${mapImageBase64 ? `
+<div class="page border">
+  <div class="header">
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
+    <div style="text-align:right;font-size:11px;opacity:0.8">
+      <div>Report ID: ${reportId}</div>
+      <div>Generated: ${generated}</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-bottom:16px">
+    <div style="font-size:22px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">TERRAIN HUNT MAP</div>
+    <div style="font-size:12px;color:#666;margin-top:6px">${address}</div>
+  </div>
+
+  <div class="gold-bar"></div>
+
+  <div style="border:3px solid #1a3a2a;margin-bottom:20px;position:relative">
+    <img src="${mapImageBase64}" style="width:100%;display:block" alt="Terrain Hunt Map"/>
+    <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(26,58,42,0.85);padding:8px 12px;display:flex;gap:24px;align-items:center">
+      <span style="color:white;font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:bold">Legend:</span>
+      <span style="color:white;font-size:10px">🟢 #1 Stand — ${stands?.[0]?.name ?? 'Top Stand'}</span>
+      ${stands?.[1] ? `<span style="color:white;font-size:10px">🟡 #2 Stand — ${stands[1].name}</span>` : ''}
+      ${stands?.[2] ? `<span style="color:white;font-size:10px">🟤 #3 Stand — ${stands[2].name}</span>` : ''}
+    </div>
+  </div>
+
+  <div class="section-title">Stand Location Summary</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+    ${(stands ?? []).slice(0,3).map((s: any, i: number) => `
+    <div style="border:2px solid #1a3a2a;padding:12px;background:#f8f6f0">
+      <div style="font-size:11px;font-weight:bold;color:#c9a84c;margin-bottom:4px">#${s.rank} — ${s.name}</div>
+      <div style="font-size:10px;color:#666;margin-bottom:6px">${s.tier}</div>
+      <div style="font-size:18px;font-weight:bold;color:#1a3a2a;margin-bottom:6px">${s.score}</div>
+      <div style="font-size:10px;color:#333">${s.coords ? `${s.coords[1].toFixed(5)}°N ${Math.abs(s.coords[0]).toFixed(5)}°W` : 'Coords unavailable'}</div>
+      <div style="font-size:10px;color:#666;margin-top:4px">Elevation: ${s.elevation ? Math.round(s.elevation * 3.281) : '—'}ft</div>
+    </div>`).join('')}
+  </div>
+
+  <div class="section-title">Approach & Wind Strategy</div>
+  <div style="background:#f8f6f0;border:1px solid #ddd;padding:16px;margin-bottom:16px">
+    <div style="font-size:12px;color:#333;line-height:1.8">
+      <div style="margin-bottom:8px"><strong>Prevailing Wind:</strong> ${prevailingWind ?? 'Not set'} — plan entry routes to keep wind in your favor approaching each stand.</div>
+      <div style="margin-bottom:8px"><strong>Top Stand (${stands?.[0]?.name ?? '—'}):</strong> Best hunted on ${(stands?.[0]?.windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands?.[0]?.approachRisk ?? '—'}.</div>
+      ${stands?.[1] ? `<div style="margin-bottom:8px"><strong>Stand 2 (${stands[1].name}):</strong> Best hunted on ${(stands[1].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[1].approachRisk ?? '—'}.</div>` : ''}
+      ${stands?.[2] ? `<div><strong>Stand 3 (${stands[2].name}):</strong> Best hunted on ${(stands[2].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[2].approachRisk ?? '—'}.</div>` : ''}
+    </div>
+  </div>
+
+  <div style="background:#1a3a2a;color:white;padding:12px 16px;font-size:11px;line-height:1.6">
+    <strong>PRO TIP:</strong> Always approach stands from downwind. Check wind forecast the night before and select the stand whose good wind directions match tomorrow's forecast. 
+    Deer will smell you from 300+ yards — your entry route matters as much as your stand location.
+  </div>
+
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page 3 of 3</span>
+  </div>
+</div>
+` : ''}
 
 </body>
 </html>`;
