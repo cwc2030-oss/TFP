@@ -22,6 +22,12 @@ function SuccessContent() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [orderCompleted, setOrderCompleted] = useState(false);
+  const [orderDetails, setOrderDetails] = useState<{
+    productType: string;
+    parcelLat: number;
+    parcelLng: number;
+    parcelAddress: string;
+  } | null>(null);
 
   // Complete the order when page loads
   useEffect(() => {
@@ -36,6 +42,15 @@ function SuccessContent() {
         });
         
         if (response.ok) {
+          const data = await response.json();
+          if (data.order) {
+            setOrderDetails({
+              productType: data.order.productType,
+              parcelLat: data.order.parcelLat,
+              parcelLng: data.order.parcelLng,
+              parcelAddress: data.order.parcelAddress,
+            });
+          }
           setOrderCompleted(true);
         }
       } catch (error) {
@@ -159,6 +174,30 @@ function SuccessContent() {
                   </>
                 )}
               </Button>
+
+              {orderDetails?.productType === 'hunt_report' && (
+                <div style={{marginTop: 16, textAlign: 'center'}}>
+                  <a
+                    href={`/intel?lat=${orderDetails.parcelLat}&lng=${orderDetails.parcelLng}&address=${encodeURIComponent(orderDetails.parcelAddress)}`}
+                    style={{
+                      display: 'inline-block',
+                      background: '#1a3a2a',
+                      color: 'white',
+                      padding: '14px 32px',
+                      borderRadius: 8,
+                      fontWeight: 'bold',
+                      fontSize: 15,
+                      textDecoration: 'none',
+                      marginTop: 8,
+                    }}
+                  >
+                    🦌 Open Terrain Analyzer
+                  </a>
+                  <p style={{fontSize: 11, color: '#666', marginTop: 8}}>
+                    Your parcel is saved — access your Terrain Analyzer anytime
+                  </p>
+                </div>
+              )}
 
               <Link href="/dashboard" className="block">
                 <Button variant="outline" className="w-full">
