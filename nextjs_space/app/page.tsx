@@ -269,7 +269,7 @@ function HeroSection() {
             <p className="text-stone-400 text-sm mb-6">
               Try: <button type="button" onClick={() => setAddress('425 SE 850th Rd, Leeton, MO')} className="text-emerald-400 hover:underline">425 SE 850th Rd, Leeton, MO</button>
               {' '} or {' '}
-              <button type="button" onClick={() => setAddress('County Road 311, Osceola, MO')} className="text-emerald-400 hover:underline">County Road 311, Osceola, MO</button>
+              <button type="button" onClick={() => setAddress('437 SE State Hwy PP, Leeton, MO')} className="text-emerald-400 hover:underline">437 SE State Hwy PP, Leeton, MO</button>
             </p>
 
             <div className="flex flex-wrap gap-4 text-stone-400 text-sm">

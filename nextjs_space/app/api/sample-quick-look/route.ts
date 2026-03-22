@@ -4,20 +4,20 @@ import { getCWDStatus } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 
-// Sample Pleasant Hill property data (same as Free Look for consistency)
+// Sample Leeton property data (same as Free Look for consistency)
 const SAMPLE_DATA = {
   parcelId: "14-620-00-00-000.00-03",
-  siteAddress: "2100 S State Route Y, Pleasant Hill, MO 64080",
+  siteAddress: "437 SE State Hwy PP, Leeton, MO 64761",
   acreage: 87.2,
-  county: "Cass",
+  county: "Johnson",
   state: "MO",
   zoning: "A-1 Agricultural",
   useDescription: "Agricultural - Vacant Land",
   legalDescription: "E 1/2 NE 1/4 & E 1/2 W 1/2 NE 1/4 SEC 15-46-31 87.2 AC M/L",
   femaFloodZone: "Zone X (Minimal Risk)",
-  elementarySchoolDistrict: "Pleasant Hill R-III School District",
-  lat: 38.7958,
-  lng: -94.2733,
+  elementarySchoolDistrict: "Leeton R-X School District",
+  lat: 38.644716,
+  lng: -93.667263,
 };
 
 const SAMPLE_SOIL = {
@@ -25,13 +25,13 @@ const SAMPLE_SOIL = {
 };
 
 function buildSampleParcelPath(): string {
-  // Polygon matching the sample property location
+  // Polygon matching the sample property location (437 SE State Hwy PP, Leeton)
   const coords = [
-    [-94.2785, 38.7995],  // NW corner
-    [-94.2680, 38.7995],  // NE corner  
-    [-94.2680, 38.7920],  // SE corner
-    [-94.2785, 38.7920],  // SW corner
-    [-94.2785, 38.7995],  // Close polygon
+    [-93.671, 38.648],  // NW corner
+    [-93.663, 38.648],  // NE corner  
+    [-93.663, 38.641],  // SE corner
+    [-93.671, 38.641],  // SW corner
+    [-93.671, 38.648],  // Close polygon
   ];
   const pathPoints = coords.map(c => `${c[1]},${c[0]}`).join("|");
   return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;

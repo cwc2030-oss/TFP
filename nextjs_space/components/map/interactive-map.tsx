@@ -60,16 +60,16 @@ interface ParcelData {
   regridPath: string;
 }
 
-// Sample parcel for demo/free-look 3D preview (Pleasant Hill, MO ~117 acres)
+// Sample parcel for demo/free-look 3D preview (437 SE State Hwy PP, Leeton, MO)
 const SAMPLE_PARCEL_3D: SelectedParcel = {
-  address: "2100 S State Route Y, Pleasant Hill, MO 64080",
-  lat: 38.7958,
-  lng: -94.2733,
+  address: "437 SE State Hwy PP, Leeton, MO 64761",
+  lat: 38.644716,
+  lng: -93.667263,
   bounds: [
-    { lat: 38.7995, lng: -94.2785 },
-    { lat: 38.7995, lng: -94.2680 },
-    { lat: 38.7920, lng: -94.2680 },
-    { lat: 38.7920, lng: -94.2785 },
+    { lat: 38.648, lng: -93.671 },
+    { lat: 38.648, lng: -93.663 },
+    { lat: 38.641, lng: -93.663 },
+    { lat: 38.641, lng: -93.671 },
   ],
 };
 

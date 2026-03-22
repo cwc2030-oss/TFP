@@ -17,12 +17,12 @@ const BUILD_STAMP = {
   components: { real: 6, stubbed: 1, total: 7 }
 };
 
-// Default demo parcel (Pleasant Hill, MO area - ~127 acres)
+// Default demo parcel (437 SE State Hwy PP, Leeton, MO)
 const DEFAULT_DEMO = {
-  lat: 38.7876,
-  lng: -94.2654,
+  lat: 38.644716,
+  lng: -93.667263,
   acreage: 127.4,
-  address: 'Pleasant Hill, MO'
+  address: '437 SE State Hwy PP, Leeton, MO'
 };
 
 // Parcel data from Regrid API

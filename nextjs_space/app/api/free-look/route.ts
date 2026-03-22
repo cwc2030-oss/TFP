@@ -9,9 +9,9 @@ export const revalidate = 0;
 
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
-  parcelAddress: "2100 S State Route Y, Pleasant Hill, MO 64080, USA",
-  parcelLat: 38.7958,  // Center of sample polygon
-  parcelLng: -94.2733, // Center of sample polygon
+  parcelAddress: "437 SE State Hwy PP, Leeton, MO 64761, USA",
+  parcelLat: 38.644716,  // Center of sample polygon
+  parcelLng: -93.667263, // Center of sample polygon
 };
 
 interface ParcelData {
@@ -151,7 +151,7 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
 }
 
 function getDefaultSampleData(): ParcelData {
-  // Sample parcel polygon for ~117-acre property near Pleasant Hill, MO
+  // Sample parcel polygon for property near Leeton, MO
   // Rural Missouri parcels typically follow section lines - mostly rectangular
   // 117 acres ≈ 0.5 mile x 0.37 mile (half-quarter section shape)
   const sampleCoordinates: number[][][] = [[
@@ -166,7 +166,7 @@ function getDefaultSampleData(): ParcelData {
     parcelId: "XX-XXX-XXX-XX-XXX-XXX.XX",
     owner: "LAND OWNER",
     mailingAddress: "[Mailing Address Redacted]",
-    siteAddress: "2100 S State Route Y, Pleasant Hill, MO 64080",
+    siteAddress: "437 SE State Hwy PP, Leeton, MO 64761",
     acreage: 117.52,
     sqft: 5120071,
     zoning: "A-1 Agricultural",
