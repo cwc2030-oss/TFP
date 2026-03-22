@@ -102,21 +102,25 @@ export async function POST(req: NextRequest) {
     const height = 480;
 
     // Build stand markers for the static map (up to 3)
-    const markerOverlays = (stands ?? []).slice(0, 3).map((s: any, i: number) => {
-      const colors = ['2d6a4f', 'c9a84c', '8b4513'];
-      const color = colors[i] ?? '2d6a4f';
-      const lngLat = s.coords;
-      if (!lngLat) return '';
-      return `pin-s-s+${color}(${lngLat[0]},${lngLat[1]})`;
-    }).filter(Boolean).join(',');
+    const markerOverlays = stands && stands.length > 0 
+      ? (stands ?? []).slice(0, 3).map((s: any, i: number) => {
+          const colors = ['2d6a4f', 'c9a84c', '8b4513'];
+          const color = colors[i] ?? '2d6a4f';
+          const lngLat = s.coords;
+          if (!lngLat) return '';
+          return `pin-s-s+${color}(${lngLat[0]},${lngLat[1]})`;
+        }).filter(Boolean).join(',')
+      : '';
 
     let pathOverlay = '';
     if (parcelCoords && parcelCoords.length >= 3) {
-      const coords = [...parcelCoords, parcelCoords[0]]; // close the polygon
-      const pathPoints = coords
-        .map((c: number[]) => `${c[0]}+${c[1]}`)
-        .join(',');
-      pathOverlay = `path-4+c9a84c-1(${encodeURIComponent(pathPoints)})`;
+      const geojson = JSON.stringify({
+        type: 'Feature',
+        properties: { 'stroke': '#c9a84c', 'stroke-width': 4, 'fill-opacity': 0 },
+        geometry: { type: 'Polygon', coordinates: [parcelCoords] }
+      });
+      pathOverlay = `geojson(${encodeURIComponent(geojson)})`;
+      console.log('[hunt-report] GeoJSON overlay length:', pathOverlay.length);
     }
 
     const overlayStr = [pathOverlay, markerOverlays]
