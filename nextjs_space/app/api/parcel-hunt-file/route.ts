@@ -114,13 +114,14 @@ export async function POST(req: NextRequest) {
 
     let pathOverlay = '';
     if (parcelCoords && parcelCoords.length >= 3) {
-      const geojson = JSON.stringify({
-        type: 'Feature',
-        properties: { 'stroke': '#c9a84c', 'stroke-width': 4, 'fill-opacity': 0 },
-        geometry: { type: 'Polygon', coordinates: [parcelCoords] }
-      });
-      pathOverlay = `geojson(${encodeURIComponent(geojson)})`;
-      console.log('[hunt-report] GeoJSON overlay length:', pathOverlay.length);
+      const coords = [...parcelCoords, parcelCoords[0]];
+      // Mapbox Static API path format: lon+lat pairs separated by commas
+      // stroke color c9a84c, stroke width 4, opacity 1, fill opacity 0
+      const pathPoints = coords
+        .map((c: number[]) => `${c[0]}+${c[1]}`)
+        .join(',');
+      pathOverlay = `path-4+c9a84c+000000-0(${encodeURIComponent(pathPoints)})`;
+      console.log('[hunt-report] path overlay length:', pathOverlay.length);
     }
 
     const overlayStr = [pathOverlay, markerOverlays]
@@ -302,9 +303,9 @@ export async function POST(req: NextRequest) {
       <div class="stat-value">${corridors?.primaryCount ?? 0} primary · ${corridors?.possibleCount ?? 0} possible</div>
       <div class="stat-label">Movement Corridors Detected</div>
       <div class="corridor-bar">
-        <div class="corridor-fill" style="width:${Math.min(100, (corridors?.parcelCoverage ?? 0) * 100)}%"></div>
+        <div class="corridor-fill" style="width:${Math.min(100, Math.round((corridors?.parcelCoverage ?? 0) * 100))}%"></div>
       </div>
-      <div style="font-size:10px;color:#666;margin-top:4px">${((corridors?.parcelCoverage ?? 0) * 100).toFixed(0)}% parcel corridor coverage</div>
+      <div style="font-size:10px;color:#666;margin-top:4px">${Math.min(100, Math.round((corridors?.parcelCoverage ?? 0) * 100))}% parcel corridor coverage</div>
     </div>
     <div class="stat-box">
       <div class="stat-value">${corridors?.hardFunnelCount ?? 0} hard · ${corridors?.slightFunnelCount ?? 0} slight</div>
