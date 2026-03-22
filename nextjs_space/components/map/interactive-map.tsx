@@ -140,12 +140,12 @@ export default function InteractiveMap({
     includedIn?: string;
   }
   const premiumLayers: PremiumLayer[] = [
-    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'hunting_intel' },
-    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'hunting_intel' },
-    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'hunting_intel' },
-    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'hunting_intel' },
-    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'full_report' },
-    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'hunting_intel' },
+    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'hunt_report' },
+    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'hunt_report' },
+    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'hunt_report' },
+    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'hunt_report' },
+    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'land_report' },
+    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'hunt_report' },
   ];
   
   const freeLayers = [
@@ -1029,7 +1029,7 @@ export default function InteractiveMap({
                           </button>
                         ) : (
                           <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
-                            {layer.includedIn === 'hunting_intel' ? 'in $79 report' : 'in $350 report'}
+                            {layer.includedIn === 'hunt_report' ? 'in $149 report' : 'in $49 report'}
                           </span>
                         )}
                       </div>
@@ -1044,93 +1044,51 @@ export default function InteractiveMap({
               <p className="text-[10px] font-semibold text-stone-400 uppercase tracking-wide mb-3">Get Your Report</p>
             </div>
 
-            {/* $79 Hunting Intelligence — Primary CTA */}
-            <div className="bg-gradient-to-br from-red-600 to-orange-600 rounded-xl p-4 text-white relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
-              <div className="relative">
-                <div className="flex items-center gap-2 mb-1">
-                  <Target className="w-4 h-4" />
-                  <span className="font-bold text-sm">Hunting Intelligence Report</span>
-                  <span className="bg-white/25 text-[9px] px-1.5 py-0.5 rounded-full font-bold">NEW</span>
-                </div>
-                <p className="text-red-100 text-[11px] mb-3">7-layer deer intel playbook for your property</p>
-                <div className="space-y-1 mb-3">
-                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> All 6 deer intel layers analyzed</p>
-                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> Stand site recommendations</p>
-                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> Season playbook (AM vs PM setups)</p>
-                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> &quot;How We Know&quot; methodology</p>
-                  <p className="text-[10px] text-white/90 flex items-center gap-1.5"><span className="text-amber-300">✓</span> 5-page PDF — print & take to the stand</p>
-                </div>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <span className="text-2xl font-bold">$79</span>
-                    <span className="text-red-200 text-xs ml-1">/ property</span>
-                  </div>
-                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">🦌 Most Popular</span>
-                </div>
-                <button 
-                  className="w-full bg-white text-red-600 hover:bg-red-50 py-2 rounded-lg font-semibold text-sm transition-colors"
-                  onClick={() => {
-                    if (parcelData) {
-                      setShowLayerPanel(false);
-                      onCheckout?.('hunting_intel');
-                    } else {
-                      alert('Search for a property first, then order your report.');
-                    }
-                  }}
-                >
-                  Order Hunting Intel — $79
-                </button>
+            {/* Hunt Intelligence Report */}
+            <div style={{background: 'linear-gradient(135deg, #1a3a2a, #2d6a4f)', borderRadius: 12, padding: 16, marginBottom: 12}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8}}>
+                <span style={{color:'#c9a84c', fontWeight:'bold', fontSize: 13}}>🦌 Hunt Intelligence Report</span>
+                <span style={{color:'white', fontWeight:'bold', fontSize: 16}}>$149</span>
               </div>
-            </div>
-
-            {/* $49 Quick Look */}
-            <div className="bg-stone-50 rounded-xl p-3.5 border border-stone-200">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-600" />
-                  <span className="font-bold text-sm text-stone-800">Broker Quick Look</span>
-                </div>
-                <span className="text-lg font-bold text-amber-600">$49</span>
-              </div>
-              <p className="text-[10px] text-stone-500 mb-2">2-page deal-killer checklist — flood, CWD, soil, access, zoning</p>
-              <button 
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-1.5 rounded-lg font-semibold text-xs transition-colors"
+              <p style={{color:'rgba(255,255,255,0.8)', fontSize: 11, marginBottom: 12}}>
+                Terrain analysis, stand placement, wind strategy, and satellite hunt map. Indefinite parcel access.
+              </p>
+              <button
                 onClick={() => {
                   if (parcelData) {
                     setShowLayerPanel(false);
-                    onCheckout?.('quick_look');
+                    onCheckout?.('hunt_report');
                   } else {
                     alert('Search for a property first, then order your report.');
                   }
                 }}
+                style={{width:'100%', background:'#c9a84c', color:'#1a1a1a', border:'none', borderRadius: 8, padding:'10px 0', fontWeight:'bold', fontSize: 13, cursor:'pointer'}}
               >
-                Order Quick Look — $49
+                Get Hunt Report — $149
               </button>
             </div>
 
-            {/* $350 Full Analysis */}
-            <div className="bg-stone-50 rounded-xl p-3.5 border border-emerald-200">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-emerald-600" />
-                  <span className="font-bold text-sm text-stone-800">Full Land Analysis</span>
-                </div>
-                <span className="text-lg font-bold text-emerald-600">$350</span>
+            {/* Land Intelligence Report */}
+            <div style={{background: 'white', border: '2px solid #e0e0e0', borderRadius: 12, padding: 16, marginBottom: 12}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8}}>
+                <span style={{color:'#1a3a2a', fontWeight:'bold', fontSize: 13}}>📋 Land Intelligence Report</span>
+                <span style={{color:'#1a3a2a', fontWeight:'bold', fontSize: 16}}>$49</span>
               </div>
-              <p className="text-[10px] text-stone-500 mb-2">12-page report — everything above plus soil, timber, ag value, comps & more</p>
-              <button 
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded-lg font-semibold text-xs transition-colors"
+              <p style={{color:'#666', fontSize: 11, marginBottom: 12}}>
+                Professional land analysis — terrain, water, access, valuation, and market data.
+              </p>
+              <button
                 onClick={() => {
                   if (parcelData) {
                     setShowLayerPanel(false);
-                    onCheckout?.('full_report');
+                    onCheckout?.('land_report');
                   } else {
                     alert('Search for a property first, then order your report.');
                   }
                 }}
+                style={{width:'100%', background:'#1a3a2a', color:'white', border:'none', borderRadius: 8, padding:'10px 0', fontWeight:'bold', fontSize: 13, cursor:'pointer'}}
               >
-                Order Full Report — $350
+                Get Land Report — $49
               </button>
             </div>
 
@@ -1245,12 +1203,15 @@ export default function InteractiveMap({
       {parcelData && !showFullPanel && !isLoadingParcel && (
         <div className={`absolute left-1/2 -translate-x-1/2 z-10 ${isMobile ? 'bottom-4' : 'bottom-6'}`}>
           <button
-            onClick={() => setShowFullPanel(true)}
+            onClick={() => {
+              setShowFullPanel(true);
+              onCheckout?.('hunt_report');
+            }}
             className={`bg-emerald-700 hover:bg-emerald-800 text-white rounded-full font-semibold shadow-2xl flex items-center gap-2 transition-all hover:scale-105 animate-pulse hover:animate-none
               ${isMobile ? 'py-3 px-6 text-base' : 'py-4 px-8 text-lg gap-3'}`}
           >
             <FileText className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
-            Order Land Analysis – $350
+            Get Hunt Report — $149
           </button>
           <p className={`text-white text-center mt-2 drop-shadow-lg bg-black/50 rounded-full px-4 py-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>
             {isMobile ? 'Tap for parcel details' : 'Click to see parcel details & order report'}
@@ -1307,11 +1268,11 @@ export default function InteractiveMap({
             {/* Action Buttons - Always Visible */}
             <div className="space-y-2">
               <button
-                onClick={() => onCheckout?.()}
+                onClick={() => onCheckout?.('hunt_report')}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
               >
                 <FileText className="w-4 h-4" />
-                Order Land Analysis – $350
+                Get Hunt Report — $149
               </button>
               <div className="flex gap-2">
                 <a
@@ -1545,11 +1506,11 @@ export default function InteractiveMap({
         acreage={parcelData?.acreage}
         previewMode={true}
         onUnlockIntel={() => {
-          // Close 3D view and trigger checkout for hunting intel
+          // Close 3D view and trigger checkout for hunt report
           setShow3DView(false);
           if (parcelData) {
             setShowLayerPanel(false);
-            onCheckout?.('hunting_intel');
+            onCheckout?.('hunt_report');
           }
         }}
       />
