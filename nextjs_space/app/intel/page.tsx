@@ -1354,8 +1354,8 @@ function DeerIntelContent() {
   const flowAnimationPhase = useRef<number>(0);
 
   // URL params (initial values)
-  const urlLat = parseFloat(searchParams.get('lat') || '38.644716');
-  const urlLng = parseFloat(searchParams.get('lng') || '-93.667263');
+  const urlLat = parseFloat(searchParams.get('lat') || '36.638590');
+  const urlLng = parseFloat(searchParams.get('lng') || '-94.345581');
   const urlAddress = searchParams.get('address') || 'Sample Property';
   const urlAcreage = searchParams.get('acreage');
   const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features

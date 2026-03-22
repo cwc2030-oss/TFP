@@ -60,16 +60,16 @@ interface ParcelData {
   regridPath: string;
 }
 
-// Sample parcel for demo/free-look 3D preview (437 SE State Hwy PP, Leeton, MO)
+// Sample parcel for demo/free-look 3D preview (761 Schlessman Rd, Pineville, MO)
 const SAMPLE_PARCEL_3D: SelectedParcel = {
-  address: "437 SE State Hwy PP, Leeton, MO 64761",
-  lat: 38.644716,
-  lng: -93.667263,
+  address: "761 Schlessman Rd, Pineville, MO 64831",
+  lat: 36.638590,
+  lng: -94.345581,
   bounds: [
-    { lat: 38.648, lng: -93.671 },
-    { lat: 38.648, lng: -93.663 },
-    { lat: 38.641, lng: -93.663 },
-    { lat: 38.641, lng: -93.671 },
+    { lat: 36.644, lng: -94.351 },
+    { lat: 36.644, lng: -94.340 },
+    { lat: 36.633, lng: -94.340 },
+    { lat: 36.633, lng: -94.351 },
   ],
 };
 

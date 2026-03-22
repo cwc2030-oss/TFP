@@ -4,20 +4,20 @@ import { getCWDStatus } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 
-// Sample Leeton property data (same as Free Look for consistency)
+// Sample Pineville property data (same as Free Look for consistency)
 const SAMPLE_DATA = {
-  parcelId: "14-620-00-00-000.00-03",
-  siteAddress: "437 SE State Hwy PP, Leeton, MO 64761",
-  acreage: 87.2,
-  county: "Johnson",
+  parcelId: "096013000000002000",
+  siteAddress: "761 Schlessman Rd, Pineville, MO 64831",
+  acreage: 118.14,
+  county: "McDonald",
   state: "MO",
-  zoning: "A-1 Agricultural",
-  useDescription: "Agricultural - Vacant Land",
-  legalDescription: "E 1/2 NE 1/4 & E 1/2 W 1/2 NE 1/4 SEC 15-46-31 87.2 AC M/L",
+  zoning: "NZ",
+  useDescription: "Agricultural - Recreational",
+  legalDescription: "T022N R032W SEC 13 118.14 AC M/L",
   femaFloodZone: "Zone X (Minimal Risk)",
-  elementarySchoolDistrict: "Leeton R-X School District",
-  lat: 38.644716,
-  lng: -93.667263,
+  elementarySchoolDistrict: "Pineville R-II School District",
+  lat: 36.638590,
+  lng: -94.345581,
 };
 
 const SAMPLE_SOIL = {
@@ -25,13 +25,13 @@ const SAMPLE_SOIL = {
 };
 
 function buildSampleParcelPath(): string {
-  // Polygon matching the sample property location (437 SE State Hwy PP, Leeton)
+  // Polygon matching the sample property location (761 Schlessman Rd, Pineville)
   const coords = [
-    [-93.671, 38.648],  // NW corner
-    [-93.663, 38.648],  // NE corner  
-    [-93.663, 38.641],  // SE corner
-    [-93.671, 38.641],  // SW corner
-    [-93.671, 38.648],  // Close polygon
+    [-94.351, 36.644],  // NW corner
+    [-94.340, 36.644],  // NE corner  
+    [-94.340, 36.633],  // SE corner
+    [-94.351, 36.633],  // SW corner
+    [-94.351, 36.644],  // Close polygon
   ];
   const pathPoints = coords.map(c => `${c[1]},${c[0]}`).join("|");
   return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
@@ -326,7 +326,7 @@ export async function GET() {
       "Road Access",
       "ACCESS VERIFIED",
       [40, 167, 69],
-      `Property has road frontage on SE 850th Rd. Recommend verifying easements and road maintenance agreements.`,
+      `Property has road frontage on Schlessman Rd. Recommend verifying easements and road maintenance agreements.`,
       yPos
     );
 

@@ -9,9 +9,9 @@ export const revalidate = 0;
 
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
-  parcelAddress: "437 SE State Hwy PP, Leeton, MO 64761, USA",
-  parcelLat: 38.644716,  // Center of sample polygon
-  parcelLng: -93.667263, // Center of sample polygon
+  parcelAddress: "761 Schlessman Rd, Pineville, MO 64831, USA",
+  parcelLat: 36.638590,  // Center of sample polygon
+  parcelLng: -94.345581, // Center of sample polygon
 };
 
 interface ParcelData {
@@ -151,23 +151,22 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
 }
 
 function getDefaultSampleData(): ParcelData {
-  // Sample parcel polygon for property near Leeton, MO
-  // Rural Missouri parcels typically follow section lines - mostly rectangular
-  // 117 acres ≈ 0.5 mile x 0.37 mile (half-quarter section shape)
+  // Sample parcel polygon for property near Pineville, MO (McDonald County)
+  // 118 acres in T022N R032W Section 13
   const sampleCoordinates: number[][][] = [[
-    [-94.2785, 38.7995],  // NW corner
-    [-94.2680, 38.7995],  // NE corner  
-    [-94.2680, 38.7920],  // SE corner
-    [-94.2785, 38.7920],  // SW corner
-    [-94.2785, 38.7995],  // Close polygon (back to NW)
+    [-94.351, 36.644],  // NW corner
+    [-94.340, 36.644],  // NE corner  
+    [-94.340, 36.633],  // SE corner
+    [-94.351, 36.633],  // SW corner
+    [-94.351, 36.644],  // Close polygon (back to NW)
   ]];
 
   return {
-    parcelId: "XX-XXX-XXX-XX-XXX-XXX.XX",
-    owner: "LAND OWNER",
+    parcelId: "096013000000002000",
+    owner: "LEWIS, RICHARD",
     mailingAddress: "[Mailing Address Redacted]",
-    siteAddress: "437 SE State Hwy PP, Leeton, MO 64761",
-    acreage: 117.52,
+    siteAddress: "761 Schlessman Rd, Pineville, MO 64831",
+    acreage: 118.14,
     sqft: 5120071,
     zoning: "A-1 Agricultural",
     useDescription: "Agricultural - Recreational",

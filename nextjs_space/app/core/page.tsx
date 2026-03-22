@@ -17,12 +17,12 @@ const BUILD_STAMP = {
   components: { real: 6, stubbed: 1, total: 7 }
 };
 
-// Default demo parcel (437 SE State Hwy PP, Leeton, MO)
+// Default demo parcel (761 Schlessman Rd, Pineville, MO)
 const DEFAULT_DEMO = {
-  lat: 38.644716,
-  lng: -93.667263,
-  acreage: 127.4,
-  address: '437 SE State Hwy PP, Leeton, MO'
+  lat: 36.638590,
+  lng: -94.345581,
+  acreage: 118.14,
+  address: '761 Schlessman Rd, Pineville, MO'
 };
 
 // Parcel data from Regrid API
