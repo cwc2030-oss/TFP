@@ -472,23 +472,26 @@ export async function POST(request: NextRequest) {
     }
 
     if (order.productType === 'hunt_report') {
-      // Generate Hunt Intelligence Report
+      const terrainPayload = order.terrainData 
+        ? JSON.parse(order.terrainData)
+        : {
+            address: order.parcelAddress,
+            lat: order.parcelLat,
+            lng: order.parcelLng,
+            acreage: 0,
+            county: '',
+            state: 'MO',
+            prevailingWind: 'N',
+            stands: [],
+            summary: null,
+            corridors: null,
+            seasonScores: null,
+          };
+
       const huntRes = await fetch(new URL('/api/parcel-hunt-file', request.url), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address: order.parcelAddress,
-          lat: order.parcelLat,
-          lng: order.parcelLng,
-          acreage: 0,
-          county: '',
-          state: 'MO',
-          prevailingWind: 'N',
-          stands: [],
-          summary: null,
-          corridors: null,
-          seasonScores: null,
-        }),
+        body: JSON.stringify(terrainPayload),
       });
       const html = await huntRes.text();
       return new NextResponse(html, {

@@ -1903,6 +1903,22 @@ function DeerIntelContent() {
           : null,
       };
 
+      // Save terrain results to order for report generation
+      try {
+        const savedOrder = localStorage.getItem('tfp_current_order_id');
+        if (savedOrder) {
+          await fetch(`/api/orders/${savedOrder}/save-terrain`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              terrainPayload: payload,
+            }),
+          });
+        }
+      } catch (e) {
+        // Non-critical — report still generates from current session
+      }
+
       const response = await fetch('/api/parcel-hunt-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -175,6 +175,7 @@ export default function MapPage() {
       }
 
       const { order } = await orderResponse.json();
+      localStorage.setItem('tfp_current_order_id', order.id);
 
       // If demo mode, skip Stripe and go directly to success
       if (isDemo) {
