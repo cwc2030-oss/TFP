@@ -326,7 +326,7 @@ export async function GET() {
       "Road Access",
       "ACCESS VERIFIED",
       [40, 167, 69],
-      `Property has road frontage on State Hwy PP. Recommend verifying easements and road maintenance agreements.`,
+      `Property has road frontage on SE 850th Rd. Recommend verifying easements and road maintenance agreements.`,
       yPos
     );
 

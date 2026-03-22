@@ -9,9 +9,9 @@ export const revalidate = 0;
 
 // Sample location - will fetch real parcel data from Regrid
 const SAMPLE_ORDER = {
-  parcelAddress: "439 SE State Hwy PP, Leeton, MO 64761, USA",
-  parcelLat: 38.641668,
-  parcelLng: -93.666698,
+  parcelAddress: "425 SE 850th Rd, Leeton, MO 64761, USA",
+  parcelLat: 38.631270,
+  parcelLng: -93.669181,
 };
 
 interface ParcelData {
@@ -155,7 +155,7 @@ function getDefaultSampleData(): ParcelData {
     parcelId: "XX-XXX-XXX-XX-XXX-XXX.XX",
     owner: "LAND OWNER",
     mailingAddress: "[Mailing Address Redacted]",
-    siteAddress: "439 SE State Hwy PP, Leeton, MO 64761",
+    siteAddress: "425 SE 850th Rd, Leeton, MO 64761",
     acreage: 9.51,
     sqft: 414314,
     zoning: "A-1 Agricultural",

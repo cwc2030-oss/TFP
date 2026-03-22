@@ -84,8 +84,8 @@ export async function POST(req: NextRequest) {
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     // Better county/state parsing from full address string
-    // Google format: "437 SE State Hwy Pp, Leeton, MO 64761, USA"
-    // Regrid format: "437 SE STATE HWY PP, LEETON, MO 64761"
+    // Google format: "425 SE 850th Rd, Leeton, MO 64761, USA"
+    // Regrid format: "425 SE 850TH RD, LEETON, MO 64761"
     const addressParts = (address ?? '').split(',').map((s: string) => s.trim());
     const parsedCounty = addressParts
       .find((p: string) => p.toLowerCase().includes('county'))
