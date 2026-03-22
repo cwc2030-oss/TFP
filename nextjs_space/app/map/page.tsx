@@ -43,29 +43,22 @@ interface SelectedParcel {
   bounds?: { lat: number; lng: number }[];
 }
 
-type ProductType = "full_report" | "quick_look" | "hunting_intel";
+type ProductType = "hunt_report" | "land_report";
 
 const PRODUCTS = {
-  quick_look: {
-    name: "Broker Quick Look",
-    price: 49,
-    description: "2-page deal-killer checklist",
-    features: ["Verified acreage & boundaries", "FEMA flood zone status", "CWD zone check", "Soil buildability", "Road access verification"],
-    color: "amber",
-  },
-  hunting_intel: {
-    name: "Hunting Intelligence",
-    price: 79,
-    description: "5-page deer intel playbook",
-    features: ["7 layers of deer corridors", "Stand site recommendations", "Season playbook (early/rut/late)", "\"How We Know\" methodology", "CWD & harvest pressure data"],
+  hunt_report: {
+    name: "Hunt Intelligence Report",
+    description: "Terrain analysis, stand placement, wind strategy, and satellite hunt map. Indefinite parcel access.",
+    price: 149,
     color: "red",
+    badge: "🦌 MOST POPULAR",
   },
-  full_report: {
-    name: "Full Land Analysis",
-    price: 350,
-    description: "9-page comprehensive report",
-    features: ["Everything in Hunting Intel", "Complete USDA soil analysis", "Property tax snapshot", "County resources & contacts", "Conservation programs"],
+  land_report: {
+    name: "Land Intelligence Report",
+    description: "Professional land analysis including terrain, water, access, valuation, and market data.",
+    price: 49,
     color: "emerald",
+    badge: null as string | null,
   },
 } as const;
 
@@ -77,7 +70,7 @@ export default function MapPage() {
   // Basic Report - all 5 layers pre-selected
   const [selectedLayers] = useState<string[]>(["flood_zones", "topography", "soil_types", "property_boundaries", "roads_transportation"]);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<ProductType>("full_report");
+  const [selectedProduct, setSelectedProduct] = useState<ProductType>("hunt_report");
   const [guestEmail, setGuestEmail] = useState("");
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isDemoCheckout, setIsDemoCheckout] = useState(false);
@@ -101,8 +94,10 @@ export default function MapPage() {
 
   useEffect(() => {
     const productParam = searchParams.get("product");
-    if (productParam === "quick_look" || productParam === "full_report" || productParam === "hunting_intel") {
+    if (productParam === "hunt_report" || productParam === "land_report") {
       setSelectedProduct(productParam);
+    } else {
+      setSelectedProduct("hunt_report"); // default to most popular
     }
   }, [searchParams]);
 
@@ -138,13 +133,7 @@ export default function MapPage() {
     if (product) {
       setSelectedProduct(product as ProductType);
     }
-    // Skip layer check for fixed products (hunting_intel, quick_look)
-    const fixedProducts = ['hunting_intel', 'quick_look'];
-    const productToCheck = product || selectedProduct;
-    if (!fixedProducts.includes(productToCheck) && selectedLayers.length === 0) {
-      setError("Please select at least one map layer for your report");
-      return;
-    }
+    // Both products are fixed — no layer selection needed
     setShowCheckout(true);
   };
 
@@ -276,109 +265,37 @@ export default function MapPage() {
               <div className="space-y-3 mb-6">
                 <p className="text-sm font-medium text-stone-700">Choose Your Report</p>
                 
-                {/* Quick Look Option */}
-                <button
-                  onClick={() => setSelectedProduct("quick_look")}
-                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
-                    selectedProduct === "quick_look"
-                      ? "border-amber-500 bg-amber-50"
-                      : "border-stone-200 hover:border-stone-300"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                        selectedProduct === "quick_look" ? "border-amber-500" : "border-stone-300"
-                      }`}>
-                        {selectedProduct === "quick_look" && (
-                          <div className="w-2 h-2 rounded-full bg-amber-500" />
-                        )}
+                {(Object.keys(PRODUCTS) as ProductType[]).map((key) => {
+                  const product = PRODUCTS[key];
+                  const isSelected = selectedProduct === key;
+                  const colorMap = { red: { border: "border-red-500", bg: "bg-red-50", dot: "bg-red-500", dotBorder: "border-red-500", price: "text-red-600", check: "text-red-500", badgeBg: "bg-red-100", badgeText: "text-red-700" }, emerald: { border: "border-emerald-500", bg: "bg-emerald-50", dot: "bg-emerald-500", dotBorder: "border-emerald-500", price: "text-emerald-600", check: "text-emerald-500", badgeBg: "bg-emerald-100", badgeText: "text-emerald-700" } };
+                  const c = colorMap[product.color];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedProduct(key)}
+                      className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
+                        isSelected ? `${c.border} ${c.bg}` : "border-stone-200 hover:border-stone-300"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                            isSelected ? c.dotBorder : "border-stone-300"
+                          }`}>
+                            {isSelected && <div className={`w-2 h-2 rounded-full ${c.dot}`} />}
+                          </div>
+                          <span className="font-semibold text-stone-800 text-sm">{product.name}</span>
+                          {product.badge && (
+                            <span className={`text-xs ${c.badgeBg} ${c.badgeText} px-2 py-0.5 rounded font-medium`}>{product.badge}</span>
+                          )}
+                        </div>
+                        <span className={`text-lg font-bold ${c.price}`}>${product.price}</span>
                       </div>
-                      <span className="font-semibold text-stone-800 text-sm">{PRODUCTS.quick_look.name}</span>
-                    </div>
-                    <span className="text-lg font-bold text-amber-600">${PRODUCTS.quick_look.price}</span>
-                  </div>
-                  <p className="text-xs text-stone-500 ml-6">{PRODUCTS.quick_look.description}</p>
-                  {selectedProduct === "quick_look" && (
-                    <ul className="mt-2 ml-6 space-y-1">
-                      {PRODUCTS.quick_look.features.slice(0, 3).map((f, i) => (
-                        <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
-                          <span className="text-amber-500">✓</span> {f}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </button>
-
-                {/* Hunting Intelligence Option */}
-                <button
-                  onClick={() => setSelectedProduct("hunting_intel")}
-                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
-                    selectedProduct === "hunting_intel"
-                      ? "border-red-500 bg-red-50"
-                      : "border-stone-200 hover:border-stone-300"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                        selectedProduct === "hunting_intel" ? "border-red-500" : "border-stone-300"
-                      }`}>
-                        {selectedProduct === "hunting_intel" && (
-                          <div className="w-2 h-2 rounded-full bg-red-500" />
-                        )}
-                      </div>
-                      <span className="font-semibold text-stone-800 text-sm">{PRODUCTS.hunting_intel.name}</span>
-                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">🦌 NEW</span>
-                    </div>
-                    <span className="text-lg font-bold text-red-600">${PRODUCTS.hunting_intel.price}</span>
-                  </div>
-                  <p className="text-xs text-stone-500 ml-6">{PRODUCTS.hunting_intel.description}</p>
-                  {selectedProduct === "hunting_intel" && (
-                    <ul className="mt-2 ml-6 space-y-1">
-                      {PRODUCTS.hunting_intel.features.slice(0, 4).map((f, i) => (
-                        <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
-                          <span className="text-red-500">✓</span> {f}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </button>
-
-                {/* Full Report Option */}
-                <button
-                  onClick={() => setSelectedProduct("full_report")}
-                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
-                    selectedProduct === "full_report"
-                      ? "border-emerald-500 bg-emerald-50"
-                      : "border-stone-200 hover:border-stone-300"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                        selectedProduct === "full_report" ? "border-emerald-500" : "border-stone-300"
-                      }`}>
-                        {selectedProduct === "full_report" && (
-                          <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                        )}
-                      </div>
-                      <span className="font-semibold text-stone-800 text-sm">{PRODUCTS.full_report.name}</span>
-                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">Most Complete</span>
-                    </div>
-                    <span className="text-lg font-bold text-emerald-600">${PRODUCTS.full_report.price}</span>
-                  </div>
-                  <p className="text-xs text-stone-500 ml-6">{PRODUCTS.full_report.description}</p>
-                  {selectedProduct === "full_report" && (
-                    <ul className="mt-2 ml-6 space-y-1">
-                      {PRODUCTS.full_report.features.slice(0, 4).map((f, i) => (
-                        <li key={i} className="text-xs text-stone-600 flex items-center gap-1">
-                          <span className="text-emerald-500">✓</span> {f}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </button>
+                      <p className="text-xs text-stone-500 ml-6">{product.description}</p>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Guest Email */}
@@ -410,7 +327,7 @@ export default function MapPage() {
                     <span className="text-lg text-stone-700">Total</span>
                     <p className="text-xs text-stone-500">{PRODUCTS[selectedProduct].name}</p>
                   </div>
-                  <span className={`text-3xl font-bold ${selectedProduct === "quick_look" ? "text-amber-600" : selectedProduct === "hunting_intel" ? "text-red-600" : "text-emerald-700"}`}>
+                  <span className={`text-3xl font-bold ${selectedProduct === "hunt_report" ? "text-red-600" : "text-emerald-700"}`}>
                     ${PRODUCTS[selectedProduct].price}
                   </span>
                 </div>
