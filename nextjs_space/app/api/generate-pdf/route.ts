@@ -471,44 +471,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    // Route Quick Look orders to the dedicated endpoint
-    if (order.productType === "quick_look") {
-      try {
-        const baseUrl = request.headers.get("x-forwarded-proto") 
-          ? `${request.headers.get("x-forwarded-proto")}://${request.headers.get("host")}`
-          : new URL(request.url).origin;
-        const quickLookResponse = await fetch(`${baseUrl}/api/broker-quick-look`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
-          signal: AbortSignal.timeout(60000),
-        });
-        const data = await quickLookResponse.json();
-        return NextResponse.json(data, { status: quickLookResponse.status });
-      } catch (error) {
-        console.error("Quick Look routing error:", error);
-        return NextResponse.json({ error: "Failed to generate Quick Look report" }, { status: 500 });
-      }
+    if (order.productType === 'hunt_report') {
+      // Generate Hunt Intelligence Report
+      const huntRes = await fetch(new URL('/api/parcel-hunt-file', request.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: order.parcelAddress,
+          lat: order.parcelLat,
+          lng: order.parcelLng,
+          acreage: 0,
+          county: '',
+          state: 'MO',
+          prevailingWind: 'N',
+          stands: [],
+          summary: null,
+          corridors: null,
+          seasonScores: null,
+        }),
+      });
+      const html = await huntRes.text();
+      return new NextResponse(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
     }
 
-    // Route Hunting Intel orders to the dedicated endpoint
-    if (order.productType === "hunting_intel") {
-      try {
-        const baseUrl = request.headers.get("x-forwarded-proto") 
-          ? `${request.headers.get("x-forwarded-proto")}://${request.headers.get("host")}`
-          : new URL(request.url).origin;
-        const huntingIntelResponse = await fetch(`${baseUrl}/api/hunting-intel`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
-          signal: AbortSignal.timeout(60000),
-        });
-        const data = await huntingIntelResponse.json();
-        return NextResponse.json(data, { status: huntingIntelResponse.status });
-      } catch (error) {
-        console.error("Hunting Intel routing error:", error);
-        return NextResponse.json({ error: "Failed to generate Hunting Intelligence Report" }, { status: 500 });
-      }
+    if (order.productType === 'land_report') {
+      // Forward to existing land report generator
+      const landRes = await fetch(new URL('/api/broker-quick-look', request.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      return new NextResponse(await landRes.arrayBuffer(), {
+        headers: { 'Content-Type': 'application/pdf' },
+      });
     }
 
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
