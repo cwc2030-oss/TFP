@@ -110,12 +110,19 @@ export async function POST(req: NextRequest) {
       return `pin-s-s+${color}(${lngLat[0]},${lngLat[1]})`;
     }).filter(Boolean).join(',');
 
-    // Parcel boundary overlay disabled — GeoJSON encoding inflates URL past Mapbox 8192-char limit
-    const geoJsonOverlay = '';
+    let pathOverlay = '';
+    if (parcelCoords && parcelCoords.length >= 3) {
+      // Build Mapbox path overlay — much shorter than GeoJSON
+      const coords = [...parcelCoords, parcelCoords[0]]; // close the polygon
+      const pathPoints = coords
+        .map((c: number[]) => `${c[0]},${c[1]}`)
+        .join(',');
+      pathOverlay = `path-3+c9a84c-0.8(${encodeURIComponent(pathPoints)})`;
+    }
 
-    // Combine overlays
-    const overlayStr = [geoJsonOverlay, markerOverlays].filter(Boolean).join(',') 
-      || 'pin-s+2d6a4f(' + lng + ',' + lat + ')';
+    const overlayStr = [pathOverlay, markerOverlays]
+      .filter(Boolean)
+      .join(',') || `pin-s+2d6a4f(${lng},${lat})`;
     const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static';
     const staticMapUrl = `${mapboxBase}/${overlayStr}/${lng},${lat},${zoom}/${width}x${height}@2x?access_token=${mapToken}`;
 

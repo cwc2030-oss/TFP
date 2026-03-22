@@ -1898,8 +1898,10 @@ function DeerIntelContent() {
           recommended: summary?.recommendedSeason ?? 'rut',
           topScore: summary?.topStandScore ?? 0,
         },
-        parcelCoords: parcelPolygon?.geometry?.type === 'Polygon' 
-          ? (parcelPolygon.geometry as any).coordinates[0].slice(0, 20)
+        parcelCoords: parcelPolygon?.geometry?.type === 'Polygon'
+          ? (parcelPolygon.geometry as any).coordinates[0]
+              .filter((_: any, i: number) => i % 3 === 0) // take every 3rd point = ~33% of coords
+              .slice(0, 15) // hard cap at 15 points
           : null,
       };
 
