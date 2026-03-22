@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
     if (parcelCoords && parcelCoords.length >= 3) {
       const coords = [...parcelCoords, parcelCoords[0]]; // close the polygon
       const pathPoints = coords
-        .map((c: number[]) => `${c[0]},${c[1]}`)
+        .map((c: number[]) => `${c[0]}+${c[1]}`)
         .join(',');
       pathOverlay = `path-4+c9a84c-1(${encodeURIComponent(pathPoints)})`;
     }
