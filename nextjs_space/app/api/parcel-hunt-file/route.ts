@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch static satellite map with parcel marker
     const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
-    const zoom = 14;
+    const zoom = 15;
     const width = 720;
     const height = 480;
 
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
       const pathPoints = coords
         .map((c: number[]) => `${c[0]},${c[1]}`)
         .join(',');
-      pathOverlay = `path+c9a84c,f00f00-0.1(${encodeURIComponent(pathPoints)})`;
+      pathOverlay = `path-4+c9a84c-1(${encodeURIComponent(pathPoints)})`;
     }
 
     const overlayStr = [pathOverlay, markerOverlays]
