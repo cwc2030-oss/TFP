@@ -112,12 +112,11 @@ export async function POST(req: NextRequest) {
 
     let pathOverlay = '';
     if (parcelCoords && parcelCoords.length >= 3) {
-      // Build Mapbox path overlay — much shorter than GeoJSON
       const coords = [...parcelCoords, parcelCoords[0]]; // close the polygon
       const pathPoints = coords
         .map((c: number[]) => `${c[0]},${c[1]}`)
         .join(',');
-      pathOverlay = `path-3+c9a84c-0.8(${encodeURIComponent(pathPoints)})`;
+      pathOverlay = `path+c9a84c,f00f00-0.1(${encodeURIComponent(pathPoints)})`;
     }
 
     const overlayStr = [pathOverlay, markerOverlays]
@@ -126,10 +125,14 @@ export async function POST(req: NextRequest) {
     const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static';
     const staticMapUrl = `${mapboxBase}/${overlayStr}/${lng},${lat},${zoom}/${width}x${height}@2x?access_token=${mapToken}`;
 
+    console.log('[hunt-report] Static map overlay:', pathOverlay);
+    console.log('[hunt-report] Full URL length:', staticMapUrl.length);
+    console.log('[hunt-report] Full URL:', staticMapUrl.substring(0, 200));
+
     let mapImageBase64 = '';
     try {
       const mapRes = await fetch(staticMapUrl);
-      console.log('[hunt-report] Static map status:', mapRes.status, 'URL length:', staticMapUrl.length);
+      console.log('[hunt-report] Static map status:', mapRes.status);
       if (mapRes.ok) {
         const mapBuffer = await mapRes.arrayBuffer();
         mapImageBase64 = `data:image/png;base64,${Buffer.from(mapBuffer).toString('base64')}`;
