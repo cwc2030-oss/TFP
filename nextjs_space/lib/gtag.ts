@@ -1,5 +1,6 @@
-// Google Analytics helper — fires custom events via gtag
-// Measurement ID is loaded in layout.tsx; this just provides typed helpers
+// Google Analytics helper + server-side funnel logging
+// GA fires via gtag in the browser; events are also logged to FunnelEvent table
+// for the weekly email report.
 
 export const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID || '';
 
@@ -15,44 +16,48 @@ export function trackEvent(eventName: string, params?: Record<string, string | n
   gtag('event', eventName, params);
 }
 
-// ─── Funnel Events ──────────────────────────────────────────
+// Fire-and-forget server-side funnel log (never blocks UI)
+function logFunnelEvent(event: string, address?: string, metadata?: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  try {
+    fetch('/api/funnel-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event, address, metadata }),
+    }).catch(() => {}); // swallow errors
+  } catch {
+    // ignore
+  }
+}
+
+// --- Funnel Events ---
 
 /** User enters an address on the homepage */
 export function trackAddressSearch(address: string) {
-  trackEvent('address_search', {
-    search_term: address,
-  });
+  trackEvent('address_search', { search_term: address });
+  logFunnelEvent('address_search', address);
 }
 
 /** User opens the Terrain Analyzer (intel page) */
 export function trackTerrainAnalyzerOpened(address: string, lat: number, lng: number) {
-  trackEvent('terrain_analyzer_opened', {
-    address,
-    lat,
-    lng,
-  });
+  trackEvent('terrain_analyzer_opened', { address, lat, lng });
+  logFunnelEvent('terrain_analyzer_opened', address, { lat, lng });
 }
 
 /** User views the pricing page */
 export function trackPricingPageViewed() {
   trackEvent('pricing_page_viewed');
+  logFunnelEvent('pricing_page_viewed');
 }
 
 /** User initiates checkout (clicks "Get Report" on map page) */
 export function trackCheckoutInitiated(productType: string, address: string, price: number) {
-  trackEvent('checkout_initiated', {
-    product_type: productType,
-    address,
-    value: price,
-    currency: 'USD',
-  });
+  trackEvent('checkout_initiated', { product_type: productType, address, value: price, currency: 'USD' });
+  logFunnelEvent('checkout_initiated', address, { productType, price });
 }
 
 /** User completes a purchase (reaches success page) */
 export function trackPurchaseCompleted(orderId: string, productType: string, address: string) {
-  trackEvent('purchase', {
-    transaction_id: orderId,
-    product_type: productType,
-    address,
-  });
+  trackEvent('purchase', { transaction_id: orderId, product_type: productType, address });
+  logFunnelEvent('purchase_completed', address, { orderId, productType });
 }

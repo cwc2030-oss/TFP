@@ -66,6 +66,17 @@ model Lead {
   @@index([email])
 }
 
+model FunnelEvent {
+  id        String   @id @default(cuid())
+  event     String   // address_search, terrain_analyzer_opened, pricing_page_viewed, checkout_initiated, purchase_completed
+  address   String?
+  metadata  String?  // JSON: productType, price, orderId, lat, lng, etc.
+  createdAt DateTime @default(now())
+
+  @@index([event])
+  @@index([createdAt])
+}
+
 model ParcelCache {
   id          String   @id @default(cuid())
   lat         Float
