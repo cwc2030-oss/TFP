@@ -9,10 +9,12 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const dynamic = "force-dynamic";
 
-const OG_IMAGE_URL = "https://terrafirmapartners.abacusai.app/og-image.png";
+// Use custom domain as the canonical base; falls back to Abacus domain
+const SITE_URL = "https://terrafirmapartners.com";
+const OG_IMAGE_URL = `${SITE_URL}/og-image.png`;
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://terrafirmapartners.abacusai.app"),
+  metadataBase: new URL(SITE_URL),
   title: "Terra Firma Partners™ | Land Intelligence | Missouri",
   description:
     "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones, soil data & more. Reports from $49.",
@@ -32,7 +34,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://terrafirmapartners.abacusai.app",
+    url: SITE_URL,
     siteName: "Terra Firma Partners™",
     title: "Terra Firma Partners™ | Land Intelligence",
     description:
