@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
+import { trackTerrainAnalyzerOpened } from "@/lib/gtag";
 
 // Dynamically import Terrain3DView to avoid SSR issues with Mapbox
 const Terrain3DView = dynamic(
@@ -119,8 +120,12 @@ function PreviewContent() {
   }, [lat, lng, address, router]);
   
   const handleUnlock = () => {
-    // Go to the new Deer Intel page with terrain analysis
-    router.push(`/intel?lat=${parcelInfo?.lat || lat}&lng=${parcelInfo?.lng || lng}&address=${encodeURIComponent(parcelInfo?.address || address)}&acreage=${parcelInfo?.acreage || 80}`);
+    // Track terrain analyzer open & go to the Deer Intel page
+    const finalLat = parcelInfo?.lat || lat;
+    const finalLng = parcelInfo?.lng || lng;
+    const finalAddress = parcelInfo?.address || address;
+    trackTerrainAnalyzerOpened(finalAddress, finalLat, finalLng);
+    router.push(`/intel?lat=${finalLat}&lng=${finalLng}&address=${encodeURIComponent(finalAddress)}&acreage=${parcelInfo?.acreage || 80}`);
   };
   
   const handleExploreMap = () => {

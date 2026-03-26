@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Check, MapPin, FileText, Shield, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
+import { trackPricingPageViewed } from "@/lib/gtag";
 
 export default function PricingPage() {
+  useEffect(() => {
+    trackPricingPageViewed();
+  }, []);
   return (
     <div className="min-h-screen bg-gradient-to-br from-stone-50 to-emerald-50">
       <Navbar />

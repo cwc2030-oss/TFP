@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MAP_LAYERS } from "@/lib/map-layers";
+import { trackAddressSearch } from "@/lib/gtag";
 
 // Seasonal greeting based on current month
 function getSeasonalGreeting(): { greeting: string; subtext: string; emoji: string } {
@@ -133,6 +134,7 @@ function HeroSection() {
       
       if (data.status === 'OK' && data.results.length > 0) {
         const location = data.results[0].geometry.location;
+        trackAddressSearch(suggestion.description);
         router.push(`/preview?lat=${location.lat}&lng=${location.lng}&address=${encodeURIComponent(suggestion.description)}`);
       } else {
         setSearchError('Could not locate address.');
@@ -164,7 +166,8 @@ function HeroSection() {
         const location = data.results[0].geometry.location;
         const formattedAddress = data.results[0].formatted_address;
         
-        // Redirect to cinematic preview
+        // Track & redirect to cinematic preview
+        trackAddressSearch(formattedAddress);
         router.push(`/preview?lat=${location.lat}&lng=${location.lng}&address=${encodeURIComponent(formattedAddress)}`);
       } else {
         setSearchError('Address not found. Try including city and state.');

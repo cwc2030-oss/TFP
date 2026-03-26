@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { trackPurchaseCompleted } from "@/lib/gtag";
 
 function SuccessContent() {
   const searchParams = useSearchParams();
@@ -50,6 +51,7 @@ function SuccessContent() {
               parcelLng: data.order.parcelLng,
               parcelAddress: data.order.parcelAddress,
             });
+            trackPurchaseCompleted(orderId, data.order.productType, data.order.parcelAddress || '');
           }
           setOrderCompleted(true);
         }

@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MAP_LAYERS } from "@/lib/map-layers";
+import { trackCheckoutInitiated } from "@/lib/gtag";
 
 const InteractiveMap = dynamic(
   () => import("@/components/map/interactive-map"),
@@ -176,6 +177,10 @@ export default function MapPage() {
 
       const { order } = await orderResponse.json();
       localStorage.setItem('tfp_current_order_id', order.id);
+
+      // Track checkout initiation
+      const priceValue = selectedProduct === 'hunt_report' ? 149 : 49;
+      trackCheckoutInitiated(selectedProduct, selectedParcel.address, priceValue);
 
       // If demo mode, skip Stripe and go directly to success
       if (isDemo) {
