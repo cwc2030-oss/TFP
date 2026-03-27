@@ -10,7 +10,7 @@ const inter = Inter({ subsets: ["latin"] });
 export const dynamic = "force-dynamic";
 
 // Use custom domain as the canonical base; falls back to Abacus domain
-const SITE_URL = "https://terrafirmapartners.com";
+const SITE_URL = "https://terrafirma.partners";
 const OG_IMAGE_URL = `${SITE_URL}/og-image.png`;
 
 export const metadata: Metadata = {

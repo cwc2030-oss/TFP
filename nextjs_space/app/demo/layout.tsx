@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-const SITE_URL = "https://terrafirmapartners.com";
+const SITE_URL = "https://terrafirma.partners";
 
 export const metadata: Metadata = {
   title: "Demo | See What Your Land Is Hiding — Terra Firma Partners",
