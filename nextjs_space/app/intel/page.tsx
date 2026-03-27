@@ -1458,7 +1458,7 @@ function DeerIntelContent() {
   const [showBeddingProbability, setShowBeddingProbability] = useState(false);
 
   // UI state
-  const [panelCollapsed, setPanelCollapsed] = useState(true); // Left panel collapsed by default
+  const [panelCollapsed, setPanelCollapsed] = useState(false); // Left panel open by default
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
