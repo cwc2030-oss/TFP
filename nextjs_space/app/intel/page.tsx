@@ -20,6 +20,7 @@ import {
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
 import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
+import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
@@ -6538,20 +6539,25 @@ function DeerIntelContent() {
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
       const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standPrimary : '#d4a574';
       const standLabel = isTopStand ? "★ Today's Sit" : stand.name;
-      const resil = stand.resilience;
-      const resilLabel = resil ? resil.label : '—';
-      const resilScore = resil ? resil.score : 0;
-      const resilColor = resilScore >= 75 ? '#22c55e' : resilScore >= 45 ? '#eab308' : '#ef4444';
+      // Explainability chips
+      const explain = getStandExplainability(stand.inputs, props, stand.alignment, stand.resilience);
+      const chipsHTML = renderChipsHTML(explain.chips);
+      const barsHTML = renderQualityBarsHTML(explain.qualityBars);
       hoverTooltip.innerHTML = `
-        <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 4px;">
+        <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 2px;">
           ${standLabel} • ${alignScore}/100
         </div>
-        <div style="color: #ccc; font-size: 12px; line-height: 1.4;">
-          <div>🏷️ Tier: <b style="color: ${tooltipColor}">${tierLabel}</b></div>
-          <div>🌬️ Best Wind: <b style="color: #22c55e">${props.windOk.slice(0, 2).join(', ')}</b></div>
-          <div>⏰ Best Time: <b>${bestTime}</b></div>
-          <div>🦌 To Corridor: <b>${props.distToCorridorMeters}m</b></div>
-          <div>🛡️ Resilience: <b style="color: ${resilColor}">${resilLabel} (${resilScore})</b></div>
+        <div style="font-size: 10px; color: #a8a29e; margin-bottom: 6px; font-style: italic;">
+          ${explain.rankRationale}
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 6px;">
+          ${chipsHTML}
+        </div>
+        <div style="margin-bottom: 4px;">
+          ${barsHTML}
+        </div>
+        <div style="color: #78716c; font-size: 10px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
+          🌬️ ${props.windOk.slice(0, 2).join(', ')} winds • ⏰ ${bestTime}
         </div>
       `;
       el.appendChild(hoverTooltip);
@@ -6580,7 +6586,7 @@ function DeerIntelContent() {
       el.onclick = () => {
         hoverTooltip.style.opacity = '0';
         setSelectedStand(stand.rank);
-        showStandPopup(coords, props, stand.resilience);
+        showStandPopup(coords, props, stand.resilience, stand);
         map.flyTo({ center: coords, zoom: 16 });
       };
 
@@ -6645,7 +6651,7 @@ function DeerIntelContent() {
     return () => { map.off('zoom', onZoom); };
   }, [mapReady, alignedStands]); // eslint-disable-line
 
-  const showStandPopup = (coords: [number, number], props: StandPointProperties, resilience?: StandResilience) => {
+  const showStandPopup = (coords: [number, number], props: StandPointProperties, resilience?: StandResilience, standData?: AlignedStand) => {
     const map = mapRef.current;
     if (!map) return;
 
@@ -6733,14 +6739,19 @@ function DeerIntelContent() {
     const isTodaysSit = props.rank === 1;
     const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing})` : 
       props.rank <= 3 ? LAYER_COLORS.standPrimary : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow;
-    const popupBadgeLabel = isTodaysSit ? "⭐ Today's Sit" : `Stand #${props.rank}`;
+    const popupBadgeLabel = isTodaysSit ? "★ Today's Sit" : `Stand #${props.rank}`;
     const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
+
+    // Explainability data (if stand data available)
+    const popupChipsHTML = standData ? renderChipsHTML(getStandExplainability(standData.inputs, props, standData.alignment, resilience).chips) : '';
+    const popupBarsHTML = standData ? renderQualityBarsHTML(getStandExplainability(standData.inputs, props, standData.alignment, resilience).qualityBars) : '';
+    const popupRationale = standData ? getStandExplainability(standData.inputs, props, standData.alignment, resilience).rankRationale : '';
     
-    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '320px', offset: 12, className: 'intel-popup' })
+    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '340px', offset: 12, className: 'intel-popup' })
       .setLngLat(coords)
       .setHTML(`
-        <div style="max-height: 240px; overflow: auto; padding: 10px 12px; font-size: 12px; line-height: 1.25; font-family: system-ui, sans-serif;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <div style="max-height: 340px; overflow: auto; padding: 10px 12px; font-size: 12px; line-height: 1.25; font-family: system-ui, sans-serif;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
             <span style="
               background: ${popupBadgeColor};
               color: ${badgeTextColor};
@@ -6752,8 +6763,26 @@ function DeerIntelContent() {
             ">${popupBadgeLabel}</span>
             <span style="font-weight: 700; font-size: 16px;">${props.score}<span style="font-size: 11px; color: #6b7280;">/100</span></span>
           </div>
+
+          ${popupRationale ? `
+          <p style="margin: 4px 0 8px; font-size: 10px; color: #9ca3af; font-style: italic;">
+            ${popupRationale}
+          </p>
+          ` : ''}
+
+          ${popupChipsHTML ? `
+          <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px;">
+            ${popupChipsHTML}
+          </div>
+          ` : ''}
+
+          ${popupBarsHTML ? `
+          <div style="margin-bottom: 8px; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+            ${popupBarsHTML}
+          </div>
+          ` : ''}
           
-          <p style="margin: 8px 0; font-size: 11px; color: #4b5563; line-height: 1.35;">
+          <p style="margin: 6px 0; font-size: 11px; color: #4b5563; line-height: 1.35;">
             ${props.reasoning}
           </p>
           
@@ -6791,46 +6820,18 @@ function DeerIntelContent() {
             ">
               ${props.approachRisk.toUpperCase()} risk
             </span>
+            ${resilience ? `
+            <span style="
+              padding: 3px 7px;
+              border-radius: 4px;
+              font-weight: 500;
+              font-size: 10px;
+              background: ${resilience.score >= 75 ? '#dcfce7' : resilience.score >= 45 ? '#fef3c7' : '#fee2e2'};
+              color: ${resilience.score >= 75 ? '#166534' : resilience.score >= 45 ? '#92400e' : '#991b1b'};
+            ">🛡️ ${resilience.label} (${resilience.score})</span>
+            ` : ''}
             <span style="color: #6b7280; font-size: 10px;">Elev: ${Math.round(props.elevation)}m</span>
           </div>
-          
-          ${resilience ? `
-          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px;">
-              <span style="font-weight: 600; font-size: 11px; color: #1f2937;">🛡️ Resilience</span>
-              <span style="
-                padding: 2px 7px;
-                border-radius: 10px;
-                font-weight: 600;
-                font-size: 10px;
-                background: ${resilience.score >= 75 ? '#dcfce7' : resilience.score >= 45 ? '#fef3c7' : '#fee2e2'};
-                color: ${resilience.score >= 75 ? '#166534' : resilience.score >= 45 ? '#92400e' : '#991b1b'};
-              ">${resilience.label} ${resilience.score}/100</span>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px; font-size: 10px;">
-              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
-                <span style="color: #6b7280;">Corridors</span>
-                <span style="float: right; font-weight: 600;">${resilience.corridorCount} (${resilience.corridorCountScore})</span>
-              </div>
-              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
-                <span style="color: #6b7280;">Spread</span>
-                <span style="float: right; font-weight: 600;">${resilience.angularSpread}° (${resilience.angularSpreadScore})</span>
-              </div>
-              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
-                <span style="color: #6b7280;">Central</span>
-                <span style="float: right; font-weight: 600;">${resilience.centralityDist}m (${resilience.centralityScore})</span>
-              </div>
-              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px;">
-                <span style="color: #6b7280;">Re-entry</span>
-                <span style="float: right; font-weight: 600;">${resilience.reentryPaths} (${resilience.reentryScore})</span>
-              </div>
-              <div style="background: #f9fafb; padding: 3px 5px; border-radius: 3px; grid-column: span 2;">
-                <span style="color: #6b7280;">Downwind</span>
-                <span style="float: right; font-weight: 600;">${resilience.downwindDirs} dirs (${resilience.downwindScore})</span>
-              </div>
-            </div>
-          </div>
-          ` : ''}
           
           <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
             <button
@@ -6855,6 +6856,7 @@ function DeerIntelContent() {
         </div>
       `)
       .addTo(map);
+
 
     popupRef.current = popup;
   };

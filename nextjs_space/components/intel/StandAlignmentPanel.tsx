@@ -3,6 +3,7 @@
 import { Target, ChevronRight } from 'lucide-react';
 import type { StandPointProperties } from '@/types/terrain';
 import type { StandInputs, StandScore } from '@/lib/scoring/stand-alignment';
+import { getStandExplainability, type ReasonChip, type QualityBar } from '@/lib/scoring/stand-explainability';
 
 export type AlignedStand = {
   rank: number;
@@ -34,6 +35,36 @@ interface StandAlignmentPanelProps {
   expanded: boolean;
   onToggleExpanded: () => void;
   onStandClick: (stand: AlignedStand) => void;
+}
+
+// Chip color mapping
+const chipStyles: Record<ReasonChip['tone'], { bg: string; text: string }> = {
+  positive: { bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
+  neutral:  { bg: 'bg-stone-500/10', text: 'text-stone-400' },
+  caution:  { bg: 'bg-red-500/15', text: 'text-red-400' },
+};
+
+function ChipBadge({ chip }: { chip: ReasonChip }) {
+  const style = chipStyles[chip.tone];
+  return (
+    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${style.bg} ${style.text} whitespace-nowrap`}>
+      {chip.icon} {chip.label}
+    </span>
+  );
+}
+
+function QualityBarRow({ bar }: { bar: QualityBar }) {
+  const pct = Math.round(bar.value * 100);
+  const barColor = bar.value >= 0.65 ? 'bg-emerald-400' : bar.value >= 0.4 ? 'bg-amber-400' : 'bg-red-400';
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-[50px] text-[9px] text-stone-500">{bar.label}</span>
+      <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+        <div className={`h-full ${barColor} rounded-full`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-[32px] text-right text-[8px] text-stone-500">{bar.displayLabel}</span>
+    </div>
+  );
 }
 
 export function StandAlignmentPanel({
@@ -85,6 +116,9 @@ export function StandAlignmentPanel({
             };
             const accentColor = accentColors[tierLabel] || '#708090';
 
+            // Explainability
+            const explain = getStandExplainability(stand.inputs, stand.props, stand.alignment, stand.resilience);
+
             return (
               <div
                 key={stand.rank}
@@ -104,32 +138,68 @@ export function StandAlignmentPanel({
                   onClick={() => onStandClick(stand)}
                   className="w-full pl-3 pr-2 py-2 text-left"
                 >
+                  {/* Row 1: Name + Score */}
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
                       <span className="text-white text-sm font-medium truncate block">{stand.name}</span>
-                      <span className="text-stone-500 text-xs">{tierLabel}</span>
                     </div>
-                    <span className="text-stone-600 text-[11px] font-mono ml-2">{stand.alignment.score}</span>
+                    <div className="flex items-center gap-1.5 ml-2">
+                      <span className="text-[9px] text-stone-500 uppercase">{tierLabel}</span>
+                      <span className="text-white text-[13px] font-bold font-mono">{stand.alignment.score}</span>
+                    </div>
                   </div>
+
+                  {/* Row 2: Reason chips */}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {explain.chips.slice(0, 3).map((chip, i) => (
+                      <ChipBadge key={i} chip={chip} />
+                    ))}
+                    {stand.resilience && (
+                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium whitespace-nowrap ${
+                        stand.resilience.score >= 70 ? 'bg-emerald-500/15 text-emerald-400' :
+                        stand.resilience.score >= 40 ? 'bg-amber-500/15 text-amber-400' :
+                        'bg-red-500/15 text-red-400'
+                      }`}>
+                        🛡️ {stand.resilience.label}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Row 3: One-line rationale */}
+                  <p className="text-[9px] text-stone-500 mt-1 italic truncate">
+                    {explain.rankRationale}
+                  </p>
                 </button>
 
                 {/* Inline expanded details */}
                 {isExpanded && (
-                  <div className="pl-3 pr-2 pb-2 pt-1 border-t border-white/5 text-xs text-stone-400 space-y-1">
-                    <div className="flex justify-between">
-                      <span>Face:</span>
-                      <span className="text-white">{stand.props.windOk[0] || 'N'}</span>
+                  <div className="pl-3 pr-2 pb-2.5 pt-1 border-t border-white/5 space-y-2">
+                    {/* Quality bars */}
+                    <div className="space-y-0.5">
+                      {explain.qualityBars.map((bar, i) => (
+                        <QualityBarRow key={i} bar={bar} />
+                      ))}
                     </div>
-                    <div className="flex justify-between">
-                      <span>Intrusion:</span>
-                      <span className="text-white capitalize">{stand.props.approachRisk}</span>
-                    </div>
-                    {stand.props.distToCorridorMeters > 0 && (
-                      <div className="flex justify-between">
-                        <span>To corridor:</span>
-                        <span className="text-white">{stand.props.distToCorridorMeters}m</span>
+
+                    {/* Key stats */}
+                    <div className="grid grid-cols-3 gap-1 text-[9px]">
+                      <div className="bg-white/[0.04] rounded px-1.5 py-1 text-center">
+                        <span className="text-stone-500 block">Wind</span>
+                        <span className="text-white font-medium">{stand.props.windOk[0] || 'N'}</span>
                       </div>
-                    )}
+                      <div className="bg-white/[0.04] rounded px-1.5 py-1 text-center">
+                        <span className="text-stone-500 block">Corridor</span>
+                        <span className="text-white font-medium">{stand.props.distToCorridorMeters}m</span>
+                      </div>
+                      <div className="bg-white/[0.04] rounded px-1.5 py-1 text-center">
+                        <span className="text-stone-500 block">Access</span>
+                        <span className={`font-medium capitalize ${
+                          stand.props.approachRisk === 'low' ? 'text-emerald-400' :
+                          stand.props.approachRisk === 'medium' ? 'text-amber-400' :
+                          'text-red-400'
+                        }`}>{stand.props.approachRisk}</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
