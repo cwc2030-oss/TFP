@@ -22,7 +22,7 @@ import {
 import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
 import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
-import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, cancelAllAnimations } from '@/lib/map-animation';
+import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
@@ -1939,41 +1939,47 @@ function DeerIntelContent() {
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
 
   // ========== FULL OVERLAY RESET — clears every tfp-* GeoJSON source ==========
+  // V4 Step 11b: All TFP source IDs for overlay management
+  const ALL_TFP_SOURCES = useRef([
+    'tfp-parcel', 'tfp-qa-parcel',
+    'tfp-debug-raw', 'tfp-debug-normalized', 'tfp-debug-analysis',
+    'tfp-bedding', 'tfp-funnels-lines', 'tfp-funnels-polys',
+    'tfp-corridors-primary', 'tfp-corridors-possible', 'tfp-corridors-exploratory',
+    'tfp-corridors-context-primary', 'tfp-corridors-context-possible',
+    'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
+    'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
+    'tfp-pressure-heatmap',
+    'tfp-movement-delta',
+    'tfp-movement-post',
+    'tfp-refuge-zones',
+    'tfp-flow-primary', 'tfp-flow-nearest-highlight', 'tfp-flow-secondary', 'tfp-flow-convergence',
+    'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
+    'tfp-huntability-corridors', 'tfp-huntability-convergence',
+    'tfp-bedding-probability',
+    'tfp-edge-arrows', 'tfp-edge-ghost', 'tfp-edge-ghost-saddles',
+    'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
+    'tfp-stand-emphasis',
+    'tfp-hunt-pockets',
+    'tfp-stand-direction',
+    'tfp-stand-tertiary',
+  ]);
+
   const clearAllOverlaySources = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-    const ALL_TFP_SOURCES = [
-      'tfp-parcel', 'tfp-qa-parcel',
-      'tfp-debug-raw', 'tfp-debug-normalized', 'tfp-debug-analysis',
-      'tfp-bedding', 'tfp-funnels-lines', 'tfp-funnels-polys',
-      'tfp-corridors-primary', 'tfp-corridors-possible', 'tfp-corridors-exploratory',
-      'tfp-corridors-context-primary', 'tfp-corridors-context-possible',
-      'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
-      'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
-      'tfp-pressure-heatmap',
-      'tfp-movement-delta',
-      'tfp-movement-post',
-      'tfp-refuge-zones',
-      'tfp-flow-primary', 'tfp-flow-nearest-highlight', 'tfp-flow-secondary', 'tfp-flow-convergence',
-      'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
-      'tfp-huntability-corridors', 'tfp-huntability-convergence',
-      'tfp-bedding-probability',
-      'tfp-edge-arrows', 'tfp-edge-ghost', 'tfp-edge-ghost-saddles',
-      'tfp-edge-draw-extensions', 'tfp-edge-pressure', 'tfp-edge-boundary',
-      'tfp-stand-emphasis', // v3.8.1 — top-stand attention glow
-      'tfp-hunt-pockets', // Hunt pocket halos around stands
-      'tfp-stand-direction', // v1.1 — movement-axis / flow-axis wedge (not approach direction)
-      'tfp-stand-tertiary', // v1.1 — tertiary stand dots
-    ];
-    for (const id of ALL_TFP_SOURCES) {
-      try {
-        const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
-        if (src) src.setData(EMPTY_FC);
-      } catch (e) {
-        // Source may have been removed — safe to ignore
-      }
-    }
-    console.log('[OVERLAY RESET] Cleared all', ALL_TFP_SOURCES.length, 'tfp-* sources');
+
+    // V4 Step 11b: Graceful fade-out before clearing data
+    // Fade out HTML stand markers first
+    markersRef.current.forEach(m => {
+      const el = m.getElement();
+      el.style.transition = 'opacity 220ms ease';
+      el.style.opacity = '0';
+    });
+
+    // Use gracefulClear to fade out all Mapbox layers, then wipe sources
+    gracefulClear(map, ALL_TFP_SOURCES.current, 220).then(() => {
+      console.log('[OVERLAY RESET] Gracefully cleared all tfp-* sources');
+    });
   }, []);
 
   // Fetch terrain analysis using shared client
@@ -3212,8 +3218,10 @@ function DeerIntelContent() {
       map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'visible');
     }
 
-    // V4 Step 10+11: Smooth corridor dimming when stand is selected
-    // Animated transition creates visual focus — nearest corridor stays bright, others smoothly fade
+    // V4 Step 11b: Choreographed corridor focus when stand is selected
+    // 1. Corridors dim smoothly (600ms ease) to push attention toward the highlight
+    // 2. Nearest corridor highlight fades in after a 200ms delay for a deliberate reveal
+    const selecting = selectedStand !== null;
     const corridorDimLayers = [
       { id: 'tfp-corridors-primary', dimOpacity: 0.25, fullOpacity: 0.78 },
       { id: 'tfp-corridors-primary-casing', dimOpacity: 0.05, fullOpacity: 0.15 },
@@ -3224,9 +3232,17 @@ function DeerIntelContent() {
     ];
     corridorDimLayers.forEach(({ id, dimOpacity, fullOpacity }) => {
       if (!map.getLayer(id)) return;
-      const target = selectedStand !== null ? dimOpacity : fullOpacity;
-      animatePaint(map, id, 'line-opacity', target, 400);
+      const target = selecting ? dimOpacity : fullOpacity;
+      // Slower when selecting (cinematic dim), faster when restoring
+      animatePaint(map, id, 'line-opacity', target, selecting ? 600 : 400);
     });
+
+    // Delayed highlight reveal for selected corridor
+    if (selecting && map.getLayer('tfp-flow-nearest-highlight') && flowVisibility.flowPrimary) {
+      setTimeout(() => {
+        fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.75, 'line-opacity', 500);
+      }, 200);
+    }
   }, [selectedStand, alignedStands, terrainFlowData, mapReady, flowVisibility.flowPrimary]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
@@ -3235,9 +3251,9 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
 
     try {
-      // V4 Step 11: Smooth fade transitions for layer visibility toggles
-      const FADE_IN = 350;
-      const FADE_OUT = 280;
+      // V4 Step 11b: Smooth fade transitions with improved timing
+      const FADE_IN = 420;
+      const FADE_OUT = 300;
 
       // Bedding visibility — smooth fade
       fadeToggleLayers(map, visibility.bedding, [
@@ -3270,8 +3286,8 @@ function DeerIntelContent() {
         { id: 'tfp-funnels-polys-outline', targetOpacity: 1.0 },
       ], FADE_IN);
       
-      // V2 Tiered corridor visibility — smooth fade (V4 Step 11)
-      fadeToggleLayers(map, visibility.corridors, [
+      // V4 Step 11b: Staggered corridor reveal — cascading "drawing on" effect
+      staggeredFadeToggle(map, visibility.corridors, [
         { id: 'tfp-corridors-primary-casing', targetOpacity: 0.15 },
         { id: 'tfp-corridors-primary', targetOpacity: 0.78 },
         { id: 'tfp-corridors-possible', targetOpacity: 0.42 },
@@ -3279,7 +3295,7 @@ function DeerIntelContent() {
         { id: 'tfp-corridors-context-primary', targetOpacity: 0.28 },
         { id: 'tfp-corridors-context-possible', targetOpacity: 0.15 },
         { id: 'tfp-intrusion-overlay', targetOpacity: 0.3, opacityProp: 'fill-opacity' },
-      ], FADE_IN);
+      ], FADE_IN, 50);
       
       // V2 Tiered funnel visibility — smooth fade
       fadeToggleLayers(map, visibility.funnels, [
@@ -3289,15 +3305,15 @@ function DeerIntelContent() {
         { id: 'tfp-funnels-slight-outline', targetOpacity: 0.5 },
       ], FADE_IN);
       
-      // Ridge spine visibility — smooth fade
-      fadeToggleLayers(map, visibility.ridgeSpines, [
+      // V4 Step 11b: Staggered ridge spine reveal
+      staggeredFadeToggle(map, visibility.ridgeSpines, [
         { id: 'tfp-ridges-primary-casing', targetOpacity: 0.25 },
         { id: 'tfp-ridges-primary', targetOpacity: 0.85 },
         { id: 'tfp-ridges-secondary-casing', targetOpacity: 0.15 },
         { id: 'tfp-ridges-secondary', targetOpacity: 0.55 },
         { id: 'tfp-saddle-nodes', targetOpacity: 0.8, opacityProp: 'circle-opacity' },
         { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.6, opacityProp: 'circle-stroke-opacity' },
-      ], FADE_IN);
+      ], FADE_IN, 45);
       
       // When ridge spines are ON, reduce heatmap opacity — smooth transition
       if (map.getLayer('tfp-pressure-heatmap')) {
@@ -3308,7 +3324,7 @@ function DeerIntelContent() {
       // Terrain Flow visibility (movement likelihood layers)
       // Pressure Simulation v1 — pressureView controls which of the 4 heat layers is active.
       // All four share the master pressureHeatmap toggle; pressureView picks one.
-      // V4 Step 11: Heatmap crossfade — smoothly animate heatmap-opacity instead of instant toggle
+      // V4 Step 11b: Heatmap crossfade with improved easing and timing
       const heatOn = flowVisibility.pressureHeatmap;
       const heatViews = [
         { id: 'tfp-pressure-heatmap', view: 'pressure' },
@@ -3321,13 +3337,12 @@ function DeerIntelContent() {
         const shouldShow = heatOn && pressureView === view;
         if (shouldShow) {
           map.setLayoutProperty(id, 'visibility', 'visible');
-          animatePaint(map, id, 'heatmap-opacity', 0.75, 450);
+          animatePaint(map, id, 'heatmap-opacity', 0.75, 550); // Slower reveal
         } else {
-          // Fade out, then hide after animation
-          animatePaint(map, id, 'heatmap-opacity', 0, 300);
+          animatePaint(map, id, 'heatmap-opacity', 0, 350); // Slightly faster exit
           setTimeout(() => {
             try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
-          }, 320);
+          }, 380);
         }
       });
 
@@ -6368,43 +6383,39 @@ function DeerIntelContent() {
     return () => clearTimeout(timer);
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
-  // Toggle visibility of HTML markers + stand emphasis glow
-  // V4 Step 11: Smooth fade transitions for stand-related layers
+  // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions
   useEffect(() => {
-    // HTML markers — use CSS transition for smooth fade
-    markersRef.current.forEach(marker => {
+    const show = visibility.stands;
+
+    // HTML markers — CSS transition with stagger per marker for cinematic effect
+    markersRef.current.forEach((marker, i) => {
       const el = marker.getElement();
-      el.style.transition = 'opacity 300ms ease';
-      el.style.opacity = visibility.stands ? '1' : '0';
-      el.style.pointerEvents = visibility.stands ? 'auto' : 'none';
-      // Keep display block so transition works, use opacity instead
+      const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
+      el.style.transition = `opacity 400ms ease ${delay}ms, transform 400ms ease ${delay}ms`;
+      el.style.opacity = show ? '1' : '0';
+      el.style.transform = show ? 'scale(1)' : 'scale(0.85)';
+      el.style.pointerEvents = show ? 'auto' : 'none';
     });
+
     const map = mapRef.current;
     if (!map) return;
-    // Stand emphasis glow — smooth fade
-    fadeToggleLayers(map, visibility.stands, [
+
+    // Staggered supporting layer reveal: glow → pockets → wedges → dots
+    staggeredFadeToggle(map, show, [
       { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
-    ], 350);
-    // Hunt pockets — smooth fade
-    fadeToggleLayers(map, visibility.stands, [
       { id: 'tfp-hunt-pockets-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
       { id: 'tfp-hunt-pockets-stroke', targetOpacity: 0.6 },
-    ], 350);
-    // Movement-axis wedge layers — smooth fade
-    fadeToggleLayers(map, visibility.stands, [
       { id: 'tfp-stand-direction-main', targetOpacity: 0.5, opacityProp: 'fill-opacity' },
       { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'fill-opacity' },
-    ], 350);
-    // Tertiary stand dots — smooth fade
-    fadeToggleLayers(map, visibility.stands, [
       { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
-    ], 350);
-    // Nearest corridor highlight
-    const showHighlight = visibility.stands && selectedStand !== null;
+    ], 400, 60);
+
+    // Nearest corridor highlight follows stand visibility
+    const showHighlight = show && selectedStand !== null;
     if (showHighlight) {
-      fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', 350);
+      fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.75, 'line-opacity', 450);
     } else {
-      fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', 280);
+      fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', 300);
     }
   }, [visibility.stands, selectedStand]);
 
@@ -6522,7 +6533,14 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map || !alignedStands.length) return;
 
+    // V4 Step 11b: Fade out old markers before replacing (cross-fade effect)
     const oldMarkers = [...markersRef.current];
+    oldMarkers.forEach(m => {
+      const el = m.getElement();
+      el.style.transition = 'opacity 200ms ease, transform 200ms ease';
+      el.style.opacity = '0';
+      el.style.transform = 'scale(0.9)';
+    });
     markersRef.current = [];
 
     // v4: Show ALL stands with unified icon family, not just top 2
@@ -6673,14 +6691,37 @@ function DeerIntelContent() {
       el.onclick = () => {
         hoverTooltip.style.opacity = '0';
         setSelectedStand(stand.rank);
-        showStandPopup(coords, props, stand.resilience, stand);
-        map.flyTo({ center: coords, zoom: 16 });
+        // V4 Step 11b: Cinematic stand selection — slower ease, slight padding
+        map.flyTo({
+          center: coords,
+          zoom: Math.max(map.getZoom(), 15.5),
+          duration: 1200,
+          essential: true,
+          padding: { top: 80, bottom: 40, left: 40, right: 40 },
+        });
+        // Show popup after camera settles for a polished feel
+        setTimeout(() => {
+          showStandPopup(coords, props, stand.resilience, stand);
+        }, 400);
       };
+
+      // V4 Step 11b: New markers fade in with stagger
+      el.style.opacity = '0';
+      el.style.transform = 'scale(0.85)';
+      requestAnimationFrame(() => {
+        const staggerDelay = idx * 80;
+        el.style.transition = `opacity 350ms ease ${staggerDelay}ms, transform 350ms ease ${staggerDelay}ms`;
+        el.style.opacity = '1';
+        el.style.transform = 'scale(1)';
+      });
 
       markersRef.current.push(marker);
     });
 
-    oldMarkers.forEach(m => m.remove());
+    // Remove old markers after their fade-out completes
+    setTimeout(() => {
+      oldMarkers.forEach(m => m.remove());
+    }, 250);
   };
 
   // ========== ZOOM-RESPONSIVE MARKER RESCALING ==========
@@ -6948,8 +6989,14 @@ function DeerIntelContent() {
     popupRef.current = popup;
   };
 
+  // V4 Step 11b: Smooth re-center with cinematic easing
   const flyToCenter = () => {
-    mapRef.current?.flyTo({ center: [lng, lat], zoom: 14 });
+    mapRef.current?.flyTo({
+      center: [lng, lat],
+      zoom: 14,
+      duration: 1400,
+      essential: true,
+    });
   };
 
   // ========== GLOBAL ERROR PANEL — customer-friendly ==========
@@ -8795,8 +8842,18 @@ function DeerIntelContent() {
                  onStandClick={(stand) => {
                    handleUserInteraction();
                    setHighlightedStandRank(stand.rank);
-                   setSelectedStand(selectedStand === stand.rank ? null : stand.rank);
-                   mapRef.current?.flyTo({ center: stand.coords, zoom: 16, duration: 800 });
+                   const deselecting = selectedStand === stand.rank;
+                   setSelectedStand(deselecting ? null : stand.rank);
+                   // V4 Step 11b: Cinematic flyTo from panel
+                   if (!deselecting && mapRef.current) {
+                     mapRef.current.flyTo({
+                       center: stand.coords,
+                       zoom: Math.max(mapRef.current.getZoom(), 15.5),
+                       duration: 1200,
+                       essential: true,
+                       padding: { top: 80, bottom: 40, left: 40, right: 40 },
+                     });
+                   }
                  }}
                />
                )}
