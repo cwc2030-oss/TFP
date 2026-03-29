@@ -1650,72 +1650,31 @@ function DeerIntelContent() {
   const mostAlignedDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hintFadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ========== GLOBAL ERROR HANDLERS (v4-fix: filter transient WebGL/Mapbox errors) ==========
+  // ========== GLOBAL ERROR HANDLERS (v4-fix2: LOG ONLY, never trigger crash screen) ==========
+  // The React Error Boundary (IntelErrorBoundary) catches render-time crashes.
+  // These handlers exist ONLY for diagnostic logging of unhandled async/runtime errors.
+  // They NEVER set globalError — doing so caused premature "Analyzer paused" on every
+  // transient Mapbox tile error, WebGL hiccup, or generic TypeError from minified code.
   useEffect(() => {
-    // v4-fix: Patterns that indicate transient WebGL/Mapbox issues that should NOT
-    // trigger the full crash screen. These are recoverable via map retry.
-    const isTransientMapError = (msg: string): boolean => {
-      const lower = msg.toLowerCase();
-      return (
-        lower.includes('webgl') ||
-        lower.includes('context lost') ||
-        lower.includes('context was lost') ||
-        lower.includes('mapbox') ||
-        lower.includes('failed to create webgl') ||
-        lower.includes('gl.bindtexture') ||
-        lower.includes('out of memory') ||
-        lower.includes('teximage2d') ||
-        lower.includes('framebuffer') ||
-        lower.includes('tile') ||
-        lower.includes('shader') ||
-        lower.includes('mapboxgl') ||
-        lower.includes('sprite') ||
-        lower.includes('worker')
-      );
-    };
-
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const errorMsg = event.reason instanceof Error 
         ? event.reason.message 
         : String(event.reason);
-      console.error('[INTEL] Unhandled promise rejection:', errorMsg);
-
-      // v4-fix: Don't crash the whole app for transient map/WebGL errors
-      if (isTransientMapError(errorMsg)) {
-        console.warn('[INTEL] Suppressed transient map error from crash screen:', errorMsg);
-        setMapError('Map encountered a temporary issue. Retrying...');
-        return;
-      }
-
       const errorStack = event.reason instanceof Error ? event.reason.stack : undefined;
-      setGlobalError({ message: `Unhandled rejection: ${errorMsg}`, stack: errorStack });
-      setError(`Unhandled error: ${errorMsg}`);
-      setIsLoading(false);
+      // Diagnostic log only — visible in dev, silenced in prod by Step 12 filter
+      console.error('[INTEL-DIAG] Unhandled promise rejection:', errorMsg);
+      if (errorStack) console.error('[INTEL-DIAG] Stack:', errorStack);
     };
 
     const handleGlobalError = (event: ErrorEvent) => {
       const msg = event.message || '';
-      console.error('[INTEL] Global error:', msg, event.filename, event.lineno);
-
-      // v4-fix: Don't crash for transient map/WebGL errors
-      if (isTransientMapError(msg)) {
-        console.warn('[INTEL] Suppressed transient map error from crash screen:', msg);
-        setMapError('Map encountered a temporary issue. Retrying...');
-        return;
-      }
-
-      setGlobalError({ 
-        message: `${msg} (${event.filename}:${event.lineno})`,
-        stack: event.error?.stack 
-      });
-      setError(`Error: ${msg}`);
-      setIsLoading(false);
+      // Diagnostic log only
+      console.error('[INTEL-DIAG] Global error:', msg, 'file:', event.filename, 'line:', event.lineno);
+      if (event.error?.stack) console.error('[INTEL-DIAG] Stack:', event.error.stack);
     };
 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
     window.addEventListener('error', handleGlobalError);
-
-    console.log('[INTEL] Global error handlers registered (v4-fix: transient filter active)');
 
     return () => {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
@@ -3565,20 +3524,22 @@ function DeerIntelContent() {
       return;
     }
 
-    // v4-fix: WebGL check with retry — if context is temporarily lost (e.g. previous
+    // v4-fix2: WebGL check with retry — if context is temporarily lost (e.g. previous
     // 3D terrain just released it), wait a beat and retry rather than showing error.
-    if (!checkWebGLSupport()) {
+    const webglOk = checkWebGLSupport();
+    console.error('[MAP-DIAG] WebGL check result:', webglOk, 'attempt:', mapRetryCountRef.current, 'of', MAX_MAP_RETRIES);
+    if (!webglOk) {
       if (mapRetryCountRef.current < MAX_MAP_RETRIES) {
         mapRetryCountRef.current++;
-        const delay = mapRetryCountRef.current * 300; // 300ms, 600ms, 900ms
-        console.warn('[MAP] WebGL not ready — retry ' + mapRetryCountRef.current + '/' + MAX_MAP_RETRIES + ' in ' + delay + 'ms');
+        const delay = mapRetryCountRef.current * 500; // 500ms, 1000ms, 1500ms (more generous)
+        console.error('[MAP-DIAG] WebGL not ready — retry ' + mapRetryCountRef.current + '/' + MAX_MAP_RETRIES + ' in ' + delay + 'ms');
         const retryTimer = setTimeout(() => {
           if (mountIdRef.current !== mountId) return;
-          // Bump state to re-trigger this useEffect
           setMapCreateAttempt(prev => prev + 1);
         }, delay);
         return () => clearTimeout(retryTimer);
       }
+      console.error('[MAP-DIAG] FINAL FAILURE: WebGL unavailable after', MAX_MAP_RETRIES, 'retries');
       setMapError("Your browser doesn't support WebGL, which is required for terrain viewing.");
       setIsLoading(false);
       return;
@@ -3617,7 +3578,7 @@ function DeerIntelContent() {
     const createMap = (mId: string) => {
     let map: mapboxgl.Map;
 
-    console.log('[MAP] BEFORE new mapboxgl.Map() id=' + mId + ' center=[' + lng + ',' + lat + ']');
+    console.error('[MAP-DIAG] BEFORE new mapboxgl.Map() id=' + mId + ' center=[' + lng + ',' + lat + ']');
     try {
       map = new mapboxgl.Map({
         container: container,
@@ -3627,45 +3588,44 @@ function DeerIntelContent() {
         pitch: 0,    // Flat 2D view - no 3D terrain
         bearing: 0,  // North up
       });
-      console.log('[MAP] AFTER new mapboxgl.Map() id=' + mId + ' map exists=' + !!map);
+      console.error('[MAP-DIAG] Map constructor SUCCESS id=' + mId);
       
       // Expose for debugging
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = map;
-        console.log('[MAP] __TFP_MAP__ SET to', !!map);
       }
     } catch (err) {
-      console.error("[MAP] FAILED to create Map:", err);
+      console.error("[MAP-DIAG] Map constructor FAILED:", err);
+      console.error("[MAP-DIAG] SUMMARY: map_create=FAILED, webgl=true, container=" + container.offsetWidth + "x" + container.offsetHeight);
       setMapError("Failed to load map. Please try refreshing the page.");
       setIsLoading(false);
       return;
     }
 
-    // v4-fix: WebGL context loss/restore handlers on the analyzer map canvas
+    // v4-fix2: WebGL context loss/restore handlers — log only, don't set mapError
+    // (Mapbox handles context restoration internally; setting mapError causes false alarms)
     try {
       const mapCanvas = map.getCanvas();
       if (mapCanvas) {
         mapCanvas.addEventListener('webglcontextlost', (e: Event) => {
           e.preventDefault(); // Tell browser we'll handle recovery
-          console.warn('[MAP] WebGL context LOST on analyzer map — will attempt recovery');
-          setMapError('Map display interrupted — recovering...');
+          console.error('[MAP-DIAG] WebGL context LOST on analyzer map canvas');
         });
         mapCanvas.addEventListener('webglcontextrestored', () => {
-          console.log('[MAP] WebGL context RESTORED on analyzer map');
-          setMapError(null);
-          // Mapbox should auto-recover, but force a resize to repaint tiles
+          console.error('[MAP-DIAG] WebGL context RESTORED on analyzer map canvas');
           try { map.resize(); } catch (_) { /* ignore */ }
         });
       }
     } catch (canvasErr) {
-      console.warn('[MAP] Could not attach WebGL context listeners:', canvasErr);
+      console.error('[MAP-DIAG] Could not attach WebGL context listeners:', canvasErr);
     }
 
-    // v3.8.4-fix — Detailed error handler: log full error object + stack
+    // Map error handler — log only; don't set mapError for tile/style errors
+    // (those are transient and Mapbox retries them automatically)
     map.on('error', (e: any) => {
       const err = e?.error || e;
-      console.error("[MAP ERROR] message:", err?.message, "status:", err?.status, "url:", err?.url);
-      if (err?.stack) console.error("[MAP ERROR] stack:", err.stack);
+      console.error("[MAP-DIAG] map.on('error'):", err?.message, "status:", err?.status);
+      // Only surface auth failures — everything else is transient
       if (err?.status === 401 || err?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
       }
@@ -3692,27 +3652,23 @@ function DeerIntelContent() {
         console.log('[MAP DIAG] sourcedata loaded:', e.sourceId);
       }
     });
-    // v3.8.4-fix — CRITICAL: Force resize IMMEDIATELY on style.load so Mapbox
-    // recalculates its internal viewport and actually requests tiles.
     map.once('style.load', () => {
-      console.log('[MAP] style.load event — forcing resize() to trigger tile requests');
+      console.error('[MAP-DIAG] style.load — forcing resize()');
       try {
         map.resize();
-        console.log('[MAP] style.load resize() completed');
       } catch (resErr) {
-        console.warn('[MAP] style.load resize() failed:', resErr);
+        console.error('[MAP-DIAG] style.load resize() failed:', resErr);
       }
     });
-    // Also listen for 'idle' once — by then all initial tiles should be painted
     map.once('idle', () => {
       const canvas = map.getCanvas();
-      console.log('[MAP DIAG] idle event — canvas:', canvas?.width, 'x', canvas?.height,
-        'loaded:', map.loaded(), 'areTilesLoaded:', map.areTilesLoaded());
+      console.error('[MAP-DIAG] idle — canvas:', canvas?.width, 'x', canvas?.height,
+        'loaded:', map.loaded(), 'tilesLoaded:', map.areTilesLoaded());
     });
 
     // Handler for when map is fully loaded
     const onMapLoad = () => {
-      console.log('[MAP] LOAD EVENT FIRED id=' + mountId + ' map.loaded()=' + map.loaded());
+      console.error('[MAP-DIAG] LOAD EVENT FIRED id=' + mountId + ' loaded=' + map.loaded() + ' canvas=' + (map.getCanvas()?.width || '?') + 'x' + (map.getCanvas()?.height || '?'));
       
       // DISABLED: 3D terrain + sky - using flat 2D map only for stability
       // Guard: only call setTerrain if the method exists (Mapbox GL v2+)
@@ -5716,9 +5672,9 @@ function DeerIntelContent() {
       } catch (_) { /* ignore */ }
 
       // ALWAYS set map ready - even if source setup failed
-      console.log('[MAP] BEFORE setMapReady(true)');
       setMapReady(true);
-      console.log('[MAP] AFTER setMapReady(true) - map should now be interactive');
+      setMapError(null); // v4-fix2: clear any transient map errors on successful load
+      console.error('[MAP-DIAG] SUMMARY: map_ready=true, map_error=cleared, style_loaded=true, sources=' + Object.keys(map.getStyle()?.sources || {}).length);
       
       setTimeout(() => {
         try {
@@ -5751,24 +5707,20 @@ function DeerIntelContent() {
     initMap();
 
     return () => {
-      console.log('[LIFECYCLE] CLEANUP id=' + mountId + ' (current=' + mountIdRef.current + ')');
+      console.error('[MAP-DIAG] CLEANUP id=' + mountId + ' mapExists=' + !!mapRef.current);
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = null;
       }
       overlaySourcesCreated.current = false;
-      // v3.5.1 — Cleanup flow animation
       if (flowAnimationRef.current !== null) {
         cancelAnimationFrame(flowAnimationRef.current);
         flowAnimationRef.current = null;
       }
-      // v3.8.4-fix3 — Let Mapbox properly release WebGL context FIRST,
-      // THEN purge orphaned DOM so Strict-Mode re-mount gets a clean container.
       if (mapRef.current) {
-        try { mapRef.current.remove(); } catch (e) { console.warn('[LIFECYCLE] map.remove() error:', e); }
+        try { mapRef.current.remove(); } catch (e) { console.error('[MAP-DIAG] map.remove() error:', e); }
         mapRef.current = null;
       }
       if (container && container.childNodes.length > 0) {
-        console.log('[LIFECYCLE] Clearing', container.childNodes.length, 'orphaned children from map container');
         container.innerHTML = '';
       }
     };
