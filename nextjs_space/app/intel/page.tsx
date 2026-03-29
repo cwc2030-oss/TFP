@@ -7205,16 +7205,6 @@ function DeerIntelContent() {
                       <p className="text-sm text-white font-semibold leading-tight">{address}</p>
                     </div>
                   </div>
-                  {/* Landowner */}
-                  {qaParcel?.owner && (
-                    <div className="flex items-start gap-2.5">
-                      <User className="h-4 w-4 text-stone-400 mt-0.5 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[9px] text-stone-500 uppercase tracking-wider font-medium">Landowner</p>
-                        <p className="text-xs text-white/80 truncate">{qaParcel.owner}</p>
-                      </div>
-                    </div>
-                  )}
                   {/* Acreage & County */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-white/5 rounded-lg p-2.5">
@@ -7228,6 +7218,32 @@ function DeerIntelContent() {
                       </div>
                     )}
                   </div>
+                  {/* Coordinates */}
+                  <p className="text-[10px] text-stone-600 text-center">
+                    {lat.toFixed(5)}, {lng.toFixed(5)}
+                  </p>
+                </div>
+              </div>
+
+              {/* ─── LANDOWNER ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Landowner</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-2.5">
+                  {qaParcel?.owner && (
+                    <div className="flex items-start gap-2.5">
+                      <User className="h-4 w-4 text-stone-400 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[9px] text-stone-500 uppercase tracking-wider font-medium">Landowner</p>
+                        <p className="text-xs text-white/80 truncate">{qaParcel.owner}</p>
+                      </div>
+                    </div>
+                  )}
                   {/* Zoning & PLSS */}
                   {(qaParcel?.zoning || qaParcel?.plss) && (
                     <div className="grid grid-cols-2 gap-2">
@@ -7245,10 +7261,85 @@ function DeerIntelContent() {
                       )}
                     </div>
                   )}
-                  {/* Coordinates */}
-                  <p className="text-[10px] text-stone-600 text-center">
-                    {lat.toFixed(5)}, {lng.toFixed(5)}
-                  </p>
+                </div>
+              </div>
+
+              {/* ─── SEASONS ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Seasons</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+              <div className="p-3 border-b border-white/10">
+                <div className="flex items-center gap-2 mb-3">
+                  <Calendar className="h-4 w-4 text-amber-500" />
+                  <span className="text-sm font-medium text-white">Season</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {SEASONS.map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => setSeason(s.value)}
+                      className={`
+                        p-2 rounded-lg text-center transition-colors duration-150
+                        ${season === s.value
+                          ? 'bg-amber-500/30 border-2 border-amber-500 text-white'
+                          : 'bg-white/5 border border-white/10 text-white/70 hover:bg-white/10'}
+                      `}
+                    >
+                      <span className="text-lg block">{s.icon}</span>
+                      <span className="text-xs font-medium block mt-1">{s.label}</span>
+                      <span className="text-[10px] text-white/50 block">{s.dates}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ─── PROFILES ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Profiles</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+              <div className="p-3 border-b border-white/10">
+                <div className="bg-white/5 rounded-lg p-3">
+                  {season === 'early' && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">🌿</span>
+                        <span className="text-xs font-semibold text-white">Early Season Profile</span>
+                      </div>
+                      <p className="text-[11px] text-white/60 leading-relaxed">
+                        Deer follow predictable bed-to-feed patterns. Focus on food sources &amp; travel corridors near field edges. Morning thermals carry scent downhill.
+                      </p>
+                    </div>
+                  )}
+                  {season === 'rut' && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">🦌</span>
+                        <span className="text-xs font-semibold text-white">Rut Profile</span>
+                      </div>
+                      <p className="text-[11px] text-white/60 leading-relaxed">
+                        Bucks cruise between bedding areas checking does. Saddles, funnels &amp; ridge connections see peak traffic. All-day sits produce.
+                      </p>
+                    </div>
+                  )}
+                  {season === 'late' && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">❄️</span>
+                        <span className="text-xs font-semibold text-white">Late Season Profile</span>
+                      </div>
+                      <p className="text-[11px] text-white/60 leading-relaxed">
+                        Caloric stress drives deer to remaining food. South-facing slopes provide thermal cover. Short afternoon hunts near food are most effective.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -7268,16 +7359,6 @@ function DeerIntelContent() {
                   setWindLastUpdated(new Date());
                 }}
               />
-
-              {/* ─── SEASONS & PROFILES ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-white/10" />
-                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Seasons &amp; Profiles</span>
-                  <div className="flex-1 h-px bg-white/10" />
-                </div>
-              </div>
-              <SeasonPanel season={season} onSeasonChange={setSeason} />
 
               {/* ─── ANALYSIS SUMMARY ─── */}
               {summary && (
