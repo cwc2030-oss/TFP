@@ -22,6 +22,7 @@ import {
 import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
 import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
+import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, cancelAllAnimations } from '@/lib/map-animation';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
@@ -3225,34 +3226,20 @@ function DeerIntelContent() {
       map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'visible');
     }
 
-    // V4 Step 10: Dim non-relevant corridors when a stand is selected
-    // This creates visual focus — the nearest corridor stays bright, others fade
+    // V4 Step 10+11: Smooth corridor dimming when stand is selected
+    // Animated transition creates visual focus — nearest corridor stays bright, others smoothly fade
     const corridorDimLayers = [
       { id: 'tfp-corridors-primary', dimOpacity: 0.25, fullOpacity: 0.78 },
       { id: 'tfp-corridors-primary-casing', dimOpacity: 0.05, fullOpacity: 0.15 },
       { id: 'tfp-corridors-possible', dimOpacity: 0.12, fullOpacity: 0.42 },
-      { id: 'tfp-corridors-exploratory', dimOpacity: 0.04, fullOpacity: null },  // null = use zoom expression
-      { id: 'tfp-corridors-context-primary', dimOpacity: 0.06, fullOpacity: null },
-      { id: 'tfp-corridors-context-possible', dimOpacity: 0.03, fullOpacity: null },
+      { id: 'tfp-corridors-exploratory', dimOpacity: 0.04, fullOpacity: 0.22 },
+      { id: 'tfp-corridors-context-primary', dimOpacity: 0.06, fullOpacity: 0.28 },
+      { id: 'tfp-corridors-context-possible', dimOpacity: 0.03, fullOpacity: 0.15 },
     ];
     corridorDimLayers.forEach(({ id, dimOpacity, fullOpacity }) => {
       if (!map.getLayer(id)) return;
-      if (selectedStand !== null) {
-        // Stand selected — dim corridors for focus
-        map.setPaintProperty(id, 'line-opacity', dimOpacity);
-      } else if (fullOpacity !== null) {
-        // No stand selected — restore fixed opacities
-        map.setPaintProperty(id, 'line-opacity', fullOpacity);
-      } else {
-        // Restore zoom-responsive opacities for layers that use expressions
-        if (id === 'tfp-corridors-exploratory') {
-          map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0.08, 14, 0.22, 17, 0.35]);
-        } else if (id === 'tfp-corridors-context-primary') {
-          map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0.12, 14, 0.28, 17, 0.38]);
-        } else if (id === 'tfp-corridors-context-possible') {
-          map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0.06, 14, 0.15, 17, 0.22]);
-        }
-      }
+      const target = selectedStand !== null ? dimOpacity : fullOpacity;
+      animatePaint(map, id, 'line-opacity', target, 400);
     });
   }, [selectedStand, alignedStands, terrainFlowData, mapReady, flowVisibility.flowPrimary]);
 
@@ -3262,18 +3249,20 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
 
     try {
-      // Bedding visibility
-      if (map.getLayer('tfp-bedding-fill')) {
-        map.setLayoutProperty('tfp-bedding-fill', 'visibility', visibility.bedding ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-bedding-outline')) {
-        map.setLayoutProperty('tfp-bedding-outline', 'visibility', visibility.bedding ? 'visible' : 'none');
-      }
+      // V4 Step 11: Smooth fade transitions for layer visibility toggles
+      const FADE_IN = 350;
+      const FADE_OUT = 280;
+
+      // Bedding visibility — smooth fade
+      fadeToggleLayers(map, visibility.bedding, [
+        { id: 'tfp-bedding-fill', targetOpacity: 0.35, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.7 },
+      ], FADE_IN);
 
       // Funnel visibility - draws layer (now independently controlled)
-      if (map.getLayer('tfp-funnels-lines-draws')) {
-        map.setLayoutProperty('tfp-funnels-lines-draws', 'visibility', visibility.draws ? 'visible' : 'none');
-      }
+      fadeToggleLayers(map, visibility.draws, [
+        { id: 'tfp-funnels-lines-draws', targetOpacity: 1.0 },
+      ], FADE_IN);
       // Legacy corridors layers — V4 Step 10: Always hidden (V2 tiered corridors are primary visual)
       if (map.getLayer('tfp-funnels-lines-corridors-solid')) {
         map.setLayoutProperty('tfp-funnels-lines-corridors-solid', 'visibility', 'none');
@@ -3289,84 +3278,81 @@ function DeerIntelContent() {
         const funnelVisible = visibility.draws || visibility.saddles || visibility.corridors;
         map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
       }
-      // Saddle polygons (now independently controlled)
-      if (map.getLayer('tfp-funnels-polys-fill')) {
-        map.setLayoutProperty('tfp-funnels-polys-fill', 'visibility', visibility.saddles ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-funnels-polys-outline')) {
-        map.setLayoutProperty('tfp-funnels-polys-outline', 'visibility', visibility.saddles ? 'visible' : 'none');
-      }
+      // Saddle polygons — smooth fade
+      fadeToggleLayers(map, visibility.saddles, [
+        { id: 'tfp-funnels-polys-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
+        { id: 'tfp-funnels-polys-outline', targetOpacity: 1.0 },
+      ], FADE_IN);
       
-      // V2 Tiered corridor visibility (V4 Step 10: includes casing layer)
-      const tieredCorridorLayers = [
-        'tfp-corridors-primary-casing',  // V4: glow casing
-        'tfp-corridors-primary',
-        'tfp-corridors-possible',
-        'tfp-corridors-exploratory',
-        'tfp-corridors-context-primary',
-        'tfp-corridors-context-possible',
-        'tfp-intrusion-overlay',
-      ];
-      tieredCorridorLayers.forEach(layerId => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', visibility.corridors ? 'visible' : 'none');
-        }
-      });
+      // V2 Tiered corridor visibility — smooth fade (V4 Step 11)
+      fadeToggleLayers(map, visibility.corridors, [
+        { id: 'tfp-corridors-primary-casing', targetOpacity: 0.15 },
+        { id: 'tfp-corridors-primary', targetOpacity: 0.78 },
+        { id: 'tfp-corridors-possible', targetOpacity: 0.42 },
+        { id: 'tfp-corridors-exploratory', targetOpacity: 0.22 },
+        { id: 'tfp-corridors-context-primary', targetOpacity: 0.28 },
+        { id: 'tfp-corridors-context-possible', targetOpacity: 0.15 },
+        { id: 'tfp-intrusion-overlay', targetOpacity: 0.3, opacityProp: 'fill-opacity' },
+      ], FADE_IN);
       
-      // V2 Tiered funnel visibility
-      const tieredFunnelLayers = [
-        'tfp-funnels-hard-fill',
-        'tfp-funnels-hard-outline',
-        'tfp-funnels-slight-fill',
-        'tfp-funnels-slight-outline',
-      ];
-      tieredFunnelLayers.forEach(layerId => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', visibility.funnels ? 'visible' : 'none');
-        }
-      });
+      // V2 Tiered funnel visibility — smooth fade
+      fadeToggleLayers(map, visibility.funnels, [
+        { id: 'tfp-funnels-hard-fill', targetOpacity: 0.35, opacityProp: 'fill-opacity' },
+        { id: 'tfp-funnels-hard-outline', targetOpacity: 0.8 },
+        { id: 'tfp-funnels-slight-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
+        { id: 'tfp-funnels-slight-outline', targetOpacity: 0.5 },
+      ], FADE_IN);
       
-      // Ridge spine visibility (structure-first terrain anatomy)
-      // Includes casing/halo layers for the "terrain skeleton" effect
-      const ridgeSpineLayers = [
-        'tfp-ridges-primary-casing',    // Halo/casing
-        'tfp-ridges-primary',           // Core line
-        'tfp-ridges-secondary-casing',  // Halo/casing
-        'tfp-ridges-secondary',         // Core line
-        'tfp-saddle-nodes',
-        'tfp-saddle-nodes-outline',
-      ];
-      ridgeSpineLayers.forEach(layerId => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', visibility.ridgeSpines ? 'visible' : 'none');
-        }
-      });
+      // Ridge spine visibility — smooth fade
+      fadeToggleLayers(map, visibility.ridgeSpines, [
+        { id: 'tfp-ridges-primary-casing', targetOpacity: 0.25 },
+        { id: 'tfp-ridges-primary', targetOpacity: 0.85 },
+        { id: 'tfp-ridges-secondary-casing', targetOpacity: 0.15 },
+        { id: 'tfp-ridges-secondary', targetOpacity: 0.55 },
+        { id: 'tfp-saddle-nodes', targetOpacity: 0.8, opacityProp: 'circle-opacity' },
+        { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.6, opacityProp: 'circle-stroke-opacity' },
+      ], FADE_IN);
       
-      // When ridge spines are ON, reduce heatmap opacity slightly so skeleton is readable
+      // When ridge spines are ON, reduce heatmap opacity — smooth transition
       if (map.getLayer('tfp-pressure-heatmap')) {
         const heatmapOpacity = visibility.ridgeSpines ? 0.55 : 0.75;
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', heatmapOpacity);
+        animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', heatmapOpacity, 400);
       }
       
       // Terrain Flow visibility (movement likelihood layers)
       // Pressure Simulation v1 — pressureView controls which of the 4 heat layers is active.
       // All four share the master pressureHeatmap toggle; pressureView picks one.
+      // V4 Step 11: Heatmap crossfade — smoothly animate heatmap-opacity instead of instant toggle
       const heatOn = flowVisibility.pressureHeatmap;
-      if (map.getLayer('tfp-pressure-heatmap')) {
-        map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', heatOn && pressureView === 'pressure' ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-movement-delta')) {
-        map.setLayoutProperty('tfp-movement-delta', 'visibility', heatOn && pressureView === 'damage' ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-movement-post')) {
-        map.setLayoutProperty('tfp-movement-post', 'visibility', heatOn && pressureView === 'movement' ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-refuge-zones')) {
-        map.setLayoutProperty('tfp-refuge-zones', 'visibility', heatOn && pressureView === 'refuge' ? 'visible' : 'none');
-      }
+      const heatViews = [
+        { id: 'tfp-pressure-heatmap', view: 'pressure' },
+        { id: 'tfp-movement-delta', view: 'damage' },
+        { id: 'tfp-movement-post', view: 'movement' },
+        { id: 'tfp-refuge-zones', view: 'refuge' },
+      ];
+      heatViews.forEach(({ id, view }) => {
+        if (!map.getLayer(id)) return;
+        const shouldShow = heatOn && pressureView === view;
+        if (shouldShow) {
+          map.setLayoutProperty(id, 'visibility', 'visible');
+          animatePaint(map, id, 'heatmap-opacity', 0.75, 450);
+        } else {
+          // Fade out, then hide after animation
+          animatePaint(map, id, 'heatmap-opacity', 0, 300);
+          setTimeout(() => {
+            try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
+          }, 320);
+        }
+      });
+
       // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
+      // V4 Step 11: Smooth fade for flow visibility
       if (map.getLayer('tfp-flow-primary')) {
-        map.setLayoutProperty('tfp-flow-primary', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+        if (flowVisibility.flowPrimary) {
+          map.setLayoutProperty('tfp-flow-primary', 'visibility', 'visible');
+        } else {
+          fadeLayerOut(map, 'tfp-flow-primary', 'line-opacity', FADE_OUT);
+        }
         // When Deer Flow is active, boost primary lines so the connective structure reads clearly
         map.setPaintProperty('tfp-flow-primary', 'line-width', isPressureMode ? [
           'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
@@ -3379,36 +3365,51 @@ function DeerIntelContent() {
           0.55, 3,
           0.75, 4
         ]);
-        map.setPaintProperty('tfp-flow-primary', 'line-opacity', isPressureMode ? [
-          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, 0.65,
-          0.55, 0.80,
-          0.75, 0.95
-        ] : [
-          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, 0.55,
-          0.55, 0.70,
-          0.75, 0.85
-        ]);
+        if (flowVisibility.flowPrimary) {
+          map.setPaintProperty('tfp-flow-primary', 'line-opacity', isPressureMode ? [
+            'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+            0.4, 0.65,
+            0.55, 0.80,
+            0.75, 0.95
+          ] : [
+            'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+            0.4, 0.55,
+            0.55, 0.70,
+            0.75, 0.85
+          ]);
+        }
       }
       if (map.getLayer('tfp-flow-primary-glow')) {
-        map.setLayoutProperty('tfp-flow-primary-glow', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
-        // Widen glow slightly when Deer Flow is active for extra readability
-        map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', isPressureMode ? 0.35 : 0.25);
+        if (flowVisibility.flowPrimary) {
+          fadeLayerIn(map, 'tfp-flow-primary-glow', isPressureMode ? 0.35 : 0.25, 'line-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-primary-glow', 'line-opacity', FADE_OUT);
+        }
       }
       // Nearest corridor highlight follows primary flow visibility + stand selection
       if (map.getLayer('tfp-flow-nearest-highlight')) {
         const showHighlight = flowVisibility.flowPrimary && selectedStand !== null;
-        map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', showHighlight ? 'visible' : 'none');
+        if (showHighlight) {
+          fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', FADE_OUT);
+        }
       }
       // v3.8.1 — Directional chevrons follow primary flow visibility
       if (map.getLayer('tfp-flow-direction-chevrons')) {
-        map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', flowVisibility.flowPrimary ? 'visible' : 'none');
+        if (flowVisibility.flowPrimary) {
+          map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'visible');
+        } else {
+          map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'none');
+        }
       }
       if (map.getLayer('tfp-flow-secondary')) {
-        map.setLayoutProperty('tfp-flow-secondary', 'visibility', flowVisibility.flowSecondary ? 'visible' : 'none');
-        // When Deer Flow is active, boost secondary enough to read as supporting routes
-        map.setPaintProperty('tfp-flow-secondary', 'line-opacity', isPressureMode ? 0.50 : 0.45);
+        const secTarget = isPressureMode ? 0.50 : 0.45;
+        if (flowVisibility.flowSecondary) {
+          fadeLayerIn(map, 'tfp-flow-secondary', secTarget, 'line-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-secondary', 'line-opacity', FADE_OUT);
+        }
         map.setPaintProperty('tfp-flow-secondary', 'line-width', isPressureMode ? [
           'interpolate', ['linear'], ['zoom'],
           10, 1.8,
@@ -3416,25 +3417,29 @@ function DeerIntelContent() {
           18, 2.8,
         ] : 1.5);
       }
+      // Convergence zones — smooth fade with pressure-aware opacity
       if (map.getLayer('tfp-flow-convergence')) {
-        map.setLayoutProperty('tfp-flow-convergence', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
-        // Fade convergence blobs when Pressure Map is active so the new heat surface dominates
-        map.setPaintProperty('tfp-flow-convergence', 'circle-opacity', isPressureMode ? 0.1 : 0.85);
+        const convTarget = isPressureMode ? 0.1 : 0.85;
+        if (flowVisibility.convergenceZones) {
+          fadeLayerIn(map, 'tfp-flow-convergence', convTarget, 'circle-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-convergence', 'circle-opacity', FADE_OUT);
+        }
       }
       if (map.getLayer('tfp-flow-convergence-pulse')) {
-        map.setLayoutProperty('tfp-flow-convergence-pulse', 'visibility', flowVisibility.convergenceZones ? 'visible' : 'none');
-        map.setPaintProperty('tfp-flow-convergence-pulse', 'circle-opacity', isPressureMode ? 0.1 : 0.15);
+        const pulseTarget = isPressureMode ? 0.1 : 0.15;
+        if (flowVisibility.convergenceZones) {
+          fadeLayerIn(map, 'tfp-flow-convergence-pulse', pulseTarget, 'circle-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-convergence-pulse', 'circle-opacity', FADE_OUT);
+        }
       }
-      // v3.6.0: Bedding Probability visibility
-      if (map.getLayer('tfp-bedding-probability-glow')) {
-        map.setLayoutProperty('tfp-bedding-probability-glow', 'visibility', showBeddingProbability ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-bedding-probability-fill')) {
-        map.setLayoutProperty('tfp-bedding-probability-fill', 'visibility', showBeddingProbability ? 'visible' : 'none');
-      }
-      if (map.getLayer('tfp-bedding-probability-outline')) {
-        map.setLayoutProperty('tfp-bedding-probability-outline', 'visibility', showBeddingProbability ? 'visible' : 'none');
-      }
+      // v3.6.0: Bedding Probability visibility — smooth fade
+      fadeToggleLayers(map, showBeddingProbability, [
+        { id: 'tfp-bedding-probability-glow', targetOpacity: 0.4, opacityProp: 'circle-opacity' },
+        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.25, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-probability-outline', targetOpacity: 0.5 },
+      ], FADE_IN);
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
@@ -6378,36 +6383,42 @@ function DeerIntelContent() {
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
   // Toggle visibility of HTML markers + stand emphasis glow
+  // V4 Step 11: Smooth fade transitions for stand-related layers
   useEffect(() => {
+    // HTML markers — use CSS transition for smooth fade
     markersRef.current.forEach(marker => {
-      marker.getElement().style.display = visibility.stands ? 'block' : 'none';
+      const el = marker.getElement();
+      el.style.transition = 'opacity 300ms ease';
+      el.style.opacity = visibility.stands ? '1' : '0';
+      el.style.pointerEvents = visibility.stands ? 'auto' : 'none';
+      // Keep display block so transition works, use opacity instead
     });
-    // v3.8.1 — Toggle stand emphasis glow with stands visibility
     const map = mapRef.current;
-    if (map && map.getLayer('tfp-stand-emphasis-glow')) {
-      map.setLayoutProperty('tfp-stand-emphasis-glow', 'visibility', visibility.stands ? 'visible' : 'none');
-    }
-    // Toggle hunt pocket visibility with stands
-    if (map && map.getLayer('tfp-hunt-pockets-fill')) {
-      map.setLayoutProperty('tfp-hunt-pockets-fill', 'visibility', visibility.stands ? 'visible' : 'none');
-    }
-    if (map && map.getLayer('tfp-hunt-pockets-stroke')) {
-      map.setLayoutProperty('tfp-hunt-pockets-stroke', 'visibility', visibility.stands ? 'visible' : 'none');
-    }
-    // v1.1: Toggle movement-axis wedge layers with stands
-    if (map && map.getLayer('tfp-stand-direction-main')) {
-      map.setLayoutProperty('tfp-stand-direction-main', 'visibility', visibility.stands ? 'visible' : 'none');
-    }
-    if (map && map.getLayer('tfp-stand-direction-flank')) {
-      map.setLayoutProperty('tfp-stand-direction-flank', 'visibility', visibility.stands ? 'visible' : 'none');
-    }
-    // v1.1: Toggle tertiary stand dots with stands
-    if (map && map.getLayer('tfp-stand-tertiary-dot')) {
-      map.setLayoutProperty('tfp-stand-tertiary-dot', 'visibility', visibility.stands ? 'visible' : 'none');
-    }
-    // Nearest corridor highlight is stand-related — hide with stands
-    if (map && map.getLayer('tfp-flow-nearest-highlight')) {
-      map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', visibility.stands && selectedStand !== null ? 'visible' : 'none');
+    if (!map) return;
+    // Stand emphasis glow — smooth fade
+    fadeToggleLayers(map, visibility.stands, [
+      { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
+    ], 350);
+    // Hunt pockets — smooth fade
+    fadeToggleLayers(map, visibility.stands, [
+      { id: 'tfp-hunt-pockets-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
+      { id: 'tfp-hunt-pockets-stroke', targetOpacity: 0.6 },
+    ], 350);
+    // Movement-axis wedge layers — smooth fade
+    fadeToggleLayers(map, visibility.stands, [
+      { id: 'tfp-stand-direction-main', targetOpacity: 0.5, opacityProp: 'fill-opacity' },
+      { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'fill-opacity' },
+    ], 350);
+    // Tertiary stand dots — smooth fade
+    fadeToggleLayers(map, visibility.stands, [
+      { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
+    ], 350);
+    // Nearest corridor highlight
+    const showHighlight = visibility.stands && selectedStand !== null;
+    if (showHighlight) {
+      fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', 350);
+    } else {
+      fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', 280);
     }
   }, [visibility.stands, selectedStand]);
 
