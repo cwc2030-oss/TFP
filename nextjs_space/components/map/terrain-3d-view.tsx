@@ -340,14 +340,33 @@ export default function Terrain3DView({
     map.on("rotateend", () => setCurrentBearing(Math.round(map.getBearing())));
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
 
+    // v4-fix: Listen for WebGL context loss and handle gracefully
+    const canvas = map.getCanvas?.();
+    const handleContextLost = (e: Event) => {
+      e.preventDefault(); // Allow context to be restored
+      console.warn('[Terrain3D] WebGL context lost — preventing default');
+    };
+    const handleContextRestored = () => {
+      console.log('[Terrain3D] WebGL context restored');
+    };
+    if (canvas) {
+      canvas.addEventListener('webglcontextlost', handleContextLost);
+      canvas.addEventListener('webglcontextrestored', handleContextRestored);
+    }
+
     return () => {
+      console.log('[Terrain3D] CLEANUP — destroying map instance');
       clearTimeout(loadTimeout);
       if (spinAnimRef.current) {
         cancelAnimationFrame(spinAnimRef.current);
         spinAnimRef.current = null;
       }
+      if (canvas) {
+        canvas.removeEventListener('webglcontextlost', handleContextLost);
+        canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+      }
       if (mapRef.current) {
-        mapRef.current.remove();
+        try { mapRef.current.remove(); } catch (e) { console.warn('[Terrain3D] map.remove() error:', e); }
         mapRef.current = null;
       }
       setIsMapLoaded(false);
@@ -494,10 +513,16 @@ export default function Terrain3DView({
                 <Button
                   size="sm"
                   onClick={() => {
-                    // Stop any running animation before navigating
+                    // v4-fix: Stop animations and allow WebGL cleanup before navigating
                     stopSpin();
-                    console.log('[Terrain3D] Deer Intel clicked - stopping spin and navigating');
-                    onUnlockIntel();
+                    console.log('[Terrain3D] Deer Intel clicked — cleaning up before navigation');
+                    // Proactively destroy map so WebGL context is released before intel page
+                    if (mapRef.current) {
+                      try { mapRef.current.remove(); } catch (e) { /* ignore */ }
+                      mapRef.current = null;
+                    }
+                    // Small delay to let GPU release the context
+                    setTimeout(() => onUnlockIntel(), 100);
                   }}
                   className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs font-semibold"
                   title="View Deer Intel Analysis"
@@ -670,10 +695,14 @@ export default function Terrain3DView({
                   {onUnlockIntel && (
                     <button
                       onClick={() => {
-                        // Stop any running animation before navigating
+                        // v4-fix: Stop animations and allow WebGL cleanup before navigating
                         stopSpin();
-                        console.log('[Terrain3D] Deer Intel CTA clicked - stopping spin and navigating');
-                        onUnlockIntel();
+                        console.log('[Terrain3D] Deer Intel CTA clicked — cleaning up before navigation');
+                        if (mapRef.current) {
+                          try { mapRef.current.remove(); } catch (e) { /* ignore */ }
+                          mapRef.current = null;
+                        }
+                        setTimeout(() => onUnlockIntel(), 100);
                       }}
                       className="w-full mt-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-all shadow-lg"
                     >

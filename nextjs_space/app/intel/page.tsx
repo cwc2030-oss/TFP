@@ -104,16 +104,20 @@ class IntelErrorBoundary extends Component<{ children: React.ReactNode }, ErrorB
         <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
           <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
             <AlertTriangle className="h-10 w-10 text-amber-400 mx-auto mb-4" />
-            <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
+            <h1 className="text-xl font-bold text-white mb-2">Analyzer paused</h1>
             <p className="text-stone-400 text-sm mb-6">
-              The terrain analyzer encountered an issue. This is usually temporary — reloading typically resolves it.
+              The terrain analyzer hit a snag. Tap Retry to pick up where you left off.
             </p>
             <div className="flex gap-3 justify-center">
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => {
+                  this.setState({ hasError: false, error: null, errorInfo: null });
+                  // Force remount of child tree
+                  window.location.href = window.location.href;
+                }}
                 className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-medium transition-colors"
               >
-                Reload Page
+                Retry
               </button>
               <Link
                 href="/"
@@ -1646,13 +1650,43 @@ function DeerIntelContent() {
   const mostAlignedDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hintFadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ========== GLOBAL ERROR HANDLERS ==========
+  // ========== GLOBAL ERROR HANDLERS (v4-fix: filter transient WebGL/Mapbox errors) ==========
   useEffect(() => {
+    // v4-fix: Patterns that indicate transient WebGL/Mapbox issues that should NOT
+    // trigger the full crash screen. These are recoverable via map retry.
+    const isTransientMapError = (msg: string): boolean => {
+      const lower = msg.toLowerCase();
+      return (
+        lower.includes('webgl') ||
+        lower.includes('context lost') ||
+        lower.includes('context was lost') ||
+        lower.includes('mapbox') ||
+        lower.includes('failed to create webgl') ||
+        lower.includes('gl.bindtexture') ||
+        lower.includes('out of memory') ||
+        lower.includes('teximage2d') ||
+        lower.includes('framebuffer') ||
+        lower.includes('tile') ||
+        lower.includes('shader') ||
+        lower.includes('mapboxgl') ||
+        lower.includes('sprite') ||
+        lower.includes('worker')
+      );
+    };
+
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('[INTEL] Unhandled promise rejection:', event.reason);
       const errorMsg = event.reason instanceof Error 
         ? event.reason.message 
         : String(event.reason);
+      console.error('[INTEL] Unhandled promise rejection:', errorMsg);
+
+      // v4-fix: Don't crash the whole app for transient map/WebGL errors
+      if (isTransientMapError(errorMsg)) {
+        console.warn('[INTEL] Suppressed transient map error from crash screen:', errorMsg);
+        setMapError('Map encountered a temporary issue. Retrying...');
+        return;
+      }
+
       const errorStack = event.reason instanceof Error ? event.reason.stack : undefined;
       setGlobalError({ message: `Unhandled rejection: ${errorMsg}`, stack: errorStack });
       setError(`Unhandled error: ${errorMsg}`);
@@ -1660,19 +1694,28 @@ function DeerIntelContent() {
     };
 
     const handleGlobalError = (event: ErrorEvent) => {
-      console.error('[INTEL] Global error:', event.message, event.filename, event.lineno);
+      const msg = event.message || '';
+      console.error('[INTEL] Global error:', msg, event.filename, event.lineno);
+
+      // v4-fix: Don't crash for transient map/WebGL errors
+      if (isTransientMapError(msg)) {
+        console.warn('[INTEL] Suppressed transient map error from crash screen:', msg);
+        setMapError('Map encountered a temporary issue. Retrying...');
+        return;
+      }
+
       setGlobalError({ 
-        message: `${event.message} (${event.filename}:${event.lineno})`,
+        message: `${msg} (${event.filename}:${event.lineno})`,
         stack: event.error?.stack 
       });
-      setError(`Error: ${event.message}`);
+      setError(`Error: ${msg}`);
       setIsLoading(false);
     };
 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
     window.addEventListener('error', handleGlobalError);
 
-    console.log('[INTEL] Global error handlers registered');
+    console.log('[INTEL] Global error handlers registered (v4-fix: transient filter active)');
 
     return () => {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
@@ -1680,9 +1723,20 @@ function DeerIntelContent() {
     };
   }, []);
 
-  // Check WebGL support
+  // v4-fix: Actual WebGL check (with context-loss detection)
   const checkWebGLSupport = (): boolean => {
-    return true; // Let Mapbox handle gracefully
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return false;
+      if (gl instanceof WebGLRenderingContext || gl instanceof WebGL2RenderingContext) {
+        return !gl.isContextLost();
+      }
+      return true;
+    } catch (e) {
+      console.warn('[MAP] WebGL support check failed:', e);
+      return false;
+    }
   };
 
   // ========== ALIGNMENT ENGINE HELPERS ==========
@@ -3491,11 +3545,15 @@ function DeerIntelContent() {
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
   const mountIdRef = useRef<string>('');
+  // v4-fix: retry counter for WebGL context recovery after 3D terrain close
+  const [mapCreateAttempt, setMapCreateAttempt] = useState(0);
+  const mapRetryCountRef = useRef<number>(0);
+  const MAX_MAP_RETRIES = 3;
   
   useEffect(() => {
     const mountId = Date.now().toString(36);
     mountIdRef.current = mountId;
-    console.log('[LIFECYCLE] useEffect ENTER id=' + mountId + ' mapRef=' + !!mapRef.current + ' container=' + !!mapContainerRef.current);
+    console.log('[LIFECYCLE] useEffect ENTER id=' + mountId + ' attempt=' + mapCreateAttempt + ' mapRef=' + !!mapRef.current + ' container=' + !!mapContainerRef.current);
     
     if (!mapContainerRef.current) {
       console.log('[LIFECYCLE] No container ref, skipping');
@@ -3507,12 +3565,27 @@ function DeerIntelContent() {
       return;
     }
 
-    // Check WebGL support
+    // v4-fix: WebGL check with retry — if context is temporarily lost (e.g. previous
+    // 3D terrain just released it), wait a beat and retry rather than showing error.
     if (!checkWebGLSupport()) {
-      setMapError("Your browser doesn't support WebGL, which is required for 3D terrain viewing.");
+      if (mapRetryCountRef.current < MAX_MAP_RETRIES) {
+        mapRetryCountRef.current++;
+        const delay = mapRetryCountRef.current * 300; // 300ms, 600ms, 900ms
+        console.warn('[MAP] WebGL not ready — retry ' + mapRetryCountRef.current + '/' + MAX_MAP_RETRIES + ' in ' + delay + 'ms');
+        const retryTimer = setTimeout(() => {
+          if (mountIdRef.current !== mountId) return;
+          // Bump state to re-trigger this useEffect
+          setMapCreateAttempt(prev => prev + 1);
+        }, delay);
+        return () => clearTimeout(retryTimer);
+      }
+      setMapError("Your browser doesn't support WebGL, which is required for terrain viewing.");
       setIsLoading(false);
       return;
     }
+
+    // Reset retry counter on successful WebGL check
+    mapRetryCountRef.current = 0;
 
     // Check token
     if (!MAPBOX_TOKEN) {
@@ -3568,11 +3641,30 @@ function DeerIntelContent() {
       return;
     }
 
+    // v4-fix: WebGL context loss/restore handlers on the analyzer map canvas
+    try {
+      const mapCanvas = map.getCanvas();
+      if (mapCanvas) {
+        mapCanvas.addEventListener('webglcontextlost', (e: Event) => {
+          e.preventDefault(); // Tell browser we'll handle recovery
+          console.warn('[MAP] WebGL context LOST on analyzer map — will attempt recovery');
+          setMapError('Map display interrupted — recovering...');
+        });
+        mapCanvas.addEventListener('webglcontextrestored', () => {
+          console.log('[MAP] WebGL context RESTORED on analyzer map');
+          setMapError(null);
+          // Mapbox should auto-recover, but force a resize to repaint tiles
+          try { map.resize(); } catch (_) { /* ignore */ }
+        });
+      }
+    } catch (canvasErr) {
+      console.warn('[MAP] Could not attach WebGL context listeners:', canvasErr);
+    }
+
     // v3.8.4-fix — Detailed error handler: log full error object + stack
     map.on('error', (e: any) => {
       const err = e?.error || e;
       console.error("[MAP ERROR] message:", err?.message, "status:", err?.status, "url:", err?.url);
-      console.error("[MAP ERROR] full:", JSON.stringify(err, null, 2));
       if (err?.stack) console.error("[MAP ERROR] stack:", err.stack);
       if (err?.status === 401 || err?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
@@ -5680,7 +5772,8 @@ function DeerIntelContent() {
         container.innerHTML = '';
       }
     };
-  }, []); // Empty deps - only mount once
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapCreateAttempt]); // v4-fix: re-trigger on retry attempts after WebGL recovery
   
   // v3.9 — Flow corridor dash animation (extracted to hook)
   useFlowAnimation(mapReady, mapRef);
@@ -6981,22 +7074,42 @@ function DeerIntelContent() {
     });
   };
 
-  // ========== GLOBAL ERROR PANEL — customer-friendly ==========
+  // ========== GLOBAL ERROR PANEL — v4-fix: graceful recovery, no "reboot" language ==========
   if (globalError) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
         <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
           <AlertTriangle className="h-10 w-10 text-amber-400 mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
+          <h1 className="text-xl font-bold text-white mb-2">Analyzer paused</h1>
           <p className="text-stone-400 text-sm mb-6">
-            The terrain analyzer encountered an issue. This is usually temporary — reloading typically resolves it.
+            The terrain analyzer hit a snag. Let&apos;s get you back on track.
           </p>
           <div className="flex gap-3 justify-center">
             <button
-              onClick={() => { setGlobalError(null); window.location.reload(); }}
+              onClick={() => {
+                // v4-fix: Try to recover without full reload first
+                setGlobalError(null);
+                setError(null);
+                setMapError(null);
+                setMapReady(false);
+                // Clean up any stale map reference
+                if (mapRef.current) {
+                  try { mapRef.current.remove(); } catch (_) { /* ignore */ }
+                  mapRef.current = null;
+                }
+                // Clear container for fresh start
+                if (mapContainerRef.current) {
+                  mapContainerRef.current.innerHTML = '';
+                }
+                overlaySourcesCreated.current = false;
+                // Trigger map re-creation
+                mapRetryCountRef.current = 0;
+                setMapCreateAttempt(prev => prev + 1);
+              }}
               className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-medium transition-colors"
             >
-              Reload Page
+              <RefreshCw className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
+              Retry
             </button>
             <Link
               href="/"
@@ -8970,11 +9083,30 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* Map Error Indicator - subtle notice without blocking UI */}
+      {/* Map Error Indicator — v4-fix: graceful with retry */}
       {mapError && (
         <div className="absolute bottom-4 left-4 z-30 bg-black/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-amber-500/30">
-          <p className="text-amber-400 text-xs font-medium">📍 Static View</p>
-          <p className="text-white/60 text-xs">Interactive 3D unavailable</p>
+          <p className="text-amber-400 text-xs font-medium">📍 Map recovering...</p>
+          <p className="text-white/60 text-xs mb-1">Interactive map is reconnecting</p>
+          <button
+            onClick={() => {
+              setMapError(null);
+              setMapReady(false);
+              if (mapRef.current) {
+                try { mapRef.current.remove(); } catch (_) { /* ignore */ }
+                mapRef.current = null;
+              }
+              if (mapContainerRef.current) {
+                mapContainerRef.current.innerHTML = '';
+              }
+              overlaySourcesCreated.current = false;
+              mapRetryCountRef.current = 0;
+              setMapCreateAttempt(prev => prev + 1);
+            }}
+            className="text-amber-400 text-xs underline hover:text-amber-300"
+          >
+            Retry now
+          </button>
         </div>
       )}
 
