@@ -7406,17 +7406,62 @@ function DeerIntelContent() {
 
               {/* ─── RE-ALIGN TERRAIN ─── */}
               <div className="p-3 border-t border-white/[0.06] mt-auto">
-                <Button
+                {/* Last analysis timestamp */}
+                {summary && !isLoading && (
+                  <div className="flex items-center justify-center gap-1.5 mb-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500/80 animate-pulse" />
+                    <span className="text-[10px] text-stone-500/70">Terrain aligned</span>
+                  </div>
+                )}
+                <button
                   onClick={runAnalysis}
                   disabled={isLoading}
-                  className="w-full bg-amber-600 hover:bg-amber-500 text-white font-medium"
+                  className={`
+                    group relative w-full overflow-hidden rounded-xl px-4 py-3.5 
+                    font-semibold text-sm tracking-wide
+                    transition-all duration-300 ease-out
+                    focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:ring-offset-2 focus:ring-offset-gray-950
+                    ${isLoading
+                      ? 'bg-amber-900/30 border border-amber-700/30 cursor-wait text-amber-300/70'
+                      : 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-500 hover:from-amber-500 hover:via-amber-400 hover:to-orange-400 text-white shadow-lg shadow-amber-900/30 hover:shadow-amber-800/40 hover:shadow-xl active:scale-[0.98] border border-amber-500/20'}
+                  `}
                 >
-                  {isLoading ? (
-                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Analyzing...</>
-                  ) : (
-                    <><RefreshCw className="h-4 w-4 mr-2" />Re-Align Terrain</>
+                  {/* Animated shimmer on hover */}
+                  {!isLoading && (
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
+                    </div>
                   )}
-                </Button>
+                  {/* Loading progress bar embedded in button */}
+                  {isLoading && (
+                    <div className="absolute bottom-0 left-0 h-[2px] bg-gradient-to-r from-amber-500 via-amber-400 to-orange-400 transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
+                  )}
+                  <div className="relative flex items-center justify-center gap-2.5">
+                    {isLoading ? (
+                      <>
+                        <div className="relative">
+                          <RefreshCw className="h-4 w-4 animate-spin" style={{ animationDuration: '2s' }} />
+                          <div className="absolute inset-0 animate-ping opacity-20">
+                            <RefreshCw className="h-4 w-4" />
+                          </div>
+                        </div>
+                        <span>Refining Terrain…</span>
+                        <span className="text-amber-400/60 text-xs font-mono">{progress}%</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
+                        <span>Re-Align Terrain</span>
+                      </>
+                    )}
+                  </div>
+                </button>
+                {/* Contextual hint */}
+                {!isLoading && !summary && (
+                  <p className="text-[10px] text-stone-500/60 text-center mt-2 leading-relaxed">
+                    Runs terrain analysis with current season &amp; wind settings
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -8657,28 +8702,56 @@ function DeerIntelContent() {
 
       {/* Loading Overlay */}
       {isLoading && (
-        <div className="absolute inset-0 z-30 bg-black/50 backdrop-blur-sm flex items-center justify-center">
-          <div className="bg-gray-900/95 rounded-xl p-8 text-center max-w-sm border border-white/10">
-            <div className="relative w-20 h-20 mx-auto mb-4">
-              <div className="absolute inset-0 rounded-full border-4 border-amber-500/30" />
+        <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-md flex items-center justify-center">
+          <div className="bg-gray-950/95 rounded-2xl p-8 text-center max-w-sm border border-white/[0.08] shadow-2xl shadow-black/50">
+            {/* Animated radar rings */}
+            <div className="relative w-24 h-24 mx-auto mb-5">
+              {/* Outer pulse ring */}
+              <div className="absolute inset-0 rounded-full border border-amber-500/20 animate-ping" style={{ animationDuration: '2s' }} />
+              {/* Middle ring */}
+              <div className="absolute inset-2 rounded-full border border-amber-500/30" />
+              {/* Spinning ring */}
               <div 
-                className="absolute inset-0 rounded-full border-4 border-amber-500 border-t-transparent animate-spin"
-                style={{ animationDuration: '1s' }}
+                className="absolute inset-1 rounded-full border-2 border-amber-500/50 border-t-transparent border-r-transparent animate-spin"
+                style={{ animationDuration: '1.5s' }}
               />
-              <Target className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 text-amber-500" />
+              {/* Counter-spin inner ring */}
+              <div 
+                className="absolute inset-4 rounded-full border border-amber-400/40 border-b-transparent border-l-transparent animate-spin"
+                style={{ animationDuration: '2.5s', animationDirection: 'reverse' }}
+              />
+              {/* Center icon with glow */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-amber-500/20 rounded-full blur-md" style={{ margin: '-4px' }} />
+                  <Target className="relative h-8 w-8 text-amber-500" />
+                </div>
+              </div>
             </div>
-            <h3 className="text-white font-semibold text-lg mb-2">Analyzing Terrain</h3>
-            <p className="text-white/60 text-sm mb-4 font-mono">
+            <h3 className="text-white font-semibold text-lg mb-1 tracking-tight">Refining Terrain Intelligence</h3>
+            <p className="text-stone-400 text-[11px] mb-4 font-mono tracking-wide">
               {progressStep}
             </p>
-            <div className="text-white/40 text-xs mb-3">{progress}%</div>
-            <div className="w-full bg-white/10 rounded-full h-2">
+            {/* Premium progress bar */}
+            <div className="relative w-full h-1.5 bg-white/[0.06] rounded-full overflow-hidden mb-2">
               <div
-                className="bg-amber-500 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
+                className="h-full rounded-full transition-all duration-500 ease-out"
+                style={{ 
+                  width: `${progress}%`,
+                  background: 'linear-gradient(90deg, #d97706, #f59e0b, #fbbf24)',
+                  boxShadow: '0 0 12px rgba(245,158,11,0.4)',
+                }}
+              />
+              {/* Shimmer on progress bar */}
+              <div 
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.15] to-transparent animate-pulse"
+                style={{ animationDuration: '1.5s' }}
               />
             </div>
-            <p className="text-white/40 text-xs mt-2">{progress}% complete</p>
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-stone-500">Processing</span>
+              <span className="text-amber-400 font-mono font-semibold">{progress}%</span>
+            </div>
           </div>
         </div>
       )}
