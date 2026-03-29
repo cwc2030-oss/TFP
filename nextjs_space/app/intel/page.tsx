@@ -3224,6 +3224,36 @@ function DeerIntelContent() {
     if (map.getLayer('tfp-flow-nearest-highlight') && flowVisibility.flowPrimary) {
       map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'visible');
     }
+
+    // V4 Step 10: Dim non-relevant corridors when a stand is selected
+    // This creates visual focus — the nearest corridor stays bright, others fade
+    const corridorDimLayers = [
+      { id: 'tfp-corridors-primary', dimOpacity: 0.25, fullOpacity: 0.78 },
+      { id: 'tfp-corridors-primary-casing', dimOpacity: 0.05, fullOpacity: 0.15 },
+      { id: 'tfp-corridors-possible', dimOpacity: 0.12, fullOpacity: 0.42 },
+      { id: 'tfp-corridors-exploratory', dimOpacity: 0.04, fullOpacity: null },  // null = use zoom expression
+      { id: 'tfp-corridors-context-primary', dimOpacity: 0.06, fullOpacity: null },
+      { id: 'tfp-corridors-context-possible', dimOpacity: 0.03, fullOpacity: null },
+    ];
+    corridorDimLayers.forEach(({ id, dimOpacity, fullOpacity }) => {
+      if (!map.getLayer(id)) return;
+      if (selectedStand !== null) {
+        // Stand selected — dim corridors for focus
+        map.setPaintProperty(id, 'line-opacity', dimOpacity);
+      } else if (fullOpacity !== null) {
+        // No stand selected — restore fixed opacities
+        map.setPaintProperty(id, 'line-opacity', fullOpacity);
+      } else {
+        // Restore zoom-responsive opacities for layers that use expressions
+        if (id === 'tfp-corridors-exploratory') {
+          map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0.08, 14, 0.22, 17, 0.35]);
+        } else if (id === 'tfp-corridors-context-primary') {
+          map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0.12, 14, 0.28, 17, 0.38]);
+        } else if (id === 'tfp-corridors-context-possible') {
+          map.setPaintProperty(id, 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0.06, 14, 0.15, 17, 0.22]);
+        }
+      }
+    });
   }, [selectedStand, alignedStands, terrainFlowData, mapReady, flowVisibility.flowPrimary]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
@@ -3244,16 +3274,15 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-funnels-lines-draws')) {
         map.setLayoutProperty('tfp-funnels-lines-draws', 'visibility', visibility.draws ? 'visible' : 'none');
       }
-      // Corridors layers (solid for high/med, dashed for low)
+      // Legacy corridors layers — V4 Step 10: Always hidden (V2 tiered corridors are primary visual)
       if (map.getLayer('tfp-funnels-lines-corridors-solid')) {
-        map.setLayoutProperty('tfp-funnels-lines-corridors-solid', 'visibility', visibility.corridors ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-funnels-lines-corridors-solid', 'visibility', 'none');
       }
       if (map.getLayer('tfp-funnels-lines-corridors-dashed')) {
-        map.setLayoutProperty('tfp-funnels-lines-corridors-dashed', 'visibility', visibility.corridors ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-funnels-lines-corridors-dashed', 'visibility', 'none');
       }
-      // Legacy corridors layer (for compatibility)
       if (map.getLayer('tfp-funnels-lines-corridors')) {
-        map.setLayoutProperty('tfp-funnels-lines-corridors', 'visibility', visibility.corridors ? 'visible' : 'none');
+        map.setLayoutProperty('tfp-funnels-lines-corridors', 'visibility', 'none');
       }
       // Fallback layer
       if (map.getLayer('tfp-funnels-lines')) {
@@ -3268,8 +3297,9 @@ function DeerIntelContent() {
         map.setLayoutProperty('tfp-funnels-polys-outline', 'visibility', visibility.saddles ? 'visible' : 'none');
       }
       
-      // V2 Tiered corridor visibility
+      // V2 Tiered corridor visibility (V4 Step 10: includes casing layer)
       const tieredCorridorLayers = [
+        'tfp-corridors-primary-casing',  // V4: glow casing
         'tfp-corridors-primary',
         'tfp-corridors-possible',
         'tfp-corridors-exploratory',
@@ -3755,7 +3785,8 @@ function DeerIntelContent() {
               'line-width': 3,
             },
           });
-          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines - HIDE in Terrain Work Mode
+          // Corridors layer: HIGH + MEDIUM confidence = SOLID lines
+          // V4 Step 10: Hidden by default — V2 tiered corridors are the primary visual
           map.addLayer({
             id: 'tfp-funnels-lines-corridors-solid',
             type: 'line',
@@ -3764,7 +3795,7 @@ function DeerIntelContent() {
               ['==', ['get', 'funnelType'], 'corridor'],
               ['>=', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4]  // Med + High only
             ],
-            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
+            layout: { visibility: 'none' },
             paint: {
               // Score-based color: High ≥0.7 (bright red-violet), Med 0.4-0.7 (purple)
               'line-color': [
@@ -3782,7 +3813,8 @@ function DeerIntelContent() {
             },
           });
           
-          // Corridors layer: LOW confidence = DASHED lines - HIDE in Terrain Work Mode
+          // Corridors layer: LOW confidence = DASHED lines
+          // V4 Step 10: Hidden by default — V2 tiered corridors are the primary visual
           map.addLayer({
             id: 'tfp-funnels-lines-corridors-dashed',
             type: 'line',
@@ -3791,7 +3823,7 @@ function DeerIntelContent() {
               ['==', ['get', 'funnelType'], 'corridor'],
               ['<', ['coalesce', ['get', 'corridorScore'], 0.5], 0.4]  // Low only
             ],
-            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
+            layout: { visibility: 'none' },
             paint: {
               'line-color': LAYER_COLORS.corridorLow,  // Light lavender
               'line-width': 2.5,  // Reduced from 3
@@ -3853,10 +3885,25 @@ function DeerIntelContent() {
         
         // ========== V2 TIERED CORRIDOR SOURCES AND LAYERS ==========
         // ALL HIDDEN in Terrain Work Mode (deer interpretation)
+        // V4 Step 10: Premium casing, zoom-responsive widths, cleaner hierarchy
         
-        // Primary corridors: Top band - VISUAL CALM (reduced weight)
+        // Primary corridors: Top band — PREMIUM with casing glow
         if (!map.getSource('tfp-corridors-primary')) {
           map.addSource('tfp-corridors-primary', { type: 'geojson', data: EMPTY_FC });
+          // Casing layer: soft diffuse glow behind primary corridor
+          map.addLayer({
+            id: 'tfp-corridors-primary-casing',
+            type: 'line',
+            source: 'tfp-corridors-primary',
+            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
+            paint: {
+              'line-color': LAYER_COLORS.corridorPrimary,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 7, 14, 10, 17, 14],
+              'line-opacity': 0.15,
+              'line-blur': 3,
+            },
+          });
+          // Core line: zoom-responsive width
           map.addLayer({
             id: 'tfp-corridors-primary',
             type: 'line',
@@ -3864,13 +3911,13 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPrimary,
-              'line-width': 3,           // Reduced from 4
-              'line-opacity': 0.70,      // Reduced from 0.85
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 14, 3.5, 17, 5],
+              'line-opacity': 0.78,
             },
           });
         }
         
-        // Possible corridors - subtle
+        // Possible corridors — subtle, zoom-responsive
         if (!map.getSource('tfp-corridors-possible')) {
           map.addSource('tfp-corridors-possible', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3880,13 +3927,13 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPossible,
-              'line-width': 2,           // Reduced from 2.5
-              'line-opacity': 0.35,      // Reduced from 0.45
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 14, 2.5, 17, 3.5],
+              'line-opacity': 0.42,
             },
           });
         }
         
-        // Exploratory lanes - very faint
+        // Exploratory lanes — very faint at low zoom, visible at high zoom
         if (!map.getSource('tfp-corridors-exploratory')) {
           map.addSource('tfp-corridors-exploratory', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3896,14 +3943,14 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorExploratory,
-              'line-width': 1.2,         // Reduced from 1.5
-              'line-opacity': 0.20,      // Reduced from 0.25
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 14, 1.5, 17, 2.5],
+              'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.08, 14, 0.22, 17, 0.35],
               'line-dasharray': [4, 3],
             },
           });
         }
         
-        // Context corridors (off-parcel) - Primary tier
+        // Context corridors (off-parcel) — Primary tier, zoom-responsive
         if (!map.getSource('tfp-corridors-context-primary')) {
           map.addSource('tfp-corridors-context-primary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3913,14 +3960,14 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorContext,
-              'line-width': 2.5,         // Reduced from 3
-              'line-opacity': 0.30,      // Reduced from 0.35
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 14, 2.5, 17, 3.5],
+              'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.12, 14, 0.28, 17, 0.38],
               'line-dasharray': [3, 2],
             },
           });
         }
         
-        // Context corridors (off-parcel) - Possible tier
+        // Context corridors (off-parcel) — Possible tier, zoom-responsive
         if (!map.getSource('tfp-corridors-context-possible')) {
           map.addSource('tfp-corridors-context-possible', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -3930,8 +3977,8 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorContext,
-              'line-width': 1.5,         // Reduced from 2
-              'line-opacity': 0.15,      // Reduced from 0.20
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 14, 1.5, 17, 2.5],
+              'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.06, 14, 0.15, 17, 0.22],
               'line-dasharray': [3, 3],
             },
           });
@@ -5096,7 +5143,8 @@ function DeerIntelContent() {
           'tfp-funnels-lines-draws',
           'tfp-funnels-polys-fill',
           'tfp-funnels-polys-outline',
-          // Corridors & funnels
+          // Corridors & funnels (V4 Step 10: casing + core)
+          'tfp-corridors-primary-casing',  // Glow casing below core
           'tfp-corridors-primary',
           'tfp-corridors-possible',
           'tfp-corridors-exploratory',
