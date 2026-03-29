@@ -7377,6 +7377,198 @@ function DeerIntelContent() {
                 </div>
               </div>
 
+              {/* Travel Corridor Layer (Primary Movement Path - ON by default) */}
+              <div className="p-3 border-b border-white/10">
+                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
+                  <Mountain className="h-4 w-4 text-stone-400" />
+                  Travel Corridor
+                </h3>
+                <div className="space-y-1">
+                  {(() => {
+                    // Calculate corridor status
+                    const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
+                    const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
+                    const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
+                    const totalFeatures = primaryCount + secondaryCount + saddleCount;
+                    const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
+                                           ridgeSpineData?.metadata?.dem_source === 'NONE' ||
+                                           !ridgeSpineData;
+                    const hasFeatures = totalFeatures > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setVisibility(v => ({ ...v, ridgeSpines: !v.ridgeSpines }))}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          visibility.ridgeSpines ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Primary Path</span>
+                        {/* Status badge */}
+                        {hasFeatures ? (
+                          <span className="text-[9px] text-green-400 px-1.5 py-0.5 bg-green-900/40 rounded">
+                            {primaryCount}{secondaryCount > 0 ? `+${secondaryCount}` : ''}
+                          </span>
+                        ) : isAwaitingData ? (
+                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">—</span>
+                        ) : null}
+                      </button>
+                    );
+                  })()}
+                </div>
+                
+                {/* Expanded details when toggle is on */}
+                {visibility.ridgeSpines && (
+                  <div className="mt-2 text-[10px] space-y-1 px-1">
+                    {(() => {
+                      const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
+                      const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
+                      const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
+                      const totalFeatures = primaryCount + secondaryCount + saddleCount;
+                      const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
+                                             ridgeSpineData?.metadata?.dem_source === 'NONE' ||
+                                             !ridgeSpineData;
+                      
+                      // Case 1: Features detected
+                      if (totalFeatures > 0) {
+                        return (
+                          <div className="text-stone-400 space-y-0.5">
+                            <div className="flex justify-between">
+                              <span>Primary Spines</span>
+                              <span className="text-white">{primaryCount}</span>
+                            </div>
+                            {secondaryCount > 0 && (
+                              <div className="flex justify-between">
+                                <span>Secondary</span>
+                                <span className="text-white">{secondaryCount}</span>
+                              </div>
+                            )}
+                            {saddleCount > 0 && (
+                              <div className="flex justify-between">
+                                <span>Saddles</span>
+                                <span className="text-white">{saddleCount}</span>
+                              </div>
+                            )}
+                            {ridgeSpineData?.metadata?.total_ridge_length_m && ridgeSpineData.metadata.total_ridge_length_m > 0 && (
+                              <div className="flex justify-between text-stone-500 pt-0.5 border-t border-white/5">
+                                <span>Total Length</span>
+                                <span>{Math.round(ridgeSpineData.metadata.total_ridge_length_m)}m</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      
+                      // Case 2: No features detected (clean empty state)
+                      return (
+                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
+                          <p className="italic">Not detected on this parcel</p>
+                          <p className="text-stone-600 mt-1 text-[9px]">
+                            Terrain may be too flat or uniform for distinct spine features.
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, saddles: !v.saddles }))}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.saddles ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.saddles ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.saddles ? 'text-white' : 'text-stone-500'}`}>
+                      Saddles
+                    </span>
+                  </button>
+                </div>
+              </div>
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.bedding ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
+                  </button>
+                </div>
+              </div>
+              <div className="p-3 border-b border-white/10">
+                {/* v3.6.0: Terrain Reasons Toggle */}
+                <div className="mt-1">
+                  <button
+                    onClick={() => setShowTerrainReasons(v => !v)}
+                    className={`w-full flex items-center gap-2 px-2 py-2 rounded transition-all text-xs ${
+                      showTerrainReasons 
+                        ? 'bg-gradient-to-r from-purple-900/40 to-violet-900/40 border border-purple-700/40' 
+                        : 'bg-stone-800/40 hover:bg-stone-700/40 border border-transparent'
+                    }`}
+                  >
+                    <Info className={`h-4 w-4 ${showTerrainReasons ? 'text-purple-400' : 'text-stone-500'}`} />
+                    <span className={`flex-1 text-left font-medium ${showTerrainReasons ? 'text-purple-300' : 'text-stone-400'}`}>
+                      Show Terrain Reasons
+                    </span>
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      showTerrainReasons ? 'bg-purple-500/30 text-purple-300' : 'bg-stone-700/50 text-stone-500'
+                    }`}>
+                      {showTerrainReasons ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                  {showTerrainReasons && (
+                    <p className="text-[9px] text-purple-300/70 mt-1.5 px-2 leading-relaxed">
+                      Click any stand, corridor, or bedding zone to see why terrain factors make it significant.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-1">
+                  
+                  {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
+                  {(() => {
+                    const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
+                    const hasData = beddingCount > 0;
+                    
+                    return (
+                      <button
+                        onClick={() => setShowBeddingProbability(v => !v)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                          showBeddingProbability ? 'bg-purple-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.beddingProbability, opacity: showBeddingProbability ? 1 : 0.4 }} />
+                        <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
+                        {hasData ? (
+                          <span className="text-[9px] text-purple-300 px-1.5 py-0.5 bg-purple-800/40 rounded">
+                            {beddingCount}
+                          </span>
+                        ) : (
+                          <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
+                            v2
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                </div>
+              </div>
+              {/* ─── DEER FLOW ─── */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Deer Flow</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+
               {/* ========== TERRAIN FLOW LAYER (Movement Likelihood) ========== */}
               <div className="p-3 border-b border-white/10">
                 <div className="flex items-center justify-between mb-2">
@@ -7645,33 +7837,6 @@ function DeerIntelContent() {
                       </button>
                     );
                   })()}
-                  
-                  {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
-                  {(() => {
-                    const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
-                    const hasData = beddingCount > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setShowBeddingProbability(v => !v)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          showBeddingProbability ? 'bg-purple-900/30' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full" style={{ background: LAYER_COLORS.beddingProbability, opacity: showBeddingProbability ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
-                        {hasData ? (
-                          <span className="text-[9px] text-purple-300 px-1.5 py-0.5 bg-purple-800/40 rounded">
-                            {beddingCount}
-                          </span>
-                        ) : (
-                          <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
-                            v2
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
                 </div>
 
                 
@@ -7804,6 +7969,7 @@ function DeerIntelContent() {
                 )}
               </div>
 
+
               {/* ========== HUNTING POTENTIAL CARD (PRIMARY ANSWER) ========== */}
               {/* This is THE answer to "Does this parcel have hunting potential?" */}
               {!exportMode && parcelPolygon && (
@@ -7924,299 +8090,6 @@ function DeerIntelContent() {
 
               {/* ========== TERRAIN WORK MODE NOTICE ========== */}
               {TERRAIN_WORK_MODE && <TerrainWorkModeNotice />}
-
-              {/* ─── DEER FLOW ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-white/10" />
-                  <span className="text-[9px] text-stone-500 uppercase tracking-[0.15em] font-semibold">Deer Flow</span>
-                  <div className="flex-1 h-px bg-white/10" />
-                </div>
-              </div>
-
-              {/* ========== TERRAIN STRUCTURE / DEER MOVEMENT PANEL ========== */}
-              {(() => {
-                // Count terrain structure features
-                const corridorCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'corridor').length || 0;
-                const saddleCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'saddle').length || 0;
-                const drawCount = layers?.funnels?.features?.filter(f => f.properties?.funnelType === 'draw').length || 0;
-                const totalMovement = corridorCount + saddleCount + drawCount;
-                
-                // In Terrain Work Mode, only count terrain structure (saddles + draws)
-                const terrainStructureCount = saddleCount + drawCount;
-                
-                // Edge features that extend beyond parcel
-                const edgeCorridors = edgeIntelData?.corridorArrows?.features?.length || 0;
-                const edgeSaddles = edgeIntelData?.ghostSaddles?.features?.length || 0;
-                const edgeDraws = edgeIntelData?.drawExtensions?.features?.length || 0;
-                const totalEdge = edgeCorridors + edgeSaddles + edgeDraws;
-                
-                const movementVisible = visibility.corridors || visibility.funnels;
-                
-                return (
-                  <div className="p-3 border-b border-white/10">
-                    {/* Header - context-aware for Terrain Work Mode */}
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-medium text-white flex items-center gap-2 text-sm">
-                        {TERRAIN_WORK_MODE ? (
-                          <>
-                            <Mountain className="h-4 w-4 text-stone-400" />
-                            Terrain Structure
-                          </>
-                        ) : (
-                          <>
-                            <Compass className="h-4 w-4 text-stone-400" />
-                            Deer Movement
-                          </>
-                        )}
-                      </h3>
-                      {(TERRAIN_WORK_MODE ? terrainStructureCount : totalMovement) > 0 && (
-                        <span className="text-xs text-stone-500">
-                          {TERRAIN_WORK_MODE ? terrainStructureCount : totalMovement} features
-                        </span>
-                      )}
-                    </div>
-                    
-                    {/* Movement feature rows */}
-                    <div className="space-y-1 mb-2">
-                      {/* Corridors - Hidden in Terrain Work Mode (deer interpretation) */}
-                      {!TERRAIN_WORK_MODE && (
-                        <button
-                          onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
-                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                            visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                          }`}
-                        >
-                          <span className="w-3 h-1 rounded-full" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
-                          <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>
-                            Corridors
-                          </span>
-                          <span className={`text-[10px] ${visibility.corridors ? 'text-stone-400' : 'text-stone-600'}`}>
-                            {corridorCount}
-                          </span>
-                        </button>
-                      )}
-                      
-                      {/* Saddles - Physical terrain structure (independent toggle) */}
-                      <button
-                        onClick={() => setVisibility(v => ({ ...v, saddles: !v.saddles }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          visibility.saddles ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.saddles ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.saddles ? 'text-white' : 'text-stone-500'}`}>
-                          Saddles
-                        </span>
-                        <span className={`text-[10px] ${visibility.saddles ? 'text-stone-400' : 'text-stone-600'}`}>
-                          {saddleCount}
-                        </span>
-                      </button>
-                      
-                      {/* Draws - Physical terrain structure (independent toggle) */}
-                      <button
-                        onClick={() => setVisibility(v => ({ ...v, draws: !v.draws }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          visibility.draws ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-0.5 rounded-full" style={{ background: LAYER_COLORS.funnelDraw, opacity: visibility.draws ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.draws ? 'text-white' : 'text-stone-500'}`}>
-                          Draws
-                        </span>
-                        <span className={`text-[10px] ${visibility.draws ? 'text-stone-400' : 'text-stone-600'}`}>
-                          {drawCount}
-                        </span>
-                      </button>
-                    </div>
-                    
-                    {/* Edge Movement Teaser (flows beyond property) - Hidden in Terrain Work Mode */}
-                    {!TERRAIN_WORK_MODE && totalEdge > 0 && movementVisible && (
-                      <div 
-                        className="mt-2 p-2 rounded-lg bg-gradient-to-r from-pink-900/20 to-orange-900/20 border border-white/5 cursor-pointer hover:border-white/10 transition-colors"
-                        onClick={() => {
-                          // Trigger unlock modal for the first available edge type
-                          if (edgeCorridors > 0) {
-                            setUnlockModalData({ edgeType: 'corridor', lngLat: [lng, lat], segmentBearing: 0 });
-                            setShowUnlockModal(true);
-                          } else if (edgeSaddles > 0) {
-                            setUnlockModalData({ edgeType: 'saddle', lngLat: [lng, lat], segmentBearing: 0 });
-                            setShowUnlockModal(true);
-                          } else if (edgeDraws > 0) {
-                            setUnlockModalData({ edgeType: 'draw', lngLat: [lng, lat], segmentBearing: 0 });
-                            setShowUnlockModal(true);
-                          }
-                        }}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <Lock className="w-3 h-3 text-pink-400" />
-                          <span className="text-[10px] text-white/70 font-medium">Continues Off-Property</span>
-                        </div>
-                        <div className="flex gap-2 text-[9px] text-stone-400">
-                          {edgeCorridors > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="w-2 h-0.5 rounded" style={{ background: LAYER_COLORS.edgeCorridorArrow }} />
-                              {edgeCorridors} corridor{edgeCorridors > 1 ? 's' : ''}
-                            </span>
-                          )}
-                          {edgeSaddles > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.edgeGhostSaddle, opacity: 0.6 }} />
-                              {edgeSaddles} saddle{edgeSaddles > 1 ? 's' : ''}
-                            </span>
-                          )}
-                          {edgeDraws > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="w-2 h-0.5 rounded" style={{ background: LAYER_COLORS.edgeDrawExtension }} />
-                              {edgeDraws} draw{edgeDraws > 1 ? 's' : ''}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1 text-[9px] text-pink-400/80">
-                          🔓 Tap to unlock adjacent intel
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              
-              {/* Travel Corridor Layer (Primary Movement Path - ON by default) */}
-              <div className="p-3 border-b border-white/10">
-                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
-                  <Mountain className="h-4 w-4 text-stone-400" />
-                  Travel Corridor
-                </h3>
-                <div className="space-y-1">
-                  {(() => {
-                    // Calculate corridor status
-                    const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
-                    const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
-                    const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
-                    const totalFeatures = primaryCount + secondaryCount + saddleCount;
-                    const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
-                                           ridgeSpineData?.metadata?.dem_source === 'NONE' ||
-                                           !ridgeSpineData;
-                    const hasFeatures = totalFeatures > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setVisibility(v => ({ ...v, ridgeSpines: !v.ridgeSpines }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                          visibility.ridgeSpines ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Primary Path</span>
-                        {/* Status badge */}
-                        {hasFeatures ? (
-                          <span className="text-[9px] text-green-400 px-1.5 py-0.5 bg-green-900/40 rounded">
-                            {primaryCount}{secondaryCount > 0 ? `+${secondaryCount}` : ''}
-                          </span>
-                        ) : isAwaitingData ? (
-                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">—</span>
-                        ) : null}
-                      </button>
-                    );
-                  })()}
-                </div>
-                
-                {/* Expanded details when toggle is on */}
-                {visibility.ridgeSpines && (
-                  <div className="mt-2 text-[10px] space-y-1 px-1">
-                    {(() => {
-                      const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
-                      const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
-                      const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
-                      const totalFeatures = primaryCount + secondaryCount + saddleCount;
-                      const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
-                                             ridgeSpineData?.metadata?.dem_source === 'NONE' ||
-                                             !ridgeSpineData;
-                      
-                      // Case 1: Features detected
-                      if (totalFeatures > 0) {
-                        return (
-                          <div className="text-stone-400 space-y-0.5">
-                            <div className="flex justify-between">
-                              <span>Primary Spines</span>
-                              <span className="text-white">{primaryCount}</span>
-                            </div>
-                            {secondaryCount > 0 && (
-                              <div className="flex justify-between">
-                                <span>Secondary</span>
-                                <span className="text-white">{secondaryCount}</span>
-                              </div>
-                            )}
-                            {saddleCount > 0 && (
-                              <div className="flex justify-between">
-                                <span>Saddles</span>
-                                <span className="text-white">{saddleCount}</span>
-                              </div>
-                            )}
-                            {ridgeSpineData?.metadata?.total_ridge_length_m && ridgeSpineData.metadata.total_ridge_length_m > 0 && (
-                              <div className="flex justify-between text-stone-500 pt-0.5 border-t border-white/5">
-                                <span>Total Length</span>
-                                <span>{Math.round(ridgeSpineData.metadata.total_ridge_length_m)}m</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
-                      
-                      // Case 2: No features detected (clean empty state)
-                      return (
-                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
-                          <p className="italic">Not detected on this parcel</p>
-                          <p className="text-stone-600 mt-1 text-[9px]">
-                            Terrain may be too flat or uniform for distinct spine features.
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
-              <div className="p-3 border-b border-white/10">
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
-                      visibility.bedding ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
-                  </button>
-                </div>
-              </div>
-              <div className="p-3 border-b border-white/10">
-                {/* v3.6.0: Terrain Reasons Toggle */}
-                <div className="mt-1">
-                  <button
-                    onClick={() => setShowTerrainReasons(v => !v)}
-                    className={`w-full flex items-center gap-2 px-2 py-2 rounded transition-all text-xs ${
-                      showTerrainReasons 
-                        ? 'bg-gradient-to-r from-purple-900/40 to-violet-900/40 border border-purple-700/40' 
-                        : 'bg-stone-800/40 hover:bg-stone-700/40 border border-transparent'
-                    }`}
-                  >
-                    <Info className={`h-4 w-4 ${showTerrainReasons ? 'text-purple-400' : 'text-stone-500'}`} />
-                    <span className={`flex-1 text-left font-medium ${showTerrainReasons ? 'text-purple-300' : 'text-stone-400'}`}>
-                      Show Terrain Reasons
-                    </span>
-                    <span className={`text-[8px] px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                      showTerrainReasons ? 'bg-purple-500/30 text-purple-300' : 'bg-stone-700/50 text-stone-500'
-                    }`}>
-                      {showTerrainReasons ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  {showTerrainReasons && (
-                    <p className="text-[9px] text-purple-300/70 mt-1.5 px-2 leading-relaxed">
-                      Click any stand, corridor, or bedding zone to see why terrain factors make it significant.
-                    </p>
-                  )}
-                </div>
-              </div>
 
               {/* ─── STAND SELECTION ─── */}
               <div className="px-3 pt-3 pb-1">
@@ -8553,6 +8426,93 @@ function DeerIntelContent() {
                 </div>
               </div>
 
+              <div className="p-3 border-b border-white/10">
+                <div className="space-y-1">
+                  {/* Primary Corridors */}
+                  {!TERRAIN_WORK_MODE && (
+                    <button
+                      onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                        visibility.corridors ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                      }`}
+                    >
+                      <span className="w-3 h-1 rounded-full" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
+                      <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>
+                        Primary Corridors
+                      </span>
+                    </button>
+                  )}
+                  {/* Draws — terrain channels */}
+                  <button
+                    onClick={() => setVisibility(v => ({ ...v, draws: !v.draws }))}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-all text-xs ${
+                      visibility.draws ? 'bg-stone-700/50' : 'bg-stone-800/30 hover:bg-stone-700/30'
+                    }`}
+                  >
+                    <span className="w-3 h-0.5 rounded-full" style={{ background: LAYER_COLORS.funnelDraw, opacity: visibility.draws ? 1 : 0.4 }} />
+                    <span className={`flex-1 text-left ${visibility.draws ? 'text-white' : 'text-stone-500'}`}>
+                      Draws
+                    </span>
+                  </button>
+                </div>
+              </div>
+              {(() => {
+                const edgeCorridors = edgeIntelData?.corridorArrows?.features?.length || 0;
+                const edgeSaddles = edgeIntelData?.ghostSaddles?.features?.length || 0;
+                const edgeDraws = edgeIntelData?.drawExtensions?.features?.length || 0;
+                const totalEdge = edgeCorridors + edgeSaddles + edgeDraws;
+                const movementVisible = visibility.corridors || visibility.funnels;
+                return (
+                  <>
+                    {!TERRAIN_WORK_MODE && totalEdge > 0 && movementVisible && (
+                      <div 
+                        className="mt-2 p-2 rounded-lg bg-gradient-to-r from-pink-900/20 to-orange-900/20 border border-white/5 cursor-pointer hover:border-white/10 transition-colors"
+                        onClick={() => {
+                          // Trigger unlock modal for the first available edge type
+                          if (edgeCorridors > 0) {
+                            setUnlockModalData({ edgeType: 'corridor', lngLat: [lng, lat], segmentBearing: 0 });
+                            setShowUnlockModal(true);
+                          } else if (edgeSaddles > 0) {
+                            setUnlockModalData({ edgeType: 'saddle', lngLat: [lng, lat], segmentBearing: 0 });
+                            setShowUnlockModal(true);
+                          } else if (edgeDraws > 0) {
+                            setUnlockModalData({ edgeType: 'draw', lngLat: [lng, lat], segmentBearing: 0 });
+                            setShowUnlockModal(true);
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <Lock className="w-3 h-3 text-pink-400" />
+                          <span className="text-[10px] text-white/70 font-medium">Continues Off-Property</span>
+                        </div>
+                        <div className="flex gap-2 text-[9px] text-stone-400">
+                          {edgeCorridors > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-0.5 rounded" style={{ background: LAYER_COLORS.edgeCorridorArrow }} />
+                              {edgeCorridors} corridor{edgeCorridors > 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {edgeSaddles > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-2 rounded" style={{ background: LAYER_COLORS.edgeGhostSaddle, opacity: 0.6 }} />
+                              {edgeSaddles} saddle{edgeSaddles > 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {edgeDraws > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="w-2 h-0.5 rounded" style={{ background: LAYER_COLORS.edgeDrawExtension }} />
+                              {edgeDraws} draw{edgeDraws > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-[9px] text-pink-400/80">
+                          🔓 Tap to unlock adjacent intel
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
               {!TERRAIN_WORK_MODE && (
                <StandAlignmentPanel
