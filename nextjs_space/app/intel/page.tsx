@@ -7354,6 +7354,7 @@ function DeerIntelContent() {
               <WindCompass
                 windDirection={windDirection}
                 windMinAgo={windMinAgo}
+                season={season}
                 onWindChange={(dir) => {
                   setWindDirection(dir);
                   setWindLastUpdated(new Date());
