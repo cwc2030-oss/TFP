@@ -4591,26 +4591,19 @@ function DeerIntelContent() {
           });
         }
 
-        // ========== TERTIARY STAND DOTS LAYER (v1.1) ==========
-        // Faint circle dots for stands 3+ showing additional huntable opportunities
+        // ========== TERTIARY STAND DOTS LAYER (v4 — disabled, replaced by HTML SVG markers) ==========
+        // Kept as source for data feeding but layer hidden — tertiary stands now use unified SVG icons
         if (!map.getSource('tfp-stand-tertiary')) {
           map.addSource('tfp-stand-tertiary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-stand-tertiary-dot',
             type: 'circle',
             source: 'tfp-stand-tertiary',
+            layout: { visibility: 'none' },  // v4: hidden — unified HTML SVG markers replace this
             paint: {
-              'circle-radius': [
-                'interpolate', ['linear'], ['zoom'],
-                13, 4,
-                15, 6,
-                17, 8,
-              ],
+              'circle-radius': 4,
               'circle-color': LAYER_COLORS.standTertiary,
-              'circle-opacity': 0.45,
-              'circle-stroke-color': '#ffffff',
-              'circle-stroke-width': 1,
-              'circle-stroke-opacity': 0.25,
+              'circle-opacity': 0,
             },
           });
         }
@@ -6378,6 +6371,65 @@ function DeerIntelContent() {
     }
   };
 
+  // ========== PREMIUM STAND ICON SVG GENERATOR ==========
+  // Unified visual family: scope-reticle pin with support pole
+  const buildStandSVG = (opts: {
+    size: number;
+    fillColor: string;
+    strokeColor: string;
+    glowColor?: string;
+    label: string;
+    isTop: boolean;
+    rank: number;
+  }): string => {
+    const { size, fillColor, strokeColor, glowColor, label, isTop, rank } = opts;
+    const half = size / 2;
+    const pinR = size * 0.34;       // Main pin circle radius
+    const poleH = size * 0.22;      // Support pole height
+    const poleW = size * 0.06;      // Pole width
+    const reticleR = pinR * 0.55;   // Inner reticle radius
+    const crossW = size * 0.025;    // Crosshair line width
+
+    // Glow filter for top stand
+    const glowFilter = isTop ? `
+      <filter id="sg${rank}" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="${size * 0.08}" result="blur"/>
+        <feFlood flood-color="${glowColor || fillColor}" flood-opacity="0.5"/>
+        <feComposite in2="blur" operator="in"/>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>` : '';
+
+    // Rank label (⭐ for #1, number for rest)
+    const labelContent = isTop 
+      ? `<text x="${half}" y="${half - poleH/2 + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="${size * 0.22}px" font-weight="700">★</text>`
+      : `<text x="${half}" y="${half - poleH/2 + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="${size * 0.24}px" font-weight="700" font-family="system-ui,sans-serif">${label}</text>`;
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <defs>${glowFilter}</defs>
+      <!-- Support pole -->
+      <rect x="${half - poleW/2}" y="${half + pinR * 0.6}" width="${poleW}" height="${poleH}" rx="${poleW/2}" fill="${strokeColor}" opacity="0.7"/>
+      <rect x="${half - poleW * 1.8}" y="${half + pinR * 0.6 + poleH - poleW}" width="${poleW * 3.6}" height="${poleW}" rx="${poleW/2}" fill="${strokeColor}" opacity="0.5"/>
+      <!-- Main pin circle -->
+      <circle cx="${half}" cy="${half - poleH/2}" r="${pinR + 1.5}" fill="none" stroke="${strokeColor}" stroke-width="1.5" opacity="0.3" ${isTop ? `filter="url(#sg${rank})"` : ''}/>
+      <circle cx="${half}" cy="${half - poleH/2}" r="${pinR}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${isTop ? 2.5 : 2}"/>
+      <!-- Scope reticle -->
+      <circle cx="${half}" cy="${half - poleH/2}" r="${reticleR}" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="${crossW}"/>
+      <line x1="${half - reticleR - 2}" y1="${half - poleH/2}" x2="${half - reticleR + size*0.06}" y2="${half - poleH/2}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
+      <line x1="${half + reticleR + 2}" y1="${half - poleH/2}" x2="${half + reticleR - size*0.06}" y2="${half - poleH/2}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
+      <line x1="${half}" y1="${half - poleH/2 - reticleR - 2}" x2="${half}" y2="${half - poleH/2 - reticleR + size*0.06}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
+      <line x1="${half}" y1="${half - poleH/2 + reticleR + 2}" x2="${half}" y2="${half - poleH/2 + reticleR - size*0.06}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
+      <!-- Label -->
+      ${labelContent}
+    </svg>`;
+  };
+
+  // ========== ZOOM-RESPONSIVE MARKER SIZING ==========
+  const getMarkerScale = (zoom: number): number => {
+    if (zoom <= 13) return 0.7;
+    if (zoom >= 17) return 1.3;
+    return 0.7 + (zoom - 13) * (0.6 / 4); // Linear interpolation 13→17 : 0.7→1.3
+  };
+
   const addStandMarkers = () => {
     const map = mapRef.current;
     if (!map || !alignedStands.length) return;
@@ -6385,27 +6437,45 @@ function DeerIntelContent() {
     const oldMarkers = [...markersRef.current];
     markersRef.current = [];
 
-    // v3.8: Use wind-sorted alignedStands — top 2 by current alignment score
-    const topTwo = alignedStands.slice(0, 2);
+    // v4: Show ALL stands with unified icon family, not just top 2
+    const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 7));
+    const currentZoom = map.getZoom();
+    const scale = getMarkerScale(currentZoom);
 
-    topTwo.forEach((stand, idx) => {
+    standsToShow.forEach((stand, idx) => {
       const props = stand.props;
       const coords = stand.coords;
       const alignScore = stand.alignment.score;
       const tierLabel = stand.alignment.label === 'Open Ground' ? 'Field Stone' : stand.alignment.label;
 
-      // Index 0 in aligned order gets blaze-orange highlight = "Today's Sit"
       const isTopStand = idx === 0;
-      const markerColor = isTopStand ? LAYER_COLORS.standPrimary : LAYER_COLORS.standSecondary;
-      const ringColor = isTopStand ? LAYER_COLORS.standPrimaryRing : '#d4a574';
-      const ringWidth = isTopStand ? 6 : 4;
-      const markerSize = isTopStand ? 56 : 48;
-      const fontSize = isTopStand ? 22 : 20;
+      const isSecondary = idx === 1;
+      const isTertiary = idx >= 2;
 
-      // Create marker with invisible expanded hitbox for reliable hover
-      const hitboxSize = markerSize + 24; // 24px larger than marker for easier targeting
+      // Unified sizing: top=60, secondary=52, tertiary=42  (base, before zoom scale)
+      const baseSize = isTopStand ? 60 : isSecondary ? 52 : 42;
+      const markerSize = Math.round(baseSize * scale);
+
+      // Unified color family — all warm earth tones
+      const fillColor = isTopStand ? LAYER_COLORS.standPrimary : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
+      const strokeColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? '#d4a574' : '#8b7355';
+      const glowColor = isTopStand ? LAYER_COLORS.standPrimaryRing : undefined;
+
+      const svgHTML = buildStandSVG({
+        size: markerSize,
+        fillColor,
+        strokeColor,
+        glowColor,
+        label: `${idx + 1}`,
+        isTop: isTopStand,
+        rank: idx,
+      });
+
+      // Hitbox for reliable hover
+      const hitboxSize = markerSize + 20;
       const el = document.createElement('div');
       el.className = 'intel-stand-marker';
+      el.dataset.standIdx = String(idx);
       el.style.cssText = `
         position: relative;
         width: ${hitboxSize}px;
@@ -6417,51 +6487,34 @@ function DeerIntelContent() {
       `;
       el.innerHTML = `
         <div class="stand-visual" style="
-          position: relative;
           width: ${markerSize}px;
           height: ${markerSize}px;
-          ${isTopStand ? `
-            background: linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing});
-            border: ${ringWidth}px solid ${LAYER_COLORS.standPrimaryRing};
-            box-shadow: 0 0 20px ${LAYER_COLORS.standPrimary}80, 0 6px 20px rgba(0,0,0,0.5);
-          ` : `
-            background: ${markerColor};
-            border: ${ringWidth}px solid ${ringColor};
-            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
-          `}
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: bold;
-          font-size: ${fontSize}px;
-          transition: transform 0.2s, box-shadow 0.2s;
+          transition: transform 0.2s ease, filter 0.2s ease;
           pointer-events: none;
-        ">
-          ${isTopStand ? '⭐' : idx + 1}
-        </div>
+          ${isTertiary ? 'opacity: 0.7;' : ''}
+        ">${svgHTML}</div>
         ${isTopStand ? `
           <div style="
             position: absolute;
-            bottom: -10px;
+            bottom: ${-4 * scale}px;
             left: 50%;
             transform: translateX(-50%);
             background: linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing});
             color: #fff;
-            font-size: 10px;
+            font-size: ${Math.round(10 * scale)}px;
             font-weight: 700;
-            padding: 2px 8px;
+            padding: ${Math.round(2 * scale)}px ${Math.round(8 * scale)}px;
             border-radius: 10px;
             white-space: nowrap;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           ">Today's Sit</div>
         ` : ''}
       `;
 
-      // Hover tooltip — v3.8: shows alignment score + tier, not static analysis score
+      // Hover tooltip (unified for all tiers)
       const hoverTooltip = document.createElement('div');
       hoverTooltip.className = 'stand-hover-tooltip';
       hoverTooltip.style.cssText = `
@@ -6470,7 +6523,7 @@ function DeerIntelContent() {
         left: 50%;
         transform: translateX(-50%);
         background: rgba(17, 24, 39, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 8px;
         padding: 10px 12px;
         white-space: nowrap;
@@ -6480,10 +6533,11 @@ function DeerIntelContent() {
         z-index: 100;
         margin-bottom: 8px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        backdrop-filter: blur(8px);
       `;
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
-      const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : LAYER_COLORS.standPrimary;
-      const standLabel = isTopStand ? "⭐ Today's Sit" : stand.name;
+      const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standPrimary : '#d4a574';
+      const standLabel = isTopStand ? "★ Today's Sit" : stand.name;
       const resil = stand.resilience;
       const resilLabel = resil ? resil.label : '—';
       const resilScore = resil ? resil.score : 0;
@@ -6500,14 +6554,13 @@ function DeerIntelContent() {
           <div>🛡️ Resilience: <b style="color: ${resilColor}">${resilLabel} (${resilScore})</b></div>
         </div>
       `;
-      el.style.position = 'relative';
       el.appendChild(hoverTooltip);
 
       el.onmouseenter = () => {
         const visual = el.querySelector('.stand-visual') as HTMLElement;
         if (visual) {
-          visual.style.transform = 'scale(1.2)';
-          visual.style.boxShadow = '0 6px 20px rgba(0,0,0,0.5)';
+          visual.style.transform = 'scale(1.15)';
+          visual.style.filter = 'brightness(1.2) drop-shadow(0 4px 12px rgba(0,0,0,0.5))';
         }
         hoverTooltip.style.opacity = '1';
       };
@@ -6515,7 +6568,7 @@ function DeerIntelContent() {
         const visual = el.querySelector('.stand-visual') as HTMLElement;
         if (visual) {
           visual.style.transform = 'scale(1)';
-          visual.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4)';
+          visual.style.filter = 'none';
         }
         hoverTooltip.style.opacity = '0';
       };
@@ -6525,16 +6578,72 @@ function DeerIntelContent() {
         .addTo(map);
 
       el.onclick = () => {
-        hoverTooltip.style.opacity = '0'; // Hide tooltip on click
+        hoverTooltip.style.opacity = '0';
         setSelectedStand(stand.rank);
         showStandPopup(coords, props, stand.resilience);
         map.flyTo({ center: coords, zoom: 16 });
       };
 
       markersRef.current.push(marker);
-      oldMarkers.forEach(m => m.remove());
     });
+
+    oldMarkers.forEach(m => m.remove());
   };
+
+  // ========== ZOOM-RESPONSIVE MARKER RESCALING ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const onZoom = () => {
+      const zoom = map.getZoom();
+      const scale = getMarkerScale(zoom);
+
+      markersRef.current.forEach((marker) => {
+        const el = marker.getElement();
+        const idx = parseInt(el.dataset?.standIdx || '0', 10);
+        const isTop = idx === 0;
+        const isSec = idx === 1;
+        const baseSize = isTop ? 60 : isSec ? 52 : 42;
+        const newSize = Math.round(baseSize * scale);
+        const hitbox = newSize + 20;
+
+        el.style.width = `${hitbox}px`;
+        el.style.height = `${hitbox}px`;
+
+        const visual = el.querySelector('.stand-visual') as HTMLElement;
+        if (visual) {
+          visual.style.width = `${newSize}px`;
+          visual.style.height = `${newSize}px`;
+          // Rebuild SVG at new size for crisp rendering
+          const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
+          const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? '#d4a574' : '#8b7355';
+          visual.innerHTML = buildStandSVG({
+            size: newSize,
+            fillColor,
+            strokeColor,
+            glowColor: isTop ? LAYER_COLORS.standPrimaryRing : undefined,
+            label: `${idx + 1}`,
+            isTop,
+            rank: idx,
+          });
+        }
+
+        // Rescale "Today's Sit" badge
+        if (isTop) {
+          const badge = el.querySelector('div > div:last-child') as HTMLElement;
+          if (badge && badge.textContent?.includes("Today")) {
+            badge.style.fontSize = `${Math.round(10 * scale)}px`;
+            badge.style.padding = `${Math.round(2 * scale)}px ${Math.round(8 * scale)}px`;
+            badge.style.bottom = `${-4 * scale}px`;
+          }
+        }
+      });
+    };
+
+    map.on('zoom', onZoom);
+    return () => { map.off('zoom', onZoom); };
+  }, [mapReady, alignedStands]); // eslint-disable-line
 
   const showStandPopup = (coords: [number, number], props: StandPointProperties, resilience?: StandResilience) => {
     const map = mapRef.current;
