@@ -20,7 +20,7 @@ import {
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
 import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
-import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML } from '@/lib/scoring/stand-explainability';
+import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML, renderKeyIndicatorsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
@@ -6871,14 +6871,16 @@ function DeerIntelContent() {
     const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
 
     // Explainability data (if stand data available)
-    const popupChipsHTML = standData ? renderChipsHTML(getStandExplainability(standData.inputs, props, standData.alignment, resilience).chips) : '';
-    const popupBarsHTML = standData ? renderQualityBarsHTML(getStandExplainability(standData.inputs, props, standData.alignment, resilience).qualityBars) : '';
-    const popupRationale = standData ? getStandExplainability(standData.inputs, props, standData.alignment, resilience).rankRationale : '';
+    const explain = standData ? getStandExplainability(standData.inputs, props, standData.alignment, resilience) : null;
+    const popupChipsHTML = explain ? renderChipsHTML(explain.chips) : '';
+    const popupIndicatorsHTML = explain ? renderKeyIndicatorsHTML(explain.keyIndicators) : '';
+    const popupBarsHTML = explain ? renderQualityBarsHTML(explain.qualityBars) : '';
+    const popupExplanation = explain ? explain.selectionExplanation : '';
     
     const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '340px', offset: 12, className: 'intel-popup' })
       .setLngLat(coords)
       .setHTML(`
-        <div style="max-height: 340px; overflow: auto; padding: 10px 12px; font-size: 12px; line-height: 1.25; font-family: system-ui, sans-serif;">
+        <div style="max-height: 380px; overflow: auto; padding: 10px 12px; font-size: 12px; line-height: 1.25; font-family: system-ui, sans-serif;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
             <span style="
               background: ${popupBadgeColor};
@@ -6892,11 +6894,13 @@ function DeerIntelContent() {
             <span style="font-weight: 700; font-size: 16px;">${props.score}<span style="font-size: 11px; color: #6b7280;">/100</span></span>
           </div>
 
-          ${popupRationale ? `
-          <p style="margin: 4px 0 8px; font-size: 10px; color: #9ca3af; font-style: italic;">
-            ${popupRationale}
+          ${popupExplanation ? `
+          <p style="margin: 4px 0 8px; font-size: 10px; color: #9ca3af; line-height: 1.4;">
+            ${popupExplanation}
           </p>
           ` : ''}
+
+          ${popupIndicatorsHTML ? popupIndicatorsHTML : ''}
 
           ${popupChipsHTML ? `
           <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px;">
@@ -6910,23 +6914,11 @@ function DeerIntelContent() {
           </div>
           ` : ''}
           
-          <p style="margin: 6px 0; font-size: 11px; color: #4b5563; line-height: 1.35;">
-            ${props.reasoning}
-          </p>
-          
           <div style="margin-bottom: 8px; font-size: 11px; color: #1f2937;">
             <span style="font-weight: 600;">Face:</span> ${faceCompass} (${faceDeg}°)
           </div>
           
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
-            <div style="background: #f3f4f6; padding: 5px 7px; border-radius: 4px;">
-              <span style="color: #6b7280; font-size: 9px; display: block;">To Corridor</span>
-              <span style="font-weight: 600; font-size: 11px;">${props.distToCorridorMeters}m</span>
-            </div>
-            <div style="background: #f3f4f6; padding: 5px 7px; border-radius: 4px;">
-              <span style="color: #6b7280; font-size: 9px; display: block;">To Bedding</span>
-              <span style="font-weight: 600; font-size: 11px;">${props.distToBeddingMeters}m</span>
-            </div>
             <div style="background: #dcfce7; padding: 5px 7px; border-radius: 4px;">
               <span style="color: #166534; font-size: 9px; display: block;">✓ Good Wind</span>
               <span style="font-weight: 600; font-size: 11px;">${props.windOk.join(', ')}</span>
@@ -6946,18 +6938,8 @@ function DeerIntelContent() {
               background: ${props.approachRisk === 'low' ? '#dcfce7' : props.approachRisk === 'medium' ? '#fef3c7' : '#fee2e2'};
               color: ${props.approachRisk === 'low' ? '#166534' : props.approachRisk === 'medium' ? '#92400e' : '#991b1b'};
             ">
-              ${props.approachRisk.toUpperCase()} risk
+              ${props.approachRisk.toUpperCase()} risk approach
             </span>
-            ${resilience ? `
-            <span style="
-              padding: 3px 7px;
-              border-radius: 4px;
-              font-weight: 500;
-              font-size: 10px;
-              background: ${resilience.score >= 75 ? '#dcfce7' : resilience.score >= 45 ? '#fef3c7' : '#fee2e2'};
-              color: ${resilience.score >= 75 ? '#166534' : resilience.score >= 45 ? '#92400e' : '#991b1b'};
-            ">🛡️ ${resilience.label} (${resilience.score})</span>
-            ` : ''}
             <span style="color: #6b7280; font-size: 10px;">Elev: ${Math.round(props.elevation)}m</span>
           </div>
           

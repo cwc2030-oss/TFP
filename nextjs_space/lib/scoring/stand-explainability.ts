@@ -1,8 +1,8 @@
 /**
- * Stand Explainability Engine
+ * Stand Explainability Engine — V4 Step 9
  * 
  * Derives human-readable reason chips, ranking rationale,
- * and quality indicators from stand scoring data.
+ * key indicators, and natural-language explanations from stand scoring data.
  */
 import type { StandInputs, StandScore } from './stand-alignment';
 import type { StandPointProperties } from '@/types/terrain';
@@ -15,6 +15,14 @@ export interface ReasonChip {
   tone: 'positive' | 'neutral' | 'caution'; // color intent
 }
 
+export type IndicatorLevel = 'high' | 'medium' | 'low';
+
+export interface KeyIndicator {
+  label: string;          // e.g. "Resilience"
+  level: IndicatorLevel;  // high / medium / low
+  displayLabel: string;   // e.g. "High", "Moderate", "Low"
+}
+
 export interface QualityBar {
   label: string;
   value: number;      // 0-1
@@ -23,8 +31,10 @@ export interface QualityBar {
 
 export interface StandExplainability {
   chips: ReasonChip[];           // 2-4 concise reason chips
+  keyIndicators: KeyIndicator[]; // 3 prominent quality signals
   qualityBars: QualityBar[];     // input quality breakdown
-  rankRationale: string;         // 1-sentence explanation of ranking
+  rankRationale: string;         // 1-sentence natural explanation
+  selectionExplanation: string;  // full paragraph when stand is selected
   strengthLabel: string;         // primary strength in 2-3 words
   weaknessLabel: string | null;  // primary weakness (or null if none)
 }
@@ -46,10 +56,17 @@ function getPressureChip(inputs: StandInputs): ReasonChip {
 }
 
 function getWindChip(inputs: StandInputs): ReasonChip {
-  const windOk = 1 - inputs.wind_overlap; // invert: lower overlap = better
-  if (windOk >= 0.75) return { icon: '🌬️', label: 'Clean Wind', tone: 'positive' };
+  const windOk = 1 - inputs.wind_overlap;
+  if (windOk >= 0.75) return { icon: '🌬️', label: 'Leeward Advantage', tone: 'positive' };
   if (windOk >= 0.45) return { icon: '🌬️', label: 'Fair Wind', tone: 'neutral' };
   return { icon: '🌬️', label: 'Risky Wind', tone: 'caution' };
+}
+
+function getCorridorChip(props: StandPointProperties): ReasonChip {
+  if (props.distToCorridorMeters <= 30) return { icon: '🦌', label: 'Primary Corridor', tone: 'positive' };
+  if (props.distToCorridorMeters <= 80) return { icon: '🦌', label: 'Near Corridor', tone: 'positive' };
+  if (props.distToCorridorMeters <= 150) return { icon: '🦌', label: 'Corridor Access', tone: 'neutral' };
+  return { icon: '🦌', label: 'Off Corridor', tone: 'caution' };
 }
 
 function getResilienceChip(resilience?: { score: number; label: string }): ReasonChip | null {
@@ -66,11 +83,39 @@ function getAccessChip(props: StandPointProperties): ReasonChip {
 }
 
 function getInteriorChip(props: StandPointProperties): ReasonChip | null {
-  // Interior vs edge: high TPI landscape = ridge/exposed, low = interior/protected
-  if (props.tpiLandscape < -2) return { icon: '🌲', label: 'Deep Interior', tone: 'positive' };
+  if (props.tpiLandscape < -2) return { icon: '🌲', label: 'Interior Access', tone: 'positive' };
   if (props.tpiLandscape < 1) return { icon: '🌲', label: 'Interior', tone: 'neutral' };
   if (props.tpiLandscape > 3) return { icon: '⛰️', label: 'Ridge Exposed', tone: 'caution' };
   return null;
+}
+
+// ========== KEY INDICATORS ==========
+
+function buildKeyIndicators(
+  inputs: StandInputs,
+  resilience?: { score: number; label: string }
+): KeyIndicator[] {
+  // Resilience
+  const resLevel: IndicatorLevel = resilience
+    ? (resilience.score >= 65 ? 'high' : resilience.score >= 35 ? 'medium' : 'low')
+    : 'medium';
+  const resDisplay = resLevel === 'high' ? 'High' : resLevel === 'medium' ? 'Moderate' : 'Low';
+
+  // Pressure exposure (inverted intrusion)
+  const pressVal = inputs.intrusion;
+  const pressLevel: IndicatorLevel = pressVal <= 0.25 ? 'low' : pressVal <= 0.55 ? 'medium' : 'high';
+  const pressDisplay = pressLevel === 'low' ? 'Low' : pressLevel === 'medium' ? 'Moderate' : 'High';
+
+  // Intercept quality
+  const intVal = inputs.movement;
+  const intLevel: IndicatorLevel = intVal >= 0.65 ? 'high' : intVal >= 0.35 ? 'medium' : 'low';
+  const intDisplay = intLevel === 'high' ? 'Strong' : intLevel === 'medium' ? 'Moderate' : 'Weak';
+
+  return [
+    { label: 'Intercept', level: intLevel, displayLabel: intDisplay },
+    { label: 'Pressure', level: pressLevel, displayLabel: pressDisplay },
+    { label: 'Resilience', level: resLevel, displayLabel: resDisplay },
+  ];
 }
 
 // ========== QUALITY BARS ==========
@@ -92,39 +137,116 @@ function buildQualityBars(inputs: StandInputs): QualityBar[] {
   ];
 }
 
-// ========== RATIONALE ==========
+// ========== NATURAL LANGUAGE RATIONALE ==========
 
+/**
+ * Builds a concise, conversational 1-line rationale.
+ * Reads like a sentence a hunting guide would say.
+ */
 function buildRankRationale(
   inputs: StandInputs,
   props: StandPointProperties,
   alignment: StandScore,
   resilience?: { score: number; label: string }
 ): string {
-  // Find the strongest and weakest inputs
-  const factors: { name: string; value: number; isInverted?: boolean }[] = [
-    { name: 'intercept quality', value: inputs.movement },
-    { name: 'wind position', value: 1 - inputs.wind_overlap, isInverted: true },
-    { name: 'low pressure', value: 1 - inputs.intrusion, isInverted: true },
-    { name: 'season fit', value: inputs.season_fit },
+  // Human-friendly factor names and values (higher = better)
+  const factors = [
+    { key: 'intercept',  name: 'strong intercept point',  friendlyName: 'intercept quality',  value: inputs.movement },
+    { key: 'wind',       name: 'downwind advantage',      friendlyName: 'wind position',       value: 1 - inputs.wind_overlap },
+    { key: 'pressure',   name: 'low pressure exposure',   friendlyName: 'low pressure',        value: 1 - inputs.intrusion },
+    { key: 'season',     name: 'seasonal timing',         friendlyName: 'season fit',          value: inputs.season_fit },
   ];
 
   const sorted = [...factors].sort((a, b) => b.value - a.value);
-  const strongest = sorted[0];
-  const weakest = sorted[sorted.length - 1];
+  const top = sorted[0];
+  const second = sorted[1];
 
-  let rationale = `Ranked by ${strongest.name}`;
-
-  // Add resilience context
-  if (resilience && resilience.score >= 60) {
-    rationale += ` with ${resilience.label.toLowerCase()} resilience`;
+  // Natural language construction
+  let rationale = '';
+  if (top.value >= 0.65 && second.value >= 0.55) {
+    rationale = `Strong ${top.friendlyName} and ${second.friendlyName}`;
+  } else if (top.value >= 0.55) {
+    rationale = `Favored for ${top.name}`;
+  } else {
+    rationale = `Best available ${top.friendlyName}`;
   }
 
-  // Add weakness caveat if significant
-  if (weakest.value < 0.35) {
-    rationale += `, limited by ${weakest.name}`;
+  // Corridor proximity adds context
+  if (props.distToCorridorMeters <= 40) {
+    rationale += ', sits on a primary corridor';
+  } else if (props.distToCorridorMeters <= 100) {
+    rationale += ', near a travel corridor';
+  }
+
+  // Resilience adds confidence
+  if (resilience && resilience.score >= 65) {
+    rationale += ' with strong resilience';
   }
 
   return rationale + '.';
+}
+
+/**
+ * Builds a full natural-language explanation for the selected stand detail view.
+ * Answers: "Why does this stand rank where it does?"
+ */
+function buildSelectionExplanation(
+  rank: number,
+  inputs: StandInputs,
+  props: StandPointProperties,
+  alignment: StandScore,
+  resilience?: { score: number; label: string }
+): string {
+  const ordinal = rank === 1 ? '#1' : rank === 2 ? '#2' : rank === 3 ? '#3' : `#${rank}`;
+
+  // Collect strengths (value >= 0.55) and weaknesses (value < 0.35)
+  const factorDescriptions = [
+    { name: 'sits near a primary travel corridor',   value: inputs.movement,          threshold: 0.55 },
+    { name: 'has a strong downwind advantage',        value: 1 - inputs.wind_overlap,  threshold: 0.55 },
+    { name: 'has low hunting pressure exposure',      value: 1 - inputs.intrusion,     threshold: 0.55 },
+    { name: 'aligns well with the current season',    value: inputs.season_fit,        threshold: 0.55 },
+  ];
+
+  const strengths = factorDescriptions.filter(f => f.value >= f.threshold);
+  const weaknesses = factorDescriptions.filter(f => f.value < 0.3);
+
+  // Corridor proximity detail
+  const corridorDetail = props.distToCorridorMeters <= 40
+    ? 'on a primary corridor'
+    : props.distToCorridorMeters <= 100
+    ? 'near a movement corridor'
+    : 'with corridor access';
+
+  let explanation = `This stand ranks ${ordinal} because it ${corridorDetail}`;
+
+  if (strengths.length >= 2) {
+    explanation += `, ${strengths[0].name}, and ${strengths[1].name}`;
+  } else if (strengths.length === 1) {
+    explanation += ` and ${strengths[0].name}`;
+  }
+
+  // Resilience context
+  if (resilience && resilience.score >= 60) {
+    explanation += `. It also shows ${resilience.label.toLowerCase()} resilience — meaning deer use this area consistently`;
+  }
+
+  // Interior / terrain context
+  if (props.tpiLandscape < -2) {
+    explanation += '. The interior position gives extra cover from approach detection';
+  } else if (props.tpiLandscape > 3) {
+    explanation += '. Note: this ridge position offers visibility but less concealment';
+  }
+
+  // Weakness caveat
+  if (weaknesses.length > 0) {
+    const weakName = weaknesses[0].name.replace('has ', '').replace('sits ', '');
+    explanation += `. Watch for: ${weakName} could limit effectiveness`;
+  }
+
+  explanation += '.';
+
+  // Clean up double periods
+  return explanation.replace(/\.\./g, '.').replace(/\. \./g, '.');
 }
 
 function findStrengthLabel(inputs: StandInputs): string {
@@ -160,6 +282,7 @@ export function getStandExplainability(
 ): StandExplainability {
   // Build chips — pick the most relevant 3-4
   const allChips: (ReasonChip | null)[] = [
+    getCorridorChip(props),
     getInterceptChip(inputs),
     getWindChip(inputs),
     getPressureChip(inputs),
@@ -178,8 +301,10 @@ export function getStandExplainability(
 
   return {
     chips,
+    keyIndicators: buildKeyIndicators(inputs, resilience),
     qualityBars: buildQualityBars(inputs),
     rankRationale: buildRankRationale(inputs, props, alignment, resilience),
+    selectionExplanation: buildSelectionExplanation(props.rank, inputs, props, alignment, resilience),
     strengthLabel: findStrengthLabel(inputs),
     weaknessLabel: findWeaknessLabel(inputs),
   };
@@ -211,4 +336,25 @@ export function renderQualityBarsHTML(bars: QualityBar[]): string {
       <span style="width:36px;text-align:right;font-size:9px;color:#a8a29e;">${b.displayLabel}</span>
     </div>`;
   }).join('');
+}
+
+export function renderKeyIndicatorsHTML(indicators: KeyIndicator[]): string {
+  return `<div style="display:flex;gap:4px;margin:6px 0;">` +
+    indicators.map(ind => {
+      const bg = ind.level === 'high'
+        ? (ind.label === 'Pressure' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)')
+        : ind.level === 'low'
+        ? (ind.label === 'Pressure' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)')
+        : 'rgba(251,191,36,0.12)';
+      const color = ind.level === 'high'
+        ? (ind.label === 'Pressure' ? '#f87171' : '#4ade80')
+        : ind.level === 'low'
+        ? (ind.label === 'Pressure' ? '#4ade80' : '#f87171')
+        : '#fbbf24';
+      return `<div style="flex:1;text-align:center;padding:4px 2px;background:${bg};border-radius:6px;">
+        <div style="font-size:8px;color:#78716c;margin-bottom:1px;">${ind.label}</div>
+        <div style="font-size:10px;font-weight:600;color:${color};">${ind.displayLabel}</div>
+      </div>`;
+    }).join('') +
+  `</div>`;
 }
