@@ -1373,6 +1373,10 @@ function DeerIntelContent() {
   const [summary, setSummary] = useState<TerrainSummary | null>(null);
   const [provenance, setProvenance] = useState<TerrainProvenance | null>(null);
 
+  // Stall detection: tracks how long progress has been stuck
+  const [analysisStalled, setAnalysisStalled] = useState(false);
+  const lastProgressRef = useRef({ value: 0, time: Date.now() });
+
   // Global/unhandled error state
   const [globalError, setGlobalError] = useState<{ message: string; stack?: string } | null>(null);
 
@@ -2004,6 +2008,8 @@ function DeerIntelContent() {
     setError(null);
     setProgress(10);
     setProgressStep('Fetching parcel boundary...');
+    setAnalysisStalled(false);
+    lastProgressRef.current = { value: 10, time: Date.now() };
     
     // Read current season/wind from refs so we always get the latest values
     // even though these are intentionally excluded from the dep array.
@@ -2011,10 +2017,10 @@ function DeerIntelContent() {
     const currentWind = windDirectionRef.current;
     
     const startTime = Date.now();
-    console.log('[INTEL] === ANALYSIS START ===');
-    console.log('[INTEL] Coordinates:', lat, lng);
-    console.log('[INTEL] Season:', currentSeason, 'Wind:', currentWind);
-    console.log('[INTEL] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
+    console.error('[INTEL-DIAG] === ANALYSIS START ===');
+    console.error('[INTEL-DIAG] Coordinates:', lat, lng);
+    console.error('[INTEL-DIAG] Season:', currentSeason, 'Wind:', currentWind);
+    console.error('[INTEL-DIAG] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
 
     try {
       // Import shared terrain client
@@ -2022,14 +2028,15 @@ function DeerIntelContent() {
       
       // Get real parcel geometry from Regrid
       setProgress(15);
-      console.log('[INTEL] Fetching parcel geometry for:', lat, lng);
+      console.error('[INTEL-DIAG] Fetching parcel geometry for:', lat, lng);
       const parcel = await fetchParcelGeometry(lat, lng);
+      console.error('[INTEL-DIAG] Parcel fetch returned:', parcel ? 'HAS DATA' : 'NULL');
       
       if (!parcel) {
         // Use synthetic fallback instead of failing
-        console.warn('[INTEL] No Regrid parcel, using synthetic boundary');
+        console.error('[INTEL-DIAG] No Regrid parcel, using synthetic boundary');
         const syntheticParcel = generateSyntheticParcel(lat, lng, parseFloat(acreageParam || '80'));
-        console.log('[INTEL] Setting parcelPolygon to SYNTHETIC parcel');
+        console.error('[INTEL-DIAG] Setting parcelPolygon to SYNTHETIC parcel');
         setParcelPolygon(syntheticParcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
         setProgress(20);
         setProgressStep('Using estimated boundary...');
@@ -2060,19 +2067,16 @@ function DeerIntelContent() {
         setProvenance(data.provenance);
         setProgress(100);
         setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
-        console.log('[INTEL] Analysis complete (synthetic):', result.durationMs, 'ms');
+        console.error('[INTEL-DIAG] Analysis complete (synthetic):', result.durationMs, 'ms');
         return;
       }
       
-      console.log('[INTEL] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
-      console.log('[INTEL] Parcel geometry type:', parcel.geometry.type);
-      console.log('[INTEL] Parcel coords length:', parcel.geometry.type === 'Polygon' 
-        ? parcel.geometry.coordinates[0].length 
-        : parcel.geometry.coordinates.map((p: any) => p[0]?.length || 0));
+      console.error('[INTEL-DIAG] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
+      console.error('[INTEL-DIAG] Parcel geometry type:', parcel.geometry.type);
       setParcelPolygon(parcel);
       setProgress(20);
       setProgressStep('Running terrain analysis...');
-      console.log('[INTEL] Got real parcel:', parcel.properties?.parcelId);
+      console.error('[INTEL-DIAG] Got real parcel:', parcel.properties?.parcelId);
 
       // Run terrain analysis with 120s timeout
       const result = await fetchTerrainAnalysis(
@@ -2090,7 +2094,7 @@ function DeerIntelContent() {
       );
 
       const totalDuration = Date.now() - startTime;
-      console.log('[INTEL] Total analysis time:', totalDuration, 'ms');
+      console.error('[INTEL-DIAG] Total analysis time:', totalDuration, 'ms');
 
       if (!result.success) {
         // Show the actual error, not generic message
@@ -2108,7 +2112,7 @@ function DeerIntelContent() {
       setProgress(100);
       setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
       
-      console.log('[INTEL] === ANALYSIS COMPLETE ===');
+      console.error('[INTEL-DIAG] === ANALYSIS COMPLETE ===');
 
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
@@ -5735,6 +5739,28 @@ function DeerIntelContent() {
     runAnalysis();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Stall watchdog: detect if progress hasn't advanced for 25 seconds while loading
+  useEffect(() => {
+    if (!isLoading) {
+      setAnalysisStalled(false);
+      lastProgressRef.current = { value: 0, time: Date.now() };
+      return;
+    }
+    // Track progress changes
+    if (progress !== lastProgressRef.current.value) {
+      lastProgressRef.current = { value: progress, time: Date.now() };
+      setAnalysisStalled(false);
+    }
+    const stallCheck = setInterval(() => {
+      const elapsed = Date.now() - lastProgressRef.current.time;
+      if (elapsed > 25_000 && isLoading && progress < 100) {
+        console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
+        setAnalysisStalled(true);
+      }
+    }, 5_000);
+    return () => clearInterval(stallCheck);
+  }, [isLoading, progress]);
+
   // ========== EDGE INTELLIGENCE CLICK EVENT LISTENER ==========
   useEffect(() => {
     const handleEdgeClick = (e: Event) => {
@@ -9000,6 +9026,27 @@ function DeerIntelContent() {
               <span className="text-stone-500">Processing</span>
               <span className="text-amber-400 font-mono font-semibold">{progress}%</span>
             </div>
+            {/* Stall recovery UI */}
+            {analysisStalled && (
+              <div className="mt-4 pt-3 border-t border-white/[0.06]">
+                <p className="text-stone-400 text-[11px] mb-3">Taking longer than expected. The terrain server may be warming up.</p>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={() => { setIsLoading(false); setError(null); setAnalysisStalled(false); runAnalysis(); }}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry Analysis
+                  </button>
+                  <button
+                    onClick={() => { setIsLoading(false); setAnalysisStalled(false); setError('Analysis stalled — please retry when ready'); }}
+                    className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] text-stone-300 text-xs rounded font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

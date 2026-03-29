@@ -46,11 +46,11 @@ export async function fetchTerrainAnalysis(
     bufferMeters: params.bufferMeters ?? 800,
   };
 
-  console.log('[TerrainClient] === FETCH START ===' );
-  console.log('[TerrainClient] URL:', apiUrl);
-  console.log('[TerrainClient] Timeout:', timeoutMs, 'ms');
-  console.log('[TerrainClient] Season:', params.seasonProfile, 'Wind:', params.prevailingWinds);
-  console.log('[TerrainClient] Parcel type:', params.parcel.geometry.type);
+  console.error('[TerrainClient] === FETCH START ===' );
+  console.error('[TerrainClient] URL:', apiUrl);
+  console.error('[TerrainClient] Timeout:', timeoutMs, 'ms');
+  console.error('[TerrainClient] Season:', params.seasonProfile, 'Wind:', params.prevailingWinds);
+  console.error('[TerrainClient] Parcel type:', params.parcel.geometry.type);
   
   onProgress?.('Connecting to terrain server...', 15);
 
@@ -65,13 +65,13 @@ export async function fetchTerrainAnalysis(
     { at: 38000, msg: 'Almost complete...', prog: 70 },
   ];
   
-  console.log('[TerrainClient] Starting progress ticker (timeout: ' + timeoutMs + 'ms)');
+  console.error('[TerrainClient] Starting progress ticker (timeout: ' + timeoutMs + 'ms)');
   const progressInterval = setInterval(() => {
     const elapsed = Date.now() - startTime;
     const nextMsg = progressMessages.find(p => p.at <= elapsed && p.prog > progressTick);
     if (nextMsg) {
       progressTick = nextMsg.prog;
-      console.log(`[TerrainClient] Progress: ${nextMsg.msg} (${nextMsg.prog}%) at ${elapsed}ms`);
+      console.error(`[TerrainClient] Progress: ${nextMsg.msg} (${nextMsg.prog}%) at ${elapsed}ms`);
       onProgress?.(nextMsg.msg, nextMsg.prog);
     }
   }, 1000); // Check every second
@@ -95,8 +95,8 @@ export async function fetchTerrainAnalysis(
     clearTimeout(timeoutId);
     const fetchDuration = Date.now() - startTime;
     
-    console.log('[TerrainClient] Response received in', fetchDuration, 'ms');
-    console.log('[TerrainClient] Status:', response.status, response.statusText);
+    console.error('[TerrainClient] Response received in', fetchDuration, 'ms');
+    console.error('[TerrainClient] Status:', response.status, response.statusText);
     
     onProgress?.(`Processing response...`, 70);
 
@@ -129,10 +129,10 @@ export async function fetchTerrainAnalysis(
     const data = await response.json() as TerrainAnalysisResponse;
     const totalDuration = Date.now() - startTime;
     
-    console.log('[TerrainClient] === FETCH COMPLETE ===' );
-    console.log('[TerrainClient] Total duration:', totalDuration, 'ms');
-    console.log('[TerrainClient] Mode:', data.mode);
-    console.log('[TerrainClient] Layers:', {
+    console.error('[TerrainClient] === FETCH COMPLETE ===' );
+    console.error('[TerrainClient] Total duration:', totalDuration, 'ms');
+    console.error('[TerrainClient] Mode:', data.mode);
+    console.error('[TerrainClient] Layers:', {
       bedding: data.layers?.beddingPolygons?.features?.length || 0,
       funnels: data.layers?.funnels?.features?.length || 0,
       stands: data.layers?.standPoints?.features?.length || 0,
@@ -178,12 +178,23 @@ export async function fetchParcelGeometry(
   lat: number,
   lng: number
 ): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> {
-  console.log('[TerrainClient] Fetching parcel boundary for:', lat, lng);
+  console.error('[TerrainClient] Fetching parcel boundary for:', lat, lng);
   
+  // 15-second timeout for parcel fetch to prevent indefinite hang
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    console.error('[TerrainClient] Parcel fetch timed out after 15s');
+  }, 15_000);
+
   try {
-    const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`);
+    const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      console.warn('[TerrainClient] Parcel fetch failed:', response.status);
+      console.error('[TerrainClient] Parcel fetch failed:', response.status);
       return null;
     }
 
@@ -191,11 +202,11 @@ export async function fetchParcelGeometry(
     const data = result.parcels?.[0];
     
     if (!data || !data.coordinates || !data.geometryType) {
-      console.warn('[TerrainClient] No parcel data in response');
+      console.error('[TerrainClient] No parcel data in response');
       return null;
     }
 
-    console.log('[TerrainClient] Got parcel:', data.parcelId, data.acreage, 'acres');
+    console.error('[TerrainClient] Got parcel:', data.parcelId, data.acreage, 'acres');
     
     return {
       type: 'Feature',
@@ -211,7 +222,12 @@ export async function fetchParcelGeometry(
       },
     };
   } catch (err) {
-    console.error('[TerrainClient] Parcel fetch error:', err);
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.error('[TerrainClient] Parcel fetch aborted (timeout)');
+    } else {
+      console.error('[TerrainClient] Parcel fetch error:', err);
+    }
     return null;
   }
 }
