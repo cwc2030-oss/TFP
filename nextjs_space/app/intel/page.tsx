@@ -7301,7 +7301,7 @@ function DeerIntelContent() {
                 }}
               />
 
-              {/* ═══ CHAPTER 3 — INTELLIGENCE ═══ */}
+              {/* ═══ CHAPTER 3 — INTELLIGENCE READOUT ═══ */}
               {summary && (
                 <div className="px-3 pt-2 pb-2 border-t border-white/[0.04]">
                   <div className="flex items-center gap-2 mb-2.5">
@@ -7309,27 +7309,105 @@ function DeerIntelContent() {
                     <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Intelligence</span>
                     <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
-                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Bedding</p>
-                      <p className="text-sm text-white font-bold">{summary.totalBeddingAcres.toFixed(1)}<span className="text-[9px] text-stone-400 ml-0.5">ac</span></p>
+
+                  {/* ── Terrain Story Headline ── */}
+                  {terrainStory && (
+                    <div className="mb-2.5">
+                      <p className="text-[11px] text-white/90 font-semibold leading-snug">{terrainStory.headline}</p>
+                      {terrainStory.narrative && (
+                        <p className="text-[10px] text-stone-400 leading-relaxed mt-1">{terrainStory.narrative}</p>
+                      )}
                     </div>
-                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
-                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Funnels</p>
+                  )}
+
+                  {/* ── Parcel Character Bar ── */}
+                  <div className="bg-white/[0.03] rounded-lg p-2 mb-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Parcel Character</span>
+                      {terrainStory && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                          terrainStory.confidence === 'high' ? 'bg-emerald-500/15 text-emerald-400' :
+                          terrainStory.confidence === 'medium' ? 'bg-amber-500/15 text-amber-400' :
+                          'bg-stone-500/15 text-stone-400'
+                        }`}>
+                          {terrainStory.confidence === 'high' ? '● High Confidence' : terrainStory.confidence === 'medium' ? '● Medium' : '● Low'}
+                        </span>
+                      )}
+                    </div>
+                    {/* Character description derived from data */}
+                    <p className="text-[10px] text-white/70 leading-relaxed">
+                      {summary.totalBeddingAcres > 5 ? 'Strong bedding cover' : summary.totalBeddingAcres > 2 ? 'Moderate bedding cover' : 'Limited bedding cover'}
+                      {summary.funnelCount > 3 ? ' with heavy funnel density' : summary.funnelCount > 1 ? ' with natural funneling' : ''}
+                      {summary.topStandScore >= 80 ? ' — premium stand opportunities.' : summary.topStandScore >= 60 ? ' — solid stand potential.' : ' — marginal stand options.'}
+                    </p>
+                  </div>
+
+                  {/* ── Movement & Drivers ── */}
+                  {terrainStory?.primaryDriver && (
+                    <div className="flex items-start gap-2 mb-2">
+                      <div className="w-1 h-full min-h-[24px] rounded-full bg-amber-500/40 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Primary Movement</p>
+                        <p className="text-[11px] text-amber-400/90 font-semibold">{terrainStory.primaryDriver.label}</p>
+                        {terrainStory.secondaryDriver && (
+                          <p className="text-[10px] text-stone-500 mt-0.5">+ {terrainStory.secondaryDriver.label}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Key Metrics Row ── */}
+                  <div className="grid grid-cols-4 gap-1 mb-2">
+                    <div className="text-center">
+                      <p className="text-sm text-white font-bold">{summary.totalBeddingAcres.toFixed(1)}</p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Bed ac</p>
+                    </div>
+                    <div className="text-center">
                       <p className="text-sm text-white font-bold">{summary.funnelCount}</p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Funnels</p>
                     </div>
-                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
-                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Top Stand</p>
-                      <p className="text-sm text-red-400 font-bold">{summary.topStandScore}<span className="text-[9px] text-stone-400">/100</span></p>
+                    <div className="text-center">
+                      <p className={`text-sm font-bold ${summary.topStandScore >= 80 ? 'text-red-400' : summary.topStandScore >= 60 ? 'text-amber-400' : 'text-stone-400'}`}>
+                        {summary.topStandScore}
+                      </p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Top Score</p>
                     </div>
-                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
-                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Area</p>
-                      <p className="text-sm text-white font-bold">{summary.analysisAreaAcres.toFixed(0)}<span className="text-[9px] text-stone-400 ml-0.5">ac</span></p>
+                    <div className="text-center">
+                      <p className="text-sm text-white font-bold">{alignedStands.length || '—'}</p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Stands</p>
                     </div>
                   </div>
-                  {/* Provenance inline */}
+
+                  {/* ── Key Opportunity ── */}
+                  {terrainStory?.keyOpportunity && (
+                    <div className="bg-amber-500/[0.06] border border-amber-500/10 rounded-lg px-2 py-1.5 mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-amber-400 text-[10px]">★</span>
+                        <p className="text-[10px] text-amber-300/90 font-medium">{terrainStory.keyOpportunity.reason}</p>
+                      </div>
+                      <p className="text-[9px] text-stone-500 mt-0.5 ml-4">{terrainStory.keyOpportunity.location}</p>
+                    </div>
+                  )}
+
+                  {/* ── Elevation Profile (if DEM metrics available) ── */}
+                  {summary.demMetrics && (
+                    <div className="flex items-center gap-3 text-[9px] text-stone-500/60 mt-1">
+                      <span>{summary.demMetrics.elevRange.toFixed(0)}m relief</span>
+                      <span>·</span>
+                      <span>{summary.demMetrics.slopeMean?.toFixed(1) ?? '—'}° avg slope</span>
+                      <span>·</span>
+                      <span>{summary.analysisAreaAcres.toFixed(0)} ac</span>
+                    </div>
+                  )}
+                  {!summary.demMetrics && (
+                    <div className="flex items-center gap-3 text-[9px] text-stone-500/60 mt-1">
+                      <span>{summary.analysisAreaAcres.toFixed(0)} ac analyzed</span>
+                    </div>
+                  )}
+
+                  {/* Provenance */}
                   {provenance && (
-                    <p className="mt-2 text-[9px] text-white/30">
+                    <p className="mt-1.5 text-[9px] text-white/20">
                       {provenance.demSource} · {provenance.demResolution}{provenance.processingTimeSeconds ? ` · ${provenance.processingTimeSeconds.toFixed(1)}s` : ''}
                     </p>
                   )}
