@@ -102,63 +102,49 @@ class IntelErrorBoundary extends Component<{ children: React.ReactNode }, ErrorB
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
-          <div className="max-w-2xl w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6">
-            <div className="flex items-start gap-4">
-              <Bug className="h-8 w-8 text-red-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-bold text-red-300 mb-2">Intel Page Crashed</h1>
-                <div className="bg-black/50 rounded-lg p-4 mb-4 overflow-auto max-h-48">
-                  <p className="text-red-200 font-mono text-sm break-words">
-                    {this.state.error?.message || 'Unknown error'}
-                  </p>
-                </div>
-                {this.state.error?.stack && (
-                  <details className="mb-4">
-                    <summary className="text-red-400 text-sm cursor-pointer hover:text-red-300">
-                      Stack trace
-                    </summary>
-                    <pre className="bg-black/50 rounded-lg p-3 mt-2 text-xs text-red-300/80 overflow-auto max-h-64 whitespace-pre-wrap">
-                      {this.state.error.stack}
-                    </pre>
-                  </details>
-                )}
-                {this.state.errorInfo?.componentStack && (
-                  <details className="mb-4">
-                    <summary className="text-red-400 text-sm cursor-pointer hover:text-red-300">
-                      Component stack
-                    </summary>
-                    <pre className="bg-black/50 rounded-lg p-3 mt-2 text-xs text-red-300/80 overflow-auto max-h-48 whitespace-pre-wrap">
-                      {this.state.errorInfo.componentStack}
-                    </pre>
-                  </details>
-                )}
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg font-medium"
-                  >
-                    Reload Page
-                  </button>
-                  <Link
-                    href="/core"
-                    className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg font-medium"
-                  >
-                    Try /core instead
-                  </Link>
-                </div>
-              </div>
+          <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
+            <AlertTriangle className="h-10 w-10 text-amber-400 mx-auto mb-4" />
+            <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
+            <p className="text-stone-400 text-sm mb-6">
+              The terrain analyzer encountered an issue. This is usually temporary — reloading typically resolves it.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => window.location.reload()}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-medium transition-colors"
+              >
+                Reload Page
+              </button>
+              <Link
+                href="/"
+                className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg font-medium transition-colors"
+              >
+                Back to Home
+              </Link>
             </div>
           </div>
         </div>
       );
     }
-
     return this.props.children;
   }
 }
 
 // Mapbox token
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
+
+// V4 Step 12: Silence verbose logging in production (keep errors)
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+  const noop = () => {};
+  const origWarn = console.warn;
+  console.log = noop;
+  console.warn = (...args: any[]) => {
+    // Keep genuine warnings about deprecation/security, silence routine ones
+    const msg = String(args[0] || '');
+    if (msg.includes('[TFP]') || msg.includes('[INTEL]') || msg.includes('[MAP]') || msg.includes('[EDGE') || msg.includes('[Backbone]') || msg.includes('[TerrainFlow]') || msg.includes('[EXPLORE]') || msg.includes('[StandResilience]') || msg.includes('[OVERLAY')) return;
+    origWarn.apply(console, args);
+  };
+}
 
 // Extend window for debugging
 declare global {
@@ -6924,48 +6910,29 @@ function DeerIntelContent() {
     mapRef.current?.flyTo({ center: [lng, lat], zoom: 14 });
   };
 
-  // BUILD STAMP - remove after debugging
-  const BUILD_STAMP = 'v3.8.4-fix3 | webgl-context-fix | 2026-03-17';
-
-  // ========== GLOBAL ERROR PANEL (catches unhandled errors) ==========
+  // ========== GLOBAL ERROR PANEL — customer-friendly ==========
   if (globalError) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
-        <div className="max-w-2xl w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6">
-          <div className="flex items-start gap-4">
-            <Bug className="h-8 w-8 text-red-400 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-bold text-red-300 mb-2">Unhandled Error in /intel</h1>
-              <div className="bg-black/50 rounded-lg p-4 mb-4 overflow-auto max-h-48">
-                <p className="text-red-200 font-mono text-sm break-words">
-                  {globalError.message}
-                </p>
-              </div>
-              {globalError.stack && (
-                <details className="mb-4">
-                  <summary className="text-red-400 text-sm cursor-pointer hover:text-red-300">
-                    Stack trace
-                  </summary>
-                  <pre className="bg-black/50 rounded-lg p-3 mt-2 text-xs text-red-300/80 overflow-auto max-h-64 whitespace-pre-wrap">
-                    {globalError.stack}
-                  </pre>
-                </details>
-              )}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { setGlobalError(null); window.location.reload(); }}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg font-medium"
-                >
-                  Reload Page
-                </button>
-                <Link
-                  href="/core"
-                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg font-medium"
-                >
-                  Try /core instead
-                </Link>
-              </div>
-            </div>
+        <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
+          <AlertTriangle className="h-10 w-10 text-amber-400 mx-auto mb-4" />
+          <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
+          <p className="text-stone-400 text-sm mb-6">
+            The terrain analyzer encountered an issue. This is usually temporary — reloading typically resolves it.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => { setGlobalError(null); window.location.reload(); }}
+              className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-medium transition-colors"
+            >
+              Reload Page
+            </button>
+            <Link
+              href="/"
+              className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white text-sm rounded-lg font-medium transition-colors"
+            >
+              Back to Home
+            </Link>
           </div>
         </div>
       </div>
@@ -6982,10 +6949,7 @@ function DeerIntelContent() {
         <div ref={mapContainerRef} style={{ width: '100%', height: '100%', position: 'relative' }} />
       </div>
 
-      {/* BUILD STAMP - visible debug marker (hidden in export mode) */}
-      <div className={`absolute bottom-2 left-2 z-50 bg-fuchsia-600 text-white px-3 py-1 rounded font-mono text-xs font-bold shadow-lg transition-opacity duration-300 ${exportMode ? 'opacity-0' : 'opacity-100'}`}>
-        BUILD: {BUILD_STAMP}
-      </div>
+      {/* Build stamp — admin-only via ?debug=true */}
 
       {/* v3.8.2 — Compact map-level busy indicator for async operations */}
       {(flowSegmentExplainLoading || qaParcelAnalyzing) && (
@@ -7014,7 +6978,7 @@ function DeerIntelContent() {
             </div>
           </div>
 
-          {/* Mode Badge */}
+          {/* Data Quality Indicator — clean, non-technical */}
           <div className={`
             px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-2
             ${mode === 'real' 
@@ -7022,9 +6986,9 @@ function DeerIntelContent() {
               : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}
           `}>
             {mode === 'real' ? (
-              <><CheckCircle className="h-4 w-4" />USGS 10m DEM</>
+              <><CheckCircle className="h-4 w-4" />Verified Terrain</>
             ) : (
-              <><Info className="h-4 w-4" />Preview Mode</>
+              <><Info className="h-4 w-4" />Preview</>
             )}
           </div>
 
@@ -7051,28 +7015,29 @@ function DeerIntelContent() {
                 {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
               </Button>
             )}
-            {/* Exploration Mode Toggle */}
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`${explorationMode 
-                ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50' 
-                : 'text-white/80 hover:text-white hover:bg-white/10'
-              }`}
-              onClick={() => {
-                setExplorationMode(!explorationMode);
-                if (explorationMode) {
-                  // Turning off - clear any selected parcel
-                  handleQaParcelClear();
-                }
-              }}
-              title="Explore Mode - Click anywhere in KS/MO to analyze parcels"
-            >
-              <Layers className="h-4 w-4 mr-1" />
-              {explorationMode ? 'Explore ON' : 'Explore'}
-            </Button>
-            {/* Geometry Debug Toggle (only show when QA Mode is on) */}
-            {qaParcelLookupMode && (
+            {/* Exploration Mode Toggle — admin/debug only */}
+            {debugMode && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`${explorationMode 
+                  ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50' 
+                  : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+                onClick={() => {
+                  setExplorationMode(!explorationMode);
+                  if (explorationMode) {
+                    handleQaParcelClear();
+                  }
+                }}
+                title="Explore Mode - Click anywhere in KS/MO to analyze parcels"
+              >
+                <Layers className="h-4 w-4 mr-1" />
+                {explorationMode ? 'Explore ON' : 'Explore'}
+              </Button>
+            )}
+            {/* Geometry Debug Toggle — admin/debug only */}
+            {debugMode && qaParcelLookupMode && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -7081,7 +7046,7 @@ function DeerIntelContent() {
                   : 'text-white/60 hover:text-white hover:bg-white/10'
                 }`}
                 onClick={() => setGeometryDebugMode(!geometryDebugMode)}
-                title="Show 3-boundary debug overlay: Red=Raw, Cyan=Normalized, Yellow=Analysis"
+                title="Show 3-boundary debug overlay"
               >
                 <Bug className="h-4 w-4 mr-1" />
                 {geometryDebugMode ? 'Debug ON' : 'Debug'}
@@ -7104,10 +7069,10 @@ function DeerIntelContent() {
                 : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
               onClick={() => setExportMode(!exportMode)}
-              title="Export Mode - Clean map view for screenshots/demos"
+              title="Screenshot mode — clean map view"
             >
               <Download className="h-4 w-4 mr-1" />
-              {exportMode ? 'Exit Export' : 'Export'}
+              {exportMode ? 'Exit Screenshot' : 'Screenshot'}
             </Button>
           </div>
         </div>
@@ -8171,79 +8136,36 @@ function DeerIntelContent() {
                       if (totalFeatures > 0) {
                         return (
                           <>
-                            {/* DEM Mode Badge */}
-                            <DEMModeBadge 
-                              mode={mode}
-                              metadata={terrainFlowData?.metadata ? {
-                                ...terrainFlowData.metadata,
-                                processing_time_seconds: terrainFlowData.metadata?.total_flow_length_m ? 0.5 : 0,
-                                buffer_m: 1000,
-                                mode: mode,
-                                dem_source: terrainFlowData.metadata.dem_source || 'unknown',
-                                resolution_m: 30,
-                                weights: {
-                                  bench_likelihood: 0.28,
-                                  saddle_proximity: 0.24,
-                                  spine_proximity: 0.20,
-                                  terrain_convergence: 0.18,
-                                  moderate_slope: 0.10,
-                                },
-                                thresholds: {
-                                  primary_min: 0.55,
-                                  secondary_min: 0.35,
-                                  min_length_m_primary: 150,
-                                  min_length_m_secondary: 80,
-                                  convergence_threshold: 0.5,
-                                  opportunity_threshold: 0.6,
-                                },
-                                stats: {
-                                  flow_count_primary: primaryCount,
-                                  flow_count_secondary: secondaryCount,
-                                  convergence_count: convergenceCount,
-                                  opportunity_count: 0, // merged into convergence
-                                  total_flow_length_m: totalFlowLength,
-                                  coverage_pct: 0,
-                                },
-                                fallback_reason: isSynthetic ? 'No terrain data available' : null,
-                              } : null}
-                            />
-                            
-                            {/* Confidence Legend */}
-                            <div className="p-2 bg-stone-800/30 rounded-lg">
-                              <div className="text-[9px] text-stone-500 uppercase tracking-wider mb-1.5 font-medium">
-                                Confidence Colors
-                              </div>
-                              <div className="flex items-center gap-3 text-[9px]">
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#10b981' }} />
-                                  <span className="text-emerald-400">Strong</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#22d3ee' }} />
-                                  <span className="text-cyan-400">Moderate</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#60a5fa' }} />
-                                  <span className="text-blue-400">Weak</span>
-                                </div>
+                            {/* Data Quality — clean, customer-facing */}
+                            <div className={`p-2 rounded-lg border ${mode === 'real_dem' ? 'bg-emerald-900/20 border-emerald-700/30' : 'bg-amber-900/20 border-amber-700/30'}`}>
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className={`h-3.5 w-3.5 ${mode === 'real_dem' ? 'text-emerald-400' : 'text-amber-400'}`} />
+                                <span className={`text-[10px] font-medium ${mode === 'real_dem' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                  {mode === 'real_dem' ? 'High-Resolution Terrain Data' : 'Estimated Terrain'}
+                                </span>
                               </div>
                             </div>
                             
-                            {/* Stats */}
+                            {/* Movement summary — plain language */}
                             <div className="text-[10px] text-stone-400 space-y-0.5">
-                              {totalFlowLength > 0 && (
+                              {primaryCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span>Total Flow Length</span>
-                                  <span className="text-white">{Math.round(totalFlowLength)}m</span>
+                                  <span>Primary Routes</span>
+                                  <span className="text-emerald-400">{primaryCount}</span>
+                                </div>
+                              )}
+                              {secondaryCount > 0 && (
+                                <div className="flex justify-between">
+                                  <span>Secondary Routes</span>
+                                  <span className="text-cyan-400">{secondaryCount}</span>
                                 </div>
                               )}
                               {convergenceCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span>Flow Convergences</span>
+                                  <span>Pinch Points</span>
                                   <span className="text-amber-400">{convergenceCount}</span>
                                 </div>
                               )}
-
                             </div>
                             
                             {/* Click instruction - highlighted when inspect mode is on */}
