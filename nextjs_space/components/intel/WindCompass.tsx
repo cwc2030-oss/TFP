@@ -21,18 +21,18 @@ interface WindCompassProps {
  */
 export function WindCompass({ windDirection, windMinAgo, onWindChange }: WindCompassProps) {
   return (
-    <div className="p-3 border-b border-white/10">
-      <div className="flex items-center justify-between mb-2">
+    <div className="p-3 border-b border-white/[0.06]">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Wind className="h-4 w-4 text-stone-400" />
-          <span className="text-sm font-medium text-white">Wind: {windDirection}</span>
+          <Wind className="h-3.5 w-3.5 text-stone-400" />
+          <span className="text-xs font-medium text-white/90">Wind: {windDirection}</span>
         </div>
-        <span className="text-xs text-stone-500">
+        <span className="text-[10px] text-stone-500/70">
           {windMinAgo} min ago
         </span>
       </div>
       {/* Compact compass selector */}
-      <div className="flex flex-wrap gap-1 justify-center">
+      <div className="flex flex-wrap gap-1.5 justify-center">
         {WIND_DIRECTIONS.map((dir) => {
           const isSelected = windDirection === dir;
           return (
@@ -40,10 +40,10 @@ export function WindCompass({ windDirection, windMinAgo, onWindChange }: WindCom
               key={dir}
               onClick={() => onWindChange(dir)}
               className={`
-                w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-colors duration-150
+                w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-medium transition-all duration-150
                 ${isSelected
-                  ? 'bg-stone-600 text-white'
-                  : 'bg-stone-800/50 text-stone-400 hover:bg-stone-700 hover:text-white'}
+                  ? 'bg-white/[0.12] border border-white/[0.15] text-white shadow-sm'
+                  : 'bg-white/[0.03] border border-transparent text-stone-500 hover:bg-white/[0.06] hover:text-white/70'}
               `}
             >
               {dir}
