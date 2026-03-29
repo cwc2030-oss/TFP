@@ -292,7 +292,7 @@ const LAYER_COLORS = {
   flowConvergence: '#f59e0b',     // Amber-500: convergence zone markers
   // v3.8.1 — Directional flow emphasis
   flowDirectionChevron: '#14b8a6', // Teal-500: directional chevrons along flow
-  standEmphasisGlow: '#2dd4bf',    // Teal-400: subtle glow bias toward top stand
+  standEmphasisGlow: '#f09048',    // Warm orange: subtle glow bias toward top stand (matches icon family)
   // flowOpportunity removed — convergence IS opportunity (use flowConvergence instead)
   // v3.6.0 — Bedding Probability colors (muted earthy/plum tones)
   beddingProbability: '#7c3aed', // Violet-600: bedding zone fill
@@ -6417,8 +6417,10 @@ function DeerIntelContent() {
     }
   };
 
-  // ========== PREMIUM STAND ICON SVG GENERATOR ==========
-  // Unified visual family: scope-reticle pin with support pole
+  // ========== PREMIUM STAND ICON SVG GENERATOR (v4 Step 8) ==========
+  // Unified visual family: scope-reticle disc with tapered tree-stand pole.
+  // All tiers share identical structure — only color/scale/glow differ.
+  // Uses fixed 100×100 viewBox for pixel-perfect crispness at every zoom level.
   const buildStandSVG = (opts: {
     size: number;
     fillColor: string;
@@ -6429,43 +6431,83 @@ function DeerIntelContent() {
     rank: number;
   }): string => {
     const { size, fillColor, strokeColor, glowColor, label, isTop, rank } = opts;
-    const half = size / 2;
-    const pinR = size * 0.34;       // Main pin circle radius
-    const poleH = size * 0.22;      // Support pole height
-    const poleW = size * 0.06;      // Pole width
-    const reticleR = pinR * 0.55;   // Inner reticle radius
-    const crossW = size * 0.025;    // Crosshair line width
 
-    // Glow filter for top stand
-    const glowFilter = isTop ? `
-      <filter id="sg${rank}" x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur stdDeviation="${size * 0.08}" result="blur"/>
-        <feFlood flood-color="${glowColor || fillColor}" flood-opacity="0.5"/>
-        <feComposite in2="blur" operator="in"/>
-        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>` : '';
+    // ---- Fixed coordinate system (viewBox 0 0 100 100) ----
+    const cx = 50;                   // Center X
+    const cy = 40;                   // Disc center (offset up for pole)
+    const discR = 28;                // Main disc radius
+    const reticleR = 16;             // Inner reticle ring
+    const crossLen = 8;              // Crosshair tick length
+    const crossGap = 2;              // Gap between reticle ring and tick start
+    const crossW = 2;                // Crosshair line weight
+    const strokeW = isTop ? 2.5 : 2; // Disc border weight
 
-    // Rank label (⭐ for #1, number for rest)
-    const labelContent = isTop 
-      ? `<text x="${half}" y="${half - poleH/2 + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="${size * 0.22}px" font-weight="700">★</text>`
-      : `<text x="${half}" y="${half - poleH/2 + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="${size * 0.24}px" font-weight="700" font-family="system-ui,sans-serif">${label}</text>`;
+    // ---- Tapered tree-stand pole with platform ----
+    const poleTop = cy + discR * 0.72;  // Start below disc
+    const poleBot = 92;                 // Near bottom of viewBox
+    const poleTopW = 3;                 // Narrow at top
+    const poleBotW = 5;                 // Wider at base
+    const platW = 14;                   // Platform crossbar width
+    const platH = 2.5;                  // Platform crossbar height
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      <defs>${glowFilter}</defs>
-      <!-- Support pole -->
-      <rect x="${half - poleW/2}" y="${half + pinR * 0.6}" width="${poleW}" height="${poleH}" rx="${poleW/2}" fill="${strokeColor}" opacity="0.7"/>
-      <rect x="${half - poleW * 1.8}" y="${half + pinR * 0.6 + poleH - poleW}" width="${poleW * 3.6}" height="${poleW}" rx="${poleW/2}" fill="${strokeColor}" opacity="0.5"/>
-      <!-- Main pin circle -->
-      <circle cx="${half}" cy="${half - poleH/2}" r="${pinR + 1.5}" fill="none" stroke="${strokeColor}" stroke-width="1.5" opacity="0.3" ${isTop ? `filter="url(#sg${rank})"` : ''}/>
-      <circle cx="${half}" cy="${half - poleH/2}" r="${pinR}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${isTop ? 2.5 : 2}"/>
-      <!-- Scope reticle -->
-      <circle cx="${half}" cy="${half - poleH/2}" r="${reticleR}" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="${crossW}"/>
-      <line x1="${half - reticleR - 2}" y1="${half - poleH/2}" x2="${half - reticleR + size*0.06}" y2="${half - poleH/2}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
-      <line x1="${half + reticleR + 2}" y1="${half - poleH/2}" x2="${half + reticleR - size*0.06}" y2="${half - poleH/2}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
-      <line x1="${half}" y1="${half - poleH/2 - reticleR - 2}" x2="${half}" y2="${half - poleH/2 - reticleR + size*0.06}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
-      <line x1="${half}" y1="${half - poleH/2 + reticleR + 2}" x2="${half}" y2="${half - poleH/2 + reticleR - size*0.06}" stroke="rgba(255,255,255,0.3)" stroke-width="${crossW}" stroke-linecap="round"/>
+    // ---- Glow: all tiers get subtle ambient glow, top gets stronger ----
+    const glowOpacity = isTop ? 0.55 : 0.25;
+    const glowStd = isTop ? 6 : 4;
+    const glowDefs = `
+      <filter id="sg${rank}" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="${glowStd}" result="blur"/>
+        <feFlood flood-color="${glowColor || fillColor}" flood-opacity="${glowOpacity}"/>
+        <feComposite in2="blur" operator="in" result="glow"/>
+        <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>`;
+
+    // ---- Inner shadow for depth ----
+    const innerShadow = `
+      <radialGradient id="ish${rank}" cx="45%" cy="38%" r="60%">
+        <stop offset="0%" stop-color="#fff" stop-opacity="0.15"/>
+        <stop offset="100%" stop-color="#000" stop-opacity="0.20"/>
+      </radialGradient>`;
+
+    // ---- Rank label ----
+    const labelEl = isTop
+      ? `<text x="${cx}" y="${cy + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="18" font-weight="700" style="text-shadow:0 1px 2px rgba(0,0,0,0.3)">★</text>`
+      : `<text x="${cx}" y="${cy + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="20" font-weight="700" font-family="system-ui,sans-serif" style="text-shadow:0 1px 2px rgba(0,0,0,0.3)">${label}</text>`;
+
+    // ---- Crosshair ticks (4 cardinal directions, outside reticle ring) ----
+    const ticks = [
+      // Left
+      `<line x1="${cx - reticleR - crossGap - crossLen}" y1="${cy}" x2="${cx - reticleR - crossGap}" y2="${cy}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
+      // Right
+      `<line x1="${cx + reticleR + crossGap}" y1="${cy}" x2="${cx + reticleR + crossGap + crossLen}" y2="${cy}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
+      // Top
+      `<line x1="${cx}" y1="${cy - reticleR - crossGap - crossLen}" x2="${cx}" y2="${cy - reticleR - crossGap}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
+      // Bottom
+      `<line x1="${cx}" y1="${cy + reticleR + crossGap}" x2="${cx}" y2="${cy + reticleR + crossGap + crossLen}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
+    ].join('\n      ');
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    return `<svg xmlns="${svgNS}" width="${size}" height="${size}" viewBox="0 0 100 100">
+      <defs>${glowDefs}${innerShadow}</defs>
+      <!-- Tapered tree-stand pole -->
+      <polygon points="${cx - poleTopW},${poleTop} ${cx + poleTopW},${poleTop} ${cx + poleBotW},${poleBot} ${cx - poleBotW},${poleBot}" fill="${strokeColor}" opacity="0.65"/>
+      <!-- Platform crossbar -->
+      <rect x="${cx - platW/2}" y="${poleTop - platH/2}" width="${platW}" height="${platH}" rx="1.2" fill="${strokeColor}" opacity="0.55"/>
+      <!-- Ground tick -->
+      <line x1="${cx - poleBotW - 2}" y1="${poleBot}" x2="${cx + poleBotW + 2}" y2="${poleBot}" stroke="${strokeColor}" stroke-width="1.5" opacity="0.35" stroke-linecap="round"/>
+      <!-- Outer glow ring -->
+      <circle cx="${cx}" cy="${cy}" r="${discR + 3}" fill="none" stroke="${glowColor || fillColor}" stroke-width="1" opacity="${isTop ? 0.35 : 0.15}" filter="url(#sg${rank})"/>
+      <!-- Main disc -->
+      <circle cx="${cx}" cy="${cy}" r="${discR}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeW}"/>
+      <!-- Inner depth overlay -->
+      <circle cx="${cx}" cy="${cy}" r="${discR - 1}" fill="url(#ish${rank})"/>
+      <!-- Reticle ring -->
+      <circle cx="${cx}" cy="${cy}" r="${reticleR}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="${crossW * 0.8}"/>
+      <!-- Crosshair ticks -->
+      ${ticks}
+      <!-- Center dot -->
+      <circle cx="${cx}" cy="${cy}" r="1.5" fill="rgba(255,255,255,0.4)"/>
       <!-- Label -->
-      ${labelContent}
+      ${labelEl}
     </svg>`;
   };
 
@@ -6502,10 +6544,10 @@ function DeerIntelContent() {
       const baseSize = isTopStand ? 60 : isSecondary ? 52 : 42;
       const markerSize = Math.round(baseSize * scale);
 
-      // Unified color family — all warm earth tones
+      // v4 Step 8: Unified color family — all warm earth tones, consistent stroke treatment
       const fillColor = isTopStand ? LAYER_COLORS.standPrimary : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-      const strokeColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? '#d4a574' : '#8b7355';
-      const glowColor = isTopStand ? LAYER_COLORS.standPrimaryRing : undefined;
+      const strokeColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
+      const glowColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
 
       const svgHTML = buildStandSVG({
         size: markerSize,
@@ -6537,7 +6579,6 @@ function DeerIntelContent() {
           height: ${markerSize}px;
           transition: transform 0.2s ease, filter 0.2s ease;
           pointer-events: none;
-          ${isTertiary ? 'opacity: 0.7;' : ''}
         ">${svgHTML}</div>
         ${isTopStand ? `
           <div style="
@@ -6582,7 +6623,7 @@ function DeerIntelContent() {
         backdrop-filter: blur(8px);
       `;
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
-      const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standPrimary : '#d4a574';
+      const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
       const standLabel = isTopStand ? "★ Today's Sit" : stand.name;
       // Explainability chips
       const explain = getStandExplainability(stand.inputs, props, stand.alignment, stand.resilience);
@@ -6607,11 +6648,12 @@ function DeerIntelContent() {
       `;
       el.appendChild(hoverTooltip);
 
+      // v4 Step 8: Consistent hover emphasis — all tiers get identical scale + warm glow
       el.onmouseenter = () => {
         const visual = el.querySelector('.stand-visual') as HTMLElement;
         if (visual) {
-          visual.style.transform = 'scale(1.15)';
-          visual.style.filter = 'brightness(1.2) drop-shadow(0 4px 12px rgba(0,0,0,0.5))';
+          visual.style.transform = 'scale(1.12)';
+          visual.style.filter = `brightness(1.15) drop-shadow(0 4px 16px ${fillColor}66)`;
         }
         hoverTooltip.style.opacity = '1';
       };
@@ -6666,14 +6708,14 @@ function DeerIntelContent() {
         if (visual) {
           visual.style.width = `${newSize}px`;
           visual.style.height = `${newSize}px`;
-          // Rebuild SVG at new size for crisp rendering
+          // Rebuild SVG at new size for crisp rendering (v4 Step 8: unified colors)
           const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-          const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? '#d4a574' : '#8b7355';
+          const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
           visual.innerHTML = buildStandSVG({
             size: newSize,
             fillColor,
             strokeColor,
-            glowColor: isTop ? LAYER_COLORS.standPrimaryRing : undefined,
+            glowColor: isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary,
             label: `${idx + 1}`,
             isTop,
             rank: idx,
