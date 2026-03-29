@@ -7187,96 +7187,53 @@ function DeerIntelContent() {
             </div>
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
-              {/* ─── PARCEL INFO ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Parcel Info</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                </div>
-              </div>
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="space-y-2.5">
-                  {/* Address */}
-                  <div className="flex items-start gap-2.5">
-                    <MapPin className="h-3.5 w-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Address</p>
-                      <p className="text-xs text-white/90 font-semibold leading-tight">{address}</p>
-                    </div>
-                  </div>
-                  {/* Acreage & County */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-white/[0.04] rounded-lg p-2.5">
-                      <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Acreage</p>
-                      <p className="text-base text-white font-bold">{acreageParam || '~80'}<span className="text-xs text-stone-400 ml-1">ac</span></p>
-                    </div>
-                    {qaParcel?.county && (
-                      <div className="bg-white/[0.04] rounded-lg p-2.5">
-                        <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">County</p>
-                        <p className="text-xs text-white font-semibold mt-0.5">{qaParcel.county}{qaParcel.state ? `, ${qaParcel.state}` : ''}</p>
-                      </div>
-                    )}
-                  </div>
-                  {/* Coordinates */}
-                  <p className="text-[10px] text-stone-600 text-center">
-                    {lat.toFixed(5)}, {lng.toFixed(5)}
-                  </p>
-                </div>
-              </div>
 
-              {/* ─── LANDOWNER ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Landowner</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+              {/* ═══ CHAPTER 1 — PARCEL IDENTITY ═══ */}
+              <div className="px-3 pt-3 pb-2">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <MapPin className="h-3 w-3 text-amber-500/70" />
+                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Parcel Identity</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
                 </div>
-              </div>
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="space-y-2.5">
+                {/* Address */}
+                <p className="text-xs text-white/90 font-semibold leading-tight">{address}</p>
+                <p className="text-[10px] text-stone-600 mt-0.5">{lat.toFixed(5)}, {lng.toFixed(5)}</p>
+                {/* Compact stat row */}
+                <div className="grid grid-cols-3 gap-1.5 mt-2.5">
+                  <div className="bg-white/[0.04] rounded-lg px-2 py-1.5 text-center">
+                    <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Acres</p>
+                    <p className="text-sm text-white font-bold">{acreageParam || '~80'}</p>
+                  </div>
+                  {qaParcel?.county && (
+                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5 text-center">
+                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">County</p>
+                      <p className="text-[10px] text-white font-semibold mt-0.5">{qaParcel.county}{qaParcel.state ? `, ${qaParcel.state}` : ''}</p>
+                    </div>
+                  )}
                   {qaParcel?.owner && (
-                    <div className="flex items-start gap-2.5">
-                      <User className="h-3.5 w-3.5 text-stone-400 mt-0.5 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Landowner</p>
-                        <p className="text-xs text-white/80 truncate">{qaParcel.owner}</p>
-                      </div>
-                    </div>
-                  )}
-                  {/* Zoning & PLSS */}
-                  {(qaParcel?.zoning || qaParcel?.plss) && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {qaParcel?.zoning && (
-                        <div className="bg-white/[0.04] rounded-lg p-2.5">
-                          <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Zoning</p>
-                          <p className="text-xs text-white/80 mt-0.5">{qaParcel.zoning}</p>
-                        </div>
-                      )}
-                      {qaParcel?.plss && (
-                        <div className="bg-white/[0.04] rounded-lg p-2.5">
-                          <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">PLSS</p>
-                          <p className="text-[10px] text-white/80 mt-0.5 truncate">{qaParcel.plss}</p>
-                        </div>
-                      )}
+                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5 text-center">
+                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Owner</p>
+                      <p className="text-[10px] text-white/80 font-semibold mt-0.5 truncate">{qaParcel.owner}</p>
                     </div>
                   )}
                 </div>
+                {/* Zoning & PLSS inline */}
+                {(qaParcel?.zoning || qaParcel?.plss) && (
+                  <div className="flex items-center gap-3 mt-2 text-[10px] text-stone-500/70">
+                    {qaParcel?.zoning && <span>Zoning: <span className="text-white/60">{qaParcel.zoning}</span></span>}
+                    {qaParcel?.plss && <span>PLSS: <span className="text-white/60 truncate">{qaParcel.plss}</span></span>}
+                  </div>
+                )}
               </div>
 
-              {/* ─── SEASONS ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Seasons</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+              {/* ═══ CHAPTER 2 — CONDITIONS ═══ */}
+              <div className="px-3 pt-2 pb-2 border-t border-white/[0.04]">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <Calendar className="h-3 w-3 text-amber-500/70" />
+                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Conditions</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
                 </div>
-              </div>
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="flex items-center gap-2 mb-3">
-                  <Calendar className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="text-xs font-medium text-white/90">Season</span>
-                </div>
+                {/* Season picker */}
                 <div className="grid grid-cols-3 gap-1.5">
                   {SEASONS.map((s) => (
                     <button
@@ -7295,62 +7252,45 @@ function DeerIntelContent() {
                     </button>
                   ))}
                 </div>
-              </div>
-
-              {/* ─── PROFILES ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Profiles</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                </div>
-              </div>
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="bg-white/[0.04] rounded-lg p-3">
+                {/* Season profile hint (merged, no separate divider) */}
+                <div className="bg-white/[0.04] rounded-lg p-2.5 mt-2.5">
                   {season === 'early' && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5">
                         <span className="text-sm">🌿</span>
-                        <span className="text-[11px] font-semibold text-white/90">Early Season Profile</span>
+                        <span className="text-[11px] font-semibold text-white/90">Early Season</span>
                       </div>
-                      <p className="text-[11px] text-stone-400 leading-relaxed">
-                        Deer follow predictable bed-to-feed patterns. Focus on food sources &amp; travel corridors near field edges. Morning thermals carry scent downhill.
+                      <p className="text-[10px] text-stone-400 leading-relaxed">
+                        Predictable bed-to-feed patterns. Focus food sources &amp; travel corridors near field edges.
                       </p>
                     </div>
                   )}
                   {season === 'rut' && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5">
                         <span className="text-sm">🦌</span>
-                        <span className="text-[11px] font-semibold text-white/90">Rut Profile</span>
+                        <span className="text-[11px] font-semibold text-white/90">Rut Phase</span>
                       </div>
-                      <p className="text-[11px] text-stone-400 leading-relaxed">
-                        Bucks cruise between bedding areas checking does. Saddles, funnels &amp; ridge connections see peak traffic. All-day sits produce.
+                      <p className="text-[10px] text-stone-400 leading-relaxed">
+                        Bucks cruise between bedding areas. Saddles, funnels &amp; ridge connections see peak traffic.
                       </p>
                     </div>
                   )}
                   {season === 'late' && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5">
                         <span className="text-sm">❄️</span>
-                        <span className="text-[11px] font-semibold text-white/90">Late Season Profile</span>
+                        <span className="text-[11px] font-semibold text-white/90">Late Season</span>
                       </div>
-                      <p className="text-[11px] text-stone-400 leading-relaxed">
-                        Caloric stress drives deer to remaining food. South-facing slopes provide thermal cover. Short afternoon hunts near food are most effective.
+                      <p className="text-[10px] text-stone-400 leading-relaxed">
+                        Caloric stress drives deer to food. South-facing slopes provide thermal cover.
                       </p>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* ─── WIND ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Wind</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                </div>
-              </div>
+              {/* Wind compass (part of Conditions chapter, no separate header) */}
               <WindCompass
                 windDirection={windDirection}
                 windMinAgo={windMinAgo}
@@ -7361,50 +7301,42 @@ function DeerIntelContent() {
                 }}
               />
 
-              {/* ─── ANALYSIS SUMMARY ─── */}
+              {/* ═══ CHAPTER 3 — INTELLIGENCE ═══ */}
               {summary && (
-                <>
-                  <div className="px-3 pt-3 pb-1">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                      <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Analysis Summary</span>
-                      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+                <div className="px-3 pt-2 pb-2 border-t border-white/[0.04]">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Target className="h-3 w-3 text-amber-500/70" />
+                    <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Intelligence</span>
+                    <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
+                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Bedding</p>
+                      <p className="text-sm text-white font-bold">{summary.totalBeddingAcres.toFixed(1)}<span className="text-[9px] text-stone-400 ml-0.5">ac</span></p>
+                    </div>
+                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
+                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Funnels</p>
+                      <p className="text-sm text-white font-bold">{summary.funnelCount}</p>
+                    </div>
+                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
+                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Top Stand</p>
+                      <p className="text-sm text-red-400 font-bold">{summary.topStandScore}<span className="text-[9px] text-stone-400">/100</span></p>
+                    </div>
+                    <div className="bg-white/[0.04] rounded-lg px-2 py-1.5">
+                      <p className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Area</p>
+                      <p className="text-sm text-white font-bold">{summary.analysisAreaAcres.toFixed(0)}<span className="text-[9px] text-stone-400 ml-0.5">ac</span></p>
                     </div>
                   </div>
-                  <div className="p-3 flex-1">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="bg-white/[0.04] rounded-lg p-2.5">
-                        <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Bedding Acres</p>
-                        <p className="text-base text-white font-bold">{summary.totalBeddingAcres.toFixed(1)}</p>
-                      </div>
-                      <div className="bg-white/[0.04] rounded-lg p-2.5">
-                        <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Funnels</p>
-                        <p className="text-base text-white font-bold">{summary.funnelCount}</p>
-                      </div>
-                      <div className="bg-white/[0.04] rounded-lg p-2.5">
-                        <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Top Stand</p>
-                        <p className="text-base text-red-400 font-bold">{summary.topStandScore}<span className="text-xs text-stone-400">/100</span></p>
-                      </div>
-                      <div className="bg-white/[0.04] rounded-lg p-2.5">
-                        <p className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium">Area</p>
-                        <p className="text-base text-white font-bold">{summary.analysisAreaAcres.toFixed(0)}<span className="text-xs text-stone-400 ml-1">ac</span></p>
-                      </div>
-                    </div>
-                    {/* Provenance */}
-                    {provenance && (
-                      <div className="mt-3 pt-3 border-t border-white/[0.06] text-[10px] text-white/40 space-y-0.5">
-                        <p>Source: {provenance.demSource}</p>
-                        <p>Resolution: {provenance.demResolution}</p>
-                        {provenance.processingTimeSeconds && (
-                          <p>Processed in {provenance.processingTimeSeconds.toFixed(2)}s</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </>
+                  {/* Provenance inline */}
+                  {provenance && (
+                    <p className="mt-2 text-[9px] text-white/30">
+                      {provenance.demSource} · {provenance.demResolution}{provenance.processingTimeSeconds ? ` · ${provenance.processingTimeSeconds.toFixed(1)}s` : ''}
+                    </p>
+                  )}
+                </div>
               )}
 
-              {/* ─── RE-ALIGN TERRAIN ─── */}
+              {/* ═══ CHAPTER 4 — REFINE ═══ */}
               <div className="p-3 border-t border-white/[0.06] mt-auto">
                 {/* Last analysis timestamp */}
                 {summary && !isLoading && (
