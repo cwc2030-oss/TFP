@@ -125,7 +125,12 @@ export function fadeLayerIn(
 }
 
 /**
- * Fade a layer OUT: animate opacity to 0, then set visibility to 'none'.
+ * Fade a layer OUT: animate opacity to 0.
+ *
+ * v4-fix9: Added `setHidden` parameter. When true (default), also sets
+ * visibility:'none' after fade completes — correct for user toggle actions.
+ * When false, leaves visibility unchanged — correct for gracefulClear so the
+ * centralized reconcile controller decides final visibility.
  */
 export function fadeLayerOut(
   map: mapboxgl.Map,
@@ -133,6 +138,7 @@ export function fadeLayerOut(
   opacityProp: string = 'line-opacity',
   durationMs: number = 300,
   easeFn: (t: number) => number = easeInQuart,
+  setHidden: boolean = true,
 ): void {
   if (!map.getLayer(layerId)) return;
   let startOpacity = 0;
@@ -143,7 +149,9 @@ export function fadeLayerOut(
     startOpacity = 0.5;
   }
   if (startOpacity < 0.01) {
-    map.setLayoutProperty(layerId, 'visibility', 'none');
+    if (setHidden) {
+      try { map.setLayoutProperty(layerId, 'visibility', 'none'); } catch { /* ignore */ }
+    }
     return;
   }
   map.setPaintProperty(layerId, opacityProp, startOpacity);
@@ -170,9 +178,9 @@ export function fadeLayerOut(
     if (progress < 1) {
       activeAnimations.set(animKey, requestAnimationFrame(step));
     } else {
-      try {
-        map.setLayoutProperty(layerId, 'visibility', 'none');
-      } catch { /* ignore */ }
+      if (setHidden) {
+        try { map.setLayoutProperty(layerId, 'visibility', 'none'); } catch { /* ignore */ }
+      }
       activeAnimations.delete(animKey);
     }
   }
@@ -281,9 +289,11 @@ export function gracefulClear(
     }
   }
 
-  // Fade them all out simultaneously
+  // v4-fix9: Fade all layers to opacity 0 but do NOT set visibility:'none'.
+  // The centralized reconcileVisibility() controller will decide final state
+  // after new data is painted. This prevents orphaned hidden layers.
   visibleLayers.forEach(({ id, prop }) => {
-    fadeLayerOut(map, id, prop, fadeMs, easeInQuart);
+    fadeLayerOut(map, id, prop, fadeMs, easeInQuart, false);
   });
 
   return new Promise((resolve) => {

@@ -23,6 +23,7 @@ import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs
 import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML, renderKeyIndicatorsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
+import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
@@ -2190,12 +2191,21 @@ function DeerIntelContent() {
   const overlaySourcesCreated = useRef(false);
   const hasFitToParcel = useRef(false);
 
-  // v4-fix8: After gracefulClear fades layers to opacity 0 + visibility 'none',
-  // we need to restore visibility when new data is painted. This ref signals the
-  // painting useEffect that a visibility restore is needed, and the epoch state
-  // forces the layer-visibility useEffect to re-run.
+  // v4-fix9: Centralized visibility lifecycle.
+  // needsVisibilityRestore — set by clearAllOverlaySources, consumed by data painting useEffect.
+  // visibilityEpoch — bumped after reconcile to trigger 'complex' layer effects.
+  // Refs mirror current toggle state so the painting useEffect (which intentionally
+  // excludes toggle state from deps) can read the latest values for reconcile.
   const needsVisibilityRestore = useRef(false);
   const [visibilityEpoch, setVisibilityEpoch] = useState(0);
+  const visibilityRef = useRef(visibility);
+  visibilityRef.current = visibility;
+  const flowVisibilityRef = useRef(flowVisibility);
+  flowVisibilityRef.current = flowVisibility;
+  const pressureViewRef = useRef(pressureView);
+  pressureViewRef.current = pressureView;
+  const showBeddingProbRef = useRef(showBeddingProbability);
+  showBeddingProbRef.current = showBeddingProbability;
 
   // ========== UPDATE NATIVE MAPBOX SOURCES WHEN DATA CHANGES ==========
   useEffect(() => {
@@ -2252,69 +2262,40 @@ function DeerIntelContent() {
 
       console.log('[MAP] Updated native Mapbox sources with terrain data');
 
-      // v4-fix8: After gracefulClear, layers are at opacity 0 + visibility 'none'.
-      // Once we've painted fresh data, restore layer visibility. We handle three groups:
-      //   1. Parcel layers — always visible, not managed by any toggle
-      //   2. "Always-on" layers (edge intel, huntability, stands, hunt pockets) — created
-      //      with visibility:'visible' but no toggle manages them
-      //   3. Toggle-managed layers (bedding, corridors, flow, ridges, heatmap) — restored
-      //      by bumping visibilityEpoch to re-trigger the visibility useEffect
+      // v4-fix9: After gracefulClear fades layers to opacity 0, run the centralized
+      // reconcileVisibility controller to restore every tfp-* layer to its correct
+      // state based on current toggles. This replaces the manual per-group restore
+      // from v4-fix8 with one unified pass.
       if (needsVisibilityRestore.current) {
-        console.error('[INTEL-DIAG] REHYDRATE — restoring layer visibility after reload');
         needsVisibilityRestore.current = false;
 
-        try {
-          // Group 1: Parcel boundary layers
-          if (parcelPolygon) {
-            if (map.getLayer('tfp-parcel-outline')) {
-              map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible');
-              map.setPaintProperty('tfp-parcel-outline', 'line-opacity', 0.95);
-            }
-            if (map.getLayer('tfp-parcel-glow')) {
-              map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible');
-              map.setPaintProperty('tfp-parcel-glow', 'line-opacity', 0.35);
-            }
-          }
+        // Build flat toggles map from refs (latest values without dep coupling)
+        const vis = visibilityRef.current;
+        const fv = flowVisibilityRef.current;
+        const reconcileState: ReconcileState = {
+          toggles: {
+            bedding: vis.bedding,
+            draws: vis.draws,
+            saddles: vis.saddles,
+            corridors: vis.corridors,
+            funnels: vis.funnels,
+            ridgeSpines: vis.ridgeSpines,
+            stands: vis.stands,
+            pressureHeatmap: fv.pressureHeatmap,
+            flowPrimary: fv.flowPrimary,
+            flowSecondary: fv.flowSecondary,
+            convergenceZones: fv.convergenceZones,
+            beddingProbability: showBeddingProbRef.current,
+          },
+          pressureView: pressureViewRef.current,
+          hasParcelData: !!parcelPolygon,
+        };
 
-          // Group 2: Always-on layers (edge intel, huntability, stands, hunt pockets)
-          // These are created with visibility:'visible' but no useEffect manages their toggle.
-          // After gracefulClear fades them to opacity 0 + visibility 'none', we must restore them.
-          const alwaysOnLayers: Array<{ id: string; opacityProp: string; opacity: number }> = [
-            // Edge intelligence
-            { id: 'tfp-edge-arrows-lines', opacityProp: 'line-opacity', opacity: 0.5 },
-            { id: 'tfp-edge-arrows-heads', opacityProp: 'fill-opacity', opacity: 0.6 },
-            { id: 'tfp-edge-ghost-fill', opacityProp: 'fill-opacity', opacity: 0.15 },
-            { id: 'tfp-edge-ghost-outline', opacityProp: 'line-opacity', opacity: 0.35 },
-            { id: 'tfp-edge-ghost-saddles-fill', opacityProp: 'fill-opacity', opacity: 0.1 },
-            { id: 'tfp-edge-ghost-saddles-outline', opacityProp: 'line-opacity', opacity: 0.3 },
-            { id: 'tfp-edge-draw-extensions-lines', opacityProp: 'line-opacity', opacity: 0.4 },
-            { id: 'tfp-edge-pressure-arrows', opacityProp: 'line-opacity', opacity: 0.35 },
-            { id: 'tfp-edge-boundary-line', opacityProp: 'line-opacity', opacity: 0.25 },
-            // Huntability
-            { id: 'tfp-huntability-favorability', opacityProp: 'heatmap-opacity', opacity: 0.6 },
-            { id: 'tfp-huntability-corridor-zones', opacityProp: 'fill-opacity', opacity: 0.15 },
-            { id: 'tfp-huntability-corridors', opacityProp: 'line-opacity', opacity: 0.6 },
-            { id: 'tfp-huntability-convergence', opacityProp: 'circle-opacity', opacity: 0.7 },
-            // Hunt pockets
-            { id: 'tfp-hunt-pockets-fill', opacityProp: 'fill-opacity', opacity: 0.2 },
-            { id: 'tfp-hunt-pockets-outline', opacityProp: 'line-opacity', opacity: 0.6 },
-          ];
-          for (const { id, opacityProp, opacity } of alwaysOnLayers) {
-            if (map.getLayer(id)) {
-              map.setLayoutProperty(id, 'visibility', 'visible');
-              map.setPaintProperty(id, opacityProp, opacity);
-            }
-          }
+        reconcileVisibility(map, reconcileState);
 
-          console.error('[INTEL-DIAG] REHYDRATE — parcel + always-on layers restored');
-        } catch (e) {
-          console.error('[INTEL-DIAG] REHYDRATE — restore error (non-fatal):', e);
-        }
-
-        // Group 3: Force the layer-visibility useEffect to re-run so it restores
-        // bedding, corridors, funnels, flow, ridges, heatmap, etc. per current toggles
+        // Bump epoch to trigger specialized effects for 'complex' layers
+        // (flow-primary with data-driven expressions, nearest-highlight, etc.)
         setVisibilityEpoch(e => e + 1);
-        console.error('[INTEL-DIAG] REHYDRATE — visibility epoch bumped, toggle-managed layers will restore');
       }
     } catch (err) {
       console.error('[MAP] Error updating sources (non-fatal):', err);
