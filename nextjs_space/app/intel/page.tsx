@@ -5671,14 +5671,20 @@ function DeerIntelContent() {
       
       // v3.8.4 — Diagnostic: log layer/source count after setup
       try {
-        const style = map.getStyle();
-        console.log('[MAP DIAG] After layer setup — sources:', Object.keys(style?.sources || {}).length, 'layers:', (style?.layers || []).length);
+        if (map.isStyleLoaded()) {
+          const style = map.getStyle();
+          console.log('[MAP DIAG] After layer setup — sources:', Object.keys(style?.sources || {}).length, 'layers:', (style?.layers || []).length);
+        } else {
+          console.error('[INTEL-DIAG] getStyle skipped — style not loaded yet');
+        }
       } catch (_) { /* ignore */ }
 
       // ALWAYS set map ready - even if source setup failed
       setMapReady(true);
       setMapError(null); // v4-fix2: clear any transient map errors on successful load
-      console.error('[MAP-DIAG] SUMMARY: map_ready=true, map_error=cleared, style_loaded=true, sources=' + Object.keys(map.getStyle()?.sources || {}).length);
+      let srcCount = '?';
+      try { if (map.isStyleLoaded()) srcCount = String(Object.keys(map.getStyle()?.sources || {}).length); } catch (_) {}
+      console.error('[MAP-DIAG] SUMMARY: map_ready=true, map_error=cleared, style_loaded=true, sources=' + srcCount);
       
       setTimeout(() => {
         try {
