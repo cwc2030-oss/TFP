@@ -1967,8 +1967,10 @@ function DeerIntelContent() {
 
   // ========== FULL OVERLAY RESET — clears every tfp-* GeoJSON source ==========
   // V4 Step 11b: All TFP source IDs for overlay management
+  // v4-fix13: tfp-parcel is EXCLUDED — the parcel boundary must stay visible
+  // during re-analysis. Only terrain overlay sources get cleared.
   const ALL_TFP_SOURCES = useRef([
-    'tfp-parcel', 'tfp-qa-parcel',
+    'tfp-qa-parcel',
     'tfp-debug-raw', 'tfp-debug-normalized', 'tfp-debug-analysis',
     'tfp-bedding', 'tfp-funnels-lines', 'tfp-funnels-polys',
     'tfp-corridors-primary', 'tfp-corridors-possible', 'tfp-corridors-exploratory',
@@ -2011,8 +2013,9 @@ function DeerIntelContent() {
     // a visibility refresh once new data arrives.
     needsVisibilityRestore.current = true;
 
-    // Use gracefulClear to fade out all Mapbox layers, then wipe sources
-    gracefulClear(map, ALL_TFP_SOURCES.current, 220).then(() => {
+    // v4-fix13: Preserve parcel boundary layers during clear — they don't change
+    // between re-analysis runs and should stay visually stable.
+    gracefulClear(map, ALL_TFP_SOURCES.current, 220, ['tfp-parcel-']).then(() => {
       console.error('[INTEL-DIAG] OVERLAYS CLEARED — sources wiped, layers faded');
     });
   }, []);
@@ -7220,83 +7223,24 @@ function DeerIntelContent() {
       });
     };
 
-    // Phase 2: Crisp SVG rebuild after camera fully settles
-    const rebuildMarkersAtZoom = () => {
+    // Phase 2: Camera settle — reset CSS scale reference point (NO SVG rebuilds).
+    // v4-fix13: SVGs use viewBox="0 0 100 100" (pure vector) so CSS scaling is
+    // visually identical to rebuilding at a new size. Removing innerHTML swaps
+    // eliminates the repaint flash that caused flicker. transform-origin is at
+    // the disc center, so CSS scale doesn't shift the geo-anchor — no offset
+    // recalculation needed either.
+    const settleMarkers = () => {
       cameraMovingRef.current = false;
       const zoom = map.getZoom();
       const scale = getMarkerScale(zoom);
 
-      // Only rebuild if zoom changed meaningfully (>0.3 zoom levels)
-      if (Math.abs(zoom - lastSVGRebuildZoom.current) < 0.3) {
-        markersRef.current.forEach((marker) => {
-          const el = marker.getElement();
-          const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-          if (wrapper) wrapper.style.transform = 'scale(1)';
-          el.dataset.refScale = String(scale);
-        });
-        console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' (skip rebuild, delta < 0.3)');
-        return;
-      }
-
-      console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' — rebuilding SVGs');
-
-      const HITBOX_SIZE = 80;
-      const DISC_CENTER_PCT = 40;
-
+      // Simply update refScale and reset wrapper to scale(1).
+      // The visual is already at the right apparent size from Phase 1 CSS scaling.
       markersRef.current.forEach((marker) => {
         const el = marker.getElement();
         const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-        if (!wrapper) return;
-        const idx = parseInt(el.dataset?.standIdx || '0', 10);
-        const isTop = idx === 0;
-        const isSec = idx === 1;
-        const baseSize = parseInt(el.dataset?.baseSize || (isTop ? '60' : isSec ? '52' : '42'), 10);
-        const newSize = Math.round(baseSize * scale);
-
-        // Recompute disc center and transform-origin for new visual size
-        const visualTop = (HITBOX_SIZE - newSize) / 2;
-        const discFromTop = visualTop + newSize * (DISC_CENTER_PCT / 100);
-        const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
-
-        // Reset scale on wrapper, update transform-origin
-        wrapper.style.transform = 'scale(1)';
-        wrapper.style.transformOrigin = `50% ${discPctY}%`;
+        if (wrapper) wrapper.style.transform = 'scale(1)';
         el.dataset.refScale = String(scale);
-        el.dataset.refSize = String(newSize);
-        el.dataset.discPctY = discPctY;
-
-        // v4-fix12c: Update marker offset (positive y = shift down to keep disc at geo)
-        const yOffset = HITBOX_SIZE / 2 - discFromTop;
-        (marker as any).setOffset([0, yOffset]);
-
-        const visual = wrapper.querySelector('.stand-visual') as HTMLElement;
-        if (visual) {
-          visual.style.width = `${newSize}px`;
-          visual.style.height = `${newSize}px`;
-          const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-          const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-          visual.innerHTML = buildStandSVG({
-            size: newSize,
-            fillColor,
-            strokeColor,
-            glowColor: isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary,
-            label: `${idx + 1}`,
-            isTop,
-            rank: idx,
-          });
-        }
-
-        // Rescale "Today's Sit" badge
-        if (isTop) {
-          const badge = wrapper.querySelector('.stand-badge') as HTMLElement;
-          if (badge) {
-            badge.style.fontSize = `${Math.round(10 * scale)}px`;
-            badge.style.padding = `${Math.round(2 * scale)}px ${Math.round(8 * scale)}px`;
-            badge.style.bottom = `${-4 * scale}px`;
-          }
-        }
-
-        console.error(`[STAND-DIAG] id=${idx + 1} rebuiltAfterSettle=true transformOrigin=${wrapper.style.transformOrigin} offset=[0,${yOffset.toFixed(1)}]`);
       });
 
       lastSVGRebuildZoom.current = zoom;
@@ -7304,7 +7248,7 @@ function DeerIntelContent() {
 
     const onCameraEnd = () => {
       if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(rebuildMarkersAtZoom, 200);
+      settleTimer = setTimeout(settleMarkers, 200);
     };
 
     map.on('move', onCameraMove);

@@ -258,6 +258,8 @@ export function gracefulClear(
   map: mapboxgl.Map,
   sourceIds: string[],
   fadeMs: number = 250,
+  /** v4-fix13: Layer IDs matching these prefixes are kept visible during clear */
+  preserveLayerPrefixes: string[] = [],
 ): Promise<void> {
   // Collect all visible layers that belong to tfp- sources
   const visibleLayers: Array<{ id: string; prop: string }> = [];
@@ -276,6 +278,8 @@ export function gracefulClear(
     for (const layer of style.layers) {
       if (!layer.id.startsWith('tfp-')) continue;
       if (layer.layout?.visibility === 'none') continue;
+      // v4-fix13: Skip preserved layers (e.g. parcel boundary)
+      if (preserveLayerPrefixes.some(p => layer.id.startsWith(p))) continue;
       // Determine the opacity paint property for this layer type
       const propMap: Record<string, string> = {
         line: 'line-opacity',
