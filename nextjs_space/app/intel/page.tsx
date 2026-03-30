@@ -1994,6 +1994,8 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map) return;
 
+    console.error('[INTEL-DIAG] === OVERLAYS CLEARING ===');
+
     // V4 Step 11b: Graceful fade-out before clearing data
     // Fade out HTML stand markers first
     markersRef.current.forEach(m => {
@@ -2002,9 +2004,15 @@ function DeerIntelContent() {
       el.style.opacity = '0';
     });
 
+    // v4-fix8: Signal that visibility restore is needed after new data is painted.
+    // gracefulClear fades layers to opacity 0 and sets visibility:'none', but
+    // nothing restores them — this flag tells the painting useEffect to trigger
+    // a visibility refresh once new data arrives.
+    needsVisibilityRestore.current = true;
+
     // Use gracefulClear to fade out all Mapbox layers, then wipe sources
     gracefulClear(map, ALL_TFP_SOURCES.current, 220).then(() => {
-      console.log('[OVERLAY RESET] Gracefully cleared all tfp-* sources');
+      console.error('[INTEL-DIAG] OVERLAYS CLEARED — sources wiped, layers faded');
     });
   }, []);
 
@@ -2182,6 +2190,13 @@ function DeerIntelContent() {
   const overlaySourcesCreated = useRef(false);
   const hasFitToParcel = useRef(false);
 
+  // v4-fix8: After gracefulClear fades layers to opacity 0 + visibility 'none',
+  // we need to restore visibility when new data is painted. This ref signals the
+  // painting useEffect that a visibility restore is needed, and the epoch state
+  // forces the layer-visibility useEffect to re-run.
+  const needsVisibilityRestore = useRef(false);
+  const [visibilityEpoch, setVisibilityEpoch] = useState(0);
+
   // ========== UPDATE NATIVE MAPBOX SOURCES WHEN DATA CHANGES ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -2236,6 +2251,71 @@ function DeerIntelContent() {
       }
 
       console.log('[MAP] Updated native Mapbox sources with terrain data');
+
+      // v4-fix8: After gracefulClear, layers are at opacity 0 + visibility 'none'.
+      // Once we've painted fresh data, restore layer visibility. We handle three groups:
+      //   1. Parcel layers — always visible, not managed by any toggle
+      //   2. "Always-on" layers (edge intel, huntability, stands, hunt pockets) — created
+      //      with visibility:'visible' but no toggle manages them
+      //   3. Toggle-managed layers (bedding, corridors, flow, ridges, heatmap) — restored
+      //      by bumping visibilityEpoch to re-trigger the visibility useEffect
+      if (needsVisibilityRestore.current) {
+        console.error('[INTEL-DIAG] REHYDRATE — restoring layer visibility after reload');
+        needsVisibilityRestore.current = false;
+
+        try {
+          // Group 1: Parcel boundary layers
+          if (parcelPolygon) {
+            if (map.getLayer('tfp-parcel-outline')) {
+              map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible');
+              map.setPaintProperty('tfp-parcel-outline', 'line-opacity', 0.95);
+            }
+            if (map.getLayer('tfp-parcel-glow')) {
+              map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible');
+              map.setPaintProperty('tfp-parcel-glow', 'line-opacity', 0.35);
+            }
+          }
+
+          // Group 2: Always-on layers (edge intel, huntability, stands, hunt pockets)
+          // These are created with visibility:'visible' but no useEffect manages their toggle.
+          // After gracefulClear fades them to opacity 0 + visibility 'none', we must restore them.
+          const alwaysOnLayers: Array<{ id: string; opacityProp: string; opacity: number }> = [
+            // Edge intelligence
+            { id: 'tfp-edge-arrows-lines', opacityProp: 'line-opacity', opacity: 0.5 },
+            { id: 'tfp-edge-arrows-heads', opacityProp: 'fill-opacity', opacity: 0.6 },
+            { id: 'tfp-edge-ghost-fill', opacityProp: 'fill-opacity', opacity: 0.15 },
+            { id: 'tfp-edge-ghost-outline', opacityProp: 'line-opacity', opacity: 0.35 },
+            { id: 'tfp-edge-ghost-saddles-fill', opacityProp: 'fill-opacity', opacity: 0.1 },
+            { id: 'tfp-edge-ghost-saddles-outline', opacityProp: 'line-opacity', opacity: 0.3 },
+            { id: 'tfp-edge-draw-extensions-lines', opacityProp: 'line-opacity', opacity: 0.4 },
+            { id: 'tfp-edge-pressure-arrows', opacityProp: 'line-opacity', opacity: 0.35 },
+            { id: 'tfp-edge-boundary-line', opacityProp: 'line-opacity', opacity: 0.25 },
+            // Huntability
+            { id: 'tfp-huntability-favorability', opacityProp: 'heatmap-opacity', opacity: 0.6 },
+            { id: 'tfp-huntability-corridor-zones', opacityProp: 'fill-opacity', opacity: 0.15 },
+            { id: 'tfp-huntability-corridors', opacityProp: 'line-opacity', opacity: 0.6 },
+            { id: 'tfp-huntability-convergence', opacityProp: 'circle-opacity', opacity: 0.7 },
+            // Hunt pockets
+            { id: 'tfp-hunt-pockets-fill', opacityProp: 'fill-opacity', opacity: 0.2 },
+            { id: 'tfp-hunt-pockets-outline', opacityProp: 'line-opacity', opacity: 0.6 },
+          ];
+          for (const { id, opacityProp, opacity } of alwaysOnLayers) {
+            if (map.getLayer(id)) {
+              map.setLayoutProperty(id, 'visibility', 'visible');
+              map.setPaintProperty(id, opacityProp, opacity);
+            }
+          }
+
+          console.error('[INTEL-DIAG] REHYDRATE — parcel + always-on layers restored');
+        } catch (e) {
+          console.error('[INTEL-DIAG] REHYDRATE — restore error (non-fatal):', e);
+        }
+
+        // Group 3: Force the layer-visibility useEffect to re-run so it restores
+        // bedding, corridors, funnels, flow, ridges, heatmap, etc. per current toggles
+        setVisibilityEpoch(e => e + 1);
+        console.error('[INTEL-DIAG] REHYDRATE — visibility epoch bumped, toggle-managed layers will restore');
+      }
     } catch (err) {
       console.error('[MAP] Error updating sources (non-fatal):', err);
     }
@@ -3512,7 +3592,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand]);
+  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand, visibilityEpoch]); // v4-fix8: visibilityEpoch forces re-run after reload
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   useEffect(() => {
