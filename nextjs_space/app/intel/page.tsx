@@ -389,6 +389,23 @@ function closestPointOnLineString(
   return { point: closestPt, dist: minDist, segIndex: segIdx };
 }
 
+// Check if a point is inside a Polygon or MultiPolygon GeoJSON geometry
+function pointInParcelGeometry(
+  point: [number, number],
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): boolean {
+  if (geometry.type === 'Polygon') {
+    // Check outer ring (index 0); holes (indices 1+) not checked for simplicity
+    return pointInPolygon(point, geometry.coordinates[0] as number[][]);
+  } else if (geometry.type === 'MultiPolygon') {
+    // Point is inside if it's inside ANY polygon of the multi
+    return geometry.coordinates.some(poly =>
+      pointInPolygon(point, poly[0] as number[][])
+    );
+  }
+  return false;
+}
+
 // Check if a point is inside a polygon (ray casting algorithm)
 function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
   let inside = false;
@@ -1766,8 +1783,8 @@ function DeerIntelContent() {
     }
     const parcelCentroid: [number, number] = [lng, lat];
 
-    // Build aligned stands array sorted by score desc
-    const aligned: AlignedStand[] = stands.map((f, i) => {
+    // Build all scored stands sorted by score desc
+    const allScored: AlignedStand[] = stands.map((f, i) => {
       const props = f.properties as StandPointProperties;
       const coords = f.geometry.coordinates as [number, number];
       // v3.8.6: Compute resilience (scoring only — no placement impact)
@@ -1782,6 +1799,36 @@ function DeerIntelContent() {
         resilience,
       };
     }).sort((a, b) => b.alignment.score - a.alignment.score);
+
+    // v4-fix16: PARCEL BOUNDARY CONSTRAINT — only recommend stands inside parcel
+    // Off-parcel terrain still influences analysis (corridors, pressure, movement),
+    // but final stand pins must be on the user's property.
+    let aligned: AlignedStand[];
+    if (parcelPolygon?.geometry) {
+      const geom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+      aligned = [];
+      const rejected: { rank: number; name: string; coords: [number, number] }[] = [];
+      
+      for (const s of allScored) {
+        if (pointInParcelGeometry(s.coords, geom)) {
+          aligned.push(s);
+        } else {
+          rejected.push({ rank: s.rank, name: s.name, coords: s.coords });
+        }
+      }
+
+      // Diagnostic logging
+      if (rejected.length > 0) {
+        rejected.forEach(r => {
+          console.error(`[STAND-DIAG] rejecting off-parcel stand candidate id=${r.rank} name="${r.name}" coords=[${r.coords[0].toFixed(6)}, ${r.coords[1].toFixed(6)}]`);
+        });
+      }
+      console.error(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (rejected ${rejected.length} off-parcel)`);
+    } else {
+      // No parcel geometry available — use all stands (fallback)
+      aligned = allScored;
+      console.error('[STAND-DIAG] no parcel geometry available — using all stand candidates');
+    }
 
     // Log stand resilience values for verification
     if (aligned.length > 0) {
@@ -1822,7 +1869,7 @@ function DeerIntelContent() {
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season]);
+  }, [layers?.standPoints, windDirection, season, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // v1.2 wind-compass fix: fire alignment scorer directly when deps change.
   // Removed the prevWindDirection stability gate — compass clicks are always 45°
@@ -1831,7 +1878,7 @@ function DeerIntelContent() {
   useEffect(() => {
     if (!layers?.standPoints) return;
     computeAlignmentScores();
-  }, [layers?.standPoints, windDirection, season, computeAlignmentScores]);
+  }, [layers?.standPoints, windDirection, season, parcelPolygon, computeAlignmentScores]);
 
   // v3.8.4 — Keep "X min ago" out of render body; update via interval only
   useEffect(() => {
