@@ -2362,99 +2362,12 @@ function DeerIntelContent() {
     }
   }, [parcelPolygon, mapReady]);
 
-  // ========== v4-fix10b: STAND-AWARE FINAL REFIT AFTER ANALYSIS ==========
-  // After analysis completes and stands are placed, do a final fit using
-  // parcel + stand positions (only if stands extend slightly beyond parcel edge).
-  // Parcel remains the dominant framing target — stands only expand bounds marginally.
+  // ========== v4-fix14: PARCEL-ONLY REFIT (no stand expansion) ==========
+  // v4-fix10b allowed stands to expand camera bounds by 15%, which caused
+  // progressive zoom-out on repeated analyzer clicks when off-parcel stands
+  // were included. Fix: refit is ALWAYS parcel-only. Stands outside parcel
+  // are visible if the user pans, but never force camera zoom-out.
   const hasPostAnalysisFit = useRef(false);
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady || !parcelPolygon) return;
-    if (!alignedStands || alignedStands.length === 0) return;
-    if (hasPostAnalysisFit.current) return;
-    if (!map.isStyleLoaded()) return;
-
-    try {
-      // 1. Build parcel bounds
-      const parcelCoords = parcelPolygon.geometry.type === 'Polygon'
-        ? parcelPolygon.geometry.coordinates[0]
-        : parcelPolygon.geometry.coordinates[0][0];
-
-      if (!parcelCoords || parcelCoords.length < 3) return;
-
-      const parcelBounds = new mapboxgl.LngLatBounds();
-      parcelCoords.forEach((coord: number[]) => {
-        parcelBounds.extend([coord[0], coord[1]]);
-      });
-
-      // 2. Check if any stands fall outside parcel bounds (with small tolerance)
-      // Only expand bounds for stands slightly outside — not wildly off-parcel
-      const parcelSpanLng = parcelBounds.getNorthEast().lng - parcelBounds.getSouthWest().lng;
-      const parcelSpanLat = parcelBounds.getNorthEast().lat - parcelBounds.getSouthWest().lat;
-      const MAX_EXPANSION = 0.15; // Allow up to 15% expansion beyond parcel edge
-
-      const finalBounds = new mapboxgl.LngLatBounds(parcelBounds.getSouthWest(), parcelBounds.getNorthEast());
-      let standsExpanded = 0;
-
-      for (const stand of alignedStands) {
-        const [sLng, sLat] = stand.coords;
-        // Check if stand is within parcel + tolerance zone
-        const outsideLng = Math.max(
-          sLng - parcelBounds.getNorthEast().lng,
-          parcelBounds.getSouthWest().lng - sLng,
-          0
-        );
-        const outsideLat = Math.max(
-          sLat - parcelBounds.getNorthEast().lat,
-          parcelBounds.getSouthWest().lat - sLat,
-          0
-        );
-        
-        // Only include if within 15% of parcel span beyond edge
-        if (outsideLng <= parcelSpanLng * MAX_EXPANSION &&
-            outsideLat <= parcelSpanLat * MAX_EXPANSION) {
-          if (outsideLng > 0 || outsideLat > 0) {
-            standsExpanded++;
-          }
-          finalBounds.extend([sLng, sLat]);
-        }
-      }
-
-      console.error('[MAP-DIAG] POST-ANALYSIS REFIT:', JSON.stringify({
-        stands: alignedStands.length,
-        standsExpandedBounds: standsExpanded,
-        parcelSW: [parcelBounds.getSouthWest().lng.toFixed(6), parcelBounds.getSouthWest().lat.toFixed(6)],
-        parcelNE: [parcelBounds.getNorthEast().lng.toFixed(6), parcelBounds.getNorthEast().lat.toFixed(6)],
-        finalSW: [finalBounds.getSouthWest().lng.toFixed(6), finalBounds.getSouthWest().lat.toFixed(6)],
-        finalNE: [finalBounds.getNorthEast().lng.toFixed(6), finalBounds.getNorthEast().lat.toFixed(6)],
-      }));
-
-      // 3. Smooth refit with parcel-dominant framing
-      const TARGET_MIN_ZOOM = 14.5;
-      map.fitBounds(finalBounds, {
-        padding: { top: 80, bottom: 80, left: 80, right: 80 },
-        duration: 1000,
-        maxZoom: 17,
-      });
-
-      // Enforce minimum zoom after animation
-      const onMoveEnd = () => {
-        map.off('moveend', onMoveEnd);
-        const finalZoom = map.getZoom();
-        console.error('[MAP-DIAG] FINAL ZOOM LEVEL (post-analysis):', finalZoom.toFixed(2));
-        if (finalZoom < TARGET_MIN_ZOOM) {
-          console.error('[MAP-DIAG] Enforcing minimum zoom:', TARGET_MIN_ZOOM, '(was', finalZoom.toFixed(2), ')');
-          map.setZoom(TARGET_MIN_ZOOM);
-        }
-      };
-      map.once('moveend', onMoveEnd);
-
-      hasPostAnalysisFit.current = true;
-      console.log('[MAP] v4-fix10b: Stand-aware final refit complete');
-    } catch (err) {
-      console.error('[MAP] Post-analysis refit error (non-fatal):', err);
-    }
-  }, [alignedStands, parcelPolygon, mapReady]);
 
   // ========== GENERATE EDGE INTELLIGENCE DATA ==========
   useEffect(() => {
@@ -7456,10 +7369,38 @@ function DeerIntelContent() {
   };
 
   // V4 Step 11b: Smooth re-center with cinematic easing
+  // v4-fix14: Re-center fits to parcel bounds (not a fixed zoom level) so
+  // the camera returns to the same parcel-dominant framing as the initial fit.
   const flyToCenter = () => {
-    mapRef.current?.flyTo({
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (parcelPolygon) {
+      try {
+        const coords = parcelPolygon.geometry.type === 'Polygon'
+          ? parcelPolygon.geometry.coordinates[0]
+          : parcelPolygon.geometry.coordinates[0][0];
+        if (coords && coords.length >= 3) {
+          const bounds = new mapboxgl.LngLatBounds();
+          coords.forEach((c: number[]) => bounds.extend([c[0], c[1]]));
+          map.fitBounds(bounds, {
+            padding: { top: 80, bottom: 80, left: 80, right: 80 },
+            duration: 1400,
+            maxZoom: 17,
+          });
+          // Enforce minimum zoom
+          map.once('moveend', () => {
+            if (map.getZoom() < 14.5) map.setZoom(14.5);
+          });
+          return;
+        }
+      } catch { /* fall through to simple flyTo */ }
+    }
+
+    // Fallback: fly to center point
+    map.flyTo({
       center: [lng, lat],
-      zoom: 14,
+      zoom: 15,
       duration: 1400,
       essential: true,
     });
