@@ -6918,6 +6918,14 @@ function DeerIntelContent() {
     const currentZoom = map.getZoom();
     const scale = getMarkerScale(currentZoom);
 
+    // v4-fix12a: UNIFORM HITBOX — all markers use same container size for identical
+    // transform/positioning behavior. Only the inner visual size varies by tier.
+    // The SVG disc center is at viewBox y=40/100 (40%). We need the hitbox center
+    // to be at the disc center so Mapbox's anchor aligns the coordinate there.
+    const HITBOX_SIZE = 80; // Fixed for all tiers — largest tier's hitbox
+    // Disc center as fraction of viewBox: 40/100 = 0.40
+    const DISC_CENTER_PCT = 40; // percentage from top of viewBox
+
     standsToShow.forEach((stand, idx) => {
       const props = stand.props;
       const coords = stand.coords;
@@ -6928,7 +6936,7 @@ function DeerIntelContent() {
       const isSecondary = idx === 1;
       const isTertiary = idx >= 2;
 
-      // Unified sizing: top=60, secondary=52, tertiary=42  (base, before zoom scale)
+      // Visual sizing still varies by tier (visual hierarchy)
       const baseSize = isTopStand ? 60 : isSecondary ? 52 : 42;
       const markerSize = Math.round(baseSize * scale);
 
@@ -6947,19 +6955,28 @@ function DeerIntelContent() {
         rank: idx,
       });
 
-      // Hitbox for reliable hover
-      const hitboxSize = markerSize + 20;
+      // v4-fix12a: Fixed hitbox for ALL markers — identical Mapbox positioning
       const el = document.createElement('div');
       el.className = 'intel-stand-marker';
       el.dataset.standIdx = String(idx);
+      el.dataset.baseSize = String(baseSize);
+      // Compute disc center position within fixed hitbox for transform-origin
+      // Visual is centered in hitbox: visualTop = (HITBOX - markerSize) / 2
+      // Disc center from top of visual: markerSize * (DISC_CENTER_PCT / 100)
+      // Disc center from top of hitbox: visualTop + markerSize * 0.40
+      const visualTop = (HITBOX_SIZE - markerSize) / 2;
+      const discFromTop = visualTop + markerSize * (DISC_CENTER_PCT / 100);
+      const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
+
       el.style.cssText = `
         position: relative;
-        width: ${hitboxSize}px;
-        height: ${hitboxSize}px;
+        width: ${HITBOX_SIZE}px;
+        height: ${HITBOX_SIZE}px;
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
+        transform-origin: 50% ${discPctY}%;
       `;
       el.innerHTML = `
         <div class="stand-visual" style="
@@ -7054,7 +7071,11 @@ function DeerIntelContent() {
         hoverTooltip.style.opacity = '0';
       };
 
-      const marker = new mapboxgl.Marker({ element: el })
+      // v4-fix12a: Offset marker so disc center (not element center) is at the coordinate
+      // Element center is at HITBOX_SIZE/2 from top. Disc center is at discFromTop.
+      // Offset = (HITBOX_SIZE/2 - discFromTop) pixels — positive = shift down
+      const yOffset = HITBOX_SIZE / 2 - discFromTop;
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center', offset: [0, -yOffset] })
         .setLngLat(coords)
         .addTo(map);
 
@@ -7079,6 +7100,7 @@ function DeerIntelContent() {
       // v4-fix11: Store reference scale on element for camera-synced scaling
       el.dataset.refScale = String(scale);
       el.dataset.refSize = String(markerSize);
+      el.dataset.discPctY = discPctY;
       el.style.opacity = '0';
       el.style.transform = 'scale(0.85)';
       requestAnimationFrame(() => {
@@ -7169,22 +7191,35 @@ function DeerIntelContent() {
 
       console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' — rebuilding SVGs for crispness');
 
+      // v4-fix12a: Fixed hitbox size for rebuild (must match creation)
+      const HITBOX_SIZE = 80;
+      const DISC_CENTER_PCT = 40;
+
       markersRef.current.forEach((marker) => {
         const el = marker.getElement();
         const idx = parseInt(el.dataset?.standIdx || '0', 10);
         const isTop = idx === 0;
         const isSec = idx === 1;
-        const baseSize = isTop ? 60 : isSec ? 52 : 42;
+        const baseSize = parseInt(el.dataset?.baseSize || (isTop ? '60' : isSec ? '52' : '42'), 10);
         const newSize = Math.round(baseSize * scale);
-        const hitbox = newSize + 20;
+
+        // v4-fix12a: Recompute disc center and transform-origin for new visual size
+        const visualTop = (HITBOX_SIZE - newSize) / 2;
+        const discFromTop = visualTop + newSize * (DISC_CENTER_PCT / 100);
+        const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
 
         // Reset CSS transform to identity — new SVG is built at correct size
+        // v4-fix12a: Hitbox stays fixed, only visual + transform-origin update
         el.style.transform = 'scale(1)';
         el.style.willChange = '';
-        el.style.width = `${hitbox}px`;
-        el.style.height = `${hitbox}px`;
+        el.style.transformOrigin = `50% ${discPctY}%`;
         el.dataset.refScale = String(scale);
         el.dataset.refSize = String(newSize);
+        el.dataset.discPctY = discPctY;
+
+        // v4-fix12a: Update marker offset to keep disc at coordinate
+        const yOffset = HITBOX_SIZE / 2 - discFromTop;
+        (marker as any).setOffset([0, -yOffset]);
 
         const visual = el.querySelector('.stand-visual') as HTMLElement;
         if (visual) {
