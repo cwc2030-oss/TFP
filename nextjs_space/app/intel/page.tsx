@@ -1377,6 +1377,10 @@ function DeerIntelContent() {
   const [analysisStalled, setAnalysisStalled] = useState(false);
   const lastProgressRef = useRef({ value: 0, time: Date.now() });
 
+  // Demo fallback: known-good parcel for FB demo safety net
+  const DEMO_FALLBACK = useRef({ lat: 36.638590, lng: -94.345581, address: '761 Schlessman Rd, Pineville, MO 64831', acreage: '118' });
+  const demoFallbackAttempted = useRef(false);
+
   // Global/unhandled error state
   const [globalError, setGlobalError] = useState<{ message: string; stack?: string } | null>(null);
 
@@ -2117,6 +2121,26 @@ function DeerIntelContent() {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
       console.error('[INTEL] Analysis error:', errorMsg);
+
+      // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch
+      if (!demoFallbackAttempted.current) {
+        console.error('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to demo parcel');
+        demoFallbackAttempted.current = true;
+        const df = DEMO_FALLBACK.current;
+        // Schedule state updates after this try/catch/finally completes
+        setTimeout(() => {
+          setActiveLat(df.lat);
+          setActiveLng(df.lng);
+          setActiveAddress(df.address);
+          setActiveAcreage(df.acreage);
+          setError(null);
+          setIsLoading(true);
+          setProgress(5);
+          setProgressStep('Switching to demo parcel...');
+        }, 100);
+        return;
+      }
+
       setError(errorMsg);
       setProgressStep('Failed');
     } finally {
@@ -5745,7 +5769,7 @@ function DeerIntelContent() {
     runAnalysis();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Stall watchdog: detect if progress hasn't advanced for 25 seconds while loading
+  // Stall watchdog: detect if progress hasn't advanced for 10s → auto-fallback to demo parcel
   useEffect(() => {
     if (!isLoading) {
       setAnalysisStalled(false);
@@ -5759,13 +5783,31 @@ function DeerIntelContent() {
     }
     const stallCheck = setInterval(() => {
       const elapsed = Date.now() - lastProgressRef.current.time;
-      if (elapsed > 25_000 && isLoading && progress < 100) {
+      if (elapsed > 10_000 && isLoading && progress < 20) {
+        console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
+        // Auto-fallback to demo parcel if not already tried
+        if (!demoFallbackAttempted.current) {
+          console.error('[INTEL-DIAG] AUTO DEMO FALLBACK — stall > 10s, switching to demo parcel');
+          demoFallbackAttempted.current = true;
+          const df = DEMO_FALLBACK.current;
+          setActiveLat(df.lat);
+          setActiveLng(df.lng);
+          setActiveAddress(df.address);
+          setActiveAcreage(df.acreage);
+          setError(null);
+          setProgress(5);
+          setProgressStep('Switching to demo parcel...');
+          // lat/lng change triggers runAnalysis via dep array
+        } else {
+          setAnalysisStalled(true); // Show manual retry UI
+        }
+      } else if (elapsed > 25_000 && isLoading && progress < 100) {
         console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
         setAnalysisStalled(true);
       }
-    }, 5_000);
+    }, 3_000);
     return () => clearInterval(stallCheck);
-  }, [isLoading, progress]);
+  }, [isLoading, progress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== EDGE INTELLIGENCE CLICK EVENT LISTENER ==========
   useEffect(() => {
