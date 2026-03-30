@@ -1513,6 +1513,12 @@ function DeerIntelContent() {
   // Backward compat alias — all QA mode references now route through exploration mode
   const qaParcelLookupMode = explorationMode;
 
+  // ========== PARCEL PICK MODE (demo-friendly one-click parcel selection) ==========
+  // Click any visible area on the map to look up the parcel, zoom to it, and auto-analyze.
+  // Available to all users (not debug-gated). Separate from explorationMode (debug QA tool).
+  const [parcelPickMode, setParcelPickMode] = useState(false);
+  const [parcelPickLoading, setParcelPickLoading] = useState(false); // fetching parcel boundary
+
   // ========== ADJACENT PARCELS STATE ==========
   interface AdjacentParcelInfo {
     parcelId: string;
@@ -6307,6 +6313,127 @@ function DeerIntelContent() {
     console.log('[EXPLORE] Restored to original URL coords:', urlLat, urlLng);
   }, [urlLat, urlLng, urlAddress, urlAcreage, runAnalysis]);
   
+  // ========== PARCEL PICK MODE: One-click lookup + auto-analyze ==========
+  const handleParcelPick = useCallback(async (clickLng: number, clickLat: number) => {
+    if (parcelPickLoading || isLoading) return;
+    
+    console.log('[PICK] Picking parcel at:', clickLat.toFixed(6), clickLng.toFixed(6));
+    setParcelPickLoading(true);
+    
+    // Clear previous state — clean slate for new parcel
+    clearAllOverlaySources();
+    setParcelPolygon(null);
+    setTerrainFlowData(null);
+    setLayers(null);
+    setTieredCorridorData(null);
+    setRidgeSpineData(null);
+    setEdgeIntelData(null);
+    setAlignedStands([]);
+    setSelectedStand(null);
+    // Remove existing stand markers from map
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+    if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
+    
+    try {
+      const response = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
+      const data = await response.json();
+      
+      if (!data.found || !data.parcel) {
+        console.warn('[PICK] No parcel found at click location');
+        setParcelPickLoading(false);
+        return;
+      }
+      
+      const parcel = data.parcel;
+      console.log('[PICK] Found parcel:', parcel.parcelId, parcel.address, parcel.acreage, 'ac');
+      
+      // Show parcel boundary immediately on the QA source for visual feedback
+      const map = mapRef.current;
+      if (map && parcel.coordinates) {
+        const coords = [...parcel.coordinates];
+        if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+          coords.push(coords[0]);
+        }
+        const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
+        if (qaSource) {
+          qaSource.setData({
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [coords] }
+          });
+          // Make QA parcel layers visible
+          if (map.getLayer('tfp-qa-parcel-outline')) {
+            map.setLayoutProperty('tfp-qa-parcel-outline', 'visibility', 'visible');
+          }
+          if (map.getLayer('tfp-qa-parcel-fill')) {
+            map.setLayoutProperty('tfp-qa-parcel-fill', 'visibility', 'visible');
+          }
+        }
+        
+        // Zoom to parcel
+        if (parcel.bounds) {
+          map.fitBounds(parcel.bounds, {
+            padding: 100,
+            duration: 800,
+            maxZoom: 16,
+          });
+        }
+      }
+      
+      // Reset camera fit flags for the new parcel
+      hasFitToParcel.current = false;
+      hasPostAnalysisFit.current = false;
+      
+      // Update active coordinates → triggers runAnalysis
+      setActiveLat(parcel.centroid[1]);
+      setActiveLng(parcel.centroid[0]);
+      setActiveAddress(parcel.address || `Parcel ${parcel.parcelId}`);
+      setActiveAcreage(parcel.acreage.toString());
+      
+      // Exit pick mode after selection
+      setParcelPickMode(false);
+      setParcelPickLoading(false);
+      
+      // Trigger full analysis
+      setTimeout(() => runAnalysis(), 150);
+      
+    } catch (err) {
+      console.error('[PICK] Lookup error:', err);
+      setParcelPickLoading(false);
+    }
+  }, [parcelPickLoading, isLoading, clearAllOverlaySources, runAnalysis]);
+
+  // Register map click handler for parcel pick mode
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !parcelPickMode) return;
+    
+    // Change cursor to crosshair
+    map.getCanvas().style.cursor = 'crosshair';
+    
+    const handlePickClick = (e: mapboxgl.MapMouseEvent) => {
+      // Don't intercept clicks on existing stand markers or terrain features
+      const features = map.queryRenderedFeatures(e.point, {
+        layers: [
+          'tfp-flow-primary', 'tfp-flow-secondary',
+        ].filter(l => map.getLayer(l))
+      });
+      if (features && features.length > 0) return;
+      
+      handleParcelPick(e.lngLat.lng, e.lngLat.lat);
+    };
+    
+    map.on('click', handlePickClick);
+    console.log('[PICK] Click handler registered');
+    
+    return () => {
+      map.off('click', handlePickClick);
+      map.getCanvas().style.cursor = '';
+      console.log('[PICK] Click handler removed');
+    };
+  }, [mapReady, parcelPickMode, handleParcelPick]);
+
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
     const map = mapRef.current;
@@ -6506,17 +6633,21 @@ function DeerIntelContent() {
     };
   }, [mapReady, qaParcelLookupMode, handleQaParcelLookup]);
 
-  // Keyboard handler for Esc to clear QA parcel
+  // Keyboard handler for Esc to clear QA parcel or exit pick mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && qaParcel) {
-        handleQaParcelClear();
+      if (e.key === 'Escape') {
+        if (parcelPickMode) {
+          setParcelPickMode(false);
+        } else if (qaParcel) {
+          handleQaParcelClear();
+        }
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [qaParcel, handleQaParcelClear]);
+  }, [qaParcel, handleQaParcelClear, parcelPickMode]);
 
   // ========== TERRAIN FLOW CLICK EVENT LISTENERS ==========
   useEffect(() => {
@@ -7681,6 +7812,23 @@ function DeerIntelContent() {
                 {geometryDebugMode ? 'Debug ON' : 'Debug'}
               </Button>
             )}
+            {/* Parcel Pick Mode — demo-friendly one-click parcel selection */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`${parcelPickMode 
+                ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
+                : 'text-white/80 hover:text-white hover:bg-white/10'
+              }`}
+              onClick={() => {
+                setParcelPickMode(!parcelPickMode);
+              }}
+              title="Pick a Parcel — click any parcel on the map to analyze it"
+              disabled={parcelPickLoading}
+            >
+              <MapPin className="h-4 w-4 mr-1" />
+              {parcelPickMode ? 'Picking…' : 'Pick Parcel'}
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -7706,6 +7854,33 @@ function DeerIntelContent() {
           </div>
         </div>
       </div>
+
+      {/* ========== PARCEL PICK MODE BANNER ========== */}
+      {parcelPickMode && !parcelPickLoading && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div className="bg-amber-900/90 backdrop-blur-sm border border-amber-500/40 rounded-xl px-5 py-3 shadow-xl pointer-events-auto flex items-center gap-3">
+            <MapPin className="h-5 w-5 text-amber-300 flex-shrink-0 animate-pulse" />
+            <div>
+              <p className="text-amber-100 font-semibold text-sm">Click any location to analyze that parcel</p>
+              <p className="text-amber-300/70 text-xs">We&apos;ll find the parcel boundary and run the Terrain Analyzer</p>
+            </div>
+            <button
+              onClick={() => setParcelPickMode(false)}
+              className="ml-3 text-amber-300/60 hover:text-amber-100 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      {parcelPickLoading && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div className="bg-stone-900/90 backdrop-blur-sm border border-stone-600/40 rounded-xl px-5 py-3 shadow-xl flex items-center gap-3">
+            <Loader2 className="h-5 w-5 text-amber-300 flex-shrink-0 animate-spin" />
+            <p className="text-stone-200 font-medium text-sm">Finding parcel boundary…</p>
+          </div>
+        </div>
+      )}
 
       {/* ========== QA PARCEL LOOKUP UI ========== */}
       {qaParcelLookupMode && (
