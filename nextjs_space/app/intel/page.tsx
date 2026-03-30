@@ -1381,6 +1381,7 @@ function DeerIntelContent() {
   const DEMO_FALLBACK = useRef({ lat: 36.638590, lng: -94.345581, address: '761 Schlessman Rd, Pineville, MO 64831', acreage: '118' });
   const demoFallbackAttempted = useRef(false);
   const [isDemoFallbackActive, setIsDemoFallbackActive] = useState(false);
+  const [showDemoBadge, setShowDemoBadge] = useState(false);
 
   // Global/unhandled error state
   const [globalError, setGlobalError] = useState<{ message: string; stack?: string } | null>(null);
@@ -5812,6 +5813,16 @@ function DeerIntelContent() {
     return () => clearInterval(stallCheck);
   }, [isLoading, progress]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Demo badge: show briefly after demo fallback completes, then auto-dismiss
+  useEffect(() => {
+    if (isDemoFallbackActive && !isLoading && !error) {
+      setShowDemoBadge(true);
+      const timer = setTimeout(() => setShowDemoBadge(false), 8_000);
+      return () => clearTimeout(timer);
+    }
+    setShowDemoBadge(false);
+  }, [isDemoFallbackActive, isLoading, error]);
+
   // ========== EDGE INTELLIGENCE CLICK EVENT LISTENER ==========
   useEffect(() => {
     const handleEdgeClick = (e: Event) => {
@@ -9100,6 +9111,23 @@ function DeerIntelContent() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Demo parcel badge — subtle, non-alarming confirmation that auto-dismisses */}
+      {isDemoFallbackActive && !isLoading && (
+        <div 
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+          style={{ 
+            opacity: showDemoBadge ? 1 : 0,
+            transform: showDemoBadge ? 'translate(-50%, 0)' : 'translate(-50%, -6px)',
+            transition: 'opacity 0.6s ease, transform 0.6s ease',
+          }}
+        >
+          <div className="flex items-center gap-2 bg-gray-950/90 backdrop-blur-sm border border-amber-500/20 rounded-full px-4 py-1.5 shadow-lg shadow-black/30">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-amber-400/90 text-[11px] font-medium tracking-wide">Demo Parcel Loaded</span>
           </div>
         </div>
       )}
