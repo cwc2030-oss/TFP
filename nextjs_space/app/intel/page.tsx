@@ -5813,6 +5813,38 @@ function DeerIntelContent() {
     return () => clearInterval(stallCheck);
   }, [isLoading, progress]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Final guard: if analysis "completed" but result is empty, auto-fallback to demo parcel
+  useEffect(() => {
+    if (isLoading || error) return; // Still running or already errored — skip
+    if (progress < 100) return; // Not actually complete yet
+
+    const hasParcel = !!parcelPolygon;
+    const hasLayers = !!(layers && (
+      (layers.standPoints?.features?.length ?? 0) > 0 ||
+      (layers.beddingPolygons?.features?.length ?? 0) > 0 ||
+      (layers.funnels?.features?.length ?? 0) > 0
+    ));
+
+    if (hasParcel && hasLayers) return; // Data looks good
+
+    console.error('[INTEL-DIAG] EMPTY RESULT GUARD — parcel:', hasParcel, 'layers:', hasLayers);
+
+    if (!demoFallbackAttempted.current) {
+      console.error('[INTEL-DIAG] EMPTY RESULT → triggering demo fallback');
+      demoFallbackAttempted.current = true;
+      setIsDemoFallbackActive(true);
+      const df = DEMO_FALLBACK.current;
+      setActiveLat(df.lat);
+      setActiveLng(df.lng);
+      setActiveAddress(df.address);
+      setActiveAcreage(df.acreage);
+      setError(null);
+      setIsLoading(true);
+      setProgress(5);
+      setProgressStep('Loading verified demo parcel\u2026');
+    }
+  }, [isLoading, error, progress, parcelPolygon, layers]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Demo badge: show briefly after demo fallback completes, then auto-dismiss
   useEffect(() => {
     if (isDemoFallbackActive && !isLoading && !error) {
