@@ -6750,17 +6750,29 @@ function DeerIntelContent() {
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
   // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions
+  // v4-fix12b: Skip transition-based animation if camera is moving (snap instead)
   useEffect(() => {
     const show = visibility.stands;
+    const isMoving = cameraMovingRef.current;
 
-    // HTML markers — CSS transition with stagger per marker for cinematic effect
     markersRef.current.forEach((marker, i) => {
       const el = marker.getElement();
-      const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
-      el.style.transition = `opacity 400ms ease ${delay}ms, transform 400ms ease ${delay}ms`;
-      el.style.opacity = show ? '1' : '0';
-      el.style.transform = show ? 'scale(1)' : 'scale(0.85)';
-      el.style.pointerEvents = show ? 'auto' : 'none';
+      if (isMoving) {
+        // Camera is in motion — snap immediately, no transition (avoids flicker)
+        el.style.transition = '';
+        el.style.opacity = show ? '1' : '0';
+        el.style.pointerEvents = show ? 'auto' : 'none';
+      } else {
+        // Camera settled — use staggered cinematic transition
+        const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
+        el.style.transition = `opacity 400ms ease ${delay}ms, transform 400ms ease ${delay}ms`;
+        el.style.opacity = show ? '1' : '0';
+        el.style.transform = show ? 'scale(1)' : 'scale(0.85)';
+        el.style.pointerEvents = show ? 'auto' : 'none';
+        // Clean up transition after animation completes
+        const totalTime = 400 + delay + 50;
+        setTimeout(() => { el.style.transition = ''; }, totalTime);
+      }
     });
 
     const map = mapRef.current;
@@ -7098,9 +7110,11 @@ function DeerIntelContent() {
 
       // V4 Step 11b: New markers fade in with stagger
       // v4-fix11: Store reference scale on element for camera-synced scaling
+      // v4-fix12b: Set will-change at creation, use transitionend for cleanup
       el.dataset.refScale = String(scale);
       el.dataset.refSize = String(markerSize);
       el.dataset.discPctY = discPctY;
+      el.style.willChange = 'transform, opacity';
       el.style.opacity = '0';
       el.style.transform = 'scale(0.85)';
       requestAnimationFrame(() => {
@@ -7108,10 +7122,19 @@ function DeerIntelContent() {
         el.style.transition = `opacity 350ms ease ${staggerDelay}ms, transform 350ms ease ${staggerDelay}ms`;
         el.style.opacity = '1';
         el.style.transform = 'scale(1)';
-        // v4-fix11: Clean up entry transition after it completes to prevent interference with zoom scaling
-        setTimeout(() => {
-          el.style.transition = '';
-        }, 350 + staggerDelay + 50);
+        // v4-fix12b: Use a single timeout that's long enough for the last marker,
+        // then mark all markers ready. This avoids per-marker timers that could
+        // fire during camera motion and mutate the DOM.
+        if (idx === standsToShow.length - 1) {
+          const totalAnimTime = 350 + staggerDelay + 100;
+          setTimeout(() => {
+            markersRef.current.forEach((m) => {
+              const mEl = m.getElement();
+              mEl.style.transition = '';
+              mEl.dataset.ready = '1';
+            });
+          }, totalAnimTime);
+        }
       });
 
       markersRef.current.push(marker);
@@ -7126,70 +7149,72 @@ function DeerIntelContent() {
     }, 250);
   };
 
-  // ========== v4-fix11: CAMERA-SYNCED MARKER SCALING ==========
+  // ========== v4-fix12b: FLICKER-FREE CAMERA-SYNCED MARKER SCALING ==========
   // Two-phase approach:
-  //   1) During camera motion: use CSS transform scale for GPU-accelerated smooth scaling (no SVG rebuild)
-  //   2) On camera settle: rebuild SVGs at final zoom for pixel-crisp rendering
+  //   Phase 1 — During camera motion: ONLY set el.style.transform (CSS scale).
+  //             NO SVG rebuilds, NO innerHTML, NO opacity/visibility, NO transition changes.
+  //   Phase 2 — After camera fully settles: ONE rebuild pass, then stop.
+  //
+  // Key invariants:
+  //   - will-change is set at marker creation, never toggled during motion
+  //   - transition is '' (empty) before motion starts (cleaned in creation)
+  //   - cameraMovingRef gates other code from touching markers during motion
+  const cameraMovingRef = useRef(false);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
     let rafId: number | null = null;
-    let isMoving = false;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Phase 1: Smooth CSS-only scaling during camera motion
+    // Phase 1: Pure transform-only scaling during camera motion
     const onCameraMove = () => {
-      if (!isMoving) {
-        isMoving = true;
-        console.error('[STAND-DIAG] CAMERA MOVING');
-        // Add will-change hint for GPU acceleration
+      if (!cameraMovingRef.current) {
+        cameraMovingRef.current = true;
+        // v4-fix12b: Strip any lingering transition from ALL markers on first move frame.
+        // This prevents entry/toggle animations from causing CSS-animated scale changes.
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
-          el.style.willChange = 'transform';
+          if (el.style.transition) el.style.transition = '';
         });
       }
       if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
 
-      if (rafId !== null) return; // Already have a pending frame
+      if (rafId !== null) return; // Already have a pending rAF
       rafId = requestAnimationFrame(() => {
         rafId = null;
         const zoom = map.getZoom();
         const currentScale = getMarkerScale(zoom);
 
+        // v4-fix12b: ONLY touch el.style.transform — nothing else.
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
           const refScale = parseFloat(el.dataset.refScale || '1');
-          // Compute relative scale factor vs the reference size the SVG was built at
           const relativeScale = currentScale / refScale;
-
-          // Apply CSS transform — GPU-accelerated, no layout thrash, no SVG rebuild
           el.style.transform = `scale(${relativeScale.toFixed(4)})`;
         });
-        console.error('[STAND-DIAG] MARKER SYNC UPDATE zoom=' + zoom.toFixed(2) + ' scale=' + currentScale.toFixed(3));
       });
     };
 
-    // Phase 2: Crisp SVG rebuild after camera settles
+    // Phase 2: Crisp SVG rebuild after camera fully settles
     const rebuildMarkersAtZoom = () => {
+      cameraMovingRef.current = false;
       const zoom = map.getZoom();
       const scale = getMarkerScale(zoom);
 
       // Only rebuild if zoom has changed meaningfully (>0.3 zoom levels)
       if (Math.abs(zoom - lastSVGRebuildZoom.current) < 0.3) {
-        // Just clean up transform to identity
+        // Just reset transform to identity and update refScale
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
           el.style.transform = 'scale(1)';
-          el.style.willChange = '';
           el.dataset.refScale = String(scale);
         });
-        console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' (skip SVG rebuild, delta < 0.3)');
-        console.error('[STAND-DIAG] MARKER SETTLED');
         return;
       }
 
-      console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' — rebuilding SVGs for crispness');
+      console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' — rebuilding SVGs');
 
       // v4-fix12a: Fixed hitbox size for rebuild (must match creation)
       const HITBOX_SIZE = 80;
@@ -7209,9 +7234,7 @@ function DeerIntelContent() {
         const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
 
         // Reset CSS transform to identity — new SVG is built at correct size
-        // v4-fix12a: Hitbox stays fixed, only visual + transform-origin update
         el.style.transform = 'scale(1)';
-        el.style.willChange = '';
         el.style.transformOrigin = `50% ${discPctY}%`;
         el.dataset.refScale = String(scale);
         el.dataset.refSize = String(newSize);
@@ -7250,18 +7273,14 @@ function DeerIntelContent() {
       });
 
       lastSVGRebuildZoom.current = zoom;
-      console.error('[STAND-DIAG] MARKER SETTLED');
     };
 
     const onCameraEnd = () => {
-      isMoving = false;
-      // Debounce settle — wait for camera to truly stop (handles chained animations)
+      // Debounce settle — wait 200ms for camera to truly stop (handles chained animations)
       if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(rebuildMarkersAtZoom, 150);
+      settleTimer = setTimeout(rebuildMarkersAtZoom, 200);
     };
 
-    // Listen to 'move' (covers zoom + pan + pitch) for Phase 1
-    // Listen to 'moveend' for Phase 2 settle
     map.on('move', onCameraMove);
     map.on('moveend', onCameraEnd);
 
@@ -7270,6 +7289,7 @@ function DeerIntelContent() {
       map.off('moveend', onCameraEnd);
       if (rafId !== null) cancelAnimationFrame(rafId);
       if (settleTimer) clearTimeout(settleTimer);
+      cameraMovingRef.current = false;
     };
   }, [mapReady, alignedStands]); // eslint-disable-line
 
