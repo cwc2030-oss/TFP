@@ -6750,28 +6750,35 @@ function DeerIntelContent() {
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
   // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions
-  // v4-fix12b: Skip transition-based animation if camera is moving (snap instead)
+  // v4-fix12c: Opacity on el (safe), scale on scaleWrapper (safe). Never touch el.style.transform.
   useEffect(() => {
     const show = visibility.stands;
     const isMoving = cameraMovingRef.current;
 
     markersRef.current.forEach((marker, i) => {
       const el = marker.getElement();
+      const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
       if (isMoving) {
-        // Camera is in motion — snap immediately, no transition (avoids flicker)
+        // Camera in motion — snap immediately, no transitions
         el.style.transition = '';
+        if (wrapper) wrapper.style.transition = '';
         el.style.opacity = show ? '1' : '0';
         el.style.pointerEvents = show ? 'auto' : 'none';
       } else {
-        // Camera settled — use staggered cinematic transition
+        // Camera settled — staggered cinematic transition
         const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
-        el.style.transition = `opacity 400ms ease ${delay}ms, transform 400ms ease ${delay}ms`;
+        el.style.transition = `opacity 400ms ease ${delay}ms`;
         el.style.opacity = show ? '1' : '0';
-        el.style.transform = show ? 'scale(1)' : 'scale(0.85)';
         el.style.pointerEvents = show ? 'auto' : 'none';
-        // Clean up transition after animation completes
+        if (wrapper) {
+          wrapper.style.transition = `transform 400ms ease ${delay}ms`;
+          wrapper.style.transform = show ? 'scale(1)' : 'scale(0.85)';
+        }
         const totalTime = 400 + delay + 50;
-        setTimeout(() => { el.style.transition = ''; }, totalTime);
+        setTimeout(() => {
+          el.style.transition = '';
+          if (wrapper) wrapper.style.transition = '';
+        }, totalTime);
       }
     });
 
@@ -6916,12 +6923,17 @@ function DeerIntelContent() {
     if (!map || !alignedStands.length) return;
 
     // V4 Step 11b: Fade out old markers before replacing (cross-fade effect)
+    // v4-fix12c: Opacity on el, scale on wrapper. Never touch el.style.transform.
     const oldMarkers = [...markersRef.current];
     oldMarkers.forEach(m => {
       const el = m.getElement();
-      el.style.transition = 'opacity 200ms ease, transform 200ms ease';
+      const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+      el.style.transition = 'opacity 200ms ease';
       el.style.opacity = '0';
-      el.style.transform = 'scale(0.9)';
+      if (wrapper) {
+        wrapper.style.transition = 'transform 200ms ease';
+        wrapper.style.transform = 'scale(0.9)';
+      }
     });
     markersRef.current = [];
 
@@ -6967,30 +6979,41 @@ function DeerIntelContent() {
         rank: idx,
       });
 
-      // v4-fix12a: Fixed hitbox for ALL markers — identical Mapbox positioning
+      // v4-fix12c: WRAPPER ARCHITECTURE — Mapbox manages el.style.transform (translate positioning).
+      // We manage scaleWrapper.style.transform (visual scaling). They never conflict.
+      // Structure: el (Mapbox positioning) → scaleWrapper (our scaling) → visual content
       const el = document.createElement('div');
       el.className = 'intel-stand-marker';
       el.dataset.standIdx = String(idx);
       el.dataset.baseSize = String(baseSize);
-      // Compute disc center position within fixed hitbox for transform-origin
-      // Visual is centered in hitbox: visualTop = (HITBOX - markerSize) / 2
-      // Disc center from top of visual: markerSize * (DISC_CENTER_PCT / 100)
-      // Disc center from top of hitbox: visualTop + markerSize * 0.40
+
+      // Compute disc center position within fixed hitbox for transform-origin on wrapper
       const visualTop = (HITBOX_SIZE - markerSize) / 2;
       const discFromTop = visualTop + markerSize * (DISC_CENTER_PCT / 100);
       const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
 
+      // Outer element: managed by Mapbox for positioning. We only touch opacity here.
       el.style.cssText = `
         position: relative;
+        width: ${HITBOX_SIZE}px;
+        height: ${HITBOX_SIZE}px;
+        cursor: pointer;
+      `;
+
+      // Scale wrapper: we manage transform (scale) and transform-origin here.
+      // Mapbox never touches this element.
+      const scaleWrapper = document.createElement('div');
+      scaleWrapper.className = 'stand-scale-wrapper';
+      scaleWrapper.style.cssText = `
         width: ${HITBOX_SIZE}px;
         height: ${HITBOX_SIZE}px;
         display: flex;
         align-items: center;
         justify-content: center;
-        cursor: pointer;
         transform-origin: 50% ${discPctY}%;
+        will-change: transform;
       `;
-      el.innerHTML = `
+      scaleWrapper.innerHTML = `
         <div class="stand-visual" style="
           width: ${markerSize}px;
           height: ${markerSize}px;
@@ -6998,7 +7021,7 @@ function DeerIntelContent() {
           pointer-events: none;
         ">${svgHTML}</div>
         ${isTopStand ? `
-          <div style="
+          <div class="stand-badge" style="
             position: absolute;
             bottom: ${-4 * scale}px;
             left: 50%;
@@ -7017,6 +7040,7 @@ function DeerIntelContent() {
           ">Today's Sit</div>
         ` : ''}
       `;
+      el.appendChild(scaleWrapper);
 
       // Hover tooltip (unified for all tiers)
       const hoverTooltip = document.createElement('div');
@@ -7083,11 +7107,11 @@ function DeerIntelContent() {
         hoverTooltip.style.opacity = '0';
       };
 
-      // v4-fix12a: Offset marker so disc center (not element center) is at the coordinate
-      // Element center is at HITBOX_SIZE/2 from top. Disc center is at discFromTop.
-      // Offset = (HITBOX_SIZE/2 - discFromTop) pixels — positive = shift down
+      // v4-fix12c: Offset marker so disc center (not element center) is at the coordinate.
+      // With anchor:'center', element center is at geo. Disc is above center by yOffset px.
+      // Positive y offset shifts element DOWN, putting disc at geo-coordinate.
       const yOffset = HITBOX_SIZE / 2 - discFromTop;
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'center', offset: [0, -yOffset] })
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center', offset: [0, yOffset] })
         .setLngLat(coords)
         .addTo(map);
 
@@ -7108,29 +7132,28 @@ function DeerIntelContent() {
         }, 400);
       };
 
-      // V4 Step 11b: New markers fade in with stagger
-      // v4-fix11: Store reference scale on element for camera-synced scaling
-      // v4-fix12b: Set will-change at creation, use transitionend for cleanup
+      // v4-fix12c: Entry animation — opacity on el, scale on scaleWrapper.
+      // NEVER set el.style.transform (Mapbox owns it for positioning).
       el.dataset.refScale = String(scale);
       el.dataset.refSize = String(markerSize);
       el.dataset.discPctY = discPctY;
-      el.style.willChange = 'transform, opacity';
       el.style.opacity = '0';
-      el.style.transform = 'scale(0.85)';
+      scaleWrapper.style.transform = 'scale(0.85)';
       requestAnimationFrame(() => {
         const staggerDelay = idx * 80;
-        el.style.transition = `opacity 350ms ease ${staggerDelay}ms, transform 350ms ease ${staggerDelay}ms`;
+        el.style.transition = `opacity 350ms ease ${staggerDelay}ms`;
+        scaleWrapper.style.transition = `transform 350ms ease ${staggerDelay}ms`;
         el.style.opacity = '1';
-        el.style.transform = 'scale(1)';
-        // v4-fix12b: Use a single timeout that's long enough for the last marker,
-        // then mark all markers ready. This avoids per-marker timers that could
-        // fire during camera motion and mutate the DOM.
+        scaleWrapper.style.transform = 'scale(1)';
+        // v4-fix12b: Single cleanup timeout after all markers finish entry
         if (idx === standsToShow.length - 1) {
           const totalAnimTime = 350 + staggerDelay + 100;
           setTimeout(() => {
             markersRef.current.forEach((m) => {
               const mEl = m.getElement();
+              const wrapper = mEl.querySelector('.stand-scale-wrapper') as HTMLElement;
               mEl.style.transition = '';
+              if (wrapper) wrapper.style.transition = '';
               mEl.dataset.ready = '1';
             });
           }, totalAnimTime);
@@ -7149,16 +7172,13 @@ function DeerIntelContent() {
     }, 250);
   };
 
-  // ========== v4-fix12b: FLICKER-FREE CAMERA-SYNCED MARKER SCALING ==========
-  // Two-phase approach:
-  //   Phase 1 — During camera motion: ONLY set el.style.transform (CSS scale).
-  //             NO SVG rebuilds, NO innerHTML, NO opacity/visibility, NO transition changes.
-  //   Phase 2 — After camera fully settles: ONE rebuild pass, then stop.
+  // ========== v4-fix12c: FLICKER-FREE CAMERA-SYNCED MARKER SCALING ==========
+  // ARCHITECTURE: Mapbox owns el.style.transform (translate positioning).
+  // We own scaleWrapper.style.transform (visual scaling). They never conflict.
   //
-  // Key invariants:
-  //   - will-change is set at marker creation, never toggled during motion
-  //   - transition is '' (empty) before motion starts (cleaned in creation)
-  //   - cameraMovingRef gates other code from touching markers during motion
+  // Phase 1 — During camera motion: ONLY set scaleWrapper.style.transform = scale(...).
+  //           NO SVG rebuilds, NO innerHTML, NO opacity, NO transition changes.
+  // Phase 2 — After camera fully settles: ONE rebuild pass, then stop.
   const cameraMovingRef = useRef(false);
 
   useEffect(() => {
@@ -7168,31 +7188,34 @@ function DeerIntelContent() {
     let rafId: number | null = null;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Phase 1: Pure transform-only scaling during camera motion
+    // Phase 1: Scale wrapper only — Mapbox's translate on el is untouched
     const onCameraMove = () => {
       if (!cameraMovingRef.current) {
         cameraMovingRef.current = true;
-        // v4-fix12b: Strip any lingering transition from ALL markers on first move frame.
-        // This prevents entry/toggle animations from causing CSS-animated scale changes.
+        // Strip lingering transitions from wrappers on first move frame
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
+          const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
           if (el.style.transition) el.style.transition = '';
+          if (wrapper?.style.transition) wrapper.style.transition = '';
         });
       }
       if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
 
-      if (rafId !== null) return; // Already have a pending rAF
+      if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
         const zoom = map.getZoom();
         const currentScale = getMarkerScale(zoom);
 
-        // v4-fix12b: ONLY touch el.style.transform — nothing else.
+        // v4-fix12c: ONLY touch scaleWrapper.style.transform. Never el.style.transform.
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
+          const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+          if (!wrapper) return;
           const refScale = parseFloat(el.dataset.refScale || '1');
           const relativeScale = currentScale / refScale;
-          el.style.transform = `scale(${relativeScale.toFixed(4)})`;
+          wrapper.style.transform = `scale(${relativeScale.toFixed(4)})`;
         });
       });
     };
@@ -7203,48 +7226,50 @@ function DeerIntelContent() {
       const zoom = map.getZoom();
       const scale = getMarkerScale(zoom);
 
-      // Only rebuild if zoom has changed meaningfully (>0.3 zoom levels)
+      // Only rebuild if zoom changed meaningfully (>0.3 zoom levels)
       if (Math.abs(zoom - lastSVGRebuildZoom.current) < 0.3) {
-        // Just reset transform to identity and update refScale
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
-          el.style.transform = 'scale(1)';
+          const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+          if (wrapper) wrapper.style.transform = 'scale(1)';
           el.dataset.refScale = String(scale);
         });
+        console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' (skip rebuild, delta < 0.3)');
         return;
       }
 
       console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' — rebuilding SVGs');
 
-      // v4-fix12a: Fixed hitbox size for rebuild (must match creation)
       const HITBOX_SIZE = 80;
       const DISC_CENTER_PCT = 40;
 
       markersRef.current.forEach((marker) => {
         const el = marker.getElement();
+        const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+        if (!wrapper) return;
         const idx = parseInt(el.dataset?.standIdx || '0', 10);
         const isTop = idx === 0;
         const isSec = idx === 1;
         const baseSize = parseInt(el.dataset?.baseSize || (isTop ? '60' : isSec ? '52' : '42'), 10);
         const newSize = Math.round(baseSize * scale);
 
-        // v4-fix12a: Recompute disc center and transform-origin for new visual size
+        // Recompute disc center and transform-origin for new visual size
         const visualTop = (HITBOX_SIZE - newSize) / 2;
         const discFromTop = visualTop + newSize * (DISC_CENTER_PCT / 100);
         const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
 
-        // Reset CSS transform to identity — new SVG is built at correct size
-        el.style.transform = 'scale(1)';
-        el.style.transformOrigin = `50% ${discPctY}%`;
+        // Reset scale on wrapper, update transform-origin
+        wrapper.style.transform = 'scale(1)';
+        wrapper.style.transformOrigin = `50% ${discPctY}%`;
         el.dataset.refScale = String(scale);
         el.dataset.refSize = String(newSize);
         el.dataset.discPctY = discPctY;
 
-        // v4-fix12a: Update marker offset to keep disc at coordinate
+        // v4-fix12c: Update marker offset (positive y = shift down to keep disc at geo)
         const yOffset = HITBOX_SIZE / 2 - discFromTop;
-        (marker as any).setOffset([0, -yOffset]);
+        (marker as any).setOffset([0, yOffset]);
 
-        const visual = el.querySelector('.stand-visual') as HTMLElement;
+        const visual = wrapper.querySelector('.stand-visual') as HTMLElement;
         if (visual) {
           visual.style.width = `${newSize}px`;
           visual.style.height = `${newSize}px`;
@@ -7263,20 +7288,21 @@ function DeerIntelContent() {
 
         // Rescale "Today's Sit" badge
         if (isTop) {
-          const badge = el.querySelector('div > div:last-child') as HTMLElement;
-          if (badge && badge.textContent?.includes("Today")) {
+          const badge = wrapper.querySelector('.stand-badge') as HTMLElement;
+          if (badge) {
             badge.style.fontSize = `${Math.round(10 * scale)}px`;
             badge.style.padding = `${Math.round(2 * scale)}px ${Math.round(8 * scale)}px`;
             badge.style.bottom = `${-4 * scale}px`;
           }
         }
+
+        console.error(`[STAND-DIAG] id=${idx + 1} rebuiltAfterSettle=true transformOrigin=${wrapper.style.transformOrigin} offset=[0,${yOffset.toFixed(1)}]`);
       });
 
       lastSVGRebuildZoom.current = zoom;
     };
 
     const onCameraEnd = () => {
-      // Debounce settle — wait 200ms for camera to truly stop (handles chained animations)
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = setTimeout(rebuildMarkersAtZoom, 200);
     };
