@@ -6889,11 +6889,15 @@ function DeerIntelContent() {
   };
 
   // ========== ZOOM-RESPONSIVE MARKER SIZING ==========
+  // v4-fix11: Smooth continuous scale function — no step jumps
   const getMarkerScale = (zoom: number): number => {
     if (zoom <= 13) return 0.7;
     if (zoom >= 17) return 1.3;
     return 0.7 + (zoom - 13) * (0.6 / 4); // Linear interpolation 13→17 : 0.7→1.3
   };
+
+  // v4-fix11: Track the zoom level at which SVGs were last rebuilt for crispness
+  const lastSVGRebuildZoom = useRef<number>(0);
 
   const addStandMarkers = () => {
     const map = mapRef.current;
@@ -7072,6 +7076,9 @@ function DeerIntelContent() {
       };
 
       // V4 Step 11b: New markers fade in with stagger
+      // v4-fix11: Store reference scale on element for camera-synced scaling
+      el.dataset.refScale = String(scale);
+      el.dataset.refSize = String(markerSize);
       el.style.opacity = '0';
       el.style.transform = 'scale(0.85)';
       requestAnimationFrame(() => {
@@ -7079,10 +7086,17 @@ function DeerIntelContent() {
         el.style.transition = `opacity 350ms ease ${staggerDelay}ms, transform 350ms ease ${staggerDelay}ms`;
         el.style.opacity = '1';
         el.style.transform = 'scale(1)';
+        // v4-fix11: Clean up entry transition after it completes to prevent interference with zoom scaling
+        setTimeout(() => {
+          el.style.transition = '';
+        }, 350 + staggerDelay + 50);
       });
 
       markersRef.current.push(marker);
     });
+
+    // v4-fix11: Record reference zoom for SVG rebuild tracking
+    lastSVGRebuildZoom.current = currentZoom;
 
     // Remove old markers after their fade-out completes
     setTimeout(() => {
@@ -7090,14 +7104,70 @@ function DeerIntelContent() {
     }, 250);
   };
 
-  // ========== ZOOM-RESPONSIVE MARKER RESCALING ==========
+  // ========== v4-fix11: CAMERA-SYNCED MARKER SCALING ==========
+  // Two-phase approach:
+  //   1) During camera motion: use CSS transform scale for GPU-accelerated smooth scaling (no SVG rebuild)
+  //   2) On camera settle: rebuild SVGs at final zoom for pixel-crisp rendering
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    const onZoom = () => {
+    let rafId: number | null = null;
+    let isMoving = false;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Phase 1: Smooth CSS-only scaling during camera motion
+    const onCameraMove = () => {
+      if (!isMoving) {
+        isMoving = true;
+        console.error('[STAND-DIAG] CAMERA MOVING');
+        // Add will-change hint for GPU acceleration
+        markersRef.current.forEach((marker) => {
+          const el = marker.getElement();
+          el.style.willChange = 'transform';
+        });
+      }
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+
+      if (rafId !== null) return; // Already have a pending frame
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const zoom = map.getZoom();
+        const currentScale = getMarkerScale(zoom);
+
+        markersRef.current.forEach((marker) => {
+          const el = marker.getElement();
+          const refScale = parseFloat(el.dataset.refScale || '1');
+          // Compute relative scale factor vs the reference size the SVG was built at
+          const relativeScale = currentScale / refScale;
+
+          // Apply CSS transform — GPU-accelerated, no layout thrash, no SVG rebuild
+          el.style.transform = `scale(${relativeScale.toFixed(4)})`;
+        });
+        console.error('[STAND-DIAG] MARKER SYNC UPDATE zoom=' + zoom.toFixed(2) + ' scale=' + currentScale.toFixed(3));
+      });
+    };
+
+    // Phase 2: Crisp SVG rebuild after camera settles
+    const rebuildMarkersAtZoom = () => {
       const zoom = map.getZoom();
       const scale = getMarkerScale(zoom);
+
+      // Only rebuild if zoom has changed meaningfully (>0.3 zoom levels)
+      if (Math.abs(zoom - lastSVGRebuildZoom.current) < 0.3) {
+        // Just clean up transform to identity
+        markersRef.current.forEach((marker) => {
+          const el = marker.getElement();
+          el.style.transform = 'scale(1)';
+          el.style.willChange = '';
+          el.dataset.refScale = String(scale);
+        });
+        console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' (skip SVG rebuild, delta < 0.3)');
+        console.error('[STAND-DIAG] MARKER SETTLED');
+        return;
+      }
+
+      console.error('[STAND-DIAG] CAMERA SETTLED zoom=' + zoom.toFixed(2) + ' — rebuilding SVGs for crispness');
 
       markersRef.current.forEach((marker) => {
         const el = marker.getElement();
@@ -7108,14 +7178,18 @@ function DeerIntelContent() {
         const newSize = Math.round(baseSize * scale);
         const hitbox = newSize + 20;
 
+        // Reset CSS transform to identity — new SVG is built at correct size
+        el.style.transform = 'scale(1)';
+        el.style.willChange = '';
         el.style.width = `${hitbox}px`;
         el.style.height = `${hitbox}px`;
+        el.dataset.refScale = String(scale);
+        el.dataset.refSize = String(newSize);
 
         const visual = el.querySelector('.stand-visual') as HTMLElement;
         if (visual) {
           visual.style.width = `${newSize}px`;
           visual.style.height = `${newSize}px`;
-          // Rebuild SVG at new size for crisp rendering (v4 Step 8: unified colors)
           const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
           const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
           visual.innerHTML = buildStandSVG({
@@ -7139,10 +7213,29 @@ function DeerIntelContent() {
           }
         }
       });
+
+      lastSVGRebuildZoom.current = zoom;
+      console.error('[STAND-DIAG] MARKER SETTLED');
     };
 
-    map.on('zoom', onZoom);
-    return () => { map.off('zoom', onZoom); };
+    const onCameraEnd = () => {
+      isMoving = false;
+      // Debounce settle — wait for camera to truly stop (handles chained animations)
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(rebuildMarkersAtZoom, 150);
+    };
+
+    // Listen to 'move' (covers zoom + pan + pitch) for Phase 1
+    // Listen to 'moveend' for Phase 2 settle
+    map.on('move', onCameraMove);
+    map.on('moveend', onCameraEnd);
+
+    return () => {
+      map.off('move', onCameraMove);
+      map.off('moveend', onCameraEnd);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      if (settleTimer) clearTimeout(settleTimer);
+    };
   }, [mapReady, alignedStands]); // eslint-disable-line
 
   const showStandPopup = (coords: [number, number], props: StandPointProperties, resilience?: StandResilience, standData?: AlignedStand) => {
