@@ -6674,6 +6674,11 @@ function DeerIntelContent() {
     markersRef.current.forEach((marker, i) => {
       const el = marker.getElement();
       const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+      // v4-fix15: Skip unrevealed markers — the reveal handler manages their entrance
+      if (el.dataset.revealed !== '1') {
+        el.style.pointerEvents = show ? 'auto' : 'none';
+        return;
+      }
       if (isMoving) {
         // Camera in motion — snap immediately, no transitions
         el.style.transition = '';
@@ -7048,33 +7053,17 @@ function DeerIntelContent() {
         }, 400);
       };
 
-      // v4-fix12c: Entry animation — opacity on el, scale on scaleWrapper.
-      // NEVER set el.style.transform (Mapbox owns it for positioning).
+      // v4-fix15: Entry animation — markers start hidden, revealed AFTER camera settles.
+      // Prevents stands 2-5 from appearing to "fly in from outside" when Mapbox
+      // repositions their screen coordinates during camera motion.
       el.dataset.refScale = String(scale);
       el.dataset.refSize = String(markerSize);
       el.dataset.discPctY = discPctY;
       el.style.opacity = '0';
       scaleWrapper.style.transform = 'scale(0.85)';
-      requestAnimationFrame(() => {
-        const staggerDelay = idx * 80;
-        el.style.transition = `opacity 350ms ease ${staggerDelay}ms`;
-        scaleWrapper.style.transition = `transform 350ms ease ${staggerDelay}ms`;
-        el.style.opacity = '1';
-        scaleWrapper.style.transform = 'scale(1)';
-        // v4-fix12b: Single cleanup timeout after all markers finish entry
-        if (idx === standsToShow.length - 1) {
-          const totalAnimTime = 350 + staggerDelay + 100;
-          setTimeout(() => {
-            markersRef.current.forEach((m) => {
-              const mEl = m.getElement();
-              const wrapper = mEl.querySelector('.stand-scale-wrapper') as HTMLElement;
-              mEl.style.transition = '';
-              if (wrapper) wrapper.style.transition = '';
-              mEl.dataset.ready = '1';
-            });
-          }, totalAnimTime);
-        }
-      });
+      // Mark as not yet revealed — the revealStandMarkers() function handles the entrance
+      el.dataset.ready = '0';
+      el.dataset.revealed = '0';
 
       markersRef.current.push(marker);
     });
@@ -7086,6 +7075,76 @@ function DeerIntelContent() {
     setTimeout(() => {
       oldMarkers.forEach(m => m.remove());
     }, 250);
+
+    // v4-fix15: Delay reveal until camera is settled. If camera is already idle,
+    // reveal after a short delay to let Mapbox position markers at final coords.
+    scheduleStandReveal();
+  };
+
+  // v4-fix15: Reveal stand markers with uniform entrance — all stands get identical
+  // speed, transform, and timing so they read as equally terrain-born.
+  const standRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const revealStandMarkers = () => {
+    const markers = markersRef.current;
+    if (!markers.length) return;
+
+    // Only reveal markers that haven't been revealed yet
+    const unrevealed = markers.filter(m => m.getElement().dataset.revealed === '0');
+    if (!unrevealed.length) return;
+
+    requestAnimationFrame(() => {
+      unrevealed.forEach((marker, idx) => {
+        const el = marker.getElement();
+        const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+        if (!wrapper || el.dataset.revealed === '1') return;
+
+        el.dataset.revealed = '1';
+        // Uniform short stagger (40ms) — all stands arrive together, not one-by-one
+        const staggerDelay = idx * 40;
+        el.style.transition = `opacity 300ms ease ${staggerDelay}ms`;
+        wrapper.style.transition = `transform 300ms ease ${staggerDelay}ms`;
+        el.style.opacity = '1';
+        wrapper.style.transform = 'scale(1)';
+      });
+
+      // Cleanup transitions after all entries complete
+      const totalTime = 300 + (unrevealed.length - 1) * 40 + 100;
+      setTimeout(() => {
+        markers.forEach((m) => {
+          const mEl = m.getElement();
+          const w = mEl.querySelector('.stand-scale-wrapper') as HTMLElement;
+          mEl.style.transition = '';
+          if (w) w.style.transition = '';
+          mEl.dataset.ready = '1';
+        });
+      }, totalTime);
+    });
+  };
+
+  const scheduleStandReveal = () => {
+    // Clear any pending reveal
+    if (standRevealTimerRef.current) {
+      clearTimeout(standRevealTimerRef.current);
+      standRevealTimerRef.current = null;
+    }
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    // If camera is currently moving, the settle handler will trigger reveal.
+    // If camera is already idle, reveal after a short delay to let Mapbox
+    // finalize marker screen positions.
+    if (cameraMovingRef.current) {
+      // Camera is moving — reveal will be triggered by settleMarkers callback
+      return;
+    }
+
+    // Camera is idle — reveal after 80ms to ensure Mapbox has positioned markers
+    standRevealTimerRef.current = setTimeout(() => {
+      standRevealTimerRef.current = null;
+      revealStandMarkers();
+    }, 80);
   };
 
   // ========== v4-fix12c: FLICKER-FREE CAMERA-SYNCED MARKER SCALING ==========
@@ -7125,8 +7184,10 @@ function DeerIntelContent() {
         const currentScale = getMarkerScale(zoom);
 
         // v4-fix12c: ONLY touch scaleWrapper.style.transform. Never el.style.transform.
+        // v4-fix15: Skip unrevealed markers — they stay hidden at scale(0.85) until reveal.
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
+          if (el.dataset.revealed !== '1') return; // Not yet visible — skip
           const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
           if (!wrapper) return;
           const refScale = parseFloat(el.dataset.refScale || '1');
@@ -7152,11 +7213,15 @@ function DeerIntelContent() {
       markersRef.current.forEach((marker) => {
         const el = marker.getElement();
         const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-        if (wrapper) wrapper.style.transform = 'scale(1)';
+        // Only reset scale for already-revealed markers; unrevealed ones keep scale(0.85)
+        if (wrapper && el.dataset.revealed === '1') wrapper.style.transform = 'scale(1)';
         el.dataset.refScale = String(scale);
       });
 
       lastSVGRebuildZoom.current = zoom;
+
+      // v4-fix15: Camera just settled — reveal any hidden markers now
+      revealStandMarkers();
     };
 
     const onCameraEnd = () => {
@@ -7172,6 +7237,7 @@ function DeerIntelContent() {
       map.off('moveend', onCameraEnd);
       if (rafId !== null) cancelAnimationFrame(rafId);
       if (settleTimer) clearTimeout(settleTimer);
+      if (standRevealTimerRef.current) clearTimeout(standRevealTimerRef.current);
       cameraMovingRef.current = false;
     };
   }, [mapReady, alignedStands]); // eslint-disable-line
