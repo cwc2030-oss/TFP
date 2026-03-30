@@ -1351,12 +1351,15 @@ function DeerIntelContent() {
   const urlAddress = searchParams.get('address') || 'Sample Property';
   const urlAcreage = searchParams.get('acreage');
   const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features
+  // Demo mode: ?demo=true → always load Pineville parcel, skip parcel lookup
+  const demoMode = searchParams.get('demo') === 'true';
 
   // Active coordinates — start from URL, updated by Exploration Mode clicks
-  const [activeLat, setActiveLat] = useState(urlLat);
-  const [activeLng, setActiveLng] = useState(urlLng);
-  const [activeAddress, setActiveAddress] = useState(urlAddress);
-  const [activeAcreage, setActiveAcreage] = useState(urlAcreage);
+  // In demo mode, always force Pineville demo parcel regardless of URL coords
+  const [activeLat, setActiveLat] = useState(demoMode ? 36.638590 : urlLat);
+  const [activeLng, setActiveLng] = useState(demoMode ? -94.345581 : urlLng);
+  const [activeAddress, setActiveAddress] = useState(demoMode ? '761 Schlessman Rd, Pineville, MO 64831' : urlAddress);
+  const [activeAcreage, setActiveAcreage] = useState(demoMode ? '118' : urlAcreage);
   
   // Derived aliases for backward compatibility throughout the file
   const lat = activeLat;
@@ -2013,7 +2016,7 @@ function DeerIntelContent() {
     setIsLoading(true);
     setError(null);
     setProgress(10);
-    setProgressStep(demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
+    setProgressStep(demoMode ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
     setAnalysisStalled(false);
     lastProgressRef.current = { value: 10, time: Date.now() };
     
@@ -2026,17 +2029,38 @@ function DeerIntelContent() {
     console.error('[INTEL-DIAG] === ANALYSIS START ===');
     console.error('[INTEL-DIAG] Coordinates:', lat, lng);
     console.error('[INTEL-DIAG] Season:', currentSeason, 'Wind:', currentWind);
+    console.error('[INTEL-DIAG] demoMode:', demoMode);
     console.error('[INTEL-DIAG] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
 
     try {
       // Import shared terrain client
       const { fetchParcelGeometry, fetchTerrainAnalysis, generateSyntheticParcel } = await import('@/lib/terrain-client');
       
-      // Get real parcel geometry from Regrid
-      setProgress(15);
-      console.error('[INTEL-DIAG] Fetching parcel geometry for:', lat, lng);
-      const parcel = await fetchParcelGeometry(lat, lng);
-      console.error('[INTEL-DIAG] Parcel fetch returned:', parcel ? 'HAS DATA' : 'NULL');
+      let parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null = null;
+
+      if (demoMode) {
+        // Demo mode: skip Regrid lookup entirely, use cached Pineville parcel directly
+        console.error('[INTEL-DIAG] DEMO MODE — skipping parcel lookup, fetching cached Pineville parcel');
+        setProgress(15);
+        setProgressStep('Loading demo parcel\u2026');
+        // Still call fetchParcelGeometry for the known-good Pineville coords (always cached/fast)
+        // but wrap in a 5s race so demo never waits on network
+        const demoFetchPromise = fetchParcelGeometry(36.638590, -94.345581);
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000));
+        parcel = await Promise.race([demoFetchPromise, timeoutPromise]);
+        if (!parcel) {
+          // Even cache miss — generate synthetic for perfect reliability
+          console.error('[INTEL-DIAG] DEMO MODE — cache miss, using synthetic Pineville parcel');
+          parcel = generateSyntheticParcel(36.638590, -94.345581, 118) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+        }
+        console.error('[INTEL-DIAG] DEMO MODE — parcel ready:', parcel.geometry.type);
+      } else {
+        // Normal mode: fetch parcel geometry from Regrid
+        setProgress(15);
+        console.error('[INTEL-DIAG] Fetching parcel geometry for:', lat, lng);
+        parcel = await fetchParcelGeometry(lat, lng);
+        console.error('[INTEL-DIAG] Parcel fetch returned:', parcel ? 'HAS DATA' : 'NULL');
+      }
       
       if (!parcel) {
         // Use synthetic fallback instead of failing
@@ -9097,7 +9121,7 @@ function DeerIntelContent() {
               </div>
             </div>
             <h3 className="text-white font-semibold text-lg mb-1 tracking-tight">
-              {isDemoFallbackActive ? 'Loading Verified Demo Parcel' : 'Refining Terrain Intelligence'}
+              {demoMode ? 'Loading Demo Parcel' : isDemoFallbackActive ? 'Loading Verified Demo Parcel' : 'Refining Terrain Intelligence'}
             </h3>
             <p className="text-stone-400 text-[11px] mb-4 font-mono tracking-wide">
               {progressStep}
