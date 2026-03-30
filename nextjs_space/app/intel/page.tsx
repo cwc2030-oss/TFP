@@ -1380,6 +1380,7 @@ function DeerIntelContent() {
   // Demo fallback: known-good parcel for FB demo safety net
   const DEMO_FALLBACK = useRef({ lat: 36.638590, lng: -94.345581, address: '761 Schlessman Rd, Pineville, MO 64831', acreage: '118' });
   const demoFallbackAttempted = useRef(false);
+  const [isDemoFallbackActive, setIsDemoFallbackActive] = useState(false);
 
   // Global/unhandled error state
   const [globalError, setGlobalError] = useState<{ message: string; stack?: string } | null>(null);
@@ -2011,7 +2012,7 @@ function DeerIntelContent() {
     setIsLoading(true);
     setError(null);
     setProgress(10);
-    setProgressStep('Fetching parcel boundary...');
+    setProgressStep(demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
     setAnalysisStalled(false);
     lastProgressRef.current = { value: 10, time: Date.now() };
     
@@ -2124,11 +2125,12 @@ function DeerIntelContent() {
 
       // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch
       if (!demoFallbackAttempted.current) {
-        console.error('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to demo parcel');
+        console.error('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to verified demo parcel');
         demoFallbackAttempted.current = true;
         const df = DEMO_FALLBACK.current;
         // Schedule state updates after this try/catch/finally completes
         setTimeout(() => {
+          setIsDemoFallbackActive(true);
           setActiveLat(df.lat);
           setActiveLng(df.lng);
           setActiveAddress(df.address);
@@ -2136,7 +2138,7 @@ function DeerIntelContent() {
           setError(null);
           setIsLoading(true);
           setProgress(5);
-          setProgressStep('Switching to demo parcel...');
+          setProgressStep('Loading verified demo parcel\u2026');
         }, 100);
         return;
       }
@@ -5787,8 +5789,9 @@ function DeerIntelContent() {
         console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
         // Auto-fallback to demo parcel if not already tried
         if (!demoFallbackAttempted.current) {
-          console.error('[INTEL-DIAG] AUTO DEMO FALLBACK — stall > 10s, switching to demo parcel');
+          console.error('[INTEL-DIAG] AUTO DEMO FALLBACK — stall > 10s, switching to verified demo parcel');
           demoFallbackAttempted.current = true;
+          setIsDemoFallbackActive(true);
           const df = DEMO_FALLBACK.current;
           setActiveLat(df.lat);
           setActiveLng(df.lng);
@@ -5796,7 +5799,7 @@ function DeerIntelContent() {
           setActiveAcreage(df.acreage);
           setError(null);
           setProgress(5);
-          setProgressStep('Switching to demo parcel...');
+          setProgressStep('Switching to verified demo parcel\u2026');
           // lat/lng change triggers runAnalysis via dep array
         } else {
           setAnalysisStalled(true); // Show manual retry UI
@@ -9050,7 +9053,9 @@ function DeerIntelContent() {
                 </div>
               </div>
             </div>
-            <h3 className="text-white font-semibold text-lg mb-1 tracking-tight">Refining Terrain Intelligence</h3>
+            <h3 className="text-white font-semibold text-lg mb-1 tracking-tight">
+              {isDemoFallbackActive ? 'Loading Verified Demo Parcel' : 'Refining Terrain Intelligence'}
+            </h3>
             <p className="text-stone-400 text-[11px] mb-4 font-mono tracking-wide">
               {progressStep}
             </p>
