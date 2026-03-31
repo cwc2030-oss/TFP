@@ -1617,6 +1617,9 @@ function DeerIntelContent() {
   const [parcelPickMode, setParcelPickMode] = useState(false);
   const [parcelPickLoading, setParcelPickLoading] = useState(false); // fetching parcel boundary
 
+  // ========== ONBOARDING / DEMO POLISH STATE ==========
+  const [showOnboarding, setShowOnboarding] = useState(demoMode);
+
   // ========== ADJACENT PARCELS STATE ==========
   interface AdjacentParcelInfo {
     parcelId: string;
@@ -8402,6 +8405,31 @@ function DeerIntelContent() {
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
 
+              {/* ═══ ONBOARDING — Demo welcome (dismissible) ═══ */}
+              {showOnboarding && (
+                <div className="mx-3 mt-3 mb-1 bg-gradient-to-br from-amber-500/[0.12] to-orange-500/[0.06] border border-amber-500/20 rounded-xl p-3 relative">
+                  <button
+                    onClick={() => setShowOnboarding(false)}
+                    className="absolute top-2 right-2 text-white/40 hover:text-white/70 transition-colors"
+                    aria-label="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="flex items-start gap-2.5 pr-4">
+                    <span className="text-lg flex-shrink-0 mt-0.5">🦌</span>
+                    <div>
+                      <p className="text-[11px] font-semibold text-amber-300">Welcome to Deer Intel</p>
+                      <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
+                        {"You're viewing a live terrain analysis of a real Missouri parcel. The map shows deer travel corridors, stand placements, and terrain features — all computed from elevation data."}
+                      </p>
+                      <p className="text-[10px] text-stone-500 leading-relaxed mt-1.5">
+                        Use the panels to explore layers, change seasons, and adjust wind direction. When {"you're"} ready, analyze your own property.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* ═══ CHAPTER 1 — PARCEL IDENTITY ═══ */}
               <div className="px-3 pt-3 pb-2">
                 <div className="flex items-center gap-2 mb-2.5">
@@ -8523,6 +8551,32 @@ function DeerIntelContent() {
                     <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Intelligence</span>
                     <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
                   </div>
+
+                  {/* ── Plain-English "What We Found" summary ── */}
+                  {!isLoading && (
+                    <div className="bg-gradient-to-br from-emerald-500/[0.08] to-green-500/[0.04] border border-emerald-500/15 rounded-lg p-2.5 mb-2.5">
+                      <p className="text-[10px] text-emerald-400/80 font-semibold uppercase tracking-wider mb-1">What We Found</p>
+                      <p className="text-[11px] text-white/85 leading-relaxed">
+                        {(() => {
+                          const stands = alignedStands.length;
+                          const score = summary.topStandScore;
+                          const beds = summary.totalBeddingAcres;
+                          const funnels = summary.funnelCount;
+                          const acres = acreageParam || summary.analysisAreaAcres?.toFixed(0) || '—';
+
+                          // Build a natural sentence
+                          const quality = score >= 80 ? 'excellent' : score >= 65 ? 'strong' : score >= 50 ? 'moderate' : 'limited';
+                          const standPhrase = stands > 0 
+                            ? `We identified ${stands} stand placement${stands > 1 ? 's' : ''} with ${quality} alignment to the terrain` 
+                            : 'No stand placements met our quality threshold on this parcel';
+                          const beddingPhrase = beds > 3 ? `, ${beds.toFixed(1)} acres of bedding cover` : beds > 0 ? ` and some bedding cover` : '';
+                          const funnelPhrase = funnels > 2 ? `, and ${funnels} natural funnels that concentrate movement` : funnels > 0 ? ` with ${funnels} natural funnel${funnels > 1 ? 's' : ''}` : '';
+
+                          return `${standPhrase}${beddingPhrase}${funnelPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
+                        })()}
+                      </p>
+                    </div>
+                  )}
 
                   {/* ── Terrain Story Headline ── */}
                   {terrainStory && (
@@ -8687,6 +8741,34 @@ function DeerIntelContent() {
                   </p>
                 )}
               </div>
+
+              {/* ═══ CTA — Analyze Your Property ═══ */}
+              {summary && !isLoading && (
+                <div className="px-3 pb-3">
+                  <div className="bg-gradient-to-br from-red-500/[0.10] to-orange-500/[0.06] border border-red-500/20 rounded-xl p-3">
+                    <p className="text-[11px] text-white/90 font-semibold">Ready to scout your own land?</p>
+                    <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
+                      Get the same terrain intelligence for any property — stand placements, corridors, bedding zones, and a downloadable hunt map.
+                    </p>
+                    <div className="flex gap-2 mt-2.5">
+                      <Link
+                        href="/map?product=hunt_report"
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-[11px] font-semibold rounded-lg transition-colors shadow-lg shadow-red-900/30"
+                      >
+                        <Target className="h-3.5 w-3.5" />
+                        Analyze My Property
+                      </Link>
+                      <Link
+                        href="/pricing"
+                        className="flex items-center justify-center gap-1 px-3 py-2 bg-white/[0.06] hover:bg-white/[0.10] text-stone-300 text-[10px] font-medium rounded-lg transition-colors border border-white/[0.08]"
+                      >
+                        Pricing
+                        <ArrowUpRight className="h-3 w-3" />
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -8726,6 +8808,7 @@ function DeerIntelContent() {
                   <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Terrain Flow</span>
                   <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
                 </div>
+                <p className="text-[9px] text-stone-600 mt-1 leading-relaxed">How terrain shapes where deer travel</p>
               </div>
 
               {/* Travel Corridor Layer (Primary Movement Path - ON by default) */}
@@ -8918,6 +9001,7 @@ function DeerIntelContent() {
                   <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Deer Flow</span>
                   <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
                 </div>
+                <p className="text-[9px] text-stone-600 mt-1 leading-relaxed">Predicted movement patterns and pressure zones</p>
               </div>
 
               {/* ========== TERRAIN FLOW LAYER (Movement Likelihood) ========== */}
@@ -9406,6 +9490,7 @@ function DeerIntelContent() {
                   <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Stand Selection</span>
                   <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
                 </div>
+                <p className="text-[9px] text-stone-600 mt-1 leading-relaxed">Best treestand locations ranked by terrain advantage</p>
               </div>
 
               <div className="p-3 border-b border-white/[0.06]">
