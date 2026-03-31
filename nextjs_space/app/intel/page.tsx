@@ -1470,8 +1470,14 @@ function DeerIntelContent() {
   useEffect(() => { activeLngRef.current = activeLng; }, [activeLng]);
   useEffect(() => { activeAcreageRef.current = activeAcreage; }, [activeAcreage]);
 
+  // Pre-fetched parcel geometry ref.  Pick Parcel / Explore flows populate this
+  // BEFORE calling runAnalysis so the analyzer can skip the redundant Regrid lookup
+  // and keep the gold boundary visible with no full-screen loading overlay.
+  const prefetchedParcelRef = useRef<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
+
   // Analysis state
   const [isLoading, setIsLoading] = useState(true);
+  const [backgroundAnalysis, setBackgroundAnalysis] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<TerrainMode>('preview');
@@ -2160,15 +2166,32 @@ function DeerIntelContent() {
 
   // Fetch terrain analysis using shared client
   const runAnalysis = useCallback(async () => {
-    // Clear ALL previous overlay sources before starting fresh analysis
-    clearAllOverlaySources();
+    // Check if a caller (Pick Parcel / Explore) already fetched the parcel
+    // geometry. When present we skip the redundant Regrid lookup and keep the
+    // gold boundary visible — no full-screen loading overlay needed.
+    const prefetchedParcel = prefetchedParcelRef.current;
+    prefetchedParcelRef.current = null; // consume once
+
+    // Only wipe overlay sources when we DON'T already have the boundary painted
+    if (!prefetchedParcel) {
+      clearAllOverlaySources();
+    }
 
     setIsLoading(true);
+    setBackgroundAnalysis(!!prefetchedParcel);
     setError(null);
-    setProgress(10);
-    setProgressStep(demoMode ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
     setAnalysisStalled(false);
-    lastProgressRef.current = { value: 10, time: Date.now() };
+
+    // When we already have a parcel boundary visible, start progress from 20 %
+    // (parcel phase done) with a terrain-focused message.
+    if (prefetchedParcel) {
+      setProgress(20);
+      setProgressStep('Running terrain analysis...');
+    } else {
+      setProgress(10);
+      setProgressStep(demoMode ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
+    }
+    lastProgressRef.current = { value: prefetchedParcel ? 20 : 10, time: Date.now() };
     
     // Read current season/wind AND coordinates from refs so we always get
     // the latest values even when called via stale setTimeout closures.
@@ -2183,7 +2206,7 @@ function DeerIntelContent() {
     console.error('[INTEL-DIAG] Coordinates:', currentLat, currentLng);
     console.error('[INTEL-DIAG] Season:', currentSeason, 'Wind:', currentWind);
     console.error('[INTEL-DIAG] demoMode:', demoMode);
-    console.error('[INTEL-DIAG] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
+    console.error('[INTEL-DIAG] prefetchedParcel:', prefetchedParcel ? 'YES' : 'NO');
 
     try {
       // Import shared terrain client
@@ -2191,18 +2214,20 @@ function DeerIntelContent() {
       
       let parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null = null;
 
-      if (demoMode) {
+      if (prefetchedParcel) {
+        // Parcel already fetched by Pick Parcel / Explore — use it directly,
+        // boundary is already painted on the map, camera already fitted.
+        parcel = prefetchedParcel;
+        console.error('[INTEL-DIAG] Using PREFETCHED parcel, skipping Regrid lookup');
+      } else if (demoMode) {
         // Demo mode: skip Regrid lookup entirely, use cached Pineville parcel directly
         console.error('[INTEL-DIAG] DEMO MODE — skipping parcel lookup, fetching cached Pineville parcel');
         setProgress(15);
         setProgressStep('Loading demo parcel\u2026');
-        // Still call fetchParcelGeometry for the known-good Pineville coords (always cached/fast)
-        // but wrap in a 5s race so demo never waits on network
         const demoFetchPromise = fetchParcelGeometry(36.638590, -94.345581);
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000));
         parcel = await Promise.race([demoFetchPromise, timeoutPromise]);
         if (!parcel) {
-          // Even cache miss — generate synthetic for perfect reliability
           console.error('[INTEL-DIAG] DEMO MODE — cache miss, using synthetic Pineville parcel');
           parcel = generateSyntheticParcel(36.638590, -94.345581, 118) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
         }
@@ -2234,9 +2259,9 @@ function DeerIntelContent() {
           },
           (step, prog) => {
             setProgressStep(step);
-            setProgress(20 + Math.round(prog * 0.8)); // Scale 0-100 to 20-100
+            setProgress(20 + Math.round(prog * 0.8));
           },
-          45_000 // 45 second timeout
+          45_000
         );
         
         if (!result.success) {
@@ -2254,9 +2279,12 @@ function DeerIntelContent() {
         return;
       }
       
-      console.error('[INTEL-DIAG] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
-      console.error('[INTEL-DIAG] Parcel geometry type:', parcel.geometry.type);
-      setParcelPolygon(parcel);
+      // Only update parcelPolygon if it wasn't already set by the caller
+      if (!prefetchedParcel) {
+        console.error('[INTEL-DIAG] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
+        console.error('[INTEL-DIAG] Parcel geometry type:', parcel.geometry.type);
+        setParcelPolygon(parcel);
+      }
       setProgress(20);
       setProgressStep('Running terrain analysis...');
       console.error('[INTEL-DIAG] Got real parcel:', parcel.properties?.parcelId);
@@ -2330,6 +2358,7 @@ function DeerIntelContent() {
       setProgressStep('Failed');
     } finally {
       setIsLoading(false);
+      setBackgroundAnalysis(false);
     }
   // NOTE: season and windDirection intentionally excluded from deps.
   // Season/wind changes only affect the heatmap repaint (handled by the terrain flow painting effect),
@@ -6384,6 +6413,14 @@ function DeerIntelContent() {
       // Show scorecard after analysis completes
       setTimeout(() => setQaShowScorecard(true), 2000);
 
+      // Pre-seed parcel geometry so runAnalysis skips duplicate fetch
+      const qaFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
+        type: 'Feature',
+        properties: { parcelId: qaParcel.parcelId, address: qaParcel.address, owner: qaParcel.owner || '', acreage: qaParcel.acreage },
+        geometry: { type: 'Polygon', coordinates: [coords] },
+      };
+      prefetchedParcelRef.current = qaFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+
       // Trigger full analysis pipeline with new coords
       setTimeout(() => runAnalysis(), 100);
       
@@ -6528,6 +6565,9 @@ function DeerIntelContent() {
       // ── 6. Trigger full terrain analysis against the new parcel ──
       // runAnalysis reads coords from refs (activeLatRef / activeLngRef) which
       // we just updated synchronously above, so no stale-closure issue.
+      // Pre-seed the parcel geometry so runAnalysis skips the duplicate fetch
+      // and keeps the gold boundary visible (no full-screen overlay).
+      prefetchedParcelRef.current = parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
       setTimeout(() => runAnalysis(), 100);
       
     } catch (err) {
@@ -9740,8 +9780,8 @@ function DeerIntelContent() {
         </div>
       </div>
 
-      {/* Loading Overlay */}
-      {isLoading && (
+      {/* Loading Overlay — full-screen for fresh load, compact chip for background analysis */}
+      {isLoading && !backgroundAnalysis && (
         <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-md flex items-center justify-center">
           <div className="bg-gray-950/95 rounded-2xl p-8 text-center max-w-sm border border-white/[0.08] shadow-2xl shadow-black/50">
             {/* Animated radar rings */}
@@ -9800,14 +9840,14 @@ function DeerIntelContent() {
                 <p className="text-stone-400 text-[11px] mb-3">Taking longer than expected. The terrain server may be warming up.</p>
                 <div className="flex gap-2 justify-center">
                   <button
-                    onClick={() => { setIsLoading(false); setError(null); setAnalysisStalled(false); runAnalysis(); }}
+                    onClick={() => { setIsLoading(false); setBackgroundAnalysis(false); setError(null); setAnalysisStalled(false); runAnalysis(); }}
                     className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded font-medium flex items-center gap-1.5 transition-colors"
                   >
                     <RefreshCw className="h-3 w-3" />
                     Retry Analysis
                   </button>
                   <button
-                    onClick={() => { setIsLoading(false); setAnalysisStalled(false); setError('Analysis stalled — please retry when ready'); }}
+                    onClick={() => { setIsLoading(false); setBackgroundAnalysis(false); setAnalysisStalled(false); setError('Analysis stalled — please retry when ready'); }}
                     className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] text-stone-300 text-xs rounded font-medium transition-colors"
                   >
                     Cancel
@@ -9815,6 +9855,27 @@ function DeerIntelContent() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* Compact background-analysis progress chip — parcel boundary stays visible */}
+      {isLoading && backgroundAnalysis && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+          <div className="flex items-center gap-3 bg-gray-950/90 backdrop-blur-sm border border-amber-500/25 rounded-full px-4 py-2 shadow-xl shadow-black/40 min-w-[260px]">
+            <div className="relative h-5 w-5 flex-shrink-0">
+              <div className="absolute inset-0 rounded-full border-2 border-amber-500/50 border-t-transparent animate-spin" style={{ animationDuration: '1.2s' }} />
+              <Target className="absolute inset-0.5 h-4 w-4 text-amber-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-xs font-medium truncate">{progressStep}</p>
+              <div className="relative w-full h-1 bg-white/[0.08] rounded-full overflow-hidden mt-1">
+                <div
+                  className="h-full rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #d97706, #f59e0b, #fbbf24)' }}
+                />
+              </div>
+            </div>
+            <span className="text-amber-400 text-[10px] font-mono font-semibold flex-shrink-0">{progress}%</span>
           </div>
         </div>
       )}
