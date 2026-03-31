@@ -1518,6 +1518,8 @@ function DeerIntelContent() {
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(() => new Date(0));
   const [windMinAgo, setWindMinAgo] = useState(0);
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
+  const selectedStandRef = useRef<number | null>(null);
+  useEffect(() => { selectedStandRef.current = selectedStand; }, [selectedStand]);
   const [soloStandMode, setSoloStandMode] = useState(false);
 
   // ========== STAND COMPARE STATE (v1.2) ==========
@@ -1944,6 +1946,17 @@ function DeerIntelContent() {
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
     setParcelStrength(ps);
+
+    // ── Stand-state cleanup after re-scoring ──
+    // If the currently-selected stand rank no longer exists in the new list,
+    // clear it to avoid stale references.
+    const prevSelected = selectedStandRef.current;
+    if (prevSelected !== null && !aligned.find(s => s.rank === prevSelected)) {
+      setSelectedStand(null);
+    }
+    // Solo mode is a transient UI state — reset it whenever stands are recomputed
+    // so that a fresh set always starts with all stands visible.
+    setSoloStandMode(false);
 
     // Set initial highlighted stand to top (read via ref to avoid dep)
     const currentHighlight = highlightedStandRankRef.current;
@@ -7086,15 +7099,27 @@ function DeerIntelContent() {
     return () => clearTimeout(timer);
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
-  // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions
+  // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions.
+  // Unified visibility gate: global show/hide × solo-mode × selected-stand.
   // v4-fix12c: Opacity on el (safe), scale on scaleWrapper (safe). Never touch el.style.transform.
   useEffect(() => {
-    const show = visibility.stands;
+    const globalShow = visibility.stands;
     const isMoving = cameraMovingRef.current;
 
     markersRef.current.forEach((marker, i) => {
       const el = marker.getElement();
       const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+      const standIdx = parseInt(el.dataset.standIdx || '0', 10);
+
+      // Determine per-marker visibility:
+      // 1. globalShow must be true
+      // 2. if soloStandMode, only show the marker whose stand matches selectedStand
+      let show = globalShow;
+      if (show && soloStandMode && selectedStand !== null) {
+        const standRank = alignedStands[standIdx]?.rank;
+        show = standRank === selectedStand;
+      }
+
       // v4-fix15: Skip unrevealed markers — the reveal handler manages their entrance
       if (el.dataset.revealed !== '1') {
         el.style.pointerEvents = show ? 'auto' : 'none';
@@ -7128,7 +7153,9 @@ function DeerIntelContent() {
     if (!map) return;
 
     // Staggered supporting layer reveal: glow → pockets → wedges → dots
-    staggeredFadeToggle(map, show, [
+    // When solo mode is active, hide supporting layers (they cover all stands)
+    const showLayers = globalShow && !soloStandMode;
+    staggeredFadeToggle(map, showLayers, [
       { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
       { id: 'tfp-hunt-pockets-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
       { id: 'tfp-hunt-pockets-stroke', targetOpacity: 0.6 },
@@ -7137,14 +7164,14 @@ function DeerIntelContent() {
       { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
     ], 400, 60);
 
-    // Nearest corridor highlight follows stand visibility
-    const showHighlight = show && selectedStand !== null;
+    // Nearest corridor highlight follows stand visibility + selection
+    const showHighlight = globalShow && selectedStand !== null;
     if (showHighlight) {
       fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.75, 'line-opacity', 450);
     } else {
       fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', 300);
     }
-  }, [visibility.stands, selectedStand]);
+  }, [visibility.stands, selectedStand, soloStandMode, alignedStands]);
 
   const cleanupMarkers = () => {
     markersRef.current.forEach(m => m.remove());
@@ -9386,7 +9413,14 @@ function DeerIntelContent() {
                   {/* Stands toggle - disabled during terrain refinement */}
                   {!TERRAIN_WORK_MODE && (
                     <button
-                      onClick={() => setVisibility(v => ({ ...v, stands: !v.stands }))}
+                      onClick={() => {
+                        const wasVisible = visibility.stands;
+                        setVisibility(v => ({ ...v, stands: !v.stands }));
+                        // Hiding stands → also exit solo mode for a clean re-show
+                        if (wasVisible && soloStandMode) {
+                          setSoloStandMode(false);
+                        }
+                      }}
                       className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
                         visibility.stands ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                       }`}
@@ -9398,10 +9432,18 @@ function DeerIntelContent() {
                     </button>
                   )}
 
-                  {/* Solo Selected Stand toggle */}
-                  {!TERRAIN_WORK_MODE && (
+                  {/* Solo Selected Stand toggle — only enabled when stands are visible */}
+                  {!TERRAIN_WORK_MODE && visibility.stands && (
                     <button
-                      onClick={() => setSoloStandMode(v => !v)}
+                      onClick={() => {
+                        const next = !soloStandMode;
+                        setSoloStandMode(next);
+                        // When entering solo mode with no stand selected,
+                        // auto-select the top stand so there's something visible.
+                        if (next && selectedStand === null && alignedStands.length > 0) {
+                          setSelectedStand(alignedStands[0].rank);
+                        }
+                      }}
                       className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
                         soloStandMode ? 'bg-amber-900/40 border border-amber-600/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                       }`}
@@ -9807,6 +9849,10 @@ function DeerIntelContent() {
                    setHighlightedStandRank(stand.rank);
                    const deselecting = selectedStand === stand.rank;
                    setSelectedStand(deselecting ? null : stand.rank);
+                   // Deselecting in solo mode → exit solo so all stands reappear
+                   if (deselecting && soloStandMode) {
+                     setSoloStandMode(false);
+                   }
                    // V4 Step 11b: Cinematic flyTo from panel
                    if (!deselecting && mapRef.current) {
                      mapRef.current.flyTo({
