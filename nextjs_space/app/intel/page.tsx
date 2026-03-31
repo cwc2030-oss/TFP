@@ -226,6 +226,77 @@ function filterByGeometryType(
   };
 }
 
+/**
+ * Filter bedding polygons that fall within ~120 m of any building footprint
+ * visible in the Mapbox composite tiles.  Eliminates obvious false-positives
+ * near houses, barns, and maintained yard areas.
+ */
+function filterBeddingNearBuildings(
+  beddingFC: GeoJSON.FeatureCollection,
+  map: mapboxgl.Map,
+  thresholdM = 120,
+): GeoJSON.FeatureCollection {
+  try {
+    // Query building features from the Mapbox composite tileset
+    const buildings = map.querySourceFeatures('composite', { sourceLayer: 'building' });
+    if (!buildings.length) return beddingFC; // No building data loaded yet
+
+    // Collect building centroids
+    const buildingPts: [number, number][] = [];
+    buildings.forEach(b => {
+      if (!b.geometry) return;
+      const coords: number[][] = [];
+      if (b.geometry.type === 'Polygon') {
+        coords.push(...(b.geometry as GeoJSON.Polygon).coordinates[0]);
+      } else if (b.geometry.type === 'MultiPolygon') {
+        (b.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+      }
+      if (!coords.length) return;
+      const cx = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+      const cy = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+      buildingPts.push([cx, cy]);
+    });
+
+    if (!buildingPts.length) return beddingFC;
+
+    const threshDeg = thresholdM / 111_320; // rough metres→degrees
+    const threshSq = threshDeg * threshDeg;
+
+    const filtered = beddingFC.features.filter(f => {
+      if (!f.geometry) return false;
+      // Get bedding centroid
+      const allCoords: number[][] = [];
+      if (f.geometry.type === 'Polygon') {
+        allCoords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+      } else if (f.geometry.type === 'MultiPolygon') {
+        (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => allCoords.push(...p[0]));
+      } else if (f.geometry.type === 'Point') {
+        allCoords.push((f.geometry as GeoJSON.Point).coordinates);
+      }
+      if (!allCoords.length) return true;
+      const bx = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+      const by = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
+
+      // Check proximity to any building
+      for (const [px, py] of buildingPts) {
+        const dx = bx - px;
+        const dy = by - py;
+        if (dx * dx + dy * dy < threshSq) return false; // too close → exclude
+      }
+      return true;
+    });
+
+    if (filtered.length < beddingFC.features.length) {
+      console.log(`[BEDDING FILTER] Removed ${beddingFC.features.length - filtered.length} bedding zone(s) near buildings (${thresholdM}m threshold)`);
+    }
+
+    return { type: 'FeatureCollection', features: filtered };
+  } catch (err) {
+    console.warn('[BEDDING FILTER] Could not filter bedding near buildings:', err);
+    return beddingFC;
+  }
+}
+
 // SEASONS & WIND_DIRECTIONS now imported from components/intel/*
 
 // ========== V2 STYLING RULES (Tiered Corridors + Funnels) ==========
@@ -1867,7 +1938,7 @@ function DeerIntelContent() {
           if (mostAlignedDebounceRef.current) clearTimeout(mostAlignedDebounceRef.current);
           mostAlignedDebounceRef.current = setTimeout(() => {
             if (aligned[0].rank === newTop.rank && scoreDiff >= 5) {
-              setMostAlignedHint({ standRank: newTop.rank, name: `Stand #${newTop.rank}` });
+              setMostAlignedHint({ standRank: newTop.rank, name: newTop.rank === 1 ? "Today's Sit" : newTop.rank === 2 ? 'Alternate Sit' : newTop.rank === 3 ? 'Backup Sit' : `Stand #${newTop.rank}` });
               if (hintFadeTimeoutRef.current) clearTimeout(hintFadeTimeoutRef.current);
               hintFadeTimeoutRef.current = setTimeout(() => setMostAlignedHint(null), 6000);
             }
@@ -2288,10 +2359,11 @@ function DeerIntelContent() {
         qaParcelSource.setData(EMPTY_FC);
       }
 
-      // Update bedding polygons
+      // Update bedding polygons — filter out zones near buildings/maintained areas
       const beddingSource = map.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
       if (beddingSource) {
-        const beddingFC = layers?.beddingPolygons ? validateGeoJSON(layers.beddingPolygons) : EMPTY_FC;
+        let beddingFC = layers?.beddingPolygons ? validateGeoJSON(layers.beddingPolygons) : EMPTY_FC;
+        beddingFC = filterBeddingNearBuildings(beddingFC, map, 120);
         const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
         beddingSource.setData(polygonsOnly);
       }
@@ -2900,10 +2972,14 @@ function DeerIntelContent() {
         favorabilitySource.setData(huntabilityData.favorabilitySurface);
       }
 
-      // v3.6.0: Update bedding probability source
-      const beddingSource = map.getSource('tfp-bedding-probability') as mapboxgl.GeoJSONSource;
-      if (beddingSource && huntabilityData.beddingProbabilityGeoJSON) {
-        beddingSource.setData(huntabilityData.beddingProbabilityGeoJSON);
+      // v3.6.0: Update bedding probability source — also filter near buildings
+      const beddingProbSource = map.getSource('tfp-bedding-probability') as mapboxgl.GeoJSONSource;
+      if (beddingProbSource && huntabilityData.beddingProbabilityGeoJSON) {
+        const mapInst = mapRef.current;
+        const filteredBedProb = mapInst
+          ? filterBeddingNearBuildings(huntabilityData.beddingProbabilityGeoJSON, mapInst, 120)
+          : huntabilityData.beddingProbabilityGeoJSON;
+        beddingProbSource.setData(filteredBedProb);
       }
 
       console.log('[Huntability] Updated map sources:', {
@@ -6821,22 +6897,9 @@ function DeerIntelContent() {
         (map.getSource('tfp-stand-direction') as mapboxgl.GeoJSONSource).setData(dirFC);
       }
 
-      // v1.1: Tertiary stand dots (stands 3+ as faint map dots)
+      // v4-demo: Clear tertiary dots — only top 3 shown as full markers now
       if (map.getSource('tfp-stand-tertiary')) {
-        const tertiaryStands = alignedStands.slice(2); // everything after top 2
-        const tertiaryFC: GeoJSON.FeatureCollection = {
-          type: 'FeatureCollection',
-          features: tertiaryStands.map(s => ({
-            type: 'Feature' as const,
-            geometry: { type: 'Point' as const, coordinates: s.coords },
-            properties: {
-              rank: s.rank,
-              score: s.alignment.score,
-              name: s.name,
-            },
-          })),
-        };
-        (map.getSource('tfp-stand-tertiary') as mapboxgl.GeoJSONSource).setData(tertiaryFC);
+        (map.getSource('tfp-stand-tertiary') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
       }
     }, 400);
 
@@ -7036,8 +7099,8 @@ function DeerIntelContent() {
     });
     markersRef.current = [];
 
-    // v4: Show ALL stands with unified icon family, not just top 2
-    const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 7));
+    // v4-demo: Show only top 3 stands for visual trust and clarity
+    const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
     const currentZoom = map.getZoom();
     const scale = getMarkerScale(currentZoom);
 
@@ -7058,6 +7121,10 @@ function DeerIntelContent() {
       const isTopStand = idx === 0;
       const isSecondary = idx === 1;
       const isTertiary = idx >= 2;
+
+      // v4-demo: Sit labels — #1 Today's Sit, #2 Alternate, #3 Backup
+      const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
+      const sitLabel = SIT_LABELS[idx] || `Sit #${idx + 1}`;
 
       // Visual sizing still varies by tier (visual hierarchy)
       const baseSize = isTopStand ? 60 : isSecondary ? 52 : 42;
@@ -7119,25 +7186,24 @@ function DeerIntelContent() {
           transition: transform 0.2s ease, filter 0.2s ease;
           pointer-events: none;
         ">${svgHTML}</div>
-        ${isTopStand ? `
-          <div class="stand-badge" style="
-            position: absolute;
-            bottom: ${-4 * scale}px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing});
-            color: #fff;
-            font-size: ${Math.round(10 * scale)}px;
-            font-weight: 700;
-            padding: ${Math.round(2 * scale)}px ${Math.round(8 * scale)}px;
-            border-radius: 10px;
-            white-space: nowrap;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            pointer-events: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          ">Today's Sit</div>
-        ` : ''}
+        <div class="stand-badge" style="
+          position: absolute;
+          bottom: ${-4 * scale}px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: linear-gradient(135deg, ${fillColor}, ${strokeColor});
+          color: #fff;
+          font-size: ${Math.round((isTopStand ? 10 : 9) * scale)}px;
+          font-weight: 700;
+          padding: ${Math.round(2 * scale)}px ${Math.round(7 * scale)}px;
+          border-radius: 10px;
+          white-space: nowrap;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          pointer-events: none;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          opacity: ${isTopStand ? 1 : 0.85};
+        ">${sitLabel}</div>
       `;
       el.appendChild(scaleWrapper);
 
@@ -7164,7 +7230,7 @@ function DeerIntelContent() {
       `;
       const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
       const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-      const standLabel = isTopStand ? "★ Today's Sit" : stand.name;
+      const standLabel = isTopStand ? `★ ${sitLabel}` : `#${idx + 1} ${sitLabel}`;
       // Explainability chips
       const explain = getStandExplainability(stand.inputs, props, stand.alignment, stand.resilience);
       const chipsHTML = renderChipsHTML(explain.chips);
@@ -7504,11 +7570,13 @@ function DeerIntelContent() {
     const faceCompass = degreesToCompass(faceBearing);
     const faceDeg = Math.round(faceBearing);
 
-    // #1 = Today's Sit with gold styling
+    // Sit labels for top 3
+    const SIT_LABELS_POPUP = ["Today's Sit", 'Alternate Sit', 'Backup Sit'] as const;
     const isTodaysSit = props.rank === 1;
+    const sitIdx = props.rank - 1; // 0-based
     const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing})` : 
-      props.rank <= 3 ? LAYER_COLORS.standPrimary : props.rank <= 7 ? LAYER_COLORS.standMed : LAYER_COLORS.standLow;
-    const popupBadgeLabel = isTodaysSit ? "★ Today's Sit" : `Stand #${props.rank}`;
+      sitIdx === 1 ? '#3b82f6' : '#6b7280';
+    const popupBadgeLabel = sitIdx < 3 ? (isTodaysSit ? `★ ${SIT_LABELS_POPUP[0]}` : `#${props.rank} ${SIT_LABELS_POPUP[sitIdx]}`) : `Stand #${props.rank}`;
     const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
 
     // Explainability data (if stand data available)
