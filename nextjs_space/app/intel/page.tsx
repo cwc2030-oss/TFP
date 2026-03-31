@@ -1461,6 +1461,15 @@ function DeerIntelContent() {
   const address = activeAddress;
   const acreageParam = activeAcreage;
 
+  // Refs that always mirror the latest active coordinates.
+  // runAnalysis reads from these so setTimeout callers never capture stale closures.
+  const activeLatRef = useRef(activeLat);
+  const activeLngRef = useRef(activeLng);
+  const activeAcreageRef = useRef(activeAcreage);
+  useEffect(() => { activeLatRef.current = activeLat; }, [activeLat]);
+  useEffect(() => { activeLngRef.current = activeLng; }, [activeLng]);
+  useEffect(() => { activeAcreageRef.current = activeAcreage; }, [activeAcreage]);
+
   // Analysis state
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -2161,14 +2170,17 @@ function DeerIntelContent() {
     setAnalysisStalled(false);
     lastProgressRef.current = { value: 10, time: Date.now() };
     
-    // Read current season/wind from refs so we always get the latest values
-    // even though these are intentionally excluded from the dep array.
+    // Read current season/wind AND coordinates from refs so we always get
+    // the latest values even when called via stale setTimeout closures.
     const currentSeason = seasonRef.current;
     const currentWind = windDirectionRef.current;
+    const currentLat = activeLatRef.current;
+    const currentLng = activeLngRef.current;
+    const currentAcreage = activeAcreageRef.current;
     
     const startTime = Date.now();
     console.error('[INTEL-DIAG] === ANALYSIS START ===');
-    console.error('[INTEL-DIAG] Coordinates:', lat, lng);
+    console.error('[INTEL-DIAG] Coordinates:', currentLat, currentLng);
     console.error('[INTEL-DIAG] Season:', currentSeason, 'Wind:', currentWind);
     console.error('[INTEL-DIAG] demoMode:', demoMode);
     console.error('[INTEL-DIAG] Current parcelPolygon:', parcelPolygon ? 'EXISTS' : 'NULL');
@@ -2198,15 +2210,15 @@ function DeerIntelContent() {
       } else {
         // Normal mode: fetch parcel geometry from Regrid
         setProgress(15);
-        console.error('[INTEL-DIAG] Fetching parcel geometry for:', lat, lng);
-        parcel = await fetchParcelGeometry(lat, lng);
+        console.error('[INTEL-DIAG] Fetching parcel geometry for:', currentLat, currentLng);
+        parcel = await fetchParcelGeometry(currentLat, currentLng);
         console.error('[INTEL-DIAG] Parcel fetch returned:', parcel ? 'HAS DATA' : 'NULL');
       }
       
       if (!parcel) {
         // Use synthetic fallback instead of failing
         console.error('[INTEL-DIAG] No Regrid parcel, using synthetic boundary');
-        const syntheticParcel = generateSyntheticParcel(lat, lng, parseFloat(acreageParam || '80'));
+        const syntheticParcel = generateSyntheticParcel(currentLat, currentLng, parseFloat(currentAcreage || '80'));
         console.error('[INTEL-DIAG] Setting parcelPolygon to SYNTHETIC parcel');
         setParcelPolygon(syntheticParcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
         setProgress(20);
@@ -2295,6 +2307,10 @@ function DeerIntelContent() {
         demoFallbackAttempted.current = true;
         const df = DEMO_FALLBACK.current;
         // Schedule state updates after this try/catch/finally completes
+        // Sync refs immediately so runAnalysis reads fresh coords
+        activeLatRef.current = df.lat;
+        activeLngRef.current = df.lng;
+        activeAcreageRef.current = df.acreage;
         setTimeout(() => {
           setIsDemoFallbackActive(true);
           setActiveLat(df.lat);
@@ -2305,6 +2321,7 @@ function DeerIntelContent() {
           setIsLoading(true);
           setProgress(5);
           setProgressStep('Loading verified demo parcel\u2026');
+          runAnalysis();
         }, 100);
         return;
       }
@@ -6348,12 +6365,20 @@ function DeerIntelContent() {
       // ========== UNIFIED PIPELINE: Update active coords and trigger runAnalysis ==========
       // This routes the exploration click through the SAME full analysis pipeline
       // that the initial page load uses, ensuring complete terrain state is retained.
-      setActiveLat(qaParcel.centroid[1]);
-      setActiveLng(qaParcel.centroid[0]);
-      setActiveAddress(qaParcel.address);
-      setActiveAcreage(qaParcel.acreage.toString());
+      const qLat = qaParcel.centroid[1];
+      const qLng = qaParcel.centroid[0];
+      const qAddr = qaParcel.address;
+      const qAcr = qaParcel.acreage.toString();
+      setActiveLat(qLat);
+      setActiveLng(qLng);
+      setActiveAddress(qAddr);
+      setActiveAcreage(qAcr);
+      // Sync refs so runAnalysis reads fresh values (stale-closure fix)
+      activeLatRef.current = qLat;
+      activeLngRef.current = qLng;
+      activeAcreageRef.current = qAcr;
       
-      console.log('[EXPLORE] Updated active coords to:', qaParcel.centroid[1], qaParcel.centroid[0]);
+      console.log('[EXPLORE] Updated active coords to:', qLat, qLng);
       console.log('[EXPLORE] Full analysis pipeline will trigger via lat/lng dep change');
       
       // Show scorecard after analysis completes
@@ -6387,6 +6412,10 @@ function DeerIntelContent() {
     setActiveLng(urlLng);
     setActiveAddress(urlAddress);
     setActiveAcreage(urlAcreage);
+    // Sync refs so runAnalysis reads fresh values (stale-closure fix)
+    activeLatRef.current = urlLat;
+    activeLngRef.current = urlLng;
+    activeAcreageRef.current = urlAcreage;
     
     // Reset fit flags for next parcel
     hasFitToParcel.current = false;
@@ -6399,6 +6428,9 @@ function DeerIntelContent() {
   }, [urlLat, urlLng, urlAddress, urlAcreage, runAnalysis]);
   
   // ========== PARCEL PICK MODE: One-click lookup + auto-analyze ==========
+  // Replicates the full direct-parcel-select → analyze path in a single pass:
+  //  1. lookup parcel  2. highlight boundary  3. populate parcel features/info
+  //  4. fit map  5. promote into active selected-parcel state  6. run analyzer
   const handleParcelPick = useCallback(async (clickLng: number, clickLat: number) => {
     if (parcelPickLoading || isLoading) return;
     
@@ -6415,6 +6447,7 @@ function DeerIntelContent() {
     setEdgeIntelData(null);
     setAlignedStands([]);
     setSelectedStand(null);
+    setHuntabilityData(null);
     // Remove existing stand markers from map
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
@@ -6433,55 +6466,69 @@ function DeerIntelContent() {
       const parcel = data.parcel;
       console.log('[PICK] Found parcel:', parcel.parcelId, parcel.address, parcel.acreage, 'ac');
       
-      // Show parcel boundary immediately on the QA source for visual feedback
-      const map = mapRef.current;
-      if (map && parcel.coordinates) {
-        const coords = [...parcel.coordinates];
-        if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
-          coords.push(coords[0]);
-        }
-        const qaSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
-        if (qaSource) {
-          qaSource.setData({
-            type: 'Feature',
-            properties: {},
-            geometry: { type: 'Polygon', coordinates: [coords] }
-          });
-          // Make QA parcel layers visible
-          if (map.getLayer('tfp-qa-parcel-outline')) {
-            map.setLayoutProperty('tfp-qa-parcel-outline', 'visibility', 'visible');
-          }
-          if (map.getLayer('tfp-qa-parcel-fill')) {
-            map.setLayoutProperty('tfp-qa-parcel-fill', 'visibility', 'visible');
-          }
-        }
-        
-        // Zoom to parcel
-        if (parcel.bounds) {
-          map.fitBounds(parcel.bounds, {
-            padding: 100,
-            duration: 800,
-            maxZoom: 16,
-          });
-        }
+      // ── 1. Build the real parcel polygon feature and promote it immediately ──
+      // This is the SAME state that runAnalysis → fetchParcelGeometry would set,
+      // but we already have the geometry from the lookup — skip the duplicate fetch.
+      const coords = [...(parcel.coordinates || [])];
+      if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+        coords.push(coords[0]);
       }
       
-      // Reset camera fit flags for the new parcel
+      const parcelFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
+        type: 'Feature',
+        properties: {
+          parcelId: parcel.parcelId,
+          address: parcel.address,
+          owner: parcel.owner,
+          acreage: parcel.acreage,
+        },
+        geometry: { type: 'Polygon', coordinates: [coords] },
+      };
+      
+      // Set parcelPolygon → triggers the map source painting useEffect
+      // which paints the gold parcel boundary on tfp-parcel.
+      setParcelPolygon(parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
+      console.log('[PICK] Set parcelPolygon from lookup data:', parcel.parcelId);
+      
+      // ── 2. Fit camera to parcel ──
+      const map = mapRef.current;
+      if (map && parcel.bounds) {
+        map.fitBounds(parcel.bounds, {
+          padding: 80,
+          duration: 800,
+          maxZoom: 17,
+        });
+      }
+      
+      // ── 3. Reset camera fit flags for the new parcel ──
       hasFitToParcel.current = false;
       hasPostAnalysisFit.current = false;
       
-      // Update active coordinates → triggers runAnalysis
-      setActiveLat(parcel.centroid[1]);
-      setActiveLng(parcel.centroid[0]);
-      setActiveAddress(parcel.address || `Parcel ${parcel.parcelId}`);
-      setActiveAcreage(parcel.acreage.toString());
+      // ── 4. Promote looked-up parcel into active selected-parcel state ──
+      // Update BOTH state AND refs synchronously so runAnalysis reads fresh values.
+      const newLat = parcel.centroid[1];
+      const newLng = parcel.centroid[0];
+      const newAddress = parcel.address || `Parcel ${parcel.parcelId}`;
+      const newAcreage = parcel.acreage.toString();
       
-      // Exit pick mode after selection
+      setActiveLat(newLat);
+      setActiveLng(newLng);
+      setActiveAddress(newAddress);
+      setActiveAcreage(newAcreage);
+      
+      // Synchronously update refs — runAnalysis reads from these, not state
+      activeLatRef.current = newLat;
+      activeLngRef.current = newLng;
+      activeAcreageRef.current = newAcreage;
+      
+      // ── 5. Exit pick mode ──
       setParcelPickMode(false);
       setParcelPickLoading(false);
       
-      // Trigger full analysis
-      setTimeout(() => runAnalysis(), 150);
+      // ── 6. Trigger full terrain analysis against the new parcel ──
+      // runAnalysis reads coords from refs (activeLatRef / activeLngRef) which
+      // we just updated synchronously above, so no stale-closure issue.
+      setTimeout(() => runAnalysis(), 100);
       
     } catch (err) {
       console.error('[PICK] Lookup error:', err);
