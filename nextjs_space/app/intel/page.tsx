@@ -1478,6 +1478,11 @@ function DeerIntelContent() {
   // Analysis state
   const [isLoading, setIsLoading] = useState(true);
   const [backgroundAnalysis, setBackgroundAnalysis] = useState(false);
+  // 1.5-second "clean parcel view" hold: after Pick Parcel, the gold boundary
+  // and fitted map are shown alone before terrain overlays / progress chip appear.
+  const [parcelViewHold, setParcelViewHold] = useState(false);
+  const parcelViewHoldRef = useRef(false); // sync mirror for map-painting effects
+  const parcelViewHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<TerrainMode>('preview');
@@ -2163,6 +2168,73 @@ function DeerIntelContent() {
       console.error('[INTEL-DIAG] OVERLAYS CLEARED — sources wiped, layers faded');
     });
   }, []);
+
+  // ── Parcel-view hold: hide / reveal terrain layers ──
+  // During the 1.5 s clean-parcel-view hold we set all terrain overlay layers
+  // to visibility:'none' (except the parcel boundary itself).  When the hold
+  // ends we restore them so overlays that were painted while the hold was active
+  // appear in one smooth reveal.
+  const holdHiddenLayersRef = useRef<string[]>([]);
+  useEffect(() => {
+    parcelViewHoldRef.current = parcelViewHold;
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    if (parcelViewHold) {
+      // Hide all tfp- layers except the parcel boundary
+      const hidden: string[] = [];
+      const style = map.getStyle();
+      if (style?.layers) {
+        for (const layer of style.layers) {
+          if (
+            layer.id.startsWith('tfp-') &&
+            !layer.id.startsWith('tfp-parcel-')
+          ) {
+            try {
+              map.setLayoutProperty(layer.id, 'visibility', 'none');
+              hidden.push(layer.id);
+            } catch { /* layer may have been removed */ }
+          }
+        }
+      }
+      holdHiddenLayersRef.current = hidden;
+      // Also hide HTML stand markers
+      markersRef.current.forEach(m => {
+        const el = m.getElement();
+        el.style.transition = 'none';
+        el.style.opacity = '0';
+      });
+    } else {
+      // Restore ALL tfp- layers (including any added during the hold)
+      const style = map.getStyle();
+      if (style?.layers) {
+        for (const layer of style.layers) {
+          if (
+            layer.id.startsWith('tfp-') &&
+            !layer.id.startsWith('tfp-parcel-')
+          ) {
+            try {
+              map.setLayoutProperty(layer.id, 'visibility', 'visible');
+            } catch { /* noop */ }
+          }
+        }
+      }
+      holdHiddenLayersRef.current = [];
+      // Reveal HTML stand markers
+      markersRef.current.forEach(m => {
+        const el = m.getElement();
+        el.style.transition = 'opacity 400ms ease';
+        el.style.opacity = '1';
+      });
+    }
+
+    return () => {
+      if (parcelViewHoldTimerRef.current) {
+        clearTimeout(parcelViewHoldTimerRef.current);
+        parcelViewHoldTimerRef.current = null;
+      }
+    };
+  }, [parcelViewHold]);
 
   // Fetch terrain analysis using shared client
   const runAnalysis = useCallback(async () => {
@@ -6562,7 +6634,19 @@ function DeerIntelContent() {
       setParcelPickMode(false);
       setParcelPickLoading(false);
       
-      // ── 6. Trigger full terrain analysis against the new parcel ──
+      // ── 6. Start 1.5 s "clean parcel view" hold ──
+      // The gold boundary + fitted map stay on-screen alone; terrain overlays
+      // and the progress chip are suppressed until the hold expires.
+      if (parcelViewHoldTimerRef.current) clearTimeout(parcelViewHoldTimerRef.current);
+      setParcelViewHold(true);
+      parcelViewHoldRef.current = true; // sync immediately for painting effects
+      parcelViewHoldTimerRef.current = setTimeout(() => {
+        setParcelViewHold(false);
+        parcelViewHoldRef.current = false;
+        parcelViewHoldTimerRef.current = null;
+      }, 1500);
+
+      // ── 7. Trigger full terrain analysis against the new parcel ──
       // runAnalysis reads coords from refs (activeLatRef / activeLngRef) which
       // we just updated synchronously above, so no stale-closure issue.
       // Pre-seed the parcel geometry so runAnalysis skips the duplicate fetch
@@ -9858,8 +9942,10 @@ function DeerIntelContent() {
           </div>
         </div>
       )}
-      {/* Compact background-analysis progress chip — parcel boundary stays visible */}
-      {isLoading && backgroundAnalysis && (
+      {/* Compact background-analysis progress chip — parcel boundary stays visible.
+          Hidden during the 1.5 s "clean parcel view" hold so the user can absorb
+          the parcel boundary before terrain analysis UI appears. */}
+      {isLoading && backgroundAnalysis && !parcelViewHold && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
           <div className="flex items-center gap-3 bg-gray-950/90 backdrop-blur-sm border border-amber-500/25 rounded-full px-4 py-2 shadow-xl shadow-black/40 min-w-[260px]">
             <div className="relative h-5 w-5 flex-shrink-0">
