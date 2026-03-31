@@ -227,9 +227,13 @@ function filterByGeometryType(
 }
 
 /**
- * Filter bedding polygons that fall within ~120 m of any building footprint
+ * DEMO TRUST FILTER — not final land-cover intelligence.
+ *
+ * Filters bedding polygons that fall within ~120 m of any building footprint
  * visible in the Mapbox composite tiles.  Eliminates obvious false-positives
- * near houses, barns, and maintained yard areas.
+ * near houses, barns, and maintained yard areas so the map reads cleanly
+ * during demos.  Fails gracefully (returns unfiltered data) if building
+ * tiles are not yet loaded or the source is unavailable.
  */
 function filterBeddingNearBuildings(
   beddingFC: GeoJSON.FeatureCollection,
@@ -238,12 +242,13 @@ function filterBeddingNearBuildings(
 ): GeoJSON.FeatureCollection {
   try {
     // Query building features from the Mapbox composite tileset
-    const buildings = map.querySourceFeatures('composite', { sourceLayer: 'building' });
-    if (!buildings.length) return beddingFC; // No building data loaded yet
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buildings = (map as any).querySourceFeatures('composite', { sourceLayer: 'building' }) as mapboxgl.MapboxGeoJSONFeature[];
+    if (!buildings || !buildings.length) return beddingFC; // No building data loaded yet
 
     // Collect building centroids
     const buildingPts: [number, number][] = [];
-    buildings.forEach(b => {
+    buildings.forEach((b: mapboxgl.MapboxGeoJSONFeature) => {
       if (!b.geometry) return;
       const coords: number[][] = [];
       if (b.geometry.type === 'Polygon') {
@@ -2534,10 +2539,13 @@ function DeerIntelContent() {
 
       // Generate edge intelligence features
       const corridorArrows = generateCorridorArrows(corridorsFC, parcelCoords);
-      const ghostBedding = generateGhostBedding(
-        layers.beddingPolygons || { type: 'FeatureCollection', features: [] },
-        parcelCoords
-      );
+      // Demo trust filter: pre-filter bedding input so ghost silhouettes
+      // also exclude zones near buildings / maintained areas.
+      const rawBeddingFC = layers.beddingPolygons || { type: 'FeatureCollection', features: [] };
+      const cleanBeddingFC = mapRef.current
+        ? filterBeddingNearBuildings(rawBeddingFC, mapRef.current, 120)
+        : rawBeddingFC;
+      const ghostBedding = generateGhostBedding(cleanBeddingFC, parcelCoords);
       const funnelsFC = layers.funnels || { type: 'FeatureCollection', features: [] };
       const ghostSaddles = generateGhostSaddles(funnelsFC, parcelCoords);
       const drawExtensions = generateDrawExtensions(funnelsFC, parcelCoords);
@@ -2972,7 +2980,8 @@ function DeerIntelContent() {
         favorabilitySource.setData(huntabilityData.favorabilitySurface);
       }
 
-      // v3.6.0: Update bedding probability source — also filter near buildings
+      // v3.6.0: Update bedding probability source
+      // Demo trust filter: also exclude probability dots near buildings.
       const beddingProbSource = map.getSource('tfp-bedding-probability') as mapboxgl.GeoJSONSource;
       if (beddingProbSource && huntabilityData.beddingProbabilityGeoJSON) {
         const mapInst = mapRef.current;
