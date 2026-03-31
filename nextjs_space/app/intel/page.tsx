@@ -6634,17 +6634,17 @@ function DeerIntelContent() {
       setParcelPickMode(false);
       setParcelPickLoading(false);
       
-      // ── 6. Start 1.5 s "clean parcel view" hold ──
-      // The gold boundary + fitted map stay on-screen alone; terrain overlays
-      // and the progress chip are suppressed until the hold expires.
-      if (parcelViewHoldTimerRef.current) clearTimeout(parcelViewHoldTimerRef.current);
-      setParcelViewHold(true);
-      parcelViewHoldRef.current = true; // sync immediately for painting effects
-      parcelViewHoldTimerRef.current = setTimeout(() => {
-        setParcelViewHold(false);
-        parcelViewHoldRef.current = false;
-        parcelViewHoldTimerRef.current = null;
-      }, 1500);
+      // ── 6. (DISABLED) Clean parcel view hold ──
+      // The 1.5 s hold is temporarily disabled for stability.
+      // To re-enable: uncomment the setParcelViewHold(true) block below.
+      // if (parcelViewHoldTimerRef.current) clearTimeout(parcelViewHoldTimerRef.current);
+      // setParcelViewHold(true);
+      // parcelViewHoldRef.current = true;
+      // parcelViewHoldTimerRef.current = setTimeout(() => {
+      //   setParcelViewHold(false);
+      //   parcelViewHoldRef.current = false;
+      //   parcelViewHoldTimerRef.current = null;
+      // }, 1500);
 
       // ── 7. Trigger full terrain analysis against the new parcel ──
       // runAnalysis reads coords from refs (activeLatRef / activeLngRef) which
