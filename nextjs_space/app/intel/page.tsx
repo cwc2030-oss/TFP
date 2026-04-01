@@ -1406,6 +1406,57 @@ function generateAdjacentParcelBoundary(parcelCoords: number[][]): GeoJSON.Featu
 // Empty GeoJSON for initializing sources
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// HERO PARCELS — curated demo properties that reliably showcase terrain intel
+// ═══════════════════════════════════════════════════════════════════════════
+interface HeroParcel {
+  slug: string;
+  label: string;
+  tagline: string;
+  lat: number;
+  lng: number;
+  acreage: string;
+  address: string;
+}
+const HERO_PARCELS: HeroParcel[] = [
+  {
+    slug: 'pineville',
+    label: 'Pineville Ridge',
+    tagline: 'Deep hollows, funnel corridors',
+    lat: 36.638590,
+    lng: -94.345581,
+    acreage: '118',
+    address: '761 Schlessman Rd, Pineville, MO 64831',
+  },
+  {
+    slug: 'pomme-de-terre',
+    label: 'Pomme de Terre',
+    tagline: 'Lake bluffs, bedding benches',
+    lat: 37.872200,
+    lng: -93.336400,
+    acreage: '80',
+    address: 'Pomme de Terre Lake, Hickory County, MO',
+  },
+  {
+    slug: 'cedar-creek',
+    label: 'Cedar Creek',
+    tagline: 'Creek bottoms, ridge saddles',
+    lat: 38.595700,
+    lng: -92.285300,
+    acreage: '95',
+    address: 'Cedar Creek, Callaway County, MO',
+  },
+  {
+    slug: 'mark-twain',
+    label: 'Mark Twain Hollow',
+    tagline: 'Steep terrain, tight funnels',
+    lat: 37.422000,
+    lng: -91.590000,
+    acreage: '100',
+    address: 'Mark Twain NF, Shannon County, MO',
+  },
+];
+
 function LoadingFallback() {
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
@@ -1447,13 +1498,23 @@ function DeerIntelContent() {
   const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features
   // Demo mode: ?demo=true → always load Pineville parcel, skip parcel lookup
   const demoMode = searchParams.get('demo') === 'true';
+  // Hero parcel: ?parcel=<slug> → load a curated demo parcel directly
+  const heroSlug = searchParams.get('parcel');
+  const heroParcel = heroSlug ? HERO_PARCELS.find(p => p.slug === heroSlug) : null;
+  // If hero parcel is specified, use its coords; if demo mode, use Pineville; else URL
+  const resolvedInitial = heroParcel
+    ? { lat: heroParcel.lat, lng: heroParcel.lng, address: heroParcel.address, acreage: heroParcel.acreage }
+    : demoMode
+    ? { lat: 36.638590, lng: -94.345581, address: '761 Schlessman Rd, Pineville, MO 64831', acreage: '118' }
+    : { lat: urlLat, lng: urlLng, address: urlAddress, acreage: urlAcreage };
 
   // Active coordinates — start from URL, updated by Exploration Mode clicks
-  // In demo mode, always force Pineville demo parcel regardless of URL coords
-  const [activeLat, setActiveLat] = useState(demoMode ? 36.638590 : urlLat);
-  const [activeLng, setActiveLng] = useState(demoMode ? -94.345581 : urlLng);
-  const [activeAddress, setActiveAddress] = useState(demoMode ? '761 Schlessman Rd, Pineville, MO 64831' : urlAddress);
-  const [activeAcreage, setActiveAcreage] = useState(demoMode ? '118' : urlAcreage);
+  const [activeLat, setActiveLat] = useState(resolvedInitial.lat);
+  const [activeLng, setActiveLng] = useState(resolvedInitial.lng);
+  const [activeAddress, setActiveAddress] = useState(resolvedInitial.address);
+  const [activeAcreage, setActiveAcreage] = useState(resolvedInitial.acreage);
+  // Track which hero parcel is currently active (for highlighting)
+  const [activeHeroSlug, setActiveHeroSlug] = useState<string | null>(heroSlug || (demoMode ? 'pineville' : null));
   
   // Derived aliases for backward compatibility throughout the file
   const lat = activeLat;
@@ -1618,7 +1679,7 @@ function DeerIntelContent() {
   const [parcelPickLoading, setParcelPickLoading] = useState(false); // fetching parcel boundary
 
   // ========== ONBOARDING / DEMO POLISH STATE ==========
-  const [showOnboarding, setShowOnboarding] = useState(demoMode);
+  const [showOnboarding, setShowOnboarding] = useState(demoMode && !heroSlug);
 
   // ========== ADJACENT PARCELS STATE ==========
   interface AdjacentParcelInfo {
@@ -2277,7 +2338,7 @@ function DeerIntelContent() {
       setProgressStep('Running terrain analysis...');
     } else {
       setProgress(10);
-      setProgressStep(demoMode ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
+      setProgressStep((demoMode || heroParcel) ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
     }
     lastProgressRef.current = { value: prefetchedParcel ? 20 : 10, time: Date.now() };
     
@@ -2307,19 +2368,22 @@ function DeerIntelContent() {
         // boundary is already painted on the map, camera already fitted.
         parcel = prefetchedParcel;
         console.error('[INTEL-DIAG] Using PREFETCHED parcel, skipping Regrid lookup');
-      } else if (demoMode) {
-        // Demo mode: skip Regrid lookup entirely, use cached Pineville parcel directly
-        console.error('[INTEL-DIAG] DEMO MODE — skipping parcel lookup, fetching cached Pineville parcel');
+      } else if (demoMode || heroParcel) {
+        // Demo / hero mode: skip Regrid lookup, use cached parcel directly
+        const dLat = activeLatRef.current;
+        const dLng = activeLngRef.current;
+        const dAcres = parseFloat(activeAcreageRef.current || '100');
+        console.error('[INTEL-DIAG] DEMO/HERO MODE — skipping parcel lookup, fetching cached parcel at', dLat, dLng);
         setProgress(15);
         setProgressStep('Loading demo parcel\u2026');
-        const demoFetchPromise = fetchParcelGeometry(36.638590, -94.345581);
+        const demoFetchPromise = fetchParcelGeometry(dLat, dLng);
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000));
         parcel = await Promise.race([demoFetchPromise, timeoutPromise]);
         if (!parcel) {
-          console.error('[INTEL-DIAG] DEMO MODE — cache miss, using synthetic Pineville parcel');
-          parcel = generateSyntheticParcel(36.638590, -94.345581, 118) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+          console.error('[INTEL-DIAG] DEMO/HERO MODE — cache miss, using synthetic parcel');
+          parcel = generateSyntheticParcel(dLat, dLng, dAcres) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
         }
-        console.error('[INTEL-DIAG] DEMO MODE — parcel ready:', parcel.geometry.type);
+        console.error('[INTEL-DIAG] DEMO/HERO MODE — parcel ready:', parcel.geometry.type);
       } else {
         // Normal mode: fetch parcel geometry from Regrid
         setProgress(15);
@@ -6676,6 +6740,60 @@ function DeerIntelContent() {
     }
   }, [parcelPickLoading, isLoading, clearAllOverlaySources, runAnalysis]);
 
+  // ═══ HERO PARCEL LOADER — one-click curated parcel switch ═══
+  const heroLoadingRef = useRef(false);
+  const loadHeroParcel = useCallback(async (hero: HeroParcel) => {
+    if (heroLoadingRef.current || isLoading) return;
+    heroLoadingRef.current = true;
+    setActiveHeroSlug(hero.slug);
+    
+    // Clear previous state
+    clearAllOverlaySources();
+    setParcelPolygon(null);
+    setTerrainFlowData(null);
+    setLayers(null);
+    setTieredCorridorData(null);
+    setRidgeSpineData(null);
+    setEdgeIntelData(null);
+    setAlignedStands([]);
+    setSelectedStand(null);
+    setHuntabilityData(null);
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+    if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
+    
+    // Update active coords (state + refs synchronously)
+    setActiveLat(hero.lat);
+    setActiveLng(hero.lng);
+    setActiveAddress(hero.address);
+    setActiveAcreage(hero.acreage);
+    activeLatRef.current = hero.lat;
+    activeLngRef.current = hero.lng;
+    activeAcreageRef.current = hero.acreage;
+    
+    // Reset camera fit flags
+    hasFitToParcel.current = false;
+    hasPostAnalysisFit.current = false;
+    
+    // Reset fallback state
+    demoFallbackAttempted.current = false;
+    setIsDemoFallbackActive(false);
+    prefetchedParcelRef.current = null;
+    
+    // Fly camera to the new location
+    const map = mapRef.current;
+    if (map) {
+      map.flyTo({ center: [hero.lng, hero.lat], zoom: 14, duration: 800 });
+    }
+    
+    // Trigger analysis
+    setIsLoading(true);
+    setProgress(5);
+    setProgressStep('Loading ' + hero.label + '\u2026');
+    heroLoadingRef.current = false;
+    setTimeout(() => runAnalysis(), 200);
+  }, [isLoading, clearAllOverlaySources, runAnalysis]);
+
   // Register map click handler for parcel pick mode
   useEffect(() => {
     const map = mapRef.current;
@@ -8090,16 +8208,19 @@ function DeerIntelContent() {
                 {geometryDebugMode ? 'Debug ON' : 'Debug'}
               </Button>
             )}
-            {/* Parcel Pick Mode — demo-friendly one-click parcel selection */}
+            {/* Parcel Pick Mode — de-emphasized in demo, available for exploration */}
             <Button
               size="sm"
               variant="ghost"
               className={`${parcelPickMode 
                 ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
-                : 'text-white/80 hover:text-white hover:bg-white/10'
+                : (demoMode || heroParcel)
+                  ? 'text-white/40 hover:text-white/70 hover:bg-white/5'
+                  : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
               onClick={() => {
                 setParcelPickMode(!parcelPickMode);
+                if (!parcelPickMode) setActiveHeroSlug(null);
               }}
               title="Pick a Parcel — click any parcel on the map to analyze it"
               disabled={parcelPickLoading}
@@ -8406,8 +8527,39 @@ function DeerIntelContent() {
             <div className="flex flex-col h-full overflow-y-auto">
 
               {/* ═══ ONBOARDING — Demo welcome (dismissible) ═══ */}
+              {/* ═══ HERO PARCEL SELECTOR — curated demo parcels ═══ */}
+              {(demoMode || heroParcel) && (
+                <div className="mx-3 mt-3 mb-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Demo Parcels</span>
+                    <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {HERO_PARCELS.map((hero) => {
+                      const isActive = activeHeroSlug === hero.slug;
+                      return (
+                        <button
+                          key={hero.slug}
+                          onClick={() => !isActive && loadHeroParcel(hero)}
+                          disabled={isLoading && !isActive}
+                          className={`text-left rounded-lg px-2.5 py-2 transition-all duration-200 border ${
+                            isActive
+                              ? 'bg-amber-500/15 border-amber-500/40 ring-1 ring-amber-500/20'
+                              : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07] hover:border-white/[0.12]'
+                          } ${isLoading && !isActive ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          <p className={`text-[11px] font-semibold leading-tight ${isActive ? 'text-amber-300' : 'text-white/80'}`}>
+                            {hero.label}
+                          </p>
+                          <p className="text-[9px] text-stone-500 leading-tight mt-0.5">{hero.tagline}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {showOnboarding && (
-                <div className="mx-3 mt-3 mb-1 bg-gradient-to-br from-amber-500/[0.12] to-orange-500/[0.06] border border-amber-500/20 rounded-xl p-3 relative">
+                <div className="mx-3 mt-2 mb-1 bg-gradient-to-br from-amber-500/[0.12] to-orange-500/[0.06] border border-amber-500/20 rounded-xl p-3 relative">
                   <button
                     onClick={() => setShowOnboarding(false)}
                     className="absolute top-2 right-2 text-white/40 hover:text-white/70 transition-colors"
@@ -8420,10 +8572,7 @@ function DeerIntelContent() {
                     <div>
                       <p className="text-[11px] font-semibold text-amber-300">Welcome to Deer Intel</p>
                       <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
-                        {"You're viewing a live terrain analysis of a real Missouri parcel. The map shows deer travel corridors, stand placements, and terrain features — all computed from elevation data."}
-                      </p>
-                      <p className="text-[10px] text-stone-500 leading-relaxed mt-1.5">
-                        Use the panels to explore layers, change seasons, and adjust wind direction. When {"you're"} ready, analyze your own property.
+                        {"You're viewing a live terrain analysis of a real Missouri parcel. Switch between demo parcels above to see different terrain features — funnels, ridges, bedding areas, and stand placements."}
                       </p>
                     </div>
                   </div>
@@ -10024,7 +10173,7 @@ function DeerIntelContent() {
               </div>
             </div>
             <h3 className="text-white font-semibold text-lg mb-1 tracking-tight">
-              {demoMode ? 'Loading Demo Parcel' : isDemoFallbackActive ? 'Loading Verified Demo Parcel' : 'Refining Terrain Intelligence'}
+              {(demoMode || heroParcel) ? 'Loading Demo Parcel' : isDemoFallbackActive ? 'Loading Verified Demo Parcel' : 'Refining Terrain Intelligence'}
             </h3>
             <p className="text-stone-400 text-[11px] mb-4 font-mono tracking-wide">
               {progressStep}
