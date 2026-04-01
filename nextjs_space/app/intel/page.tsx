@@ -531,6 +531,144 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
   return { point: closestPoint, segment: closestSegment, index: closestIndex };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PARCEL-SAFE STAND ENFORCEMENT (v4-fix17)
+// All Top-3 stands must be strictly inside the parcel with an interior buffer.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Interior safety margin — stands must be at least this far from parcel edge.
+// 15m ≈ ~50ft, keeps stands visually inside even at high zoom levels.
+const PARCEL_INSET_METERS = 15;
+
+// Maximum distance (meters) from parcel boundary for an off-parcel candidate
+// to be eligible for snap-inward repair. Beyond this → discard.
+const MAX_SNAP_DISTANCE_METERS = 80;
+
+/**
+ * Move a point toward a target by `meters` distance (approximate for small distances).
+ * Returns a new [lng, lat] coordinate.
+ */
+function movePointToward(
+  from: [number, number],
+  toward: [number, number],
+  meters: number
+): [number, number] {
+  const dist = distanceMeters(from, toward);
+  if (dist < 0.1) return toward; // already there
+  // At ~37° latitude, 1° lat ≈ 111km, 1° lng ≈ 88km
+  const ratio = meters / dist;
+  return [
+    from[0] + (toward[0] - from[0]) * ratio,
+    from[1] + (toward[1] - from[1]) * ratio,
+  ];
+}
+
+/**
+ * Get the polygon ring(s) from a parcel geometry for distance checks.
+ * Returns an array of outer rings (one for Polygon, multiple for MultiPolygon).
+ */
+function getParcelRings(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): number[][][] {
+  if (geometry.type === 'Polygon') {
+    return [geometry.coordinates[0]]; // outer ring only
+  } else {
+    return geometry.coordinates.map(poly => poly[0]); // outer ring of each polygon
+  }
+}
+
+/**
+ * Compute the signed distance of a point from the parcel boundary:
+ *  - positive = inside parcel, value is distance to nearest edge
+ *  - negative = outside parcel, value is distance to nearest edge (negated)
+ * Also returns the closest boundary point for snap operations.
+ */
+function signedDistanceToParcel(
+  point: [number, number],
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): { distance: number; closestBoundaryPoint: [number, number] } {
+  const inside = pointInParcelGeometry(point, geometry);
+  const rings = getParcelRings(geometry);
+  
+  let minDist = Infinity;
+  let bestBoundaryPt: [number, number] = point;
+  
+  for (const ring of rings) {
+    const { point: cp } = closestPointOnPolygon(point, ring);
+    const d = distanceMeters(point, cp);
+    if (d < minDist) {
+      minDist = d;
+      bestBoundaryPt = cp;
+    }
+  }
+  
+  return {
+    distance: inside ? minDist : -minDist,
+    closestBoundaryPoint: bestBoundaryPt,
+  };
+}
+
+/**
+ * Snap a stand coordinate to be safely inside the parcel with an inset buffer.
+ * 
+ * Returns:
+ *  - { snapped: true, coords } if the point was moved inside
+ *  - { snapped: false, coords: original } if already inside with buffer
+ *  - null if the point is too far outside to snap
+ */
+function snapToParcelInterior(
+  point: [number, number],
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
+  insetMeters: number = PARCEL_INSET_METERS
+): { snapped: boolean; coords: [number, number] } | null {
+  const { distance, closestBoundaryPoint } = signedDistanceToParcel(point, geometry);
+  
+  // Already safely inside with buffer — no action needed
+  if (distance >= insetMeters) {
+    return { snapped: false, coords: point };
+  }
+  
+  // Outside but within snap range — repair
+  if (distance < insetMeters && distance > -MAX_SNAP_DISTANCE_METERS) {
+    // Find the centroid of the polygon to determine "inward" direction
+    const rings = getParcelRings(geometry);
+    let cx = 0, cy = 0, count = 0;
+    for (const ring of rings) {
+      for (const coord of ring) {
+        cx += coord[0]; cy += coord[1]; count++;
+      }
+    }
+    cx /= count; cy /= count;
+    const centroid: [number, number] = [cx, cy];
+    
+    // Strategy: move the closest boundary point toward centroid by insetMeters
+    const insetPoint = movePointToward(closestBoundaryPoint, centroid, insetMeters + 2);
+    
+    // Verify the inset point is actually inside
+    if (pointInParcelGeometry(insetPoint, geometry)) {
+      return { snapped: true, coords: insetPoint };
+    }
+    
+    // Fallback: move original point toward centroid until inside with buffer
+    // Iterative approach for complex geometries
+    for (let step = 1; step <= 10; step++) {
+      const candidate = movePointToward(point, centroid, insetMeters * step);
+      const candidateDist = signedDistanceToParcel(candidate, geometry);
+      if (candidateDist.distance >= insetMeters) {
+        return { snapped: true, coords: candidate };
+      }
+    }
+    
+    // Last resort: use centroid if nothing else works
+    if (pointInParcelGeometry(centroid, geometry)) {
+      return { snapped: true, coords: centroid };
+    }
+    
+    return null; // Can't snap — discard
+  }
+  
+  // Too far outside to snap
+  return null;
+}
+
 // ========== STAND RESILIENCE SCORING (v3.8.6) ==========
 // Pure scoring dimension — does NOT influence stand placement or ordering.
 // Measures how robust a stand is across variable conditions.
@@ -1968,30 +2106,56 @@ function DeerIntelContent() {
       };
     }).sort((a, b) => b.alignment.score - a.alignment.score);
 
-    // v4-fix16: PARCEL BOUNDARY CONSTRAINT — only recommend stands inside parcel
+    // v4-fix17: PARCEL-SAFE STAND ENFORCEMENT — all Top-3 stands must be strictly
+    // inside the parcel with an interior safety buffer (PARCEL_INSET_METERS).
+    // 
+    // Logic order:
+    //   1. Check each candidate against buffered parcel boundary
+    //   2. Inside with buffer → accept as-is
+    //   3. Inside but too close to edge, or outside within MAX_SNAP_DISTANCE_METERS
+    //      → snap inward to nearest valid interior point
+    //   4. Too far outside → discard, promote next candidate
+    //
     // Off-parcel terrain still influences analysis (corridors, pressure, movement),
     // but final stand pins must be on the user's property.
     let aligned: AlignedStand[];
     if (parcelPolygon?.geometry) {
       const geom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
       aligned = [];
-      const rejected: { rank: number; name: string; coords: [number, number] }[] = [];
+      const rejected: { rank: number; name: string; coords: [number, number]; reason: string }[] = [];
+      const snapped: { rank: number; name: string; from: [number, number]; to: [number, number] }[] = [];
       
       for (const s of allScored) {
-        if (pointInParcelGeometry(s.coords, geom)) {
-          aligned.push(s);
+        const snapResult = snapToParcelInterior(s.coords, geom);
+        
+        if (snapResult === null) {
+          // Too far outside — discard
+          rejected.push({ rank: s.rank, name: s.name, coords: s.coords, reason: 'too far outside' });
+          continue;
+        }
+        
+        if (snapResult.snapped) {
+          // Coordinate was repaired — update the stand's coords
+          snapped.push({ rank: s.rank, name: s.name, from: s.coords, to: snapResult.coords });
+          aligned.push({ ...s, coords: snapResult.coords });
         } else {
-          rejected.push({ rank: s.rank, name: s.name, coords: s.coords });
+          // Already safely inside with buffer
+          aligned.push(s);
         }
       }
 
       // Diagnostic logging
-      if (rejected.length > 0) {
-        rejected.forEach(r => {
-          console.error(`[STAND-DIAG] rejecting off-parcel stand candidate id=${r.rank} name="${r.name}" coords=[${r.coords[0].toFixed(6)}, ${r.coords[1].toFixed(6)}]`);
+      if (snapped.length > 0) {
+        snapped.forEach(r => {
+          console.error(`[STAND-DIAG] snapped stand id=${r.rank} "${r.name}" from [${r.from[0].toFixed(6)}, ${r.from[1].toFixed(6)}] → [${r.to[0].toFixed(6)}, ${r.to[1].toFixed(6)}]`);
         });
       }
-      console.error(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (rejected ${rejected.length} off-parcel)`);
+      if (rejected.length > 0) {
+        rejected.forEach(r => {
+          console.error(`[STAND-DIAG] rejecting off-parcel stand candidate id=${r.rank} name="${r.name}" coords=[${r.coords[0].toFixed(6)}, ${r.coords[1].toFixed(6)}] reason=${r.reason}`);
+        });
+      }
+      console.error(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
     } else {
       // No parcel geometry available — use all stands (fallback)
       aligned = allScored;

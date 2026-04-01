@@ -1,12 +1,12 @@
 generator client {
-  provider      = "prisma-client-js"
-  output        = "/home/ubuntu/terra_firma_mapping/nextjs_space/node_modules/.prisma/client"
-  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/terra_firma_mapping/nextjs_space/node_modules/.prisma/client"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
 }
 
 model User {
