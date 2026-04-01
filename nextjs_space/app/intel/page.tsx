@@ -4474,6 +4474,7 @@ function DeerIntelContent() {
         if (!map.getSource('tfp-funnels-lines')) {
           map.addSource('tfp-funnels-lines', { type: 'geojson', data: EMPTY_FC });
           // Draws layer (blue) - Physical terrain, SHOW in Terrain Work Mode
+          // v3.9.1: dasharray for extremely subtle animation (structural pathways)
           map.addLayer({
             id: 'tfp-funnels-lines-draws',
             type: 'line',
@@ -4483,6 +4484,7 @@ function DeerIntelContent() {
             paint: {
               'line-color': LAYER_COLORS.funnelDraw,
               'line-width': 3,
+              'line-dasharray': [10, 2],
             },
           });
           // Corridors layer: HIGH + MEDIUM confidence = SOLID lines
@@ -4603,7 +4605,7 @@ function DeerIntelContent() {
               'line-blur': 3,
             },
           });
-          // Core line: zoom-responsive width
+          // Core line: zoom-responsive width (v3.9.1: dasharray for subtle animation)
           map.addLayer({
             id: 'tfp-corridors-primary',
             type: 'line',
@@ -4613,6 +4615,7 @@ function DeerIntelContent() {
               'line-color': LAYER_COLORS.corridorPrimary,
               'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 14, 3.5, 17, 5],
               'line-opacity': 0.78,
+              'line-dasharray': [8, 3],
             },
           });
         }
@@ -4629,6 +4632,7 @@ function DeerIntelContent() {
               'line-color': LAYER_COLORS.corridorPossible,
               'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 14, 2.5, 17, 3.5],
               'line-opacity': 0.42,
+              'line-dasharray': [6, 3],
             },
           });
         }
