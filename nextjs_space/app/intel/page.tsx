@@ -7391,6 +7391,9 @@ function DeerIntelContent() {
   // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions.
   // Unified visibility gate: global show/hide × solo-mode × selected-stand.
   // v4-fix12c: Opacity on el (safe), scale on scaleWrapper (safe). Never touch el.style.transform.
+  // v4-fix19: Visibility toggle ONLY controls opacity. It NEVER touches wrapper.style.transform
+  // during show, preventing it from overwriting the frozen scale during camera motion.
+  // Scale changes are exclusively owned by the settle handler.
   useEffect(() => {
     const globalShow = visibility.stands;
     const isMoving = cameraMovingRef.current;
@@ -7415,20 +7418,21 @@ function DeerIntelContent() {
         return;
       }
       if (isMoving) {
-        // Camera in motion — snap immediately, no transitions
+        // Camera in motion — snap opacity immediately, do NOT touch wrapper transform
         el.style.transition = '';
-        if (wrapper) wrapper.style.transition = '';
         el.style.opacity = show ? '1' : '0';
         el.style.pointerEvents = show ? 'auto' : 'none';
       } else {
-        // Camera settled — staggered cinematic transition
+        // Camera settled — staggered cinematic transition (opacity only for show)
         const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
         el.style.transition = `opacity 400ms ease ${delay}ms`;
         el.style.opacity = show ? '1' : '0';
         el.style.pointerEvents = show ? 'auto' : 'none';
-        if (wrapper) {
+        // v4-fix19: Only apply scale-down on HIDE. On show, leave wrapper transform
+        // untouched — the settle handler owns scale state.
+        if (!show && wrapper) {
           wrapper.style.transition = `transform 400ms ease ${delay}ms`;
-          wrapper.style.transform = show ? 'scale(1)' : 'scale(0.85)';
+          wrapper.style.transform = 'scale(0.85)';
         }
         const totalTime = 400 + delay + 50;
         setTimeout(() => {
@@ -7679,6 +7683,7 @@ function DeerIntelContent() {
           width: ${markerSize}px;
           height: ${markerSize}px;
           transition: transform 0.2s ease, filter 0.2s ease;
+          transform-origin: 50% ${DISC_CENTER_PCT}%;
           pointer-events: none;
         ">${svgHTML}</div>
         <div class="stand-badge" style="
@@ -7887,19 +7892,25 @@ function DeerIntelContent() {
     }, 80);
   };
 
-  // ========== v4-fix18: FRAME-SYNCED MARKER SCALING (replaces v4-fix12c rAF approach) ==========
+  // ========== v4-fix19: ZERO-DRIFT MARKER ANCHORING ==========
   // ARCHITECTURE: Mapbox owns el.style.transform (translate positioning).
   // We own scaleWrapper.style.transform (visual scaling). They never conflict.
   //
-  // v4-fix18 FIX: Previous rAF-batched scaling caused 1-frame lag between Mapbox's
-  // translate update and our scale update. For #2/#3 (smaller baseSizes, larger relative
-  // scale jumps), this desync manifested as visible positional drift during zoom/pan.
-  // Fix: apply scaling SYNCHRONOUSLY in the 'move' handler so it executes in the same
-  // paint frame as Mapbox's own marker repositioning. Removed will-change:transform
-  // from scaleWrapper to prevent GPU-layer compositing desync.
+  // v4-fix19: CRITICAL INSIGHT — Any CSS scale change on the wrapper during camera
+  // motion can desync with Mapbox's translate updates, causing positional drift.
+  // Even synchronous scaling in the 'move' handler (v4-fix18) drifts because
+  // Mapbox's internal Marker._update() may fire its translate in a different
+  // microtask order within the same rAF callback.
   //
-  // Phase 1 — During camera motion: SYNC scale wrapper transform (no rAF).
-  // Phase 2 — After camera fully settles: ONE reference-reset pass, then stop.
+  // SOLUTION: Do NOT scale markers during camera motion at all. Markers maintain
+  // their current pixel size while zooming (like default Mapbox markers). After
+  // camera fully settles, smoothly transition to the zoom-appropriate scale.
+  // This guarantees zero positional drift because the wrapper's transform is
+  // FROZEN during all camera motion — only Mapbox's translate changes.
+  //
+  // Phase 1 — During camera motion: FREEZE all wrapper transforms. Only strip
+  //           lingering transitions on first move frame.
+  // Phase 2 — After camera fully settles: Smooth transition to new scale.
   const cameraMovingRef = useRef(false);
 
   useEffect(() => {
@@ -7907,59 +7918,66 @@ function DeerIntelContent() {
     if (!map || !mapReady) return;
 
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
-    // v4-fix18: Throttle scale updates to ~60fps via timestamp check (no rAF)
-    let lastScaleTs = 0;
 
-    // Phase 1: Scale wrapper SYNCHRONOUSLY — same call-stack as Mapbox's translate update
+    // Phase 1: FREEZE — do not touch any marker transforms during motion.
+    // Only strip transitions on first move frame to prevent stale animations.
     const onCameraMove = () => {
       if (!cameraMovingRef.current) {
         cameraMovingRef.current = true;
-        // Strip lingering transitions from wrappers on first move frame
+        // Strip ALL lingering transitions so markers don't animate during motion.
+        // Includes .stand-visual to prevent hover transitions from shifting the disc.
         markersRef.current.forEach((marker) => {
           const el = marker.getElement();
           const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+          const visual = el.querySelector('.stand-visual') as HTMLElement;
           if (el.style.transition) el.style.transition = '';
           if (wrapper?.style.transition) wrapper.style.transition = '';
+          if (visual) {
+            visual.style.transition = 'none';
+            visual.style.transform = 'scale(1)'; // Reset any hover scale
+            visual.style.filter = 'none';
+          }
         });
       }
       if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
-
-      // v4-fix18: Throttle to ~60fps (16ms) to avoid excessive style recalcs,
-      // but still synchronous with Mapbox's paint frame (no rAF deferral).
-      const now = performance.now();
-      if (now - lastScaleTs < 16) return;
-      lastScaleTs = now;
-
-      const zoom = map.getZoom();
-      const currentScale = getMarkerScale(zoom);
-
-      // v4-fix12c: ONLY touch scaleWrapper.style.transform. Never el.style.transform.
-      // v4-fix15: Skip unrevealed markers — they stay hidden at scale(0.85) until reveal.
-      markersRef.current.forEach((marker) => {
-        const el = marker.getElement();
-        if (el.dataset.revealed !== '1') return; // Not yet visible — skip
-        const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-        if (!wrapper) return;
-        const refScale = parseFloat(el.dataset.refScale || '1');
-        const relativeScale = currentScale / refScale;
-        wrapper.style.transform = `scale(${relativeScale.toFixed(4)})`;
-      });
+      // v4-fix19: NO scale updates here. Wrapper transform stays frozen.
     };
 
-    // Phase 2: Camera settle — reset CSS scale reference point (NO SVG rebuilds).
+    // Phase 2: Camera settle — smoothly transition to zoom-appropriate scale.
     const settleMarkers = () => {
       cameraMovingRef.current = false;
       const zoom = map.getZoom();
-      const scale = getMarkerScale(zoom);
+      const newScale = getMarkerScale(zoom);
 
-      // Simply update refScale and reset wrapper to scale(1).
-      // The visual is already at the right apparent size from Phase 1 CSS scaling.
       markersRef.current.forEach((marker) => {
         const el = marker.getElement();
         const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-        // Only reset scale for already-revealed markers; unrevealed ones keep scale(0.85)
-        if (wrapper && el.dataset.revealed === '1') wrapper.style.transform = 'scale(1)';
-        el.dataset.refScale = String(scale);
+        if (!wrapper || el.dataset.revealed !== '1') return;
+
+        // v4-fix19: Restore hover transitions on .stand-visual after motion freeze
+        const visual = el.querySelector('.stand-visual') as HTMLElement;
+        if (visual) {
+          visual.style.transition = 'transform 0.2s ease, filter 0.2s ease';
+        }
+
+        const refScale = parseFloat(el.dataset.refScale || '1');
+        const relativeScale = newScale / refScale;
+
+        // If scale actually changed, animate the transition
+        if (Math.abs(relativeScale - 1) > 0.01) {
+          wrapper.style.transition = 'transform 250ms ease-out';
+          wrapper.style.transform = `scale(${relativeScale.toFixed(4)})`;
+          // After transition completes, reset to scale(1) and update refScale
+          setTimeout(() => {
+            wrapper.style.transition = '';
+            wrapper.style.transform = 'scale(1)';
+            el.dataset.refScale = String(newScale);
+          }, 280);
+        } else {
+          // Negligible change — just reset
+          wrapper.style.transform = 'scale(1)';
+          el.dataset.refScale = String(newScale);
+        }
       });
 
       lastSVGRebuildZoom.current = zoom;
@@ -7970,7 +7988,7 @@ function DeerIntelContent() {
 
     const onCameraEnd = () => {
       if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(settleMarkers, 200);
+      settleTimer = setTimeout(settleMarkers, 150);
     };
 
     map.on('move', onCameraMove);
