@@ -4098,15 +4098,15 @@ function DeerIntelContent() {
     try {
       const fp = getFocusPaintParams(pressureFocus);
       if (map.getLayer('tfp-pressure-heatmap')) {
-        // v1.4: Weight curve with hard 0.35 cutoff — focus mode shapes mid-range
+        // v1.5: Moderate weight curve — 0.20 dead zone, focus mode shapes mid-range
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
           'interpolate', ['linear'],
           ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
           0.00, fp.weightCurve[0],
-          0.35, fp.weightCurve[1],
-          0.50, fp.weightCurve[2],
-          0.65, fp.weightCurve[3],
-          0.80, fp.weightCurve[4],
+          0.20, fp.weightCurve[1],
+          0.35, fp.weightCurve[2],
+          0.55, fp.weightCurve[3],
+          0.75, fp.weightCurve[4],
           1.00, fp.weightCurve[5],
         ]);
         // Intensity: scaled per focus
@@ -4115,12 +4115,12 @@ function DeerIntelContent() {
           10, 0.7 * fp.intensityMult,
           15, 1.3 * fp.intensityMult,
         ]);
-        // v1.4: Smallest base radius — offset per focus (tighter in focused, wider in broad)
+        // v1.5: Moderate base radius — offset per focus
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
-          10, Math.max(6, 9 + fp.radiusOffset),
-          15, Math.max(9, 14 + fp.radiusOffset),
-          18, Math.max(13, 20 + fp.radiusOffset),
+          10, Math.max(7, 11 + fp.radiusOffset),
+          15, Math.max(11, 16 + fp.radiusOffset),
+          18, Math.max(16, 23 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
         const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
@@ -4797,22 +4797,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-pressure-heatmap',
             paint: {
-              // v1.4: Hard haze cutoff at 0.35 — only high-confidence terrain shows
+              // v1.5: Moderate weight curve — shows broader movement story
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
                 0.00, 0.0,
-                0.35, 0.0,
-                0.50, 0.25,
-                0.65, 0.6,
-                0.80, 0.9,
+                0.20, 0.0,
+                0.35, 0.15,
+                0.55, 0.5,
+                0.75, 0.85,
                 1.00, 1.0,
               ],
-              // Intensity: boosted for contrast with smaller radius
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.8,
-                15, 1.4,
+                10, 0.75,
+                15, 1.3,
               ],
               // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
@@ -4827,14 +4826,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.80)',    // red-700
                 1.00, 'rgba(153,27,27,0.85)',    // red-800 (hot)
               ],
-              // v1.4: Smallest practical radius — forces shapes to follow point placement
+              // v1.5: Moderate radius — broader than v1.4 but tighter than v1.2
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 9,
-                15, 14,
-                18, 20,
+                10, 11,
+                15, 16,
+                18, 23,
               ],
-              'heatmap-opacity': 0.78,
+              'heatmap-opacity': 0.75,
             },
           });
         }
@@ -4848,21 +4847,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-delta',
             paint: {
-              // v1.4: Hard haze cutoff — only strong delta values contribute
+              // v1.5: Moderate weight — broader movement delta expression
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'delta'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.35, 0.0,
-                0.50, 0.20,
-                0.65, 0.55,
-                0.80, 0.85,
+                0.20, 0.0,
+                0.40, 0.15,
+                0.55, 0.45,
+                0.75, 0.8,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.9,
-                15, 1.5,
+                10, 0.8,
+                15, 1.4,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4876,14 +4875,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.80)',   // red-700
                 1.00, 'rgba(153,27,27,0.85)',   // deep red
               ],
-              // v1.4: Tight radius — shapes track terrain point placement
+              // v1.5: Moderate radius — terrain-shaped but broader coverage
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 8,
-                15, 13,
-                18, 18,
+                10, 10,
+                15, 15,
+                18, 21,
               ],
-              'heatmap-opacity': 0.58,
+              'heatmap-opacity': 0.52,
             },
             layout: {
               visibility: 'visible',
@@ -4900,21 +4899,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-post',
             paint: {
-              // v1.4: Hard cutoff — only meaningful post-pressure movement shows
+              // v1.5: Moderate weight — broader post-pressure movement expression
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'movement_post'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.35, 0.0,
-                0.50, 0.20,
-                0.65, 0.55,
-                0.80, 0.85,
+                0.20, 0.0,
+                0.40, 0.15,
+                0.55, 0.45,
+                0.75, 0.8,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.9,
-                15, 1.5,
+                10, 0.8,
+                15, 1.4,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4928,14 +4927,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(22,163,74,0.80)',    // green-600
                 1.00, 'rgba(21,128,61,0.85)',    // green-700 (strong)
               ],
-              // v1.4: Tight radius — terrain-shaped movement corridors
+              // v1.5: Moderate radius — terrain-shaped but broader
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 8,
-                15, 13,
-                18, 18,
+                10, 10,
+                15, 15,
+                18, 21,
               ],
-              'heatmap-opacity': 0.58,
+              'heatmap-opacity': 0.52,
             },
             layout: {
               visibility: 'visible',
@@ -4952,21 +4951,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-refuge-zones',
             paint: {
-              // v1.4: Hard cutoff — terrain-shaped refuge zones
+              // v1.5: Moderate weight — broader refuge expression
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'refuge_score'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.35, 0.0,
-                0.50, 0.20,
-                0.65, 0.55,
-                0.80, 0.85,
+                0.20, 0.0,
+                0.40, 0.15,
+                0.55, 0.45,
+                0.75, 0.8,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.9,
-                15, 1.5,
+                10, 0.8,
+                15, 1.4,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4980,14 +4979,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(37,99,235,0.80)',     // blue-600
                 1.00, 'rgba(29,78,216,0.85)',     // blue-700 (strong refuge)
               ],
-              // v1.4: Tight radius — terrain-shaped refuge pockets
+              // v1.5: Moderate radius — broader refuge expression
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 8,
-                15, 13,
-                18, 18,
+                10, 10,
+                15, 15,
+                18, 21,
               ],
-              'heatmap-opacity': 0.62,
+              'heatmap-opacity': 0.55,
             },
             layout: {
               visibility: 'visible',

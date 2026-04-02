@@ -152,12 +152,12 @@ const WEAK_PARCEL_CONFIG = {
 };
 
 // ============ INFLUENCE RADII (meters) ============
-// v1.4 — pulled radii back toward originals to break circular "golf ball" shapes.
-// v1.2 widened these but combined with cubic falloff the result was overly round blobs.
-// Tighter radii + steeper falloff → shapes defined by terrain feature placement.
-const BENCH_INFLUENCE_M  = 85;   // v1.2 was 110, orig 80 — tight food/bed zone
-const SADDLE_INFLUENCE_M = 115;  // v1.2 was 150, orig 120 — focused funnel reach
-const RIDGE_INFLUENCE_M  = 65;   // v1.2 was 85, orig 60 — close ridge influence
+// v1.5 — moderate radii: midpoint between v1.2 (too broad) and v1.4 (too tight).
+// Enough overlap to read as connected movement system, but not so wide that
+// individual features bloom into circular blobs.
+const BENCH_INFLUENCE_M  = 95;   // v1.4=85, v1.2=110 — moderate food/bed reach
+const SADDLE_INFLUENCE_M = 130;  // v1.4=115, v1.2=150 — funnels bridge terrain gaps
+const RIDGE_INFLUENCE_M  = 75;   // v1.4=65, v1.2=85 — ridges connect across draws
 
 // ============ SEASON PROFILES (v4.0 — Seasonal Terrain Weighting) ============
 // Each season adjusts:
@@ -877,12 +877,12 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // v1.4 — Gaussian smoothing REMOVED entirely.
-  // v1.3 used single pass, v1.2 used double pass — both circularize angular
-  // terrain features into "golf ball" shapes.  The quartic proximity falloff
-  // already produces smooth gradients; additional isotropic blur only erases
-  // the directional structure that ridges and draws create.
-  // applyGaussianSmoothing(grid);  // DISABLED — preserve raw terrain geometry
+  // v1.5 — light single-pass smoothing restored for natural transitions.
+  // v1.4 removed smoothing entirely which left shapes too sparse/disconnected.
+  // v1.2's double pass was too much.  Single pass with the existing 3×3 kernel
+  // (sigma≈0.85, center=0.25) provides just enough blending to connect
+  // neighbouring cells without erasing directional terrain structure.
+  applyGaussianSmoothing(grid);
 
   // Normalize pressure to 0-1 range
   let maxPressure = 0;
@@ -939,12 +939,10 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  // v1.4 — raised floor from 0.60 → 0.68 for terrain-shaped output.
-  // Without Gaussian smoothing and with quartic falloff, pressure values
-  // are more concentrated near feature cores.  0.68 culls the soft outer
-  // halo that was rounding shapes into golf balls, leaving only the
-  // high-confidence terrain-following skeleton.
-  const HARD_PRESSURE_FLOOR = 0.68;
+  // v1.5 — moderate floor between v1.2 (0.55) and v1.4 (0.68).
+  // 0.58 lets enough cells survive to tell a broad movement story across
+  // the parcel while still filtering the weakest background haze.
+  const HARD_PRESSURE_FLOOR = 0.58;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
@@ -1059,7 +1057,7 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
       const delta = Math.min(1, Math.max(0, 0.7 * cell.pressure));
-      if (delta < 0.20) continue; // v1.4: raised from 0.15 — tighter core shapes
+      if (delta < 0.10) continue; // v1.5: lowered from 0.20 — broader movement story
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       deltaFeatures.push({
@@ -1088,7 +1086,7 @@ export function buildTerrainRaster(input: RasterInput): {
         debugSamples++;
       }
 
-      if (post < 0.15) continue; // v1.4: raised from 0.10 — sharper movement shapes
+      if (post < 0.06) continue; // v1.5: lowered from 0.15 — more movement lanes visible
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       postFeatures.push({
