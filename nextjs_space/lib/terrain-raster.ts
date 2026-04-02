@@ -152,11 +152,12 @@ const WEAK_PARCEL_CONFIG = {
 };
 
 // ============ INFLUENCE RADII (meters) ============
-// v1.2 — widened base radii so neighbouring features overlap and the heat
-//         surface reads as connected movement pressure rather than isolated kernels.
-const BENCH_INFLUENCE_M  = 110;  // was 80 — broader food/bed zone glow
-const SADDLE_INFLUENCE_M = 150;  // was 120 — saddles cast wider funnels
-const RIDGE_INFLUENCE_M  = 85;   // was 60 — ridge influence bridges gaps
+// v1.4 — pulled radii back toward originals to break circular "golf ball" shapes.
+// v1.2 widened these but combined with cubic falloff the result was overly round blobs.
+// Tighter radii + steeper falloff → shapes defined by terrain feature placement.
+const BENCH_INFLUENCE_M  = 85;   // v1.2 was 110, orig 80 — tight food/bed zone
+const SADDLE_INFLUENCE_M = 115;  // v1.2 was 150, orig 120 — focused funnel reach
+const RIDGE_INFLUENCE_M  = 65;   // v1.2 was 85, orig 60 — close ridge influence
 
 // ============ SEASON PROFILES (v4.0 — Seasonal Terrain Weighting) ============
 // Each season adjusts:
@@ -445,14 +446,17 @@ export function generateRasterGrid(parcelCoords: number[][]): RasterGrid | null 
 /**
  * Compute proximity score: 1.0 at source, decaying to 0 at radius.
  * v1.2 — changed from quadratic (1-t²) to cubic (1-t³) falloff.
- * Cubic holds higher values longer before dropping off, which creates
- * smoother overlap between neighbouring features and reduces the
- * "isolated kernel" appearance on the heat map.
+ * v1.4: Quartic falloff (1-t²)² — sharper than cubic (1-t³).
+ * Cubic was too gentle and held high values far from feature centers,
+ * creating uniform circular blobs ("golf ball" effect).
+ * Quartic drops off faster at distance while still smooth at center,
+ * so shapes are defined by feature placement not by falloff halo.
  */
 function proximityScore(dist: number, radius: number): number {
   if (dist >= radius) return 0;
   const t = dist / radius;
-  return Math.max(0, 1 - t * t * t);  // cubic falloff — gentler than quadratic
+  const u = 1 - t * t;
+  return Math.max(0, u * u);  // quartic (1-t²)² — sharper edges than cubic
 }
 
 /**
@@ -873,10 +877,12 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // v1.3 — single pass of Gaussian smoothing (1-cell/15m blur).
-  // v1.2 used double pass which over-smoothed terrain structure into amoeba blobs.
-  // Single pass preserves corridor-driven shape while still blending cell boundaries.
-  applyGaussianSmoothing(grid);
+  // v1.4 — Gaussian smoothing REMOVED entirely.
+  // v1.3 used single pass, v1.2 used double pass — both circularize angular
+  // terrain features into "golf ball" shapes.  The quartic proximity falloff
+  // already produces smooth gradients; additional isotropic blur only erases
+  // the directional structure that ridges and draws create.
+  // applyGaussianSmoothing(grid);  // DISABLED — preserve raw terrain geometry
 
   // Normalize pressure to 0-1 range
   let maxPressure = 0;
@@ -933,11 +939,12 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  // v1.3 — raised floor from 0.55 → 0.60 for tighter terrain-driven shapes.
-  // v1.2's 0.55 + double smoothing created overly broad amoeba blobs.
-  // With single-pass smoothing, 0.60 lets ~20-30% of cells survive while
-  // preserving corridor/funnel structure as distinct visual lanes.
-  const HARD_PRESSURE_FLOOR = 0.60;
+  // v1.4 — raised floor from 0.60 → 0.68 for terrain-shaped output.
+  // Without Gaussian smoothing and with quartic falloff, pressure values
+  // are more concentrated near feature cores.  0.68 culls the soft outer
+  // halo that was rounding shapes into golf balls, leaving only the
+  // high-confidence terrain-following skeleton.
+  const HARD_PRESSURE_FLOOR = 0.68;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
@@ -1052,7 +1059,7 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
       const delta = Math.min(1, Math.max(0, 0.7 * cell.pressure));
-      if (delta < 0.15) continue; // v1.3: raised from 0.05 to suppress weak haze
+      if (delta < 0.20) continue; // v1.4: raised from 0.15 — tighter core shapes
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       deltaFeatures.push({
@@ -1081,7 +1088,7 @@ export function buildTerrainRaster(input: RasterInput): {
         debugSamples++;
       }
 
-      if (post < 0.10) continue; // v1.3: raised from 0.02 to suppress weak haze
+      if (post < 0.15) continue; // v1.4: raised from 0.10 — sharper movement shapes
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       postFeatures.push({
