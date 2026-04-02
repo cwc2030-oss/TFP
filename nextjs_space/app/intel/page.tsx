@@ -7388,57 +7388,39 @@ function DeerIntelContent() {
     return () => clearTimeout(timer);
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
-  // V4 Step 11b: Choreographed stand toggle — staggered reveal with CSS transitions.
-  // Unified visibility gate: global show/hide × solo-mode × selected-stand.
-  // v4-fix12c: Opacity on el (safe), scale on scaleWrapper (safe). Never touch el.style.transform.
-  // v4-fix19: Visibility toggle ONLY controls opacity. It NEVER touches wrapper.style.transform
-  // during show, preventing it from overwriting the frozen scale during camera motion.
-  // Scale changes are exclusively owned by the settle handler.
+  // v4-fix20: Simplified stand toggle — OPACITY ONLY, no transforms.
+  // Visibility gate: global show/hide × solo-mode × selected-stand.
   useEffect(() => {
     const globalShow = visibility.stands;
     const isMoving = cameraMovingRef.current;
 
     markersRef.current.forEach((marker, i) => {
       const el = marker.getElement();
-      const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
       const standIdx = parseInt(el.dataset.standIdx || '0', 10);
 
-      // Determine per-marker visibility:
-      // 1. globalShow must be true
-      // 2. if soloStandMode, only show the marker whose stand matches selectedStand
       let show = globalShow;
       if (show && soloStandMode && selectedStand !== null) {
         const standRank = alignedStands[standIdx]?.rank;
         show = standRank === selectedStand;
       }
 
-      // v4-fix15: Skip unrevealed markers — the reveal handler manages their entrance
+      // Skip unrevealed markers — the reveal handler manages their entrance
       if (el.dataset.revealed !== '1') {
         el.style.pointerEvents = show ? 'auto' : 'none';
         return;
       }
       if (isMoving) {
-        // Camera in motion — snap opacity immediately, do NOT touch wrapper transform
+        // Camera in motion — snap immediately, no transitions
         el.style.transition = '';
         el.style.opacity = show ? '1' : '0';
         el.style.pointerEvents = show ? 'auto' : 'none';
       } else {
-        // Camera settled — staggered cinematic transition (opacity only for show)
+        // Camera settled — staggered opacity transition
         const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
         el.style.transition = `opacity 400ms ease ${delay}ms`;
         el.style.opacity = show ? '1' : '0';
         el.style.pointerEvents = show ? 'auto' : 'none';
-        // v4-fix19: Only apply scale-down on HIDE. On show, leave wrapper transform
-        // untouched — the settle handler owns scale state.
-        if (!show && wrapper) {
-          wrapper.style.transition = `transform 400ms ease ${delay}ms`;
-          wrapper.style.transform = 'scale(0.85)';
-        }
-        const totalTime = 400 + delay + 50;
-        setTimeout(() => {
-          el.style.transition = '';
-          if (wrapper) wrapper.style.transition = '';
-        }, totalTime);
+        setTimeout(() => { el.style.transition = ''; }, 400 + delay + 50);
       }
     });
 
@@ -7569,66 +7551,44 @@ function DeerIntelContent() {
     </svg>`;
   };
 
-  // ========== ZOOM-RESPONSIVE MARKER SIZING ==========
-  // v4-fix11: Smooth continuous scale function — no step jumps
-  const getMarkerScale = (zoom: number): number => {
-    if (zoom <= 13) return 0.7;
-    if (zoom >= 17) return 1.3;
-    return 0.7 + (zoom - 13) * (0.6 / 4); // Linear interpolation 13→17 : 0.7→1.3
-  };
-
-  // v4-fix11: Track the zoom level at which SVGs were last rebuilt for crispness
-  const lastSVGRebuildZoom = useRef<number>(0);
+  // v4-fix20: Removed zoom-responsive scaling entirely. Markers use fixed pixel sizes.
+  // This eliminates all transform/scale desync issues that caused positional drift.
 
   const addStandMarkers = () => {
     const map = mapRef.current;
     if (!map || !alignedStands.length) return;
 
-    // V4 Step 11b: Fade out old markers before replacing (cross-fade effect)
-    // v4-fix12c: Opacity on el, scale on wrapper. Never touch el.style.transform.
+    // v4-fix20: Simple opacity fade-out for old markers (no scale transforms)
     const oldMarkers = [...markersRef.current];
     oldMarkers.forEach(m => {
       const el = m.getElement();
-      const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
       el.style.transition = 'opacity 200ms ease';
       el.style.opacity = '0';
-      if (wrapper) {
-        wrapper.style.transition = 'transform 200ms ease';
-        wrapper.style.transform = 'scale(0.9)';
-      }
     });
     markersRef.current = [];
 
     // v4-demo: Show only top 3 stands for visual trust and clarity
     const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
-    const currentZoom = map.getZoom();
-    const scale = getMarkerScale(currentZoom);
 
-    // v4-fix12a: UNIFORM HITBOX — all markers use same container size for identical
-    // transform/positioning behavior. Only the inner visual size varies by tier.
-    // The SVG disc center is at viewBox y=40/100 (40%). We need the hitbox center
-    // to be at the disc center so Mapbox's anchor aligns the coordinate there.
-    const HITBOX_SIZE = 80; // Fixed for all tiers — largest tier's hitbox
-    // Disc center as fraction of viewBox: 40/100 = 0.40
-    const DISC_CENTER_PCT = 40; // percentage from top of viewBox
+    // v4-fix20: FIXED PIXEL SIZES — no zoom scaling, no transform stack.
+    // Markers behave like default Mapbox markers: pinned to geo coordinates,
+    // Mapbox handles all positioning via translate(). We never touch transforms.
+    // Sizes: #1=52px, #2=46px, #3=40px (compact but readable)
+    const MARKER_SIZES = [52, 46, 40];
 
     standsToShow.forEach((stand, idx) => {
       const props = stand.props;
       const coords = stand.coords;
       const alignScore = stand.alignment.score;
-      const tierLabel = stand.alignment.label === 'Open Ground' ? 'Field Stone' : stand.alignment.label;
 
       const isTopStand = idx === 0;
       const isSecondary = idx === 1;
-      const isTertiary = idx >= 2;
 
       // v4-demo: Sit labels — #1 Today's Sit, #2 Alternate, #3 Backup
       const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
       const sitLabel = SIT_LABELS[idx] || `Sit #${idx + 1}`;
 
-      // Visual sizing still varies by tier (visual hierarchy)
-      const baseSize = isTopStand ? 60 : isSecondary ? 52 : 42;
-      const markerSize = Math.round(baseSize * scale);
+      const markerSize = MARKER_SIZES[idx] || 40;
 
       // v4 Step 8: Unified color family — all warm earth tones, consistent stroke treatment
       const fillColor = isTopStand ? LAYER_COLORS.standPrimary : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
@@ -7645,67 +7605,54 @@ function DeerIntelContent() {
         rank: idx,
       });
 
-      // v4-fix12c: WRAPPER ARCHITECTURE — Mapbox manages el.style.transform (translate positioning).
-      // We manage scaleWrapper.style.transform (visual scaling). They never conflict.
-      // Structure: el (Mapbox positioning) → scaleWrapper (our scaling) → visual content
+      // v4-fix20: FLAT ARCHITECTURE — No scale wrapper. No transform stack.
+      // el → visual div (SVG) + badge + tooltip. Mapbox owns el.style.transform entirely.
+      // We only touch el.style.opacity for show/hide.
       const el = document.createElement('div');
       el.className = 'intel-stand-marker';
       el.dataset.standIdx = String(idx);
-      el.dataset.baseSize = String(baseSize);
-
-      // Compute disc center position within fixed hitbox for transform-origin on wrapper
-      const visualTop = (HITBOX_SIZE - markerSize) / 2;
-      const discFromTop = visualTop + markerSize * (DISC_CENTER_PCT / 100);
-      const discPctY = (discFromTop / HITBOX_SIZE * 100).toFixed(1);
-
-      // Outer element: managed by Mapbox for positioning. We only touch opacity here.
       el.style.cssText = `
         position: relative;
-        width: ${HITBOX_SIZE}px;
-        height: ${HITBOX_SIZE}px;
+        width: ${markerSize}px;
+        height: ${markerSize}px;
         cursor: pointer;
       `;
 
-      // Scale wrapper: we manage transform (scale) and transform-origin here.
-      // Mapbox never touches this element.
-      const scaleWrapper = document.createElement('div');
-      scaleWrapper.className = 'stand-scale-wrapper';
-      scaleWrapper.style.cssText = `
-        width: ${HITBOX_SIZE}px;
-        height: ${HITBOX_SIZE}px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transform-origin: 50% ${discPctY}%;
+      // SVG visual — no transitions, no transforms
+      const visualDiv = document.createElement('div');
+      visualDiv.className = 'stand-visual';
+      visualDiv.style.cssText = `
+        width: ${markerSize}px;
+        height: ${markerSize}px;
+        pointer-events: none;
       `;
-      scaleWrapper.innerHTML = `
-        <div class="stand-visual" style="
-          width: ${markerSize}px;
-          height: ${markerSize}px;
-          transition: transform 0.2s ease, filter 0.2s ease;
-          transform-origin: 50% ${DISC_CENTER_PCT}%;
-          pointer-events: none;
-        ">${svgHTML}</div>
-        <div class="stand-badge" style="
-          position: absolute;
-          bottom: ${-4 * scale}px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: linear-gradient(135deg, ${fillColor}, ${strokeColor});
-          color: #fff;
-          font-size: ${Math.round((isTopStand ? 10 : 9) * scale)}px;
-          font-weight: 700;
-          padding: ${Math.round(2 * scale)}px ${Math.round(7 * scale)}px;
-          border-radius: 10px;
-          white-space: nowrap;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          pointer-events: none;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          opacity: ${isTopStand ? 1 : 0.85};
-        ">${sitLabel}</div>
+      visualDiv.innerHTML = svgHTML;
+      el.appendChild(visualDiv);
+
+      // Badge label — fixed positioning below the marker
+      const badgeFontSize = isTopStand ? 10 : 9;
+      const badge = document.createElement('div');
+      badge.className = 'stand-badge';
+      badge.style.cssText = `
+        position: absolute;
+        bottom: -4px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, ${fillColor}, ${strokeColor});
+        color: #fff;
+        font-size: ${badgeFontSize}px;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 10px;
+        white-space: nowrap;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        pointer-events: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        opacity: ${isTopStand ? 1 : 0.85};
       `;
-      el.appendChild(scaleWrapper);
+      badge.textContent = sitLabel;
+      el.appendChild(badge);
 
       // Hover tooltip (unified for all tiers)
       const hoverTooltip = document.createElement('div');
@@ -7754,37 +7701,27 @@ function DeerIntelContent() {
       `;
       el.appendChild(hoverTooltip);
 
-      // v4 Step 8: Consistent hover emphasis — all tiers get identical scale + warm glow
+      // v4-fix20: Hover — filter glow only, no scale transforms
       el.onmouseenter = () => {
-        const visual = el.querySelector('.stand-visual') as HTMLElement;
-        if (visual) {
-          visual.style.transform = 'scale(1.12)';
-          visual.style.filter = `brightness(1.15) drop-shadow(0 4px 16px ${fillColor}66)`;
-        }
+        visualDiv.style.filter = `brightness(1.15) drop-shadow(0 4px 12px ${fillColor}66)`;
         hoverTooltip.style.opacity = '1';
       };
       el.onmouseleave = () => {
-        const visual = el.querySelector('.stand-visual') as HTMLElement;
-        if (visual) {
-          visual.style.transform = 'scale(1)';
-          visual.style.filter = 'none';
-        }
+        visualDiv.style.filter = 'none';
         hoverTooltip.style.opacity = '0';
       };
 
-      // v4-fix12c: Offset marker so disc center (not element center) is at the coordinate.
-      // With anchor:'center', element center is at geo. Disc is above center by yOffset px.
-      // Positive y offset shifts element DOWN, putting disc at geo-coordinate.
-      // v4-fix18: Round to integer to eliminate sub-pixel rounding drift across tiers.
-      const yOffset = Math.round(HITBOX_SIZE / 2 - discFromTop);
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'center', offset: [0, yOffset] })
+      // v4-fix20: Anchor at bottom of the SVG (pole base = geo coordinate).
+      // The SVG's ground tick is at y=92/100, so the bottom of the rendered element
+      // is approximately at the geo point. anchor:'bottom' pins the element's
+      // bottom edge to the coordinate — no offset math needed.
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat(coords)
         .addTo(map);
 
       el.onclick = () => {
         hoverTooltip.style.opacity = '0';
         setSelectedStand(stand.rank);
-        // V4 Step 11b: Cinematic stand selection — slower ease, slight padding
         map.flyTo({
           center: coords,
           zoom: Math.max(map.getZoom(), 15.5),
@@ -7792,37 +7729,25 @@ function DeerIntelContent() {
           essential: true,
           padding: { top: 80, bottom: 40, left: 40, right: 40 },
         });
-        // Show popup after camera settles for a polished feel
         setTimeout(() => {
           showStandPopup(coords, props, stand.resilience, stand);
         }, 400);
       };
 
-      // v4-fix15: Entry animation — markers start hidden, revealed AFTER camera settles.
-      // Prevents stands 2-5 from appearing to "fly in from outside" when Mapbox
-      // repositions their screen coordinates during camera motion.
-      el.dataset.refScale = String(scale);
-      el.dataset.refSize = String(markerSize);
-      el.dataset.discPctY = discPctY;
+      // v4-fix20: Markers start hidden, revealed after camera settles (opacity only)
       el.style.opacity = '0';
-      scaleWrapper.style.transform = 'scale(0.85)';
-      // Mark as not yet revealed — the revealStandMarkers() function handles the entrance
       el.dataset.ready = '0';
       el.dataset.revealed = '0';
 
       markersRef.current.push(marker);
     });
 
-    // v4-fix11: Record reference zoom for SVG rebuild tracking
-    lastSVGRebuildZoom.current = currentZoom;
-
     // Remove old markers after their fade-out completes
     setTimeout(() => {
       oldMarkers.forEach(m => m.remove());
     }, 250);
 
-    // v4-fix15: Delay reveal until camera is settled. If camera is already idle,
-    // reveal after a short delay to let Mapbox position markers at final coords.
+    // v4-fix15: Delay reveal until camera is settled.
     scheduleStandReveal();
   };
 
@@ -7830,27 +7755,23 @@ function DeerIntelContent() {
   // speed, transform, and timing so they read as equally terrain-born.
   const standRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // v4-fix20: Simplified reveal — opacity fade-in only, no scale transforms
   const revealStandMarkers = () => {
     const markers = markersRef.current;
     if (!markers.length) return;
 
-    // Only reveal markers that haven't been revealed yet
     const unrevealed = markers.filter(m => m.getElement().dataset.revealed === '0');
     if (!unrevealed.length) return;
 
     requestAnimationFrame(() => {
       unrevealed.forEach((marker, idx) => {
         const el = marker.getElement();
-        const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-        if (!wrapper || el.dataset.revealed === '1') return;
+        if (el.dataset.revealed === '1') return;
 
         el.dataset.revealed = '1';
-        // Uniform short stagger (40ms) — all stands arrive together, not one-by-one
         const staggerDelay = idx * 40;
         el.style.transition = `opacity 300ms ease ${staggerDelay}ms`;
-        wrapper.style.transition = `transform 300ms ease ${staggerDelay}ms`;
         el.style.opacity = '1';
-        wrapper.style.transform = 'scale(1)';
       });
 
       // Cleanup transitions after all entries complete
@@ -7858,9 +7779,7 @@ function DeerIntelContent() {
       setTimeout(() => {
         markers.forEach((m) => {
           const mEl = m.getElement();
-          const w = mEl.querySelector('.stand-scale-wrapper') as HTMLElement;
           mEl.style.transition = '';
-          if (w) w.style.transition = '';
           mEl.dataset.ready = '1';
         });
       }, totalTime);
@@ -7892,25 +7811,11 @@ function DeerIntelContent() {
     }, 80);
   };
 
-  // ========== v4-fix19: ZERO-DRIFT MARKER ANCHORING ==========
-  // ARCHITECTURE: Mapbox owns el.style.transform (translate positioning).
-  // We own scaleWrapper.style.transform (visual scaling). They never conflict.
-  //
-  // v4-fix19: CRITICAL INSIGHT — Any CSS scale change on the wrapper during camera
-  // motion can desync with Mapbox's translate updates, causing positional drift.
-  // Even synchronous scaling in the 'move' handler (v4-fix18) drifts because
-  // Mapbox's internal Marker._update() may fire its translate in a different
-  // microtask order within the same rAF callback.
-  //
-  // SOLUTION: Do NOT scale markers during camera motion at all. Markers maintain
-  // their current pixel size while zooming (like default Mapbox markers). After
-  // camera fully settles, smoothly transition to the zoom-appropriate scale.
-  // This guarantees zero positional drift because the wrapper's transform is
-  // FROZEN during all camera motion — only Mapbox's translate changes.
-  //
-  // Phase 1 — During camera motion: FREEZE all wrapper transforms. Only strip
-  //           lingering transitions on first move frame.
-  // Phase 2 — After camera fully settles: Smooth transition to new scale.
+  // ========== v4-fix20: MINIMAL CAMERA STATE TRACKER ==========
+  // No scaling, no transforms, no wrapper manipulation.
+  // Only tracks whether camera is moving so:
+  // 1. Reveal logic can wait for settle before showing new markers
+  // 2. Visibility toggle can skip transitions during motion
   const cameraMovingRef = useRef(false);
 
   useEffect(() => {
@@ -7919,76 +7824,18 @@ function DeerIntelContent() {
 
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Phase 1: FREEZE — do not touch any marker transforms during motion.
-    // Only strip transitions on first move frame to prevent stale animations.
     const onCameraMove = () => {
-      if (!cameraMovingRef.current) {
-        cameraMovingRef.current = true;
-        // Strip ALL lingering transitions so markers don't animate during motion.
-        // Includes .stand-visual to prevent hover transitions from shifting the disc.
-        markersRef.current.forEach((marker) => {
-          const el = marker.getElement();
-          const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-          const visual = el.querySelector('.stand-visual') as HTMLElement;
-          if (el.style.transition) el.style.transition = '';
-          if (wrapper?.style.transition) wrapper.style.transition = '';
-          if (visual) {
-            visual.style.transition = 'none';
-            visual.style.transform = 'scale(1)'; // Reset any hover scale
-            visual.style.filter = 'none';
-          }
-        });
-      }
+      cameraMovingRef.current = true;
       if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
-      // v4-fix19: NO scale updates here. Wrapper transform stays frozen.
-    };
-
-    // Phase 2: Camera settle — smoothly transition to zoom-appropriate scale.
-    const settleMarkers = () => {
-      cameraMovingRef.current = false;
-      const zoom = map.getZoom();
-      const newScale = getMarkerScale(zoom);
-
-      markersRef.current.forEach((marker) => {
-        const el = marker.getElement();
-        const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-        if (!wrapper || el.dataset.revealed !== '1') return;
-
-        // v4-fix19: Restore hover transitions on .stand-visual after motion freeze
-        const visual = el.querySelector('.stand-visual') as HTMLElement;
-        if (visual) {
-          visual.style.transition = 'transform 0.2s ease, filter 0.2s ease';
-        }
-
-        const refScale = parseFloat(el.dataset.refScale || '1');
-        const relativeScale = newScale / refScale;
-
-        // If scale actually changed, animate the transition
-        if (Math.abs(relativeScale - 1) > 0.01) {
-          wrapper.style.transition = 'transform 250ms ease-out';
-          wrapper.style.transform = `scale(${relativeScale.toFixed(4)})`;
-          // After transition completes, reset to scale(1) and update refScale
-          setTimeout(() => {
-            wrapper.style.transition = '';
-            wrapper.style.transform = 'scale(1)';
-            el.dataset.refScale = String(newScale);
-          }, 280);
-        } else {
-          // Negligible change — just reset
-          wrapper.style.transform = 'scale(1)';
-          el.dataset.refScale = String(newScale);
-        }
-      });
-
-      lastSVGRebuildZoom.current = zoom;
-
-      // v4-fix15: Camera just settled — reveal any hidden markers now
-      revealStandMarkers();
     };
 
     const onCameraEnd = () => {
       if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(settleMarkers, 150);
+      settleTimer = setTimeout(() => {
+        cameraMovingRef.current = false;
+        // Reveal any unrevealed markers now that camera has settled
+        revealStandMarkers();
+      }, 150);
     };
 
     map.on('move', onCameraMove);
