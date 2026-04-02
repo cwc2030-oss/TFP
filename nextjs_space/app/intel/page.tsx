@@ -7673,7 +7673,6 @@ function DeerIntelContent() {
         align-items: center;
         justify-content: center;
         transform-origin: 50% ${discPctY}%;
-        will-change: transform;
       `;
       scaleWrapper.innerHTML = `
         <div class="stand-visual" style="
@@ -7771,7 +7770,8 @@ function DeerIntelContent() {
       // v4-fix12c: Offset marker so disc center (not element center) is at the coordinate.
       // With anchor:'center', element center is at geo. Disc is above center by yOffset px.
       // Positive y offset shifts element DOWN, putting disc at geo-coordinate.
-      const yOffset = HITBOX_SIZE / 2 - discFromTop;
+      // v4-fix18: Round to integer to eliminate sub-pixel rounding drift across tiers.
+      const yOffset = Math.round(HITBOX_SIZE / 2 - discFromTop);
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center', offset: [0, yOffset] })
         .setLngLat(coords)
         .addTo(map);
@@ -7887,23 +7887,30 @@ function DeerIntelContent() {
     }, 80);
   };
 
-  // ========== v4-fix12c: FLICKER-FREE CAMERA-SYNCED MARKER SCALING ==========
+  // ========== v4-fix18: FRAME-SYNCED MARKER SCALING (replaces v4-fix12c rAF approach) ==========
   // ARCHITECTURE: Mapbox owns el.style.transform (translate positioning).
   // We own scaleWrapper.style.transform (visual scaling). They never conflict.
   //
-  // Phase 1 — During camera motion: ONLY set scaleWrapper.style.transform = scale(...).
-  //           NO SVG rebuilds, NO innerHTML, NO opacity, NO transition changes.
-  // Phase 2 — After camera fully settles: ONE rebuild pass, then stop.
+  // v4-fix18 FIX: Previous rAF-batched scaling caused 1-frame lag between Mapbox's
+  // translate update and our scale update. For #2/#3 (smaller baseSizes, larger relative
+  // scale jumps), this desync manifested as visible positional drift during zoom/pan.
+  // Fix: apply scaling SYNCHRONOUSLY in the 'move' handler so it executes in the same
+  // paint frame as Mapbox's own marker repositioning. Removed will-change:transform
+  // from scaleWrapper to prevent GPU-layer compositing desync.
+  //
+  // Phase 1 — During camera motion: SYNC scale wrapper transform (no rAF).
+  // Phase 2 — After camera fully settles: ONE reference-reset pass, then stop.
   const cameraMovingRef = useRef(false);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    let rafId: number | null = null;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    // v4-fix18: Throttle scale updates to ~60fps via timestamp check (no rAF)
+    let lastScaleTs = 0;
 
-    // Phase 1: Scale wrapper only — Mapbox's translate on el is untouched
+    // Phase 1: Scale wrapper SYNCHRONOUSLY — same call-stack as Mapbox's translate update
     const onCameraMove = () => {
       if (!cameraMovingRef.current) {
         cameraMovingRef.current = true;
@@ -7917,32 +7924,29 @@ function DeerIntelContent() {
       }
       if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
 
-      if (rafId !== null) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        const zoom = map.getZoom();
-        const currentScale = getMarkerScale(zoom);
+      // v4-fix18: Throttle to ~60fps (16ms) to avoid excessive style recalcs,
+      // but still synchronous with Mapbox's paint frame (no rAF deferral).
+      const now = performance.now();
+      if (now - lastScaleTs < 16) return;
+      lastScaleTs = now;
 
-        // v4-fix12c: ONLY touch scaleWrapper.style.transform. Never el.style.transform.
-        // v4-fix15: Skip unrevealed markers — they stay hidden at scale(0.85) until reveal.
-        markersRef.current.forEach((marker) => {
-          const el = marker.getElement();
-          if (el.dataset.revealed !== '1') return; // Not yet visible — skip
-          const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
-          if (!wrapper) return;
-          const refScale = parseFloat(el.dataset.refScale || '1');
-          const relativeScale = currentScale / refScale;
-          wrapper.style.transform = `scale(${relativeScale.toFixed(4)})`;
-        });
+      const zoom = map.getZoom();
+      const currentScale = getMarkerScale(zoom);
+
+      // v4-fix12c: ONLY touch scaleWrapper.style.transform. Never el.style.transform.
+      // v4-fix15: Skip unrevealed markers — they stay hidden at scale(0.85) until reveal.
+      markersRef.current.forEach((marker) => {
+        const el = marker.getElement();
+        if (el.dataset.revealed !== '1') return; // Not yet visible — skip
+        const wrapper = el.querySelector('.stand-scale-wrapper') as HTMLElement;
+        if (!wrapper) return;
+        const refScale = parseFloat(el.dataset.refScale || '1');
+        const relativeScale = currentScale / refScale;
+        wrapper.style.transform = `scale(${relativeScale.toFixed(4)})`;
       });
     };
 
     // Phase 2: Camera settle — reset CSS scale reference point (NO SVG rebuilds).
-    // v4-fix13: SVGs use viewBox="0 0 100 100" (pure vector) so CSS scaling is
-    // visually identical to rebuilding at a new size. Removing innerHTML swaps
-    // eliminates the repaint flash that caused flicker. transform-origin is at
-    // the disc center, so CSS scale doesn't shift the geo-anchor — no offset
-    // recalculation needed either.
     const settleMarkers = () => {
       cameraMovingRef.current = false;
       const zoom = map.getZoom();
@@ -7975,7 +7979,6 @@ function DeerIntelContent() {
     return () => {
       map.off('move', onCameraMove);
       map.off('moveend', onCameraEnd);
-      if (rafId !== null) cancelAnimationFrame(rafId);
       if (settleTimer) clearTimeout(settleTimer);
       if (standRevealTimerRef.current) clearTimeout(standRevealTimerRef.current);
       cameraMovingRef.current = false;
