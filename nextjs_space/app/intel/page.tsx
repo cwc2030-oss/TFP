@@ -1621,7 +1621,7 @@ function DeerIntelContent() {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
   const popupRef = useRef<mapboxgl.Popup | null>(null);
   
   // v3.5.1 — Animation frame ref for corridor flow animation
@@ -2381,6 +2381,7 @@ function DeerIntelContent() {
     'tfp-hunt-pockets',
     'tfp-stand-direction',
     'tfp-stand-tertiary',
+    'tfp-stands',
   ]);
 
   const clearAllOverlaySources = useCallback(() => {
@@ -2389,13 +2390,8 @@ function DeerIntelContent() {
 
     console.error('[INTEL-DIAG] === OVERLAYS CLEARING ===');
 
-    // V4 Step 11b: Graceful fade-out before clearing data
-    // Fade out HTML stand markers first
-    markersRef.current.forEach(m => {
-      const el = m.getElement();
-      el.style.transition = 'opacity 220ms ease';
-      el.style.opacity = '0';
-    });
+    // vNext: Stand popup cleanup (GeoJSON layers cleared via gracefulClear below)
+    if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
 
     // v4-fix8: Signal that visibility restore is needed after new data is painted.
     // gracefulClear fades layers to opacity 0 and sets visibility:'none', but
@@ -2439,12 +2435,8 @@ function DeerIntelContent() {
         }
       }
       holdHiddenLayersRef.current = hidden;
-      // Also hide HTML stand markers
-      markersRef.current.forEach(m => {
-        const el = m.getElement();
-        el.style.transition = 'none';
-        el.style.opacity = '0';
-      });
+      // vNext: Hide stand popup during hold (GeoJSON layers handled by loop above)
+      if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
     } else {
       // Restore ALL tfp- layers (including any added during the hold)
       const style = map.getStyle();
@@ -2461,12 +2453,6 @@ function DeerIntelContent() {
         }
       }
       holdHiddenLayersRef.current = [];
-      // Reveal HTML stand markers
-      markersRef.current.forEach(m => {
-        const el = m.getElement();
-        el.style.transition = 'opacity 400ms ease';
-        el.style.opacity = '1';
-      });
     }
 
     return () => {
@@ -5343,19 +5329,138 @@ function DeerIntelContent() {
           });
         }
 
-        // ========== TERTIARY STAND DOTS LAYER (v4 — disabled, replaced by HTML SVG markers) ==========
-        // Kept as source for data feeding but layer hidden — tertiary stands now use unified SVG icons
+        // ========== TERTIARY STAND DOTS LAYER (v4 — disabled, replaced by vNext GeoJSON stands) ==========
         if (!map.getSource('tfp-stand-tertiary')) {
           map.addSource('tfp-stand-tertiary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-stand-tertiary-dot',
             type: 'circle',
             source: 'tfp-stand-tertiary',
-            layout: { visibility: 'none' },  // v4: hidden — unified HTML SVG markers replace this
+            layout: { visibility: 'none' },
             paint: {
               'circle-radius': 4,
               'circle-color': LAYER_COLORS.standTertiary,
               'circle-opacity': 0,
+            },
+          });
+        }
+
+        // ========== vNEXT: MAP-NATIVE STAND LAYERS ==========
+        // Replaces HTML markers with GeoJSON source + circle/symbol layers.
+        // Stands are rendered as map features, not DOM overlays — zero positional drift.
+        if (!map.getSource('tfp-stands')) {
+          map.addSource('tfp-stands', { type: 'geojson', data: EMPTY_FC });
+
+          // 1. Outer glow ring — soft radial around each stand point
+          map.addLayer({
+            id: 'tfp-stands-glow',
+            type: 'circle',
+            source: 'tfp-stands',
+            paint: {
+              'circle-radius': [
+                'match', ['get', 'rank'], 0, 18, 1, 15, 13
+              ],
+              'circle-color': ['get', 'color'],
+              'circle-opacity': [
+                'match', ['get', 'rank'], 0, 0.25, 1, 0.18, 0.12
+              ],
+              'circle-blur': 0.9,
+            },
+          });
+
+          // 2. Main disc — solid filled circle per stand
+          map.addLayer({
+            id: 'tfp-stands-disc',
+            type: 'circle',
+            source: 'tfp-stands',
+            paint: {
+              'circle-radius': [
+                'match', ['get', 'rank'], 0, 10, 1, 8.5, 7
+              ],
+              'circle-color': ['get', 'color'],
+              'circle-opacity': 1,
+              'circle-stroke-width': [
+                'match', ['get', 'rank'], 0, 2.5, 2
+              ],
+              'circle-stroke-color': ['get', 'strokeColor'],
+              'circle-stroke-opacity': 0.9,
+            },
+          });
+
+          // 3. Inner reticle ring — scope crosshair aesthetic
+          map.addLayer({
+            id: 'tfp-stands-reticle',
+            type: 'circle',
+            source: 'tfp-stands',
+            paint: {
+              'circle-radius': [
+                'match', ['get', 'rank'], 0, 5.5, 1, 4.5, 3.5
+              ],
+              'circle-color': 'transparent',
+              'circle-stroke-width': 1,
+              'circle-stroke-color': 'rgba(255,255,255,0.4)',
+              'circle-stroke-opacity': 1,
+            },
+          });
+
+          // 4. Center dot — tiny white dot at stand coordinate
+          map.addLayer({
+            id: 'tfp-stands-center',
+            type: 'circle',
+            source: 'tfp-stands',
+            paint: {
+              'circle-radius': 1.5,
+              'circle-color': 'rgba(255,255,255,0.6)',
+              'circle-opacity': 1,
+            },
+          });
+
+          // 5. Label — "Today's Sit", "Alternate Sit", "Backup Sit"
+          map.addLayer({
+            id: 'tfp-stands-label',
+            type: 'symbol',
+            source: 'tfp-stands',
+            layout: {
+              'text-field': ['get', 'label'],
+              'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+              'text-size': [
+                'match', ['get', 'rank'], 0, 12, 1, 11, 10
+              ],
+              'text-offset': [0, 1.8],
+              'text-anchor': 'top',
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+            },
+            paint: {
+              'text-color': '#ffffff',
+              'text-halo-color': ['get', 'color'],
+              'text-halo-width': 2,
+              'text-halo-blur': 1,
+              'text-opacity': [
+                'match', ['get', 'rank'], 0, 1, 0.85
+              ],
+            },
+          });
+
+          // 6. Rank number inside disc
+          map.addLayer({
+            id: 'tfp-stands-rank',
+            type: 'symbol',
+            source: 'tfp-stands',
+            layout: {
+              'text-field': ['get', 'rankLabel'],
+              'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+              'text-size': [
+                'match', ['get', 'rank'], 0, 14, 1, 12, 11
+              ],
+              'text-anchor': 'center',
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+            },
+            paint: {
+              'text-color': '#ffffff',
+              'text-halo-color': 'rgba(0,0,0,0.3)',
+              'text-halo-width': 1,
             },
           });
         }
@@ -5883,6 +5988,13 @@ function DeerIntelContent() {
           'tfp-flow-convergence',
           'tfp-huntability-convergence-glow',
           'tfp-huntability-convergence',
+          // vNext: GeoJSON stand layers (highest z-index — above all terrain)
+          'tfp-stands-glow',
+          'tfp-stands-disc',
+          'tfp-stands-reticle',
+          'tfp-stands-center',
+          'tfp-stands-label',
+          'tfp-stands-rank',
         ];
         
         // Move layers in order (later = higher z-index)
@@ -6805,9 +6917,10 @@ function DeerIntelContent() {
     setAlignedStands([]);
     setSelectedStand(null);
     setHuntabilityData(null);
-    // Remove existing stand markers from map
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    // vNext: Clear stand GeoJSON + popup
+    if (mapRef.current?.getSource('tfp-stands')) {
+      (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
+    }
     if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
     
     try {
@@ -6926,8 +7039,10 @@ function DeerIntelContent() {
     setAlignedStands([]);
     setSelectedStand(null);
     setHuntabilityData(null);
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    // vNext: Clear stand GeoJSON + popup
+    if (mapRef.current?.getSource('tfp-stands')) {
+      (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
+    }
     if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
     
     // Update active coords (state + refs synchronously)
@@ -7346,16 +7461,47 @@ function DeerIntelContent() {
     };
   }, [showTerrainReasons]);
 
-  // ========== HTML STAND MARKERS + DIRECTION WEDGES + TERTIARY DOTS (v1.1) ==========
-  // Uses alignedStands (wind-sorted) so markers react to wind changes.
-  // Primary + secondary get full markers, tertiary gets faint dots on map.
+  // ========== vNext: GeoJSON STAND LAYERS + DIRECTION WEDGES (map-native) ==========
+  // Populates the tfp-stands GeoJSON source with point features for top 3 stands.
+  // Also populates emphasis glow, hunt pockets, direction wedges (unchanged).
+  const STAND_LAYER_IDS = [
+    'tfp-stands-glow', 'tfp-stands-disc', 'tfp-stands-reticle',
+    'tfp-stands-center', 'tfp-stands-label', 'tfp-stands-rank',
+  ] as const;
+
   useEffect(() => {
     if (!mapReady || !alignedStands.length) return;
 
     const timer = setTimeout(() => {
-      if (!mapRef.current) return;
-      addStandMarkers();
       const map = mapRef.current;
+      if (!map) return;
+
+      // ── Populate tfp-stands GeoJSON source ──
+      const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
+      const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
+      const features = standsToShow.map((stand, idx) => {
+        const isTop = idx === 0;
+        const isSec = idx === 1;
+        const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
+        const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
+        return {
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: stand.coords },
+          properties: {
+            rank: idx,
+            label: SIT_LABELS[idx] || `Sit #${idx + 1}`,
+            rankLabel: idx === 0 ? '★' : String(idx + 1),
+            color: fillColor,
+            strokeColor,
+            score: stand.alignment.score,
+            standIdx: idx,
+          },
+        };
+      });
+      const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features };
+      if (map.getSource('tfp-stands')) {
+        (map.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(fc);
+      }
 
       // Top-stand emphasis glow
       if (map.getSource('tfp-stand-emphasis')) {
@@ -7379,53 +7525,58 @@ function DeerIntelContent() {
         (map.getSource('tfp-stand-direction') as mapboxgl.GeoJSONSource).setData(dirFC);
       }
 
-      // v4-demo: Clear tertiary dots — only top 3 shown as full markers now
+      // Clear tertiary dots — only top 3 shown as GeoJSON layers now
       if (map.getSource('tfp-stand-tertiary')) {
         (map.getSource('tfp-stand-tertiary') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
       }
+
+      // vNext: Make stand layers visible (they may have been hidden by gracefulClear)
+      STAND_LAYER_IDS.forEach(id => {
+        if (map.getLayer(id)) {
+          try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch {}
+        }
+      });
     }, 400);
 
     return () => clearTimeout(timer);
   }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
 
-  // v4-fix20: Simplified stand toggle — OPACITY ONLY, no transforms.
-  // Visibility gate: global show/hide × solo-mode × selected-stand.
+  // vNext: Stand visibility toggle — uses map layer visibility instead of HTML opacity.
+  // Solo mode uses a GeoJSON filter expression instead of per-marker DOM manipulation.
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
     const globalShow = visibility.stands;
-    const isMoving = cameraMovingRef.current;
 
-    markersRef.current.forEach((marker, i) => {
-      const el = marker.getElement();
-      const standIdx = parseInt(el.dataset.standIdx || '0', 10);
-
-      let show = globalShow;
-      if (show && soloStandMode && selectedStand !== null) {
-        const standRank = alignedStands[standIdx]?.rank;
-        show = standRank === selectedStand;
-      }
-
-      // Skip unrevealed markers — the reveal handler manages their entrance
-      if (el.dataset.revealed !== '1') {
-        el.style.pointerEvents = show ? 'auto' : 'none';
-        return;
-      }
-      if (isMoving) {
-        // Camera in motion — snap immediately, no transitions
-        el.style.transition = '';
-        el.style.opacity = show ? '1' : '0';
-        el.style.pointerEvents = show ? 'auto' : 'none';
-      } else {
-        // Camera settled — staggered opacity transition
-        const delay = show ? i * 80 : (markersRef.current.length - 1 - i) * 50;
-        el.style.transition = `opacity 400ms ease ${delay}ms`;
-        el.style.opacity = show ? '1' : '0';
-        el.style.pointerEvents = show ? 'auto' : 'none';
-        setTimeout(() => { el.style.transition = ''; }, 400 + delay + 50);
+    // Toggle stand GeoJSON layers
+    const vis = globalShow ? 'visible' : 'none';
+    STAND_LAYER_IDS.forEach(id => {
+      if (map.getLayer(id)) {
+        try { map.setLayoutProperty(id, 'visibility', vis); } catch {}
       }
     });
 
-    const map = mapRef.current;
-    if (!map) return;
+    // Solo mode: apply per-stand filter on the disc/label/rank layers
+    // When solo mode is active and a stand is selected, filter to only that stand.
+    if (globalShow && soloStandMode && selectedStand !== null) {
+      // Find the standIdx that matches the selectedStand rank
+      const matchIdx = alignedStands.findIndex(s => s.rank === selectedStand);
+      if (matchIdx >= 0) {
+        const soloFilter: any = ['==', ['get', 'standIdx'], matchIdx];
+        STAND_LAYER_IDS.forEach(id => {
+          if (map.getLayer(id)) {
+            try { map.setFilter(id, soloFilter); } catch {}
+          }
+        });
+      }
+    } else {
+      // Clear any solo filter
+      STAND_LAYER_IDS.forEach(id => {
+        if (map.getLayer(id)) {
+          try { map.setFilter(id, null); } catch {}
+        }
+      });
+    }
 
     // Staggered supporting layer reveal: glow → pockets → wedges → dots
     // When solo mode is active, hide supporting layers (they cover all stands)
@@ -7448,407 +7599,57 @@ function DeerIntelContent() {
     }
   }, [visibility.stands, selectedStand, soloStandMode, alignedStands]);
 
+  // vNext: Cleanup — clear GeoJSON source + popup (no HTML markers to remove)
   const cleanupMarkers = () => {
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    if (mapRef.current?.getSource('tfp-stands')) {
+      (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
+    }
     if (popupRef.current) {
       popupRef.current.remove();
       popupRef.current = null;
     }
   };
 
-  // ========== PREMIUM STAND ICON SVG GENERATOR (v4 Step 8) ==========
-  // Unified visual family: scope-reticle disc with tapered tree-stand pole.
-  // All tiers share identical structure — only color/scale/glow differ.
-  // Uses fixed 100×100 viewBox for pixel-perfect crispness at every zoom level.
-  const buildStandSVG = (opts: {
-    size: number;
-    fillColor: string;
-    strokeColor: string;
-    glowColor?: string;
-    label: string;
-    isTop: boolean;
-    rank: number;
-  }): string => {
-    const { size, fillColor, strokeColor, glowColor, label, isTop, rank } = opts;
-
-    // ---- Fixed coordinate system (viewBox 0 0 100 100) ----
-    const cx = 50;                   // Center X
-    const cy = 40;                   // Disc center (offset up for pole)
-    const discR = 28;                // Main disc radius
-    const reticleR = 16;             // Inner reticle ring
-    const crossLen = 8;              // Crosshair tick length
-    const crossGap = 2;              // Gap between reticle ring and tick start
-    const crossW = 2;                // Crosshair line weight
-    const strokeW = isTop ? 2.5 : 2; // Disc border weight
-
-    // ---- Tapered tree-stand pole with platform ----
-    const poleTop = cy + discR * 0.72;  // Start below disc
-    const poleBot = 92;                 // Near bottom of viewBox
-    const poleTopW = 3;                 // Narrow at top
-    const poleBotW = 5;                 // Wider at base
-    const platW = 14;                   // Platform crossbar width
-    const platH = 2.5;                  // Platform crossbar height
-
-    // ---- Glow: all tiers get subtle ambient glow, top gets stronger ----
-    const glowOpacity = isTop ? 0.55 : 0.25;
-    const glowStd = isTop ? 6 : 4;
-    const glowDefs = `
-      <filter id="sg${rank}" x="-60%" y="-60%" width="220%" height="220%">
-        <feGaussianBlur in="SourceAlpha" stdDeviation="${glowStd}" result="blur"/>
-        <feFlood flood-color="${glowColor || fillColor}" flood-opacity="${glowOpacity}"/>
-        <feComposite in2="blur" operator="in" result="glow"/>
-        <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>`;
-
-    // ---- Inner shadow for depth ----
-    const innerShadow = `
-      <radialGradient id="ish${rank}" cx="45%" cy="38%" r="60%">
-        <stop offset="0%" stop-color="#fff" stop-opacity="0.15"/>
-        <stop offset="100%" stop-color="#000" stop-opacity="0.20"/>
-      </radialGradient>`;
-
-    // ---- Rank label ----
-    const labelEl = isTop
-      ? `<text x="${cx}" y="${cy + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="18" font-weight="700" style="text-shadow:0 1px 2px rgba(0,0,0,0.3)">★</text>`
-      : `<text x="${cx}" y="${cy + 1}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="20" font-weight="700" font-family="system-ui,sans-serif" style="text-shadow:0 1px 2px rgba(0,0,0,0.3)">${label}</text>`;
-
-    // ---- Crosshair ticks (4 cardinal directions, outside reticle ring) ----
-    const ticks = [
-      // Left
-      `<line x1="${cx - reticleR - crossGap - crossLen}" y1="${cy}" x2="${cx - reticleR - crossGap}" y2="${cy}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
-      // Right
-      `<line x1="${cx + reticleR + crossGap}" y1="${cy}" x2="${cx + reticleR + crossGap + crossLen}" y2="${cy}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
-      // Top
-      `<line x1="${cx}" y1="${cy - reticleR - crossGap - crossLen}" x2="${cx}" y2="${cy - reticleR - crossGap}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
-      // Bottom
-      `<line x1="${cx}" y1="${cy + reticleR + crossGap}" x2="${cx}" y2="${cy + reticleR + crossGap + crossLen}" stroke="rgba(255,255,255,0.5)" stroke-width="${crossW}" stroke-linecap="round"/>`,
-    ].join('\n      ');
-
-    const svgNS = 'http://www.w3.org/2000/svg';
-    return `<svg xmlns="${svgNS}" width="${size}" height="${size}" viewBox="0 0 100 100">
-      <defs>${glowDefs}${innerShadow}</defs>
-      <!-- Tapered tree-stand pole -->
-      <polygon points="${cx - poleTopW},${poleTop} ${cx + poleTopW},${poleTop} ${cx + poleBotW},${poleBot} ${cx - poleBotW},${poleBot}" fill="${strokeColor}" opacity="0.65"/>
-      <!-- Platform crossbar -->
-      <rect x="${cx - platW/2}" y="${poleTop - platH/2}" width="${platW}" height="${platH}" rx="1.2" fill="${strokeColor}" opacity="0.55"/>
-      <!-- Ground tick -->
-      <line x1="${cx - poleBotW - 2}" y1="${poleBot}" x2="${cx + poleBotW + 2}" y2="${poleBot}" stroke="${strokeColor}" stroke-width="1.5" opacity="0.35" stroke-linecap="round"/>
-      <!-- Outer glow ring -->
-      <circle cx="${cx}" cy="${cy}" r="${discR + 3}" fill="none" stroke="${glowColor || fillColor}" stroke-width="1" opacity="${isTop ? 0.35 : 0.15}" filter="url(#sg${rank})"/>
-      <!-- Main disc -->
-      <circle cx="${cx}" cy="${cy}" r="${discR}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeW}"/>
-      <!-- Inner depth overlay -->
-      <circle cx="${cx}" cy="${cy}" r="${discR - 1}" fill="url(#ish${rank})"/>
-      <!-- Reticle ring -->
-      <circle cx="${cx}" cy="${cy}" r="${reticleR}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="${crossW * 0.8}"/>
-      <!-- Crosshair ticks -->
-      ${ticks}
-      <!-- Center dot -->
-      <circle cx="${cx}" cy="${cy}" r="1.5" fill="rgba(255,255,255,0.4)"/>
-      <!-- Label -->
-      ${labelEl}
-    </svg>`;
-  };
-
-  // v4-fix20: Removed zoom-responsive scaling entirely. Markers use fixed pixel sizes.
-  // This eliminates all transform/scale desync issues that caused positional drift.
-
-  const addStandMarkers = () => {
-    const map = mapRef.current;
-    if (!map || !alignedStands.length) return;
-
-    // v4-fix20: Simple opacity fade-out for old markers (no scale transforms)
-    const oldMarkers = [...markersRef.current];
-    oldMarkers.forEach(m => {
-      const el = m.getElement();
-      el.style.transition = 'opacity 200ms ease';
-      el.style.opacity = '0';
-    });
-    markersRef.current = [];
-
-    // v4-demo: Show only top 3 stands for visual trust and clarity
-    const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
-
-    // v4-fix20: FIXED PIXEL SIZES — no zoom scaling, no transform stack.
-    // Markers behave like default Mapbox markers: pinned to geo coordinates,
-    // Mapbox handles all positioning via translate(). We never touch transforms.
-    // Sizes: #1=52px, #2=46px, #3=40px (compact but readable)
-    const MARKER_SIZES = [52, 46, 40];
-
-    standsToShow.forEach((stand, idx) => {
-      const props = stand.props;
-      const coords = stand.coords;
-      const alignScore = stand.alignment.score;
-
-      const isTopStand = idx === 0;
-      const isSecondary = idx === 1;
-
-      // v4-demo: Sit labels — #1 Today's Sit, #2 Alternate, #3 Backup
-      const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
-      const sitLabel = SIT_LABELS[idx] || `Sit #${idx + 1}`;
-
-      const markerSize = MARKER_SIZES[idx] || 40;
-
-      // v4 Step 8: Unified color family — all warm earth tones, consistent stroke treatment
-      const fillColor = isTopStand ? LAYER_COLORS.standPrimary : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-      const strokeColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-      const glowColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-
-      const svgHTML = buildStandSVG({
-        size: markerSize,
-        fillColor,
-        strokeColor,
-        glowColor,
-        label: `${idx + 1}`,
-        isTop: isTopStand,
-        rank: idx,
-      });
-
-      // v4-fix20: FLAT ARCHITECTURE — No scale wrapper. No transform stack.
-      // el → visual div (SVG) + badge + tooltip. Mapbox owns el.style.transform entirely.
-      // We only touch el.style.opacity for show/hide.
-      const el = document.createElement('div');
-      el.className = 'intel-stand-marker';
-      el.dataset.standIdx = String(idx);
-      el.style.cssText = `
-        position: relative;
-        width: ${markerSize}px;
-        height: ${markerSize}px;
-        cursor: pointer;
-      `;
-
-      // SVG visual — no transitions, no transforms
-      const visualDiv = document.createElement('div');
-      visualDiv.className = 'stand-visual';
-      visualDiv.style.cssText = `
-        width: ${markerSize}px;
-        height: ${markerSize}px;
-        pointer-events: none;
-      `;
-      visualDiv.innerHTML = svgHTML;
-      el.appendChild(visualDiv);
-
-      // Badge label — fixed positioning below the marker
-      const badgeFontSize = isTopStand ? 10 : 9;
-      const badge = document.createElement('div');
-      badge.className = 'stand-badge';
-      badge.style.cssText = `
-        position: absolute;
-        bottom: -4px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: linear-gradient(135deg, ${fillColor}, ${strokeColor});
-        color: #fff;
-        font-size: ${badgeFontSize}px;
-        font-weight: 700;
-        padding: 2px 7px;
-        border-radius: 10px;
-        white-space: nowrap;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        pointer-events: none;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        opacity: ${isTopStand ? 1 : 0.85};
-      `;
-      badge.textContent = sitLabel;
-      el.appendChild(badge);
-
-      // Hover tooltip (unified for all tiers)
-      const hoverTooltip = document.createElement('div');
-      hoverTooltip.className = 'stand-hover-tooltip';
-      hoverTooltip.style.cssText = `
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(17, 24, 39, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 8px;
-        padding: 10px 12px;
-        white-space: nowrap;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.15s;
-        z-index: 100;
-        margin-bottom: 8px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-        backdrop-filter: blur(8px);
-      `;
-      const bestTime = season === 'rut' ? 'All Day' : season === 'early' ? 'AM/PM' : 'Midday';
-      const tooltipColor = isTopStand ? LAYER_COLORS.standPrimaryRing : isSecondary ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-      const standLabel = isTopStand ? `★ ${sitLabel}` : `#${idx + 1} ${sitLabel}`;
-      // Explainability chips
-      const explain = getStandExplainability(stand.inputs, props, stand.alignment, stand.resilience);
-      const chipsHTML = renderChipsHTML(explain.chips);
-      const barsHTML = renderQualityBarsHTML(explain.qualityBars);
-      hoverTooltip.innerHTML = `
-        <div style="font-weight: bold; color: ${tooltipColor}; font-size: 13px; margin-bottom: 2px;">
-          ${standLabel} • ${alignScore}/100
-        </div>
-        <div style="font-size: 10px; color: #a8a29e; margin-bottom: 6px; font-style: italic;">
-          ${explain.rankRationale}
-        </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 6px;">
-          ${chipsHTML}
-        </div>
-        <div style="margin-bottom: 4px;">
-          ${barsHTML}
-        </div>
-        <div style="color: #78716c; font-size: 10px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
-          🌬️ ${props.windOk.slice(0, 2).join(', ')} winds • ⏰ ${bestTime}
-        </div>
-      `;
-      el.appendChild(hoverTooltip);
-
-      // v4-fix20: Hover — filter glow only, no scale transforms
-      el.onmouseenter = () => {
-        visualDiv.style.filter = `brightness(1.15) drop-shadow(0 4px 12px ${fillColor}66)`;
-        hoverTooltip.style.opacity = '1';
-      };
-      el.onmouseleave = () => {
-        visualDiv.style.filter = 'none';
-        hoverTooltip.style.opacity = '0';
-      };
-
-      // v4-fix20: Anchor at bottom of the SVG (pole base = geo coordinate).
-      // The SVG's ground tick is at y=92/100, so the bottom of the rendered element
-      // is approximately at the geo point. anchor:'bottom' pins the element's
-      // bottom edge to the coordinate — no offset math needed.
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(coords)
-        .addTo(map);
-
-      el.onclick = () => {
-        hoverTooltip.style.opacity = '0';
-        setSelectedStand(stand.rank);
-        map.flyTo({
-          center: coords,
-          zoom: Math.max(map.getZoom(), 15.5),
-          duration: 1200,
-          essential: true,
-          padding: { top: 80, bottom: 40, left: 40, right: 40 },
-        });
-        setTimeout(() => {
-          showStandPopup(coords, props, stand.resilience, stand);
-        }, 400);
-      };
-
-      // v4-fix20: Markers start hidden, revealed after camera settles (opacity only)
-      el.style.opacity = '0';
-      el.dataset.ready = '0';
-      el.dataset.revealed = '0';
-
-      markersRef.current.push(marker);
-    });
-
-    // Remove old markers after their fade-out completes
-    setTimeout(() => {
-      oldMarkers.forEach(m => m.remove());
-    }, 250);
-
-    // v4-fix15: Delay reveal until camera is settled.
-    scheduleStandReveal();
-  };
-
-  // v4-fix15: Reveal stand markers with uniform entrance — all stands get identical
-  // speed, transform, and timing so they read as equally terrain-born.
-  const standRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // v4-fix20: Simplified reveal — opacity fade-in only, no scale transforms
-  const revealStandMarkers = () => {
-    const markers = markersRef.current;
-    if (!markers.length) return;
-
-    const unrevealed = markers.filter(m => m.getElement().dataset.revealed === '0');
-    if (!unrevealed.length) return;
-
-    requestAnimationFrame(() => {
-      unrevealed.forEach((marker, idx) => {
-        const el = marker.getElement();
-        if (el.dataset.revealed === '1') return;
-
-        el.dataset.revealed = '1';
-        const staggerDelay = idx * 40;
-        el.style.transition = `opacity 300ms ease ${staggerDelay}ms`;
-        el.style.opacity = '1';
-      });
-
-      // Cleanup transitions after all entries complete
-      const totalTime = 300 + (unrevealed.length - 1) * 40 + 100;
-      setTimeout(() => {
-        markers.forEach((m) => {
-          const mEl = m.getElement();
-          mEl.style.transition = '';
-          mEl.dataset.ready = '1';
-        });
-      }, totalTime);
-    });
-  };
-
-  const scheduleStandReveal = () => {
-    // Clear any pending reveal
-    if (standRevealTimerRef.current) {
-      clearTimeout(standRevealTimerRef.current);
-      standRevealTimerRef.current = null;
-    }
-
-    const map = mapRef.current;
-    if (!map) return;
-
-    // If camera is currently moving, the settle handler will trigger reveal.
-    // If camera is already idle, reveal after a short delay to let Mapbox
-    // finalize marker screen positions.
-    if (cameraMovingRef.current) {
-      // Camera is moving — reveal will be triggered by settleMarkers callback
-      return;
-    }
-
-    // Camera is idle — reveal after 80ms to ensure Mapbox has positioned markers
-    standRevealTimerRef.current = setTimeout(() => {
-      standRevealTimerRef.current = null;
-      revealStandMarkers();
-    }, 80);
-  };
-
-  // ========== v4-fix20: MINIMAL CAMERA STATE TRACKER ==========
-  // No scaling, no transforms, no wrapper manipulation.
-  // Only tracks whether camera is moving so:
-  // 1. Reveal logic can wait for settle before showing new markers
-  // 2. Visibility toggle can skip transitions during motion
-  const cameraMovingRef = useRef(false);
-
+  // ========== vNext: MAP-NATIVE STAND CLICK / HOVER HANDLERS ==========
+  // Replaces HTML marker onclick/onmouseenter with Mapbox layer event handlers.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    const onClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      const feat = e.features?.[0];
+      if (!feat?.properties) return;
+      const idx = feat.properties.standIdx as number;
+      const stand = alignedStands[idx];
+      if (!stand) return;
 
-    const onCameraMove = () => {
-      cameraMovingRef.current = true;
-      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      setSelectedStand(stand.rank);
+      map.flyTo({
+        center: stand.coords,
+        zoom: Math.max(map.getZoom(), 15.5),
+        duration: 1200,
+        essential: true,
+        padding: { top: 80, bottom: 40, left: 40, right: 40 },
+      });
+      setTimeout(() => {
+        showStandPopup(stand.coords, stand.props, stand.resilience, stand);
+      }, 400);
     };
 
-    const onCameraEnd = () => {
-      if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(() => {
-        cameraMovingRef.current = false;
-        // Reveal any unrevealed markers now that camera has settled
-        revealStandMarkers();
-      }, 150);
-    };
+    const onMouseEnter = () => { map.getCanvas().style.cursor = 'pointer'; };
+    const onMouseLeave = () => { map.getCanvas().style.cursor = ''; };
 
-    map.on('move', onCameraMove);
-    map.on('moveend', onCameraEnd);
+    map.on('click', 'tfp-stands-disc', onClick);
+    map.on('mouseenter', 'tfp-stands-disc', onMouseEnter);
+    map.on('mouseleave', 'tfp-stands-disc', onMouseLeave);
 
     return () => {
-      map.off('move', onCameraMove);
-      map.off('moveend', onCameraEnd);
-      if (settleTimer) clearTimeout(settleTimer);
-      if (standRevealTimerRef.current) clearTimeout(standRevealTimerRef.current);
-      cameraMovingRef.current = false;
+      map.off('click', 'tfp-stands-disc', onClick);
+      map.off('mouseenter', 'tfp-stands-disc', onMouseEnter);
+      map.off('mouseleave', 'tfp-stands-disc', onMouseLeave);
     };
   }, [mapReady, alignedStands]); // eslint-disable-line
+
 
   const showStandPopup = (coords: [number, number], props: StandPointProperties, resilience?: StandResilience, standData?: AlignedStand) => {
     const map = mapRef.current;
