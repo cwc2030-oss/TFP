@@ -873,10 +873,9 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // v1.2 — two passes of Gaussian smoothing (effectively ~2-cell blur).
-  // Single pass was 1-cell/15m, which left gaps between features 50-100m apart.
-  // Double pass bridges those gaps while preserving peak structure.
-  applyGaussianSmoothing(grid);
+  // v1.3 — single pass of Gaussian smoothing (1-cell/15m blur).
+  // v1.2 used double pass which over-smoothed terrain structure into amoeba blobs.
+  // Single pass preserves corridor-driven shape while still blending cell boundaries.
   applyGaussianSmoothing(grid);
 
   // Normalize pressure to 0-1 range
@@ -934,10 +933,11 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  // v1.2 — lowered hard floor from 0.65 → 0.55 so ~25-35% of cells survive.
-  // Combined with wider radii and double smoothing, this creates connected
-  // heat surfaces instead of isolated kernels while still suppressing noise.
-  const HARD_PRESSURE_FLOOR = 0.55;
+  // v1.3 — raised floor from 0.55 → 0.60 for tighter terrain-driven shapes.
+  // v1.2's 0.55 + double smoothing created overly broad amoeba blobs.
+  // With single-pass smoothing, 0.60 lets ~20-30% of cells survive while
+  // preserving corridor/funnel structure as distinct visual lanes.
+  const HARD_PRESSURE_FLOOR = 0.60;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
@@ -1052,7 +1052,7 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
       const delta = Math.min(1, Math.max(0, 0.7 * cell.pressure));
-      if (delta < 0.05) continue; // skip near-zero cells
+      if (delta < 0.15) continue; // v1.3: raised from 0.05 to suppress weak haze
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       deltaFeatures.push({
@@ -1081,7 +1081,7 @@ export function buildTerrainRaster(input: RasterInput): {
         debugSamples++;
       }
 
-      if (post < 0.02) continue; // skip near-zero cells
+      if (post < 0.10) continue; // v1.3: raised from 0.02 to suppress weak haze
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       postFeatures.push({

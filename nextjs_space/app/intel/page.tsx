@@ -4115,12 +4115,12 @@ function DeerIntelContent() {
           10, 0.7 * fp.intensityMult,
           15, 1.3 * fp.intensityMult,
         ]);
-        // Radius: tight lanes — offset per focus (tighter in focused, wider in broad)
+        // v1.3: Tighter base radius — offset per focus (tighter in focused, wider in broad)
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
-          10, Math.max(8, 18 + fp.radiusOffset),
-          15, Math.max(12, 24 + fp.radiusOffset),
-          18, Math.max(18, 34 + fp.radiusOffset),
+          10, Math.max(8, 13 + fp.radiusOffset),
+          15, Math.max(12, 18 + fp.radiusOffset),
+          18, Math.max(16, 26 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
         const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
@@ -4827,14 +4827,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.80)',    // red-700
                 1.00, 'rgba(153,27,27,0.85)',    // red-800 (hot)
               ],
-              // Radius: tight lanes, not broad blobs
+              // v1.3: Tighter radius for corridor-driven shapes
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 18,
-                15, 24,
-                18, 34,
+                10, 13,
+                15, 18,
+                18, 26,
               ],
-              'heatmap-opacity': 0.75, // slight boost from 0.7
+              'heatmap-opacity': 0.75,
             },
           });
         }
@@ -4848,21 +4848,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-delta',
             paint: {
-              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
+              // v1.3: Steeper weight curve — aggressive haze suppression for terrain-driven shapes
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'delta'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.25, 0.0,
-                0.40, 0.2,
-                0.60, 0.6,
-                0.80, 0.9,
+                0.30, 0.0,
+                0.45, 0.15,
+                0.60, 0.5,
+                0.80, 0.85,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.7,
-                15, 1.3,
+                10, 0.8,
+                15, 1.4,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4876,13 +4876,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.80)',   // red-700
                 1.00, 'rgba(153,27,27,0.85)',   // deep red
               ],
+              // v1.3: Tighter radius for corridor-driven shapes instead of soft amoeba blobs
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 18,
-                15, 24,
-                18, 34,
+                10, 12,
+                15, 17,
+                18, 24,
               ],
-              'heatmap-opacity': 0.5,
+              'heatmap-opacity': 0.55,
             },
             layout: {
               visibility: 'visible',
@@ -4899,21 +4900,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-post',
             paint: {
-              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
+              // v1.3: Steeper weight curve — aggressive haze suppression for terrain-driven shapes
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'movement_post'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.25, 0.0,
-                0.40, 0.2,
-                0.60, 0.6,
-                0.80, 0.9,
+                0.30, 0.0,
+                0.45, 0.15,
+                0.60, 0.5,
+                0.80, 0.85,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.7,
-                15, 1.3,
+                10, 0.8,
+                15, 1.4,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4927,13 +4928,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(22,163,74,0.80)',    // green-600
                 1.00, 'rgba(21,128,61,0.85)',    // green-700 (strong)
               ],
+              // v1.3: Tighter radius for corridor-driven shapes instead of soft amoeba blobs
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 18,
-                15, 24,
-                18, 34,
+                10, 12,
+                15, 17,
+                18, 24,
               ],
-              'heatmap-opacity': 0.5,
+              'heatmap-opacity': 0.55,
             },
             layout: {
               visibility: 'visible',
@@ -4950,21 +4952,21 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-refuge-zones',
             paint: {
-              // Weight: hide weak haze — values below ~0.25 contribute almost nothing
+              // v1.3: Steeper weight curve — terrain-driven refuge shapes
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'refuge_score'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.25, 0.0,
-                0.40, 0.2,
-                0.60, 0.6,
-                0.80, 0.9,
+                0.30, 0.0,
+                0.45, 0.15,
+                0.60, 0.5,
+                0.80, 0.85,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.7,
-                15, 1.3,
+                10, 0.8,
+                15, 1.4,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -4978,11 +4980,12 @@ function DeerIntelContent() {
                 0.92, 'rgba(37,99,235,0.80)',     // blue-600
                 1.00, 'rgba(29,78,216,0.85)',     // blue-700 (strong refuge)
               ],
+              // v1.3: Tighter radius for terrain-driven shapes
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 18,
-                15, 24,
-                18, 34,
+                10, 12,
+                15, 17,
+                18, 24,
               ],
               'heatmap-opacity': 0.6,
             },
@@ -6955,13 +6958,28 @@ function DeerIntelContent() {
         geometry: { type: 'Polygon', coordinates: [coords] },
       };
       
-      // Set parcelPolygon → triggers the map source painting useEffect
-      // which paints the gold parcel boundary on tfp-parcel.
+      // Set parcelPolygon state (triggers painting useEffect on next render)
       setParcelPolygon(parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
       console.log('[PICK] Set parcelPolygon from lookup data:', parcel.parcelId);
       
-      // ── 2. Fit camera to parcel ──
+      // ── 1b. IMPERATIVE PAINT: show gold boundary immediately ──
+      // React state won't propagate until the next render cycle, but we want
+      // the gold boundary visible NOW — before camera animation or analysis.
       const map = mapRef.current;
+      if (map) {
+        const parcelSrc = map.getSource('tfp-parcel') as mapboxgl.GeoJSONSource | undefined;
+        if (parcelSrc) {
+          parcelSrc.setData(parcelFeature);
+          // Ensure parcel layers are visible (gracefulClear may have faded them)
+          try { map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible'); } catch {}
+          try { map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible'); } catch {}
+          try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', 0.95); } catch {}
+          try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', 0.35); } catch {}
+          console.log('[PICK] Imperative paint: gold boundary visible immediately');
+        }
+      }
+      
+      // ── 2. Fit camera to parcel ──
       if (map && parcel.bounds) {
         map.fitBounds(parcel.bounds, {
           padding: 80,
