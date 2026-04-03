@@ -103,6 +103,11 @@ export { TERRAIN_FLOW_WEIGHTS as FLOW_WEIGHTS, FLOW_THRESHOLDS };
 // Re-export DEM analysis functions for external use
 export { computeFlowSegmentScores, type FlowSegmentScores };
 
+// ========== DETERMINISTIC SEEDED PRNG ==========
+// v1.5: Import from seeded-rng.ts to avoid circular deps with terrain-flow-v3.
+import { seedRng, sRand, nextFlowId } from './seeded-rng';
+export { seedRng, sRand } from './seeded-rng';
+
 // ========== PARCEL CLIPPING UTILITIES ==========
 
 /**
@@ -367,6 +372,8 @@ export function generateTerrainDrivenFlow(
   
   // Calculate parcel dimensions and adaptive scaling
   const centroid = getCentroid(coords);
+  // v1.5: Seed deterministic PRNG from parcel centroid
+  seedRng(centroid);
   const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
   
@@ -748,8 +755,8 @@ function generateTerrainFollowingLines(
     // Generate random terrain-following bearing (not axis-aligned)
     // Simulate ridge/bench directions: typically 30-60, 120-150, 210-240, 300-330 degrees
     const quadrant = i % 4;
-    const baseAngle = quadrant * 90 + 30 + Math.random() * 30; // Diagonal directions
-    const bearing = (baseAngle + Math.random() * 20 - 10) % 360;
+    const baseAngle = quadrant * 90 + 30 + sRand() * 30; // Diagonal directions
+    const bearing = (baseAngle + sRand() * 20 - 10) % 360;
     
     // Random starting position (not centered)
     const startOffset = (i - numLines / 2) / numLines;
@@ -787,10 +794,10 @@ function generateTerrainFollowingLines(
       properties: {
         id: `flow_${tier}_${i}`,
         tier,
-        likelihood: tier === 'primary' ? 0.75 + Math.random() * 0.15 : 0.55 + Math.random() * 0.15,
+        likelihood: tier === 'primary' ? 0.75 + sRand() * 0.15 : 0.55 + sRand() * 0.15,
         lengthM: Math.round(lineLength),
-        avgSlope: 8 + Math.random() * 6,
-        convergenceScore: 0.5 + Math.random() * 0.3,
+        avgSlope: 8 + sRand() * 6,
+        convergenceScore: 0.5 + sRand() * 0.3,
       },
       geometry: {
         type: 'LineString',
@@ -968,6 +975,8 @@ export function generateLegacySyntheticFlow(
   
   const bbox = getBbox(coords);
   const centroid = getCentroid(coords);
+  // v1.5: Seed deterministic PRNG from parcel centroid
+  seedRng(centroid);
   const widthM = distanceMeters([bbox[0], centroid[1]], [bbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], bbox[1]], [centroid[0], bbox[3]]);
   const parcelAcres = (widthM * heightM * 0.8) / 4046.86;
@@ -999,7 +1008,7 @@ export function generateLegacySyntheticFlow(
   
   for (let i = 0; i < numSecondary; i++) {
     const offset = (i - (numSecondary - 1) / 2) * (isNorthSouth ? widthM : heightM) / (numSecondary + 1);
-    const angle = primaryBearing + (Math.random() - 0.5) * 40;
+    const angle = primaryBearing + (sRand() - 0.5) * 40;
     const line = generateLegacyFlowLine(
       centroid,
       angle,
@@ -1016,17 +1025,17 @@ export function generateLegacySyntheticFlow(
   const numConvergence = Math.min(3, Math.max(1, Math.floor(parcelAcres / 40)));
   
   for (let i = 0; i < numConvergence; i++) {
-    const offsetLng = (Math.random() - 0.5) * (bbox[2] - bbox[0]) * 0.6;
-    const offsetLat = (Math.random() - 0.5) * (bbox[3] - bbox[1]) * 0.6;
+    const offsetLng = (sRand() - 0.5) * (bbox[2] - bbox[0]) * 0.6;
+    const offsetLat = (sRand() - 0.5) * (bbox[3] - bbox[1]) * 0.6;
     const point: [number, number] = [centroid[0] + offsetLng, centroid[1] + offsetLat];
     
     convergenceZones.push({
       type: 'Feature',
       properties: {
         id: `conv_${i}`,
-        intensity: 0.65 + Math.random() * 0.25,
-        flowCount: 2 + Math.floor(Math.random() * 2),
-        radiusM: 30 + Math.random() * 40,
+        intensity: 0.65 + sRand() * 0.25,
+        flowCount: 2 + Math.floor(sRand() * 2),
+        radiusM: 30 + sRand() * 40,
         type: i === 0 ? 'pinch' : 'overlap',
       },
       geometry: {
@@ -1044,7 +1053,7 @@ export function generateLegacySyntheticFlow(
       type: 'Feature',
       properties: {
         id: 'opp_1',
-        score: 0.75 + Math.random() * 0.15,
+        score: 0.75 + sRand() * 0.15,
         flowIntensity: topConvergence.properties.intensity,
         convergenceBonus: 0.15,
         benchBonus: 0.10,
@@ -1127,12 +1136,12 @@ function generateLegacyFlowLine(
   return {
     type: 'Feature',
     properties: {
-      id: `flow_${tier}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `flow_${tier}_${nextFlowId()}`,
       tier,
-      likelihood: tier === 'primary' ? 0.80 + Math.random() * 0.15 : 0.60 + Math.random() * 0.15,
+      likelihood: tier === 'primary' ? 0.80 + sRand() * 0.15 : 0.60 + sRand() * 0.15,
       lengthM: Math.round(lineLength),
-      avgSlope: 8 + Math.random() * 6,
-      convergenceScore: 0.5 + Math.random() * 0.3,
+      avgSlope: 8 + sRand() * 6,
+      convergenceScore: 0.5 + sRand() * 0.3,
     },
     geometry: {
       type: 'LineString',

@@ -2104,7 +2104,7 @@ function DeerIntelContent() {
         coords,
         resilience,
       };
-    }).sort((a, b) => b.alignment.score - a.alignment.score);
+    }).sort((a, b) => b.alignment.score - a.alignment.score || a.props.rank - b.props.rank);
 
     // v4-fix17: PARCEL-SAFE STAND ENFORCEMENT — all Top-3 stands must be strictly
     // inside the parcel with an interior safety buffer (PARCEL_INSET_METERS).

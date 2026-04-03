@@ -28,6 +28,7 @@ import type {
   OpportunityZoneProperties,
   FlowTier,
 } from '@/types/terrain-flow';
+import { sRand } from './seeded-rng';
 
 import {
   TERRAIN_FLOW_WEIGHTS,
@@ -353,7 +354,7 @@ function generateLinearFlow(
     const offsetDir = (bearing + 90) % 360;
     const offset = widthM * 0.18;
     const startPoint = movePoint(centroid, offsetDir, offset);
-    const variedBearing = bearing + (Math.random() - 0.5) * 12;
+    const variedBearing = bearing + (sRand() - 0.5) * 12;
     const line = generateSingleFlowLine(startPoint, variedBearing, maxLen * 0.55, scale, 'secondary', 0);
     if (line) secondary.push(line);
   }
@@ -405,8 +406,8 @@ function generateFunnelFlow(
         tier: i === 0 ? 'primary' : 'secondary',
         likelihood: i === 0 ? 0.78 : 0.6,
         lengthM: Math.round(length),
-        avgSlope: 8 + Math.random() * 5,
-        convergenceScore: 0.7 + Math.random() * 0.2,
+        avgSlope: 8 + sRand() * 5,
+        convergenceScore: 0.7 + sRand() * 0.2,
       },
       geometry: { type: 'LineString', coordinates: lineCoords },
     };
@@ -452,7 +453,7 @@ function generateBenchFlow(
   if (scale.areaAcres >= 70) {
     const offset = scale.widthM * 0.15;
     const offsetPoint = movePoint(centroid, (bearing + 90) % 360, offset);
-    const variedBearing = bearing + (Math.random() - 0.5) * 10;
+    const variedBearing = bearing + (sRand() - 0.5) * 10;
     const line = generateSingleFlowLine(offsetPoint, variedBearing, maxLen * 0.5, scale, 'secondary', 0);
     if (line) {
       line.properties.likelihood = 0.55;
@@ -550,10 +551,10 @@ function generateSingleFlowLine(
     properties: {
       id: `flow_${tier}_${index}`,
       tier,
-      likelihood: tier === 'primary' ? 0.78 + Math.random() * 0.12 : 0.58 + Math.random() * 0.12,
+      likelihood: tier === 'primary' ? 0.78 + sRand() * 0.12 : 0.58 + sRand() * 0.12,
       lengthM: Math.round(actualLength),
-      avgSlope: 7 + Math.random() * 6,
-      convergenceScore: 0.5 + Math.random() * 0.3,
+      avgSlope: 7 + sRand() * 6,
+      convergenceScore: 0.5 + sRand() * 0.3,
     },
     geometry: { type: 'LineString', coordinates: coords },
   };
@@ -573,8 +574,8 @@ function generateCurvedLine(
   const numSegments = Math.max(10, Math.round(12 * scaleFactor));
   
   // Random phase offsets for organic variation
-  const phase1 = Math.random() * Math.PI * 2;
-  const phase2 = Math.random() * Math.PI * 2;
+  const phase1 = sRand() * Math.PI * 2;
+  const phase2 = sRand() * Math.PI * 2;
   
   for (let i = 0; i <= numSegments; i++) {
     const t = i / numSegments;
@@ -640,7 +641,7 @@ function generateCurvedLineToTarget(
   const directDist = distanceMeters(start, target);
   
   // Add some curve to the path
-  const curveBias = (Math.random() - 0.5) * 30; // degrees
+  const curveBias = (sRand() - 0.5) * 30; // degrees
   
   for (let i = 0; i <= numSegments; i++) {
     const t = i / numSegments;

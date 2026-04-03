@@ -984,7 +984,14 @@ export function buildTerrainRaster(input: RasterInput): {
 
   // Hard cap: keep only the top 500 highest-scoring cells
   if (features.length > 500) {
-    features.sort((a, b) => (b.properties?.score ?? 0) - (a.properties?.score ?? 0));
+    features.sort((a, b) => {
+      const ds = (b.properties?.score ?? 0) - (a.properties?.score ?? 0);
+      if (ds !== 0) return ds;
+      // Tie-break by coordinates for determinism
+      const ac = a.geometry?.type === 'Point' ? (a.geometry as GeoJSON.Point).coordinates : [0, 0];
+      const bc = b.geometry?.type === 'Point' ? (b.geometry as GeoJSON.Point).coordinates : [0, 0];
+      return ac[1] - bc[1] || ac[0] - bc[0];
+    });
     features = features.slice(0, 500);
   }
 
@@ -1391,7 +1398,9 @@ function extractPrimeStandSites(
       for (let dr = -1; dr <= 1 && isMax; dr++) {
         for (let dc = -1; dc <= 1 && isMax; dc++) {
           if (dr === 0 && dc === 0) continue;
-          if (grid.cells[r + dr][c + dc].pressure >= center) {
+          const neighborP = grid.cells[r + dr][c + dc].pressure;
+          // Strict > for neighbors; ties broken by position (lower row,col wins)
+          if (neighborP > center || (neighborP === center && (r + dr < r || (r + dr === r && c + dc < c)))) {
             isMax = false;
           }
         }
@@ -1406,7 +1415,7 @@ function extractPrimeStandSites(
   }
 
   // Sort by pressure (highest first)
-  candidates.sort((a, b) => b.pressure - a.pressure);
+  candidates.sort((a, b) => b.pressure - a.pressure || a.row - b.row || a.col - b.col);
 
   // Step 2, 3, 4: For each hotspot, apply cover gating, compute intercept, and apply offset
   const MIN_SEPARATION_CELLS = 4; // ~60m at 15m cell size
