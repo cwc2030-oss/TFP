@@ -2314,9 +2314,15 @@ function DeerIntelContent() {
       }
     }
 
+    // Cap to Top 3 — diversity selection already picked the best 3; parcel-safe
+    // enforcement may have let extras through from the remaining pool.
+    // All downstream consumers (GeoJSON layers, StandAlignmentPanel, popups, compare
+    // dropdowns) expect at most 3 stands. This is the single enforcement point.
+    aligned = aligned.slice(0, 3);
+
     // Log stand resilience values for verification
     if (aligned.length > 0) {
-      console.log('[StandResilience] Sample values:', aligned.slice(0, 5).map(s => ({
+      console.log('[StandResilience] Sample values:', aligned.slice(0, 3).map(s => ({
         rank: s.rank, name: s.name,
         standResilience: s.props?.standResilience?.toFixed(3) ?? 'N/A',
         corridorResilience: s.resilience?.score?.toFixed(3) ?? 'N/A',
@@ -7714,6 +7720,24 @@ function DeerIntelContent() {
           try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch {}
         }
       });
+
+      // Ensure direction wedge + hunt pocket layers are visible and at correct opacity
+      // after gracefulClear may have faded them to 0.
+      const supportLayers: { id: string; prop: string; opacity: number }[] = [
+        { id: 'tfp-stand-direction-main', prop: 'line-opacity', opacity: 0.5 },
+        { id: 'tfp-stand-direction-flank', prop: 'line-opacity', opacity: 0.3 },
+        { id: 'tfp-hunt-pockets-fill', prop: 'fill-opacity', opacity: 0.2 },
+        { id: 'tfp-hunt-pockets-stroke', prop: 'line-opacity', opacity: 0.6 },
+        { id: 'tfp-stand-emphasis-glow', prop: 'circle-opacity', opacity: 0.45 },
+      ];
+      supportLayers.forEach(({ id, prop, opacity }) => {
+        if (map.getLayer(id)) {
+          try {
+            map.setLayoutProperty(id, 'visibility', 'visible');
+            map.setPaintProperty(id, prop, opacity);
+          } catch {}
+        }
+      });
     }, 400);
 
     return () => clearTimeout(timer);
@@ -7763,8 +7787,8 @@ function DeerIntelContent() {
       { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
       { id: 'tfp-hunt-pockets-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
       { id: 'tfp-hunt-pockets-stroke', targetOpacity: 0.6 },
-      { id: 'tfp-stand-direction-main', targetOpacity: 0.5, opacityProp: 'fill-opacity' },
-      { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'fill-opacity' },
+      { id: 'tfp-stand-direction-main', targetOpacity: 0.5, opacityProp: 'line-opacity' },
+      { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'line-opacity' },
       { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
     ], 400, 60);
 

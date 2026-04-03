@@ -149,8 +149,8 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-hunt-pockets-stroke', group: 'huntPockets', opacityProp: 'line-opacity', targetOpacity: 0.6, source: { kind: 'toggle', key: 'stands' } },
 
   // ── Stand support layers (toggle: stands) ──
-  { id: 'tfp-stand-direction-main',  group: 'stands', opacityProp: 'fill-opacity',   targetOpacity: 0.5,  source: { kind: 'toggle', key: 'stands' } },
-  { id: 'tfp-stand-direction-flank', group: 'stands', opacityProp: 'fill-opacity',   targetOpacity: 0.3,  source: { kind: 'toggle', key: 'stands' } },
+  { id: 'tfp-stand-direction-main',  group: 'stands', opacityProp: 'line-opacity',   targetOpacity: 0.5,  source: { kind: 'toggle', key: 'stands' } },
+  { id: 'tfp-stand-direction-flank', group: 'stands', opacityProp: 'line-opacity',   targetOpacity: 0.3,  source: { kind: 'toggle', key: 'stands' } },
   { id: 'tfp-stand-tertiary-dot',    group: 'stands', opacityProp: 'circle-opacity', targetOpacity: 0.6,  source: { kind: 'toggle', key: 'stands' } },
   { id: 'tfp-stand-emphasis-glow',   group: 'stands', opacityProp: 'circle-opacity', targetOpacity: 0.45, source: { kind: 'toggle', key: 'stands' } },
 
