@@ -152,12 +152,12 @@ const WEAK_PARCEL_CONFIG = {
 };
 
 // ============ INFLUENCE RADII (meters) ============
-// v1.5 — moderate radii: midpoint between v1.2 (too broad) and v1.4 (too tight).
-// Enough overlap to read as connected movement system, but not so wide that
-// individual features bloom into circular blobs.
-const BENCH_INFLUENCE_M  = 95;   // v1.4=85, v1.2=110 — moderate food/bed reach
-const SADDLE_INFLUENCE_M = 130;  // v1.4=115, v1.2=150 — funnels bridge terrain gaps
-const RIDGE_INFLUENCE_M  = 75;   // v1.4=65, v1.2=85 — ridges connect across draws
+// v2.0 — tighter radii to produce lane-shaped movement instead of circular blobs.
+// Each feature projects influence only as far as its real-world terrain effect.
+// Ridges are tightest (narrow spines), saddles moderate (funnel width), benches mid.
+const BENCH_INFLUENCE_M  = 65;   // was 95 — food/bed reach tighter
+const SADDLE_INFLUENCE_M = 90;   // was 130 — funnel projection (not broad glow)
+const RIDGE_INFLUENCE_M  = 50;   // was 75 — ridge spine is narrow
 
 // ============ SEASON PROFILES (v4.0 — Seasonal Terrain Weighting) ============
 // Each season adjusts:
@@ -456,7 +456,7 @@ function proximityScore(dist: number, radius: number): number {
   if (dist >= radius) return 0;
   const t = dist / radius;
   const u = 1 - t * t;
-  return Math.max(0, u * u);  // quartic (1-t²)² — sharper edges than cubic
+  return Math.max(0, u * u * u);  // sextic (1-t²)³ — steep falloff, tight core
 }
 
 /**
@@ -877,12 +877,11 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // v1.5 — light single-pass smoothing restored for natural transitions.
-  // v1.4 removed smoothing entirely which left shapes too sparse/disconnected.
-  // v1.2's double pass was too much.  Single pass with the existing 3×3 kernel
-  // (sigma≈0.85, center=0.25) provides just enough blending to connect
-  // neighbouring cells without erasing directional terrain structure.
-  applyGaussianSmoothing(grid);
+  // v2.0 — NO Gaussian smoothing. Smoothing inflates every feature into a
+  // circular blob and destroys directional structure. With tighter influence
+  // radii and steeper falloff, the raw raster already has natural transitions
+  // from overlapping feature kernels. Mapbox heatmap rendering adds its own
+  // pixel-level blur which provides visual softness without destroying shape.
 
   // Normalize pressure to 0-1 range
   let maxPressure = 0;
@@ -913,13 +912,12 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // Soft-cap pressure to preserve internal variation in high-pressure zones.
-  // The exponential curve compresses extreme values while keeping ordering intact,
-  // preventing large flat saturated plates on the map.
+  // v2.0 — steeper soft-cap to preserve more internal variation.
+  // Higher exponent coefficient = more separation between mid and high scores.
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const p = grid.cells[r][c].pressure;
-      grid.cells[r][c].pressure = Math.min(1, Math.max(0, 1 - Math.exp(-1.35 * p)));
+      grid.cells[r][c].pressure = Math.min(1, Math.max(0, 1 - Math.exp(-2.0 * p)));
     }
   }
 
@@ -939,10 +937,10 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  // v1.5 — moderate floor between v1.2 (0.55) and v1.4 (0.68).
-  // 0.58 lets enough cells survive to tell a broad movement story across
-  // the parcel while still filtering the weakest background haze.
-  const HARD_PRESSURE_FLOOR = 0.58;
+  // v2.0 — raised floor to aggressively prune background haze.
+  // Only cells in the top ~25-30% of the score range survive, producing
+  // crisp terrain-aligned lanes instead of broad amorphous glow.
+  const HARD_PRESSURE_FLOOR = 0.68;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
@@ -1418,7 +1416,7 @@ function extractPrimeStandSites(
   candidates.sort((a, b) => b.pressure - a.pressure || a.row - b.row || a.col - b.col);
 
   // Step 2, 3, 4: For each hotspot, apply cover gating, compute intercept, and apply offset
-  const MIN_SEPARATION_CELLS = 4; // ~60m at 15m cell size
+  const MIN_SEPARATION_CELLS = 10; // ~150m at 15m cell size — forces meaningful spatial diversity
   const selected: (PrimeStandSite & { _row: number; _col: number })[] = [];
 
   for (const hotspot of candidates) {

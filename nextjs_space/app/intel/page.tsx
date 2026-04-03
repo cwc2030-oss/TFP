@@ -2106,6 +2106,77 @@ function DeerIntelContent() {
       };
     }).sort((a, b) => b.alignment.score - a.alignment.score || a.props.rank - b.props.rank);
 
+    // ═══ v2.0: DIVERSITY SELECTION — prevent stand clustering ═══
+    // Greedy selection: pick best, then for each subsequent pick, apply a
+    // proximity penalty and terrain-similarity penalty so #2 and #3 represent
+    // genuinely different hunting options rather than minor variations of #1.
+    const MIN_STAND_SEPARATION_M = 150; // minimum metres between any two selected stands
+    const PROXIMITY_PENALTY_FACTOR = 0.35; // score penalty per stand within penalty radius
+    const TERRAIN_SIMILARITY_PENALTY = 0.12; // penalty when dominant terrain context matches
+    const PENALTY_RADIUS_M = 250; // distance within which proximity penalty applies (smooth decay)
+    const TARGET_COUNT = 3;
+
+    function dominantTerrainContext(p: StandPointProperties): string {
+      // Classify by TPI: positive = ridge/hilltop, near-zero = flat/bench, negative = valley/draw
+      if (p.tpiLocal > 1.5) return 'ridge';
+      if (p.tpiLocal < -1.5) return 'draw';
+      if (p.distToBeddingMeters < 80) return 'bedding_edge';
+      return 'bench';
+    }
+
+    const diverseStands: typeof allScored = [];
+    const remainingPool = [...allScored];
+
+    for (let pick = 0; pick < TARGET_COUNT && remainingPool.length > 0; pick++) {
+      if (pick === 0) {
+        // First pick: always the highest-scoring stand
+        diverseStands.push(remainingPool.shift()!);
+        continue;
+      }
+
+      // For subsequent picks, compute effective score = alignment.score - penalties
+      let bestIdx = 0;
+      let bestEffective = -Infinity;
+
+      for (let i = 0; i < remainingPool.length; i++) {
+        const candidate = remainingPool[i];
+        let penalty = 0;
+
+        for (const selected of diverseStands) {
+          const dist = distanceMeters(candidate.coords, selected.coords);
+
+          // Hard minimum separation
+          if (dist < MIN_STAND_SEPARATION_M) {
+            penalty += 100; // effectively disqualifies
+            continue;
+          }
+
+          // Smooth proximity penalty within PENALTY_RADIUS_M
+          if (dist < PENALTY_RADIUS_M) {
+            const t = 1 - (dist - MIN_STAND_SEPARATION_M) / (PENALTY_RADIUS_M - MIN_STAND_SEPARATION_M);
+            penalty += PROXIMITY_PENALTY_FACTOR * t * 100; // scale to alignment score units (0-100)
+          }
+
+          // Terrain similarity penalty
+          if (dominantTerrainContext(candidate.props) === dominantTerrainContext(selected.props)) {
+            penalty += TERRAIN_SIMILARITY_PENALTY * 100;
+          }
+        }
+
+        const effective = candidate.alignment.score - penalty;
+        if (effective > bestEffective) {
+          bestEffective = effective;
+          bestIdx = i;
+        }
+      }
+
+      diverseStands.push(remainingPool.splice(bestIdx, 1)[0]);
+    }
+
+    // Replace allScored with diversity-selected stands + remaining pool (for fallback)
+    const allScoredDiverse = [...diverseStands, ...remainingPool];
+    // ═══ END DIVERSITY SELECTION ═══
+
     // v4-fix17: PARCEL-SAFE STAND ENFORCEMENT — all Top-3 stands must be strictly
     // inside the parcel with an interior safety buffer (PARCEL_INSET_METERS).
     // 
@@ -2125,7 +2196,7 @@ function DeerIntelContent() {
       const rejected: { rank: number; name: string; coords: [number, number]; reason: string }[] = [];
       const snapped: { rank: number; name: string; from: [number, number]; to: [number, number] }[] = [];
       
-      for (const s of allScored) {
+      for (const s of allScoredDiverse) {
         const snapResult = snapToParcelInterior(s.coords, geom);
         
         if (snapResult === null) {
@@ -2157,8 +2228,8 @@ function DeerIntelContent() {
       }
       console.error(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
     } else {
-      // No parcel geometry available — use all stands (fallback)
-      aligned = allScored;
+      // No parcel geometry available — use diversity-selected stands (fallback)
+      aligned = allScoredDiverse;
       console.error('[STAND-DIAG] no parcel geometry available — using all stand candidates');
     }
 
@@ -4098,32 +4169,32 @@ function DeerIntelContent() {
     try {
       const fp = getFocusPaintParams(pressureFocus);
       if (map.getLayer('tfp-pressure-heatmap')) {
-        // v1.5: Moderate weight curve — 0.20 dead zone, focus mode shapes mid-range
+        // v2.0: Steep weight curve — 0.30 dead zone, focus mode shapes mid-range
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
           'interpolate', ['linear'],
           ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
           0.00, fp.weightCurve[0],
-          0.20, fp.weightCurve[1],
-          0.35, fp.weightCurve[2],
-          0.55, fp.weightCurve[3],
-          0.75, fp.weightCurve[4],
+          0.30, fp.weightCurve[1],
+          0.45, fp.weightCurve[2],
+          0.60, fp.weightCurve[3],
+          0.80, fp.weightCurve[4],
           1.00, fp.weightCurve[5],
         ]);
-        // Intensity: scaled per focus
+        // Intensity: scaled per focus — lower base than v1.5
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
           'interpolate', ['linear'], ['zoom'],
-          10, 0.7 * fp.intensityMult,
-          15, 1.3 * fp.intensityMult,
+          10, 0.55 * fp.intensityMult,
+          15, 1.0 * fp.intensityMult,
         ]);
-        // v1.5: Moderate base radius — offset per focus
+        // v2.0: Tight base radius — offset per focus
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
-          10, Math.max(7, 11 + fp.radiusOffset),
-          15, Math.max(11, 16 + fp.radiusOffset),
-          18, Math.max(16, 23 + fp.radiusOffset),
+          10, Math.max(4, 6 + fp.radiusOffset),
+          15, Math.max(7, 10 + fp.radiusOffset),
+          18, Math.max(10, 15 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
-        const baseOpacity = visibility.ridgeSpines ? 0.55 : fp.opacity;
+        const baseOpacity = visibility.ridgeSpines ? 0.50 : fp.opacity;
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', baseOpacity);
       }
 
@@ -4797,43 +4868,44 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-pressure-heatmap',
             paint: {
-              // v1.5: Moderate weight curve — shows broader movement story
+              // v2.0: Steep weight curve — kills low-value background glow,
+              // only strong terrain signals produce visible heat
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
                 0.00, 0.0,
-                0.20, 0.0,
-                0.35, 0.15,
-                0.55, 0.5,
-                0.75, 0.85,
+                0.30, 0.0,
+                0.45, 0.10,
+                0.60, 0.40,
+                0.80, 0.80,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.75,
-                15, 1.3,
+                10, 0.60,
+                15, 1.0,
               ],
               // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
                 0.00, 'rgba(0,0,0,0)',
-                0.10, 'rgba(254,240,138,0.22)',  // yellow-200
-                0.20, 'rgba(250,204,21,0.34)',   // yellow-400
-                0.35, 'rgba(245,158,11,0.46)',   // amber-500
+                0.10, 'rgba(254,240,138,0.18)',  // yellow-200
+                0.20, 'rgba(250,204,21,0.30)',   // yellow-400
+                0.35, 'rgba(245,158,11,0.44)',   // amber-500
                 0.50, 'rgba(249,115,22,0.56)',   // orange-500
-                0.65, 'rgba(239,68,68,0.65)',    // red-500
-                0.80, 'rgba(220,38,38,0.74)',    // red-600
-                0.92, 'rgba(185,28,28,0.80)',    // red-700
-                1.00, 'rgba(153,27,27,0.85)',    // red-800 (hot)
+                0.65, 'rgba(239,68,68,0.66)',    // red-500
+                0.80, 'rgba(220,38,38,0.76)',    // red-600
+                0.92, 'rgba(185,28,28,0.82)',    // red-700
+                1.00, 'rgba(153,27,27,0.88)',    // red-800 (hot)
               ],
-              // v1.5: Moderate radius — broader than v1.4 but tighter than v1.2
+              // v2.0: Tight radius — terrain-shaped lanes, not circular blobs
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 11,
-                15, 16,
-                18, 23,
+                10, 6,
+                15, 10,
+                18, 15,
               ],
-              'heatmap-opacity': 0.75,
+              'heatmap-opacity': 0.72,
             },
           });
         }
@@ -4847,40 +4919,40 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-delta',
             paint: {
-              // v1.5: Moderate weight — broader movement delta expression
+              // v2.0: Steep weight — terrain-shaped movement delta
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'delta'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.20, 0.0,
-                0.40, 0.15,
-                0.55, 0.45,
-                0.75, 0.8,
+                0.30, 0.0,
+                0.45, 0.10,
+                0.60, 0.40,
+                0.80, 0.80,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.8,
-                15, 1.4,
+                10, 0.60,
+                15, 1.1,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
                 0.00, 'rgba(0,0,0,0)',
-                0.10, 'rgba(255,237,160,0.22)', // faint yellow
-                0.20, 'rgba(254,215,100,0.34)', // warm yellow
-                0.35, 'rgba(254,178,76,0.46)',  // orange-light
-                0.50, 'rgba(251,146,60,0.56)',  // orange-400
-                0.65, 'rgba(252,78,42,0.65)',   // red-orange
-                0.80, 'rgba(220,38,38,0.74)',   // red-600
-                0.92, 'rgba(185,28,28,0.80)',   // red-700
-                1.00, 'rgba(153,27,27,0.85)',   // deep red
+                0.10, 'rgba(255,237,160,0.18)',
+                0.20, 'rgba(254,215,100,0.30)',
+                0.35, 'rgba(254,178,76,0.44)',
+                0.50, 'rgba(251,146,60,0.56)',
+                0.65, 'rgba(252,78,42,0.66)',
+                0.80, 'rgba(220,38,38,0.76)',
+                0.92, 'rgba(185,28,28,0.82)',
+                1.00, 'rgba(153,27,27,0.88)',
               ],
-              // v1.5: Moderate radius — terrain-shaped but broader coverage
+              // v2.0: Tight radius
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 10,
-                15, 15,
-                18, 21,
+                10, 5,
+                15, 9,
+                18, 14,
               ],
               'heatmap-opacity': 0.52,
             },
@@ -4899,40 +4971,40 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-movement-post',
             paint: {
-              // v1.5: Moderate weight — broader post-pressure movement expression
+              // v2.0: Steep weight — terrain-shaped post-pressure movement
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'movement_post'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.20, 0.0,
-                0.40, 0.15,
-                0.55, 0.45,
-                0.75, 0.8,
+                0.30, 0.0,
+                0.45, 0.10,
+                0.60, 0.40,
+                0.80, 0.80,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.8,
-                15, 1.4,
+                10, 0.60,
+                15, 1.1,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
                 0.00, 'rgba(0,0,0,0)',
-                0.10, 'rgba(254,240,138,0.22)',  // yellow-200
-                0.20, 'rgba(250,204,21,0.34)',   // yellow-400
-                0.35, 'rgba(234,179,8,0.44)',    // yellow-500
-                0.50, 'rgba(163,230,53,0.54)',   // lime-400
-                0.65, 'rgba(132,204,22,0.62)',   // lime-500
-                0.80, 'rgba(34,197,94,0.72)',    // green-500
-                0.92, 'rgba(22,163,74,0.80)',    // green-600
-                1.00, 'rgba(21,128,61,0.85)',    // green-700 (strong)
+                0.10, 'rgba(254,240,138,0.18)',
+                0.20, 'rgba(250,204,21,0.30)',
+                0.35, 'rgba(234,179,8,0.42)',
+                0.50, 'rgba(163,230,53,0.54)',
+                0.65, 'rgba(132,204,22,0.64)',
+                0.80, 'rgba(34,197,94,0.74)',
+                0.92, 'rgba(22,163,74,0.82)',
+                1.00, 'rgba(21,128,61,0.88)',
               ],
-              // v1.5: Moderate radius — terrain-shaped but broader
+              // v2.0: Tight radius
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 10,
-                15, 15,
-                18, 21,
+                10, 5,
+                15, 9,
+                18, 14,
               ],
               'heatmap-opacity': 0.52,
             },
@@ -4951,40 +5023,40 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-refuge-zones',
             paint: {
-              // v1.5: Moderate weight — broader refuge expression
+              // v2.0: Steep weight — terrain-shaped refuge zones
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'refuge_score'], ['get', 'intensity'], 0],
                 0.00, 0.0,
-                0.20, 0.0,
-                0.40, 0.15,
-                0.55, 0.45,
-                0.75, 0.8,
+                0.30, 0.0,
+                0.45, 0.10,
+                0.60, 0.40,
+                0.80, 0.80,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.8,
-                15, 1.4,
+                10, 0.60,
+                15, 1.1,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
                 0.00, 'rgba(0,0,0,0)',
-                0.10, 'rgba(207,250,254,0.22)',   // cyan-100
-                0.20, 'rgba(165,243,252,0.34)',   // cyan-200
-                0.35, 'rgba(34,211,238,0.44)',    // cyan-400
-                0.50, 'rgba(6,182,212,0.54)',     // cyan-500
-                0.65, 'rgba(14,165,233,0.63)',    // sky-500
-                0.80, 'rgba(59,130,246,0.72)',    // blue-500
-                0.92, 'rgba(37,99,235,0.80)',     // blue-600
-                1.00, 'rgba(29,78,216,0.85)',     // blue-700 (strong refuge)
+                0.10, 'rgba(207,250,254,0.18)',
+                0.20, 'rgba(165,243,252,0.30)',
+                0.35, 'rgba(34,211,238,0.42)',
+                0.50, 'rgba(6,182,212,0.54)',
+                0.65, 'rgba(14,165,233,0.64)',
+                0.80, 'rgba(59,130,246,0.74)',
+                0.92, 'rgba(37,99,235,0.82)',
+                1.00, 'rgba(29,78,216,0.88)',
               ],
-              // v1.5: Moderate radius — broader refuge expression
+              // v2.0: Tight radius
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 10,
-                15, 15,
-                18, 21,
+                10, 5,
+                15, 9,
+                18, 14,
               ],
               'heatmap-opacity': 0.55,
             },

@@ -100,10 +100,10 @@ const FOCUS_CONFIG: Record<PressureFocus, { scoreFloor: number; scoreGamma: numb
 };
 
 // ============ INFLUENCE RADII (meters) ============
-// v1.2 — widened to match terrain-raster.ts and reduce isolated kernels
-const BENCH_INFLUENCE_M  = 105;  // was 75
-const SADDLE_INFLUENCE_M = 150;  // was 120
-const RIDGE_INFLUENCE_M  = 85;   // was 60
+// v2.0 — tightened to match terrain-raster.ts and produce terrain-shaped lanes
+const BENCH_INFLUENCE_M  = 65;   // was 105
+const SADDLE_INFLUENCE_M = 90;   // was 150
+const RIDGE_INFLUENCE_M  = 50;   // was 85
 
 /**
  * Build terrain-driven heat map features.
@@ -148,17 +148,16 @@ export function buildTerrainHeatMap(input: HeatMapInput): GeoJSON.FeatureCollect
       if (f.geometry?.type === 'Point') {
         const coord = f.geometry.coordinates as [number, number];
         features.push(makeHeatPoint(coord, score, 'saddle'));
-        // v1.2 — wider halo (0.7× radius) with gentler decay (0.65×) for smoother
-        //         saddle glow instead of tight isolated kernels
-        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.7) / 111000;
+        // v2.0 — minimal halo: just 2 points along dominant axis, tight offset
+        // Prevents circular saddle glow; elongation comes from real terrain data
+        const haloOffsetDeg = (SADDLE_INFLUENCE_M * 0.35) / 111000;
         const offsets: [number, number][] = [
           [haloOffsetDeg, 0], [-haloOffsetDeg, 0],
-          [0, haloOffsetDeg], [0, -haloOffsetDeg],
         ];
         for (const [dx, dy] of offsets) {
           features.push(makeHeatPoint(
             [coord[0] + dx, coord[1] + dy],
-            score * 0.65,
+            score * 0.45,
             'saddle_halo'
           ));
         }
@@ -308,13 +307,13 @@ export function getFocusPaintParams(focus: PressureFocus): {
   // All modes kill values below ~0.25; modes differ in mid-range ramp steepness.
   switch (focus) {
     case 'broad':
-      // Gentler ramp — lets more mid-range through
-      return { weightCurve: [0.0, 0.0, 0.25, 0.55, 0.85, 1.0], intensityMult: 0.85, radiusOffset: 6, opacity: 0.65, oppZoneMaxCount: 3 };
+      // v2.0: Gentler ramp — lets more mid-range through, small radius bump
+      return { weightCurve: [0.0, 0.0, 0.20, 0.50, 0.82, 1.0], intensityMult: 0.85, radiusOffset: 3, opacity: 0.65, oppZoneMaxCount: 3 };
     case 'focused':
-      // Aggressive — only strong values survive
-      return { weightCurve: [0.0, 0.0, 0.10, 0.50, 0.90, 1.0], intensityMult: 1.25, radiusOffset: -6, opacity: 0.85, oppZoneMaxCount: 1 };
+      // v2.0: Aggressive — only strong values survive, tighter radius
+      return { weightCurve: [0.0, 0.0, 0.05, 0.40, 0.88, 1.0], intensityMult: 1.20, radiusOffset: -3, opacity: 0.80, oppZoneMaxCount: 1 };
     default: // balanced
-      return { weightCurve: [0.0, 0.0, 0.20, 0.60, 0.90, 1.0], intensityMult: 1.0, radiusOffset: 0, opacity: 0.75, oppZoneMaxCount: 3 };
+      return { weightCurve: [0.0, 0.0, 0.15, 0.55, 0.88, 1.0], intensityMult: 1.0, radiusOffset: 0, opacity: 0.72, oppZoneMaxCount: 3 };
   }
 }
 
