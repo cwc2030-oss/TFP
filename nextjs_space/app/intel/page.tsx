@@ -1117,9 +1117,18 @@ function buildStandDirectionFeatures(
   stands: { coords: [number, number]; rank: number; props: StandPointProperties; alignment: { score: number } }[],
   funnels: GeoJSON.FeatureCollection | null | undefined,
   ridges: { ridges_primary?: GeoJSON.FeatureCollection; ridges_secondary?: GeoJSON.FeatureCollection } | null | undefined,
+  windDir?: string,
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   if (!stands.length) return { type: 'FeatureCollection', features };
+
+  // Wind bearing (direction wind is blowing FROM → hunter should face downwind)
+  const WIND_BEARINGS: Record<string, number> = {
+    N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315,
+  };
+  const windBearing = windDir ? (WIND_BEARINGS[windDir] ?? 315) : 315;
+  // Downwind bearing: the direction scent carries (opposite of wind FROM direction)
+  const downwindBearing = (windBearing + 180) % 360;
 
   // Extract corridor/draw/ridge lines (same logic as hunt pocket)
   const corridorLines: [number, number][][] = [];
@@ -1143,23 +1152,54 @@ function buildStandDirectionFeatures(
     }
   }
 
+  // Helper: generate filled wedge polygon (fan arc) from center
+  // Returns a closed polygon: center → arc points → center
+  function buildWedgePoly(
+    center: [number, number],
+    bearing: number,
+    halfAngle: number,
+    length: number,
+    offset: number,
+    arcSteps: number = 12,
+  ): [number, number][] {
+    const origin = movePoint(center, bearing, offset);
+    const coords: [number, number][] = [origin];
+    for (let i = -arcSteps; i <= arcSteps; i++) {
+      const angle = bearing + (halfAngle * i) / arcSteps;
+      const normAngle = ((angle % 360) + 360) % 360;
+      coords.push(movePoint(center, normAngle, length));
+    }
+    coords.push(origin); // close polygon
+    return coords;
+  }
+
+  // Helper: determine semantic watch label
+  function getWatchLabel(stand: typeof stands[0], nearestCorridorDist: number, nearestDrawDist: number, nearestRidgeDist: number): string {
+    const isEdge = stand.props?.isEdgeStand === true;
+    if (isEdge) return 'Watching: Field Edge';
+    const saddleScore = (stand.props as unknown as Record<string, unknown>)?.saddleScore;
+    if (typeof saddleScore === 'number' && saddleScore > 0.3) return 'Watching: Saddle Funnel';
+    if (nearestDrawDist < 200) return 'Watching: Creek Crossing';
+    if (nearestCorridorDist < 300) return 'Watching: Corridor';
+    if (nearestRidgeDist < 300) return 'Watching: Ridge Line';
+    return 'Watching: Corridor';
+  }
+
   for (const stand of stands) {
     const center = stand.coords;
 
     // ---- Detect edge stand ----
     const isEdge = stand.props?.isEdgeStand === true && typeof stand.props?.fieldBearing === 'number';
 
-    // ---- Determine face bearing ----
-    // Edge stands: point INTO the field (use fieldBearing)
-    // Terrain stands: use corridor/draw/ridge tangent (movement-axis)
-    let faceBearing = 315; // fallback NW
+    // ---- Determine movement bearing (terrain/corridor axis) ----
+    let movementBearing = 315; // fallback NW
+    let nearestCorridorDist = Infinity;
+    let nearestDrawDist = Infinity;
+    let nearestRidgeDist = Infinity;
 
     if (isEdge) {
-      // v2.1: Edge stand — direction points into the field
-      faceBearing = stand.props.fieldBearing!;
+      movementBearing = stand.props.fieldBearing!;
     } else {
-      // Terrain-driven bearing (unchanged)
-      let nearestCorridorDist = Infinity;
       let corridorBrg: number | null = null;
       for (const line of corridorLines) {
         if (line.length < 2) continue;
@@ -1172,9 +1212,8 @@ function buildStandDirectionFeatures(
         }
       }
       if (corridorBrg !== null && nearestCorridorDist < 500) {
-        faceBearing = corridorBrg;
+        movementBearing = corridorBrg;
       } else {
-        let nearestDrawDist = Infinity;
         for (const line of drawLines) {
           if (line.length < 2) continue;
           const result = closestPointOnLineString(center, line);
@@ -1182,11 +1221,10 @@ function buildStandDirectionFeatures(
             nearestDrawDist = result.dist;
             const seg = line[result.segIndex];
             const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-            faceBearing = calculateBearing(seg, segEnd);
+            movementBearing = calculateBearing(seg, segEnd);
           }
         }
         if (nearestDrawDist >= 500) {
-          let nearestRidgeDist = Infinity;
           for (const line of ridgeLines) {
             if (line.length < 2) continue;
             const result = closestPointOnLineString(center, line);
@@ -1194,76 +1232,44 @@ function buildStandDirectionFeatures(
               nearestRidgeDist = result.dist;
               const seg = line[result.segIndex];
               const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-              faceBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+              movementBearing = (calculateBearing(seg, segEnd) + 90) % 360;
             }
           }
         }
       }
     }
 
-    // v2.1: Edge stands get a wider fan (shooting lanes into field) + longer reach
-    const WEDGE_LENGTH = isEdge ? 70 : 55;      // edge: 70m, terrain: 55m
-    const WEDGE_HALF_ANGLE = isEdge ? 22 : 12;  // edge: ±22° fan, terrain: ±12° wedge
-    const OFFSET = 12; // start 12m from center (outside the marker)
+    // ---- Composite facing: 70% movement vector + 30% wind-adjusted bearing ----
+    // Wind adjustment: face crosswind/downwind for scent advantage
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const toDeg = (r: number) => (r * 180) / Math.PI;
+    const mvRad = toRad(movementBearing);
+    const dwRad = toRad(downwindBearing);
+    // Circular weighted average
+    const sx = 0.7 * Math.sin(mvRad) + 0.3 * Math.sin(dwRad);
+    const cx = 0.7 * Math.cos(mvRad) + 0.3 * Math.cos(dwRad);
+    let faceBearing = ((toDeg(Math.atan2(sx, cx)) % 360) + 360) % 360;
 
-    const tipMain = movePoint(center, faceBearing, WEDGE_LENGTH);
-    const startPt = movePoint(center, faceBearing, OFFSET);
-    const tipLeft = movePoint(center, (faceBearing - WEDGE_HALF_ANGLE + 360) % 360, WEDGE_LENGTH * 0.85);
-    const tipRight = movePoint(center, (faceBearing + WEDGE_HALF_ANGLE) % 360, WEDGE_LENGTH * 0.85);
+    // Kill Zone wedge parameters
+    const WEDGE_LENGTH = isEdge ? 65 : 50;         // edge: 65m, terrain: 50m
+    const WEDGE_HALF_ANGLE = isEdge ? 25 : 12;     // edge: ±25° (wide), terrain: ±12° (narrow)
+    const OFFSET = 10; // start 10m from center (outside the marker)
 
-    // Main vector line
+    const watchLabel = getWatchLabel(stand, nearestCorridorDist, nearestDrawDist, nearestRidgeDist);
+
+    // Build filled wedge polygon
+    const wedgeCoords = buildWedgePoly(center, faceBearing, WEDGE_HALF_ANGLE, WEDGE_LENGTH, OFFSET);
     features.push({
       type: 'Feature',
-      geometry: { type: 'LineString', coordinates: [startPt, tipMain] },
+      geometry: { type: 'Polygon', coordinates: [wedgeCoords] },
       properties: {
         standRank: stand.rank,
         isTopStand: stand.rank === stands[0]?.rank,
-        type: 'main',
         isEdgeStand: isEdge,
+        watchLabel,
+        faceBearing,
       },
     });
-
-    // Left flank
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: [startPt, tipLeft] },
-      properties: {
-        standRank: stand.rank,
-        isTopStand: stand.rank === stands[0]?.rank,
-        type: 'flank',
-        isEdgeStand: isEdge,
-      },
-    });
-
-    // Right flank
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: [startPt, tipRight] },
-      properties: {
-        standRank: stand.rank,
-        isTopStand: stand.rank === stands[0]?.rank,
-        type: 'flank',
-        isEdgeStand: isEdge,
-      },
-    });
-
-    // v2.1: Edge stands get additional intermediate fan lines for visual weight
-    if (isEdge) {
-      const MID_ANGLE = WEDGE_HALF_ANGLE * 0.55; // ~12° intermediate lines
-      const tipMidLeft = movePoint(center, (faceBearing - MID_ANGLE + 360) % 360, WEDGE_LENGTH * 0.92);
-      const tipMidRight = movePoint(center, (faceBearing + MID_ANGLE) % 360, WEDGE_LENGTH * 0.92);
-
-      features.push({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: [startPt, tipMidLeft] },
-        properties: { standRank: stand.rank, isTopStand: stand.rank === stands[0]?.rank, type: 'flank', isEdgeStand: true },
-      });
-      features.push({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: [startPt, tipMidRight] },
-        properties: { standRank: stand.rank, isTopStand: stand.rank === stands[0]?.rank, type: 'flank', isEdgeStand: true },
-      });
-    }
   }
 
   return { type: 'FeatureCollection', features };
@@ -5509,53 +5515,50 @@ function DeerIntelContent() {
           });
         }
 
-        // ========== STAND MOVEMENT-AXIS WEDGE LAYER (v1.1) ==========
-        // Thin wedge extending from stand along the corridor/draw flow axis.
-        // Shows likely movement flow past the stand — NOT a true approach direction.
-        // See buildStandDirectionFeatures() header for full semantic notes.
+        // ========== KILL ZONE WEDGE LAYER (v2.3) ==========
+        // Filled fan polygon showing orientation / kill zone for top stands.
+        // Composite facing: 70% movement vector + 30% wind-adjusted bearing.
+        // See buildStandDirectionFeatures() for full computation notes.
         if (!map.getSource('tfp-stand-direction')) {
           map.addSource('tfp-stand-direction', { type: 'geojson', data: EMPTY_FC });
-          // Main vector line
+          // Filled wedge (low-opacity fan)
           map.addLayer({
             id: 'tfp-stand-direction-main',
-            type: 'line',
+            type: 'fill',
             source: 'tfp-stand-direction',
-            filter: ['==', ['get', 'type'], 'main'],
             paint: {
-              'line-color': [
+              'fill-color': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
                 LAYER_COLORS.standPrimaryRing,
-                '#f0a050',                        // Stand 2: brighter amber for satellite contrast
+                '#f0a050',
               ],
-              'line-width': 2.5,
-              'line-opacity': [
+              'fill-opacity': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
-                0.55,                             // Stand 1: unchanged
-                0.75,                             // Stand 2: boosted from 0.55
+                0.14,
+                0.18,
               ],
             },
           });
-          // Flank lines (thinner)
+          // Subtle outline stroke for edge definition
           map.addLayer({
             id: 'tfp-stand-direction-flank',
             type: 'line',
             source: 'tfp-stand-direction',
-            filter: ['==', ['get', 'type'], 'flank'],
             paint: {
               'line-color': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
                 LAYER_COLORS.standPrimaryRing,
-                '#f0a050',                        // Stand 2: brighter amber for satellite contrast
+                '#f0a050',
               ],
-              'line-width': 1.2,
+              'line-width': 0.8,
               'line-opacity': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
-                0.35,                             // Stand 1: unchanged
-                0.55,                             // Stand 2: boosted from 0.35
+                0.25,
+                0.35,
               ],
             },
           });
@@ -7774,7 +7777,7 @@ function DeerIntelContent() {
       // v1.1: Movement-axis wedges for top 2 stands (flow direction, not approach)
       if (map.getSource('tfp-stand-direction')) {
         const topStands = alignedStands.slice(0, 2);
-        const dirFC = buildStandDirectionFeatures(topStands, layers?.funnels, ridgeSpineData);
+        const dirFC = buildStandDirectionFeatures(topStands, layers?.funnels, ridgeSpineData, windDirectionRef.current);
         (map.getSource('tfp-stand-direction') as mapboxgl.GeoJSONSource).setData(dirFC);
       }
 
@@ -7793,7 +7796,7 @@ function DeerIntelContent() {
       // Ensure direction wedge + hunt pocket layers are visible and at correct opacity
       // after gracefulClear may have faded them to 0.
       const supportLayers: { id: string; prop: string; opacity: number }[] = [
-        { id: 'tfp-stand-direction-main', prop: 'line-opacity', opacity: 0.5 },
+        { id: 'tfp-stand-direction-main', prop: 'fill-opacity', opacity: 0.16 },
         { id: 'tfp-stand-direction-flank', prop: 'line-opacity', opacity: 0.3 },
         { id: 'tfp-hunt-pockets-fill', prop: 'fill-opacity', opacity: 0.2 },
         { id: 'tfp-hunt-pockets-stroke', prop: 'line-opacity', opacity: 0.6 },
@@ -7856,7 +7859,7 @@ function DeerIntelContent() {
       { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
       { id: 'tfp-hunt-pockets-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
       { id: 'tfp-hunt-pockets-stroke', targetOpacity: 0.6 },
-      { id: 'tfp-stand-direction-main', targetOpacity: 0.5, opacityProp: 'line-opacity' },
+      { id: 'tfp-stand-direction-main', targetOpacity: 0.16, opacityProp: 'fill-opacity' },
       { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'line-opacity' },
       { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
     ], 400, 60);
