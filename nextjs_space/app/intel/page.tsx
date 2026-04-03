@@ -545,6 +545,61 @@ const PARCEL_INSET_METERS = 15;
 const MAX_SNAP_DISTANCE_METERS = 80;
 
 /**
+ * Compute a parcel complexity/irregularity score (0-1).
+ *   0 = perfectly rectangular / simple shape
+ *   1 = extremely irregular (many vertices, notches, peninsulas)
+ *
+ * Factors:
+ *   1. Compactness ratio: area / (perimeter² / 4π) — circle=1, long narrow strip→0
+ *   2. Vertex count: more vertices = more complex boundary
+ *   3. Vertex density: vertices per km of perimeter — high density = jagged
+ *
+ * Returns 0 if geometry is missing or degenerate.
+ */
+function computeParcelComplexity(
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon | null | undefined
+): number {
+  if (!geometry) return 0;
+  const ring: number[][] =
+    geometry.type === 'Polygon'
+      ? geometry.coordinates[0]
+      : geometry.coordinates[0]?.[0]; // first ring of first polygon
+  if (!ring || ring.length < 4) return 0;
+
+  // Compute approximate area (shoelace) and perimeter in meters
+  const DEG_TO_M_LAT = 111320;
+  const midLat = ring.reduce((s, c) => s + c[1], 0) / ring.length;
+  const DEG_TO_M_LNG = DEG_TO_M_LAT * Math.cos((midLat * Math.PI) / 180);
+
+  let area2 = 0; // 2× signed area in m²
+  let perimeter = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const x0 = ring[i][0] * DEG_TO_M_LNG,     y0 = ring[i][1] * DEG_TO_M_LAT;
+    const x1 = ring[i + 1][0] * DEG_TO_M_LNG, y1 = ring[i + 1][1] * DEG_TO_M_LAT;
+    area2 += x0 * y1 - x1 * y0;
+    perimeter += Math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2);
+  }
+  const areaM2 = Math.abs(area2) / 2;
+  if (perimeter < 1 || areaM2 < 1) return 0;
+
+  // Isoperimetric quotient: 1.0 = circle, ~0.78 = square, lower = more irregular
+  const compactness = (4 * Math.PI * areaM2) / (perimeter * perimeter);
+
+  // Vertex complexity — rectangles have 5 (4+closing), irregular parcels have 20-200+
+  const nVerts = ring.length - 1; // exclude closing vertex
+  const vertexScore = Math.min(1, Math.max(0, (nVerts - 5) / 60)); // 5→0, 65+→1
+
+  // Vertex density — jagged boundary has high verts/km ratio
+  const perimeterKm = perimeter / 1000;
+  const vertDensity = nVerts / Math.max(perimeterKm, 0.01);
+  const densityScore = Math.min(1, Math.max(0, (vertDensity - 8) / 40)); // 8/km→0, 48+/km→1
+
+  // Weighted blend — compactness is the primary signal
+  const raw = 0.50 * (1 - compactness) + 0.30 * vertexScore + 0.20 * densityScore;
+  return Math.min(1, Math.max(0, raw));
+}
+
+/**
  * Move a point toward a target by `meters` distance (approximate for small distances).
  * Returns a new [lng, lat] coordinate.
  */
@@ -1767,6 +1822,9 @@ function DeerIntelContent() {
   const [season, setSeason] = useState<SeasonProfile>('rut');
   const [pressureFocus, setPressureFocus] = useState<PressureFocus>('balanced');
   const [pressureView, setPressureView] = useState<PressureView>('pressure');
+  // v2.2: Parcel complexity score (0-1) — drives Deer Flow expression strength.
+  // Simple parcels get lighter heatmap; irregular parcels get stronger expression.
+  const parcelComplexityRef = useRef<number>(0);
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
   // Refs that always mirror the latest season/wind values.
   // runAnalysis reads from these so it never captures stale closures,
@@ -2999,6 +3057,14 @@ function DeerIntelContent() {
       console.error('[MAP] FitBounds error (non-fatal):', err);
     }
   }, [parcelPolygon, mapReady]);
+
+  // ========== v2.2: PARCEL COMPLEXITY — drives Deer Flow expression strength ==========
+  useEffect(() => {
+    const geom = parcelPolygon?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | null | undefined;
+    const c = computeParcelComplexity(geom);
+    parcelComplexityRef.current = c;
+    if (c > 0) console.log('[DeerFlow] Parcel complexity:', c.toFixed(3), c > 0.35 ? '(irregular — stronger expression)' : '(simple — lighter expression)');
+  }, [parcelPolygon]);
 
   // ========== v4-fix14: PARCEL-ONLY REFIT (no stand expansion) ==========
   // v4-fix10b allowed stands to expand camera bounds by 15%, which caused
@@ -4252,46 +4318,49 @@ function DeerIntelContent() {
   }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand, visibilityEpoch]); // v4-fix8: visibilityEpoch forces re-run after reload
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
+  // v2.2: Now parcel-aware — passes complexity score for adaptive expression.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     try {
-      const fp = getFocusPaintParams(pressureFocus);
+      const complexity = parcelComplexityRef.current;
+      const fp = getFocusPaintParams(pressureFocus, complexity);
       if (map.getLayer('tfp-pressure-heatmap')) {
-        // v2.0: Steep weight curve — 0.30 dead zone, focus mode shapes mid-range
+        // v2.2: Weight dead zone lowered from 0.30 → 0.22 — lets more terrain signal through
+        // while keeping the dead zone high enough to suppress random noise
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
           'interpolate', ['linear'],
           ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
           0.00, fp.weightCurve[0],
-          0.30, fp.weightCurve[1],
-          0.45, fp.weightCurve[2],
-          0.60, fp.weightCurve[3],
+          0.22, fp.weightCurve[1],
+          0.40, fp.weightCurve[2],
+          0.58, fp.weightCurve[3],
           0.80, fp.weightCurve[4],
           1.00, fp.weightCurve[5],
         ]);
-        // Intensity: scaled per focus — lower base than v1.5
+        // v2.2: Intensity: slight base lift from v2.0 (was 0.55/1.0)
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
           'interpolate', ['linear'], ['zoom'],
-          10, 0.55 * fp.intensityMult,
-          15, 1.0 * fp.intensityMult,
+          10, 0.60 * fp.intensityMult,
+          15, 1.05 * fp.intensityMult,
         ]);
-        // v2.0: Tight base radius — offset per focus
+        // v2.2: Radius: +1px base lift from v2.0 — still tight, not blobby
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
-          10, Math.max(4, 6 + fp.radiusOffset),
-          15, Math.max(7, 10 + fp.radiusOffset),
-          18, Math.max(10, 15 + fp.radiusOffset),
+          10, Math.max(4, 7 + fp.radiusOffset),
+          15, Math.max(7, 11 + fp.radiusOffset),
+          18, Math.max(10, 16 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
-        const baseOpacity = visibility.ridgeSpines ? 0.50 : fp.opacity;
+        const baseOpacity = visibility.ridgeSpines ? 0.54 : fp.opacity;
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', baseOpacity);
       }
 
-      console.log('[PressureFocus]', pressureFocus, fp, 'ridgeSpines:', visibility.ridgeSpines);
+      console.log('[PressureFocus]', pressureFocus, 'complexity:', complexity.toFixed(3), fp, 'ridgeSpines:', visibility.ridgeSpines);
     } catch (err) {
       console.error('[PressureFocus] Error updating paint (non-fatal):', err);
     }
-  }, [pressureFocus, mapReady, visibility.ridgeSpines]);
+  }, [pressureFocus, mapReady, visibility.ridgeSpines, parcelPolygon]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -4957,22 +5026,22 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-pressure-heatmap',
             paint: {
-              // v2.0: Steep weight curve — kills low-value background glow,
-              // only strong terrain signals produce visible heat
+              // v2.2: Modest lift from v2.0 — readable secondary layer, not blobby
+              // Dead zone lowered from 0.30→0.22, mid-range ramp slightly eased
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
                 0.00, 0.0,
-                0.30, 0.0,
-                0.45, 0.10,
-                0.60, 0.40,
-                0.80, 0.80,
+                0.22, 0.0,
+                0.40, 0.18,
+                0.58, 0.58,
+                0.80, 0.90,
                 1.00, 1.0,
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.60,
-                15, 1.0,
+                10, 0.63,
+                15, 1.05,
               ],
               // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
@@ -4987,14 +5056,14 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.82)',    // red-700
                 1.00, 'rgba(153,27,27,0.88)',    // red-800 (hot)
               ],
-              // v2.0: Tight radius — terrain-shaped lanes, not circular blobs
+              // v2.2: +1px from v2.0 — tight terrain lanes, not blobs
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 6,
-                15, 10,
-                18, 15,
+                10, 7,
+                15, 11,
+                18, 16,
               ],
-              'heatmap-opacity': 0.72,
+              'heatmap-opacity': 0.76,
             },
           });
         }

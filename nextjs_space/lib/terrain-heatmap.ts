@@ -296,24 +296,54 @@ export function getSeasonWeights(season: SeasonProfile): SeasonWeightProfile {
  * Returns partial paint properties that should be set dynamically
  * when the user changes the focus slider.
  */
-export function getFocusPaintParams(focus: PressureFocus): {
+/**
+ * v2.2: Parcel-aware Deer Flow expression.
+ * @param focus       User-selected focus mode (broad/balanced/focused)
+ * @param complexity  Parcel complexity score 0-1 (0=simple rectangle, 1=extremely irregular).
+ *                    Higher complexity → modestly stronger expression to help explain movement.
+ *
+ * Base params are boosted from v2.0 (which was too faint) to a comfortable secondary-layer
+ * level. Then complexity adds a small further boost for irregular parcels.
+ */
+export function getFocusPaintParams(focus: PressureFocus, complexity: number = 0): {
   weightCurve: number[];       // [0, 0.25, 0.40, 0.60, 0.80, 1.0] stops for heatmap-weight
   intensityMult: number;       // multiplier applied to heatmap-intensity at each zoom
   radiusOffset: number;        // px offset added to each zoom-level radius (negative = tighter)
   opacity: number;
   oppZoneMaxCount: number;     // max opportunity zones to show
 } {
-  // weightCurve: 6 stops at [0, 0.25, 0.40, 0.60, 0.80, 1.0]
-  // All modes kill values below ~0.25; modes differ in mid-range ramp steepness.
+  // Complexity boost: 0 at complexity=0, maxing out at complexity=0.7+
+  // Keeps simple parcels clean, gives irregular parcels more explanation value.
+  const cBoost = Math.min(1, complexity / 0.7); // 0..1
+
+  // v2.2 baseline: modestly lifted from v2.0 to make Deer Flow readable as a
+  // secondary "why this works" layer without returning to blob visuals.
+  // weightCurve: 6 stops at [0, 0.30, 0.45, 0.60, 0.80, 1.0]
   switch (focus) {
     case 'broad':
-      // v2.0: Gentler ramp — lets more mid-range through, small radius bump
-      return { weightCurve: [0.0, 0.0, 0.20, 0.50, 0.82, 1.0], intensityMult: 0.85, radiusOffset: 3, opacity: 0.65, oppZoneMaxCount: 3 };
+      return {
+        weightCurve: [0.0, 0.0, 0.22 + 0.04 * cBoost, 0.52 + 0.05 * cBoost, 0.84, 1.0],
+        intensityMult: 0.90 + 0.08 * cBoost,
+        radiusOffset: 3 + Math.round(2 * cBoost),
+        opacity: 0.68 + 0.06 * cBoost,
+        oppZoneMaxCount: 3,
+      };
     case 'focused':
-      // v2.0: Aggressive — only strong values survive, tighter radius
-      return { weightCurve: [0.0, 0.0, 0.05, 0.40, 0.88, 1.0], intensityMult: 1.20, radiusOffset: -3, opacity: 0.80, oppZoneMaxCount: 1 };
+      return {
+        weightCurve: [0.0, 0.0, 0.08 + 0.03 * cBoost, 0.42 + 0.04 * cBoost, 0.90, 1.0],
+        intensityMult: 1.22 + 0.06 * cBoost,
+        radiusOffset: -2 + Math.round(1 * cBoost),
+        opacity: 0.82 + 0.04 * cBoost,
+        oppZoneMaxCount: 1,
+      };
     default: // balanced
-      return { weightCurve: [0.0, 0.0, 0.15, 0.55, 0.88, 1.0], intensityMult: 1.0, radiusOffset: 0, opacity: 0.72, oppZoneMaxCount: 3 };
+      return {
+        weightCurve: [0.0, 0.0, 0.18 + 0.04 * cBoost, 0.58 + 0.05 * cBoost, 0.90, 1.0],
+        intensityMult: 1.04 + 0.08 * cBoost,
+        radiusOffset: 1 + Math.round(2 * cBoost),
+        opacity: 0.76 + 0.06 * cBoost,
+        oppZoneMaxCount: 3,
+      };
   }
 }
 

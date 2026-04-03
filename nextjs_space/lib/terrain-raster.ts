@@ -942,10 +942,11 @@ export function buildTerrainRaster(input: RasterInput): {
   }
 
   // Convert to GeoJSON heat points with focus mode filtering
-  // v2.0 — raised floor to aggressively prune background haze.
-  // Only cells in the top ~25-30% of the score range survive, producing
-  // crisp terrain-aligned lanes instead of broad amorphous glow.
-  const HARD_PRESSURE_FLOOR = 0.68;
+  // v2.2 — slightly lowered floor from v2.0 (0.68→0.62) to allow more mid-range
+  // terrain signals through. Combined with the Mapbox-side weight dead zone (0.22),
+  // this gives Deer Flow enough expression to serve as a "why this works" layer
+  // without returning to the v1.x blob visuals.
+  const HARD_PRESSURE_FLOOR = 0.62;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {

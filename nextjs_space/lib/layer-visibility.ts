@@ -124,7 +124,7 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-saddle-nodes-outline',   group: 'ridgeSpines', opacityProp: 'circle-stroke-opacity', targetOpacity: 0.6,  source: { kind: 'toggle', key: 'ridgeSpines' } },
 
   // ── Heatmap views (complex: pressureHeatmap + pressureView) ──
-  { id: 'tfp-pressure-heatmap', group: 'flow', opacityProp: 'heatmap-opacity', targetOpacity: 0.75, source: { kind: 'heatmapView', view: 'pressure' } },
+  { id: 'tfp-pressure-heatmap', group: 'flow', opacityProp: 'heatmap-opacity', targetOpacity: 0.76, source: { kind: 'heatmapView', view: 'pressure' } },
   { id: 'tfp-movement-delta',   group: 'flow', opacityProp: 'heatmap-opacity', targetOpacity: 0.75, source: { kind: 'heatmapView', view: 'damage' } },
   { id: 'tfp-movement-post',    group: 'flow', opacityProp: 'heatmap-opacity', targetOpacity: 0.75, source: { kind: 'heatmapView', view: 'movement' } },
   { id: 'tfp-refuge-zones',     group: 'flow', opacityProp: 'heatmap-opacity', targetOpacity: 0.75, source: { kind: 'heatmapView', view: 'refuge' } },
