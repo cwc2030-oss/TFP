@@ -847,14 +847,19 @@ function buildHuntPocketFeatures(
   const MAX_RADIUS = 170;
   const SEGMENTS = 48;
 
-  // v3.8.6: More extreme teardrop + tighter perpendicular squeeze
+  // ---- Terrain-driven (default) teardrop parameters ----
   const FWD_STRETCH = 2.8;    // longer upstream reach
   const BWD_STRETCH = 0.35;   // minimal downstream presence
   const LAT_COMPRESS = 0.45;  // tight lateral squeeze — strongly flow-aligned
-
-  // v3.8.6: Upstream center offset (fraction of max radius shifted along bearing)
-  // This places the stand near the trailing edge, not the center.
   const UPSTREAM_SHIFT = 0.30; // 30% of scaled max radius
+
+  // ---- Edge-stand (v2.1) forward-biased fan parameters ----
+  // Hunter in cover, watching into field: 70% outward / 30% inward
+  const EDGE_FWD_STRETCH = 2.4;     // forward reach into field
+  const EDGE_BWD_STRETCH = 0.55;    // reduced but present (30% backward)
+  const EDGE_LAT_FWD = 0.70;        // wider lateral spread on field side (fan-shaped)
+  const EDGE_LAT_BWD = 0.30;        // tight lateral on timber side
+  const EDGE_FIELD_SHIFT = 0.35;    // shift pocket center toward field (35% of radius)
 
   // Extract corridor/draw/ridge lines for bearing
   const corridorLines: [number, number][][] = [];
@@ -884,44 +889,56 @@ function buildHuntPocketFeatures(
     const scaleFactor = sIdx === 0 ? 1.0 : 0.84;
     const opacityScale = sIdx === 0 ? 1.0 : 0.78;
 
-    // ---- Determine flow bearing ----
+    // ---- Detect edge stand ----
+    const isEdge = stand.props?.isEdgeStand === true && typeof stand.props?.fieldBearing === 'number';
+
+    // ---- Determine pocket bearing ----
+    // Edge stands: use field bearing (pointing into the field)
+    // Terrain stands: use corridor/draw/ridge tangent
     let stretchBearing = 315;
-    let nearestCorridorDist = Infinity;
-    let corridorBearing: number | null = null;
-    for (const line of corridorLines) {
-      if (line.length < 2) continue;
-      const result = closestPointOnLineString(center, line);
-      if (result.dist < nearestCorridorDist) {
-        nearestCorridorDist = result.dist;
-        const seg = line[result.segIndex];
-        const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-        corridorBearing = calculateBearing(seg, segEnd);
-      }
-    }
-    if (corridorBearing !== null && nearestCorridorDist < 500) {
-      stretchBearing = corridorBearing;
+
+    if (isEdge) {
+      // v2.1: Edge stand — primary bearing points INTO the field
+      stretchBearing = stand.props.fieldBearing!;
     } else {
-      let nearestDrawDist = Infinity;
-      for (const line of drawLines) {
+      // Terrain-driven bearing (unchanged from v3.8.6)
+      let nearestCorridorDist = Infinity;
+      let corridorBearing: number | null = null;
+      for (const line of corridorLines) {
         if (line.length < 2) continue;
         const result = closestPointOnLineString(center, line);
-        if (result.dist < nearestDrawDist) {
-          nearestDrawDist = result.dist;
+        if (result.dist < nearestCorridorDist) {
+          nearestCorridorDist = result.dist;
           const seg = line[result.segIndex];
           const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-          stretchBearing = calculateBearing(seg, segEnd);
+          corridorBearing = calculateBearing(seg, segEnd);
         }
       }
-      if (nearestDrawDist >= 500) {
-        let nearestRidgeDist = Infinity;
-        for (const line of ridgeLines) {
+      if (corridorBearing !== null && nearestCorridorDist < 500) {
+        stretchBearing = corridorBearing;
+      } else {
+        let nearestDrawDist = Infinity;
+        for (const line of drawLines) {
           if (line.length < 2) continue;
           const result = closestPointOnLineString(center, line);
-          if (result.dist < nearestRidgeDist) {
-            nearestRidgeDist = result.dist;
+          if (result.dist < nearestDrawDist) {
+            nearestDrawDist = result.dist;
             const seg = line[result.segIndex];
             const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-            stretchBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+            stretchBearing = calculateBearing(seg, segEnd);
+          }
+        }
+        if (nearestDrawDist >= 500) {
+          let nearestRidgeDist = Infinity;
+          for (const line of ridgeLines) {
+            if (line.length < 2) continue;
+            const result = closestPointOnLineString(center, line);
+            if (result.dist < nearestRidgeDist) {
+              nearestRidgeDist = result.dist;
+              const seg = line[result.segIndex];
+              const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+              stretchBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+            }
           }
         }
       }
@@ -929,11 +946,14 @@ function buildHuntPocketFeatures(
 
     const bearingRad = stretchBearing * Math.PI / 180;
 
-    // v3.8.6: Shift pocket origin upstream so stand sits on trailing edge
-    const shiftDist = MAX_RADIUS * scaleFactor * UPSTREAM_SHIFT;
+    // ---- Shift pocket origin ----
+    // Edge stands: shift toward field so pocket projects into the open
+    // Terrain stands: shift upstream (stand sits on trailing edge)
+    const shiftFraction = isEdge ? EDGE_FIELD_SHIFT : UPSTREAM_SHIFT;
+    const shiftDist = MAX_RADIUS * scaleFactor * shiftFraction;
     const shiftedCenter = movePoint(center, stretchBearing, shiftDist);
 
-    // ---- Build concentric teardrop shells ----
+    // ---- Build concentric shells ----
     for (let ring = RINGS; ring >= 1; ring--) {
       const t = ring / RINGS;
       const radius = (BASE_RADIUS + (MAX_RADIUS - BASE_RADIUS) * t) * scaleFactor;
@@ -941,14 +961,32 @@ function buildHuntPocketFeatures(
 
       for (let i = 0; i <= SEGMENTS; i++) {
         const angle = (i / SEGMENTS) * 2 * Math.PI;
-        const localX = Math.cos(angle);
-        const localY = Math.sin(angle);
+        const localX = Math.cos(angle); // +1 = forward (field/upstream), -1 = backward
+        const localY = Math.sin(angle); // lateral
 
-        // Smooth teardrop deformation with cubic easing
-        const fwdBlend = (localX + 1) / 2;
-        const axialStretch = BWD_STRETCH + (FWD_STRETCH - BWD_STRETCH) * fwdBlend * fwdBlend;
-        const deformedX = localX * axialStretch;
-        const deformedY = localY * LAT_COMPRESS;
+        let deformedX: number;
+        let deformedY: number;
+
+        if (isEdge) {
+          // v2.1: Forward-weighted fan — asymmetric laterals
+          // Forward half (localX > 0): wide fan reaching into field
+          // Backward half (localX < 0): compressed, stays in cover
+          const fwdBlend = Math.max(0, (localX + 1) / 2);  // 0 at back, 1 at front
+          const axialStretch = EDGE_BWD_STRETCH + (EDGE_FWD_STRETCH - EDGE_BWD_STRETCH) * fwdBlend * fwdBlend;
+          deformedX = localX * axialStretch;
+
+          // Asymmetric lateral: wider on field side, tighter on timber side
+          const latCompress = localX >= 0
+            ? EDGE_LAT_FWD  // field-side: wider fan
+            : EDGE_LAT_BWD; // timber-side: tight
+          deformedY = localY * latCompress;
+        } else {
+          // Terrain-driven teardrop (unchanged)
+          const fwdBlend = (localX + 1) / 2;
+          const axialStretch = BWD_STRETCH + (FWD_STRETCH - BWD_STRETCH) * fwdBlend * fwdBlend;
+          deformedX = localX * axialStretch;
+          deformedY = localY * LAT_COMPRESS;
+        }
 
         const mag = Math.sqrt(deformedX * deformedX + deformedY * deformedY);
         if (mag < 0.001) { coords.push(shiftedCenter); continue; }
@@ -958,13 +996,13 @@ function buildHuntPocketFeatures(
         const geoY = deformedX * Math.sin(bearingRad) + deformedY * Math.cos(bearingRad);
 
         const ptBearing = (Math.atan2(geoX, geoY) * 180 / Math.PI + 360) % 360;
-        const ptDist = radius * mag / Math.max(axialStretch, LAT_COMPRESS);
+        const maxStretch = isEdge ? Math.max(EDGE_FWD_STRETCH, EDGE_LAT_FWD) : Math.max(FWD_STRETCH, LAT_COMPRESS);
+        const ptDist = radius * mag / maxStretch;
 
         coords.push(movePoint(shiftedCenter, ptBearing, ptDist));
       }
 
-      // v3.8.6: 6-harmonic organic jitter — stronger amplitude on outer shells
-      // Higher base (8%) + steeper ring-dependent growth (12%) = 8–20% distortion
+      // 6-harmonic organic jitter — stronger amplitude on outer shells
       const jitterAmp = radius * (0.08 + 0.12 * t);
       const jitteredCoords = coords.map((c, i) => {
         if (i === coords.length - 1) return coords[0]; // close ring
@@ -978,15 +1016,8 @@ function buildHuntPocketFeatures(
         return movePoint(c, jitterBearing, noise * jitterAmp);
       });
 
-      // v3.8.6: Compute average corridor-axis bias for this ring.
-      // Points along the corridor axis (high |localX|) get bias ~1.0;
-      // points perpendicular (high |localY|) get bias ~0.5.
-      // This is averaged across all vertices to produce a single ring value
-      // (Mapbox expressions can't do per-vertex, so we bias per-ring via
-      // the dominant axis direction of each ring's shape).
-      // For the teardrop, all rings share the same deformation so we store
-      // a constant representing the overall shape's corridor alignment.
-      const corridorBias = 0.85; // teardrop is heavily corridor-aligned
+      // Corridor-axis bias: edge stands get slightly lower bias (fan, not lane)
+      const corridorBias = isEdge ? 0.75 : 0.85;
 
       // v-resilience: scale pocket opacity by stand resilience (0→50%, 1→100%)
       const resilienceVal = stand.props?.standResilience ?? 0;
@@ -1002,8 +1033,9 @@ function buildHuntPocketFeatures(
           score: stand.alignment.score,
           stretchBearing,
           opacityScale,
-          corridorBias, // v3.8.6: flow-axis intensity multiplier
-          resilienceFactor, // v-resilience: derived from standResilience
+          corridorBias,
+          resilienceFactor,
+          isEdgeStand: isEdge, // v2.1: edge stand flag for styling
         },
       });
     }
@@ -1059,56 +1091,64 @@ function buildStandDirectionFeatures(
   for (const stand of stands) {
     const center = stand.coords;
 
-    // Movement-axis bearing: uses corridor-tangent (same as hunt pocket stretchBearing)
-    // so the wedge aligns with the pocket's long axis.  This is flow direction,
-    // not a true approach vector — see header comment on buildStandDirectionFeatures.
+    // ---- Detect edge stand ----
+    const isEdge = stand.props?.isEdgeStand === true && typeof stand.props?.fieldBearing === 'number';
+
+    // ---- Determine face bearing ----
+    // Edge stands: point INTO the field (use fieldBearing)
+    // Terrain stands: use corridor/draw/ridge tangent (movement-axis)
     let faceBearing = 315; // fallback NW
-    let nearestCorridorDist = Infinity;
-    let corridorBrg: number | null = null;
-    for (const line of corridorLines) {
-      if (line.length < 2) continue;
-      const result = closestPointOnLineString(center, line);
-      if (result.dist < nearestCorridorDist) {
-        nearestCorridorDist = result.dist;
-        const seg = line[result.segIndex];
-        const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-        corridorBrg = calculateBearing(seg, segEnd);
-      }
-    }
-    if (corridorBrg !== null && nearestCorridorDist < 500) {
-      faceBearing = corridorBrg;
+
+    if (isEdge) {
+      // v2.1: Edge stand — direction points into the field
+      faceBearing = stand.props.fieldBearing!;
     } else {
-      // Fallback: draw segment tangent
-      let nearestDrawDist = Infinity;
-      for (const line of drawLines) {
+      // Terrain-driven bearing (unchanged)
+      let nearestCorridorDist = Infinity;
+      let corridorBrg: number | null = null;
+      for (const line of corridorLines) {
         if (line.length < 2) continue;
         const result = closestPointOnLineString(center, line);
-        if (result.dist < nearestDrawDist) {
-          nearestDrawDist = result.dist;
+        if (result.dist < nearestCorridorDist) {
+          nearestCorridorDist = result.dist;
           const seg = line[result.segIndex];
           const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-          faceBearing = calculateBearing(seg, segEnd);
+          corridorBrg = calculateBearing(seg, segEnd);
         }
       }
-      if (nearestDrawDist >= 500) {
-        // Fallback: perpendicular to nearest ridge
-        let nearestRidgeDist = Infinity;
-        for (const line of ridgeLines) {
+      if (corridorBrg !== null && nearestCorridorDist < 500) {
+        faceBearing = corridorBrg;
+      } else {
+        let nearestDrawDist = Infinity;
+        for (const line of drawLines) {
           if (line.length < 2) continue;
           const result = closestPointOnLineString(center, line);
-          if (result.dist < nearestRidgeDist) {
-            nearestRidgeDist = result.dist;
+          if (result.dist < nearestDrawDist) {
+            nearestDrawDist = result.dist;
             const seg = line[result.segIndex];
             const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
-            faceBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+            faceBearing = calculateBearing(seg, segEnd);
+          }
+        }
+        if (nearestDrawDist >= 500) {
+          let nearestRidgeDist = Infinity;
+          for (const line of ridgeLines) {
+            if (line.length < 2) continue;
+            const result = closestPointOnLineString(center, line);
+            if (result.dist < nearestRidgeDist) {
+              nearestRidgeDist = result.dist;
+              const seg = line[result.segIndex];
+              const segEnd = line[Math.min(result.segIndex + 1, line.length - 1)];
+              faceBearing = (calculateBearing(seg, segEnd) + 90) % 360;
+            }
           }
         }
       }
     }
 
-    // Build a thin flow-axis wedge: center → tip, with two flanking lines at ±12°
-    const WEDGE_LENGTH = 55; // meters — subtle, not overpowering
-    const WEDGE_HALF_ANGLE = 12; // degrees
+    // v2.1: Edge stands get a wider fan (shooting lanes into field) + longer reach
+    const WEDGE_LENGTH = isEdge ? 70 : 55;      // edge: 70m, terrain: 55m
+    const WEDGE_HALF_ANGLE = isEdge ? 22 : 12;  // edge: ±22° fan, terrain: ±12° wedge
     const OFFSET = 12; // start 12m from center (outside the marker)
 
     const tipMain = movePoint(center, faceBearing, WEDGE_LENGTH);
@@ -1124,6 +1164,7 @@ function buildStandDirectionFeatures(
         standRank: stand.rank,
         isTopStand: stand.rank === stands[0]?.rank,
         type: 'main',
+        isEdgeStand: isEdge,
       },
     });
 
@@ -1135,6 +1176,7 @@ function buildStandDirectionFeatures(
         standRank: stand.rank,
         isTopStand: stand.rank === stands[0]?.rank,
         type: 'flank',
+        isEdgeStand: isEdge,
       },
     });
 
@@ -1146,8 +1188,27 @@ function buildStandDirectionFeatures(
         standRank: stand.rank,
         isTopStand: stand.rank === stands[0]?.rank,
         type: 'flank',
+        isEdgeStand: isEdge,
       },
     });
+
+    // v2.1: Edge stands get additional intermediate fan lines for visual weight
+    if (isEdge) {
+      const MID_ANGLE = WEDGE_HALF_ANGLE * 0.55; // ~12° intermediate lines
+      const tipMidLeft = movePoint(center, (faceBearing - MID_ANGLE + 360) % 360, WEDGE_LENGTH * 0.92);
+      const tipMidRight = movePoint(center, (faceBearing + MID_ANGLE) % 360, WEDGE_LENGTH * 0.92);
+
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [startPt, tipMidLeft] },
+        properties: { standRank: stand.rank, isTopStand: stand.rank === stands[0]?.rank, type: 'flank', isEdgeStand: true },
+      });
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [startPt, tipMidRight] },
+        properties: { standRank: stand.rank, isTopStand: stand.rank === stands[0]?.rank, type: 'flank', isEdgeStand: true },
+      });
+    }
   }
 
   return { type: 'FeatureCollection', features };
@@ -2233,12 +2294,34 @@ function DeerIntelContent() {
       console.error('[STAND-DIAG] no parcel geometry available — using all stand candidates');
     }
 
+    // v2.1: EDGE STAND POSITION BIAS — nudge edge stands ~10m toward the field edge
+    // (keeping them inside cover but visually closer to the boundary).
+    // Applied after parcel-safe enforcement so the nudge doesn't push outside.
+    const EDGE_POSITION_NUDGE_M = 10; // meters toward field
+    for (const s of aligned) {
+      if (s.props?.isEdgeStand && typeof s.props.fieldBearing === 'number') {
+        const nudged = movePoint(s.coords, s.props.fieldBearing, EDGE_POSITION_NUDGE_M);
+        // Only apply if the nudged position is still inside the parcel
+        if (parcelPolygon?.geometry) {
+          const check = snapToParcelInterior(nudged, parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon);
+          if (check && !check.snapped) {
+            // Nudged position is safely inside — apply it
+            s.coords = nudged;
+            console.log(`[STAND-DIAG] EDGE_STAND nudge rank=${s.rank} "${s.name}" +${EDGE_POSITION_NUDGE_M}m toward field bearing ${s.props.fieldBearing}°`);
+          }
+          // If nudged position would need snapping, skip the nudge (stay put)
+        }
+      }
+    }
+
     // Log stand resilience values for verification
     if (aligned.length > 0) {
       console.log('[StandResilience] Sample values:', aligned.slice(0, 5).map(s => ({
         rank: s.rank, name: s.name,
         standResilience: s.props?.standResilience?.toFixed(3) ?? 'N/A',
         corridorResilience: s.resilience?.score?.toFixed(3) ?? 'N/A',
+        isEdgeStand: s.props?.isEdgeStand ?? false,
+        fieldBearing: s.props?.fieldBearing ?? null,
       })));
     }
 

@@ -170,6 +170,11 @@ export interface StandPointProperties {
   tpiLandscape: number;           // TPI at 500m scale
   reasoning: string;              // human-readable explanation
   standResilience?: number;       // 0-1, pressure-based resilience score
+  // Edge stand classification (v2.1 — field-edge hunting behaviour)
+  coverType?: 'timber' | 'edge' | 'open' | 'draw';
+  isEdgeStand?: boolean;          // true if stand is on a field/timber boundary
+  fieldBearing?: number;          // bearing (0-360) toward the open field side
+  edgeConfidence?: number;        // 0-1, strength of edge detection signal
 }
 
 // ============ Ridge Spine Types (Structure-First, DEM-Only) ============

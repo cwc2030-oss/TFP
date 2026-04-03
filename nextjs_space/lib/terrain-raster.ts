@@ -294,6 +294,11 @@ export interface PrimeStandSite {
   interceptType?: 'gradient' | 'leeward' | 'sidehill' | 'combined';
   // Pressure-based resilience (v1 — derived from movement_post, refuge, pressure)
   standResilience?: number; // 0-1, how well the stand survives pressure
+  // Edge stand classification (v2.1 — field-edge hunting behaviour)
+  coverType?: 'timber' | 'edge' | 'open' | 'draw';
+  isEdgeStand?: boolean;     // true if stand is on a field/timber boundary
+  fieldBearing?: number;     // bearing (0-360) toward the open field side
+  edgeConfidence?: number;   // 0-1, strength of edge detection signal
 }
 
 // ============ UTILITY FUNCTIONS ============
@@ -1341,18 +1346,112 @@ function evaluateCoverQuality(cell: RasterCell): {
 }
 
 /**
+ * Detect field/timber edge and compute bearing toward the open side.
+ * Uses a radial scan of cover scores (ridge + bench + sidehill) in 8 directions.
+ * An edge is detected when:
+ *   - The stand cell has adequate cover (coverType 'timber' or 'edge')
+ *   - There is a clear cover drop-off within EDGE_SCAN_RADIUS cells in some direction
+ *   - The stand is NOT primarily terrain-driven (saddle > 0.4 or ridge > 0.5)
+ *
+ * Returns: { isEdgeStand, fieldBearing (deg, 0=N), edgeConfidence (0-1) }
+ */
+function detectFieldEdge(
+  hotspot: HotspotCandidate,
+  grid: RasterGrid,
+  coverType: 'timber' | 'edge' | 'open' | 'draw',
+): { isEdgeStand: boolean; fieldBearing: number; edgeConfidence: number } {
+  const NO_EDGE = { isEdgeStand: false, fieldBearing: 0, edgeConfidence: 0 };
+
+  // Only consider stands classified as 'edge' or 'timber' (not draw/open)
+  if (coverType !== 'edge' && coverType !== 'timber') return NO_EDGE;
+
+  // Exclude terrain-driven stands — saddle or strong ridge
+  const cell = hotspot.cell;
+  if (cell.saddle > 0.4) return NO_EDGE;
+  if (cell.ridge > 0.5 && cell.bench > 0.3) return NO_EDGE; // full timber = not edge
+
+  const SCAN_RADIUS = 4; // ~60m at 15m cell size
+  const r = hotspot.row;
+  const c = hotspot.col;
+
+  // 8 compass directions: N, NE, E, SE, S, SW, W, NW
+  const dirs = [
+    { dr: -1, dc:  0, angle:   0 }, // N
+    { dr: -1, dc:  1, angle:  45 }, // NE
+    { dr:  0, dc:  1, angle:  90 }, // E
+    { dr:  1, dc:  1, angle: 135 }, // SE
+    { dr:  1, dc:  0, angle: 180 }, // S
+    { dr:  1, dc: -1, angle: 225 }, // SW
+    { dr:  0, dc: -1, angle: 270 }, // W
+    { dr: -1, dc: -1, angle: 315 }, // NW
+  ];
+
+  // Center cell cover score
+  const centerCover = cell.ridge * 0.6 + cell.bench * 0.3 + cell.sidehill * 0.1;
+
+  // Scan each direction — find average cover along the ray
+  const dirDrops: { angle: number; avgCover: number; drop: number }[] = [];
+
+  for (const d of dirs) {
+    let coverSum = 0;
+    let count = 0;
+    for (let step = 1; step <= SCAN_RADIUS; step++) {
+      const rr = r + d.dr * step;
+      const cc = c + d.dc * step;
+      if (rr < 0 || rr >= grid.rows || cc < 0 || cc >= grid.cols) break;
+      const nc = grid.cells[rr][cc];
+      coverSum += nc.ridge * 0.6 + nc.bench * 0.3 + nc.sidehill * 0.1;
+      count++;
+    }
+    if (count > 0) {
+      const avgCover = coverSum / count;
+      dirDrops.push({ angle: d.angle, avgCover, drop: centerCover - avgCover });
+    }
+  }
+
+  if (dirDrops.length === 0) return NO_EDGE;
+
+  // Find the direction with the steepest cover drop-off = toward the field
+  dirDrops.sort((a, b) => b.drop - a.drop);
+  const best = dirDrops[0];
+
+  // Require meaningful drop: center has cover, target direction is significantly more open
+  const MIN_DROP = 0.12;    // minimum cover differential
+  const MIN_CENTER = 0.20;  // center must have some cover
+  if (best.drop < MIN_DROP || centerCover < MIN_CENTER) return NO_EDGE;
+
+  // Also require that the opposite direction retains cover (confirming this IS an edge)
+  const oppositeAngle = (best.angle + 180) % 360;
+  const opposite = dirDrops.find(d => d.angle === oppositeAngle);
+  if (opposite && opposite.avgCover < MIN_CENTER) return NO_EDGE; // both sides open = not an edge
+
+  // Confidence: how sharp is the transition
+  const edgeConfidence = Math.min(1, best.drop / 0.30); // max confidence at 0.30 drop
+
+  return {
+    isEdgeStand: true,
+    fieldBearing: best.angle,
+    edgeConfidence,
+  };
+}
+
+/**
  * Extract Prime Stand Sites using the Kill Window model with Cover Gating.
  * 
  * v3.4 Enhancements:
  * - COVER GATING: Reject open-field hotspots unless extreme terrain compression
  * - WEAK PARCEL LIMITS: Reduce recommendations on weak terrain parcels
  * 
+ * v2.1 Enhancements:
+ * - EDGE STAND DETECTION: Field/timber boundary classification with field bearing
+ * 
  * Pipeline:
  * 1. Find local pressure maxima (hotspot centers / deer destinations)
  * 2. Apply cover gating (reject open-field candidates)
  * 3. Compute optimal intercept direction for each hotspot
  * 4. Offset stand sites 25-40m toward the intercept edge
- * 5. Respect weak parcel stand limits
+ * 5. Classify edge stands and compute field bearing
+ * 6. Respect weak parcel stand limits
  * 
  * Result: Stand sites positioned for ambush in believable terrain locations.
  */
@@ -1423,9 +1522,10 @@ function extractPrimeStandSites(
     if (selected.length >= effectiveMaxCount) break;
 
     // === COVER GATING (v3.4) ===
+    // Evaluate cover for all candidates (needed for edge detection too)
+    const coverEval = evaluateCoverQuality(hotspot.cell);
+
     if (COVER_GATING.enabled) {
-      const coverEval = evaluateCoverQuality(hotspot.cell);
-      
       // Check if this is an open-field hotspot
       if (!coverEval.hasAdequateCover) {
         // Allow exception for extreme terrain compression (narrow draw crossing)
@@ -1444,6 +1544,9 @@ function extractPrimeStandSites(
         }
       }
     }
+
+    // === EDGE STAND DETECTION (v2.1) ===
+    const edgeResult = detectFieldEdge(hotspot, grid, coverEval.coverType);
 
     // Compute intercept direction
     const interceptDir = computeInterceptDirection(
@@ -1482,10 +1585,20 @@ function extractPrimeStandSites(
         offsetDistanceM: offsetPos.offsetM,
         offsetAngle: interceptDir.angle,
         interceptType: interceptDir.type,
+        // Edge stand classification
+        coverType: coverEval.coverType,
+        isEdgeStand: edgeResult.isEdgeStand,
+        fieldBearing: edgeResult.isEdgeStand ? edgeResult.fieldBearing : undefined,
+        edgeConfidence: edgeResult.isEdgeStand ? edgeResult.edgeConfidence : undefined,
         // Internal tracking
         _row: hotspot.row,
         _col: hotspot.col,
       };
+
+      if (edgeResult.isEdgeStand) {
+        console.log(`[PrimeStandSites] EDGE_STAND detected rank=${selected.length + 1} fieldBearing=${edgeResult.fieldBearing}° confidence=${edgeResult.edgeConfidence.toFixed(2)} at ${hotspot.cell.lng.toFixed(5)},${hotspot.cell.lat.toFixed(5)}`);
+      }
+
       selected.push(site);
     }
   }
@@ -1523,6 +1636,11 @@ export function primeStandSitesToGeoJSON(
         interceptType: s.interceptType,
         // Pressure-based resilience score
         standResilience: s.standResilience ?? 0,
+        // Edge stand classification (v2.1)
+        coverType: s.coverType,
+        isEdgeStand: s.isEdgeStand ?? false,
+        fieldBearing: s.fieldBearing,
+        edgeConfidence: s.edgeConfidence,
       },
       geometry: {
         type: 'Point' as const,
