@@ -5304,8 +5304,8 @@ function DeerIntelContent() {
               'fill-color': [
                 'case',
                 ['==', ['get', 'isTopStand'], true],
-                LAYER_COLORS.standPrimary,
-                '#e8943a',                        // Stand 2: brighter amber (was standSecondary #c45d22)
+                '#c49872',                        // Muted warm tan (was standPrimary #e2712a)
+                '#c4a67a',                        // Muted sand (was bright amber #e8943a)
               ],
               // v3.8.6+resilience: opacity = base_curve × opacityScale × corridorBias × resilienceFactor
               // resilienceFactor ranges 0.5 (no resilience) to 1.0 (max resilience)
@@ -5426,53 +5426,56 @@ function DeerIntelContent() {
           map.addSource('tfp-stands', { type: 'geojson', data: EMPTY_FC });
 
           // 1. Outer glow ring — soft radial around each stand point
+          // v2.0: reduced radius & opacity for cleaner look
           map.addLayer({
             id: 'tfp-stands-glow',
             type: 'circle',
             source: 'tfp-stands',
             paint: {
               'circle-radius': [
-                'match', ['get', 'rank'], 0, 18, 1, 15, 13
+                'match', ['get', 'rank'], 0, 14, 1, 12, 10
               ],
               'circle-color': ['get', 'color'],
               'circle-opacity': [
-                'match', ['get', 'rank'], 0, 0.25, 1, 0.18, 0.12
+                'match', ['get', 'rank'], 0, 0.18, 1, 0.12, 0.08
               ],
               'circle-blur': 0.9,
             },
           });
 
           // 2. Main disc — solid filled circle per stand
+          // v2.0: thinner stroke (~25% reduction)
           map.addLayer({
             id: 'tfp-stands-disc',
             type: 'circle',
             source: 'tfp-stands',
             paint: {
               'circle-radius': [
-                'match', ['get', 'rank'], 0, 10, 1, 8.5, 7
+                'match', ['get', 'rank'], 0, 9, 1, 7.5, 6
               ],
               'circle-color': ['get', 'color'],
               'circle-opacity': 1,
               'circle-stroke-width': [
-                'match', ['get', 'rank'], 0, 2.5, 2
+                'match', ['get', 'rank'], 0, 1.8, 1.5
               ],
               'circle-stroke-color': ['get', 'strokeColor'],
-              'circle-stroke-opacity': 0.9,
+              'circle-stroke-opacity': 0.7,
             },
           });
 
           // 3. Inner reticle ring — scope crosshair aesthetic
+          // v2.0: thinner, subtler
           map.addLayer({
             id: 'tfp-stands-reticle',
             type: 'circle',
             source: 'tfp-stands',
             paint: {
               'circle-radius': [
-                'match', ['get', 'rank'], 0, 5.5, 1, 4.5, 3.5
+                'match', ['get', 'rank'], 0, 4.5, 1, 3.8, 3
               ],
               'circle-color': 'transparent',
-              'circle-stroke-width': 1,
-              'circle-stroke-color': 'rgba(255,255,255,0.4)',
+              'circle-stroke-width': 0.7,
+              'circle-stroke-color': 'rgba(255,255,255,0.3)',
               'circle-stroke-opacity': 1,
             },
           });
@@ -5483,49 +5486,52 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-stands',
             paint: {
-              'circle-radius': 1.5,
-              'circle-color': 'rgba(255,255,255,0.6)',
+              'circle-radius': 1.2,
+              'circle-color': 'rgba(255,255,255,0.5)',
               'circle-opacity': 1,
             },
           });
 
           // 5. Label — "Today's Sit", "Alternate Sit", "Backup Sit"
+          // v2.0: lighter font (Medium), smaller size, thinner halo
           map.addLayer({
             id: 'tfp-stands-label',
             type: 'symbol',
             source: 'tfp-stands',
             layout: {
               'text-field': ['get', 'label'],
-              'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
               'text-size': [
-                'match', ['get', 'rank'], 0, 12, 1, 11, 10
+                'match', ['get', 'rank'], 0, 11, 1, 10, 9.5
               ],
-              'text-offset': [0, 1.8],
+              'text-offset': [0, 1.6],
               'text-anchor': 'top',
               'text-allow-overlap': true,
               'text-ignore-placement': true,
+              'text-letter-spacing': 0.02,
             },
             paint: {
               'text-color': '#ffffff',
               'text-halo-color': ['get', 'color'],
-              'text-halo-width': 2,
-              'text-halo-blur': 1,
+              'text-halo-width': 1.2,
+              'text-halo-blur': 0.5,
               'text-opacity': [
-                'match', ['get', 'rank'], 0, 1, 0.85
+                'match', ['get', 'rank'], 0, 0.95, 0.78
               ],
             },
           });
 
           // 6. Rank number inside disc
+          // v2.0: Medium weight, slightly smaller
           map.addLayer({
             id: 'tfp-stands-rank',
             type: 'symbol',
             source: 'tfp-stands',
             layout: {
               'text-field': ['get', 'rankLabel'],
-              'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
               'text-size': [
-                'match', ['get', 'rank'], 0, 14, 1, 12, 11
+                'match', ['get', 'rank'], 0, 12, 1, 10.5, 9.5
               ],
               'text-anchor': 'center',
               'text-allow-overlap': true,
@@ -5533,8 +5539,8 @@ function DeerIntelContent() {
             },
             paint: {
               'text-color': '#ffffff',
-              'text-halo-color': 'rgba(0,0,0,0.3)',
-              'text-halo-width': 1,
+              'text-halo-color': 'rgba(0,0,0,0.2)',
+              'text-halo-width': 0.6,
             },
           });
         }
