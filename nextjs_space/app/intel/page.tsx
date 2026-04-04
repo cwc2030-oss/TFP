@@ -2688,7 +2688,17 @@ function DeerIntelContent() {
   }, [parcelViewHold]);
 
   // Fetch terrain analysis using shared client
+  const analysisInFlightRef = useRef(false);
   const runAnalysis = useCallback(async () => {
+    // v2.3: Prevent overlapping analysis runs — a second click while the first
+    // is still in flight would reset the seeded PRNG mid-generation, corrupting
+    // both runs' stand candidate sequences.
+    if (analysisInFlightRef.current) {
+      console.error('[INTEL-DIAG] runAnalysis SKIPPED — analysis already in flight');
+      return;
+    }
+    analysisInFlightRef.current = true;
+
     // Check if a caller (Pick Parcel / Explore) already fetched the parcel
     // geometry. When present we skip the redundant Regrid lookup and keep the
     // gold boundary visible — no full-screen loading overlay needed.
@@ -2883,6 +2893,7 @@ function DeerIntelContent() {
       setError(errorMsg);
       setProgressStep('Failed');
     } finally {
+      analysisInFlightRef.current = false;
       setIsLoading(false);
       setBackgroundAnalysis(false);
     }

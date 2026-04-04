@@ -105,8 +105,8 @@ export { computeFlowSegmentScores, type FlowSegmentScores };
 
 // ========== DETERMINISTIC SEEDED PRNG ==========
 // v1.5: Import from seeded-rng.ts to avoid circular deps with terrain-flow-v3.
-import { seedRng, sRand, nextFlowId } from './seeded-rng';
-export { seedRng, sRand } from './seeded-rng';
+import { createSeededRng, setActiveRng, seedRng, sRand, nextFlowId } from './seeded-rng';
+export { seedRng, sRand, createSeededRng, setActiveRng } from './seeded-rng';
 
 // ========== PARCEL CLIPPING UTILITIES ==========
 
@@ -372,8 +372,10 @@ export function generateTerrainDrivenFlow(
   
   // Calculate parcel dimensions and adaptive scaling
   const centroid = getCentroid(coords);
-  // v1.5: Seed deterministic PRNG from parcel centroid
-  seedRng(centroid);
+  // v2.3: Local RNG instance — immune to concurrent analysis race conditions.
+  // setActiveRng() makes sRand()/nextFlowId() in terrain-flow-v3 use this instance.
+  const rng = createSeededRng(centroid);
+  setActiveRng(rng);
   const widthM = distanceMeters([parcelBbox[0], centroid[1]], [parcelBbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], parcelBbox[1]], [centroid[0], parcelBbox[3]]);
   
@@ -975,8 +977,9 @@ export function generateLegacySyntheticFlow(
   
   const bbox = getBbox(coords);
   const centroid = getCentroid(coords);
-  // v1.5: Seed deterministic PRNG from parcel centroid
-  seedRng(centroid);
+  // v2.3: Local RNG instance — immune to concurrent analysis race conditions.
+  const rng = createSeededRng(centroid);
+  setActiveRng(rng);
   const widthM = distanceMeters([bbox[0], centroid[1]], [bbox[2], centroid[1]]);
   const heightM = distanceMeters([centroid[0], bbox[1]], [centroid[0], bbox[3]]);
   const parcelAcres = (widthM * heightM * 0.8) / 4046.86;
