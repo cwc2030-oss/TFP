@@ -5057,8 +5057,8 @@ function DeerIntelContent() {
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.63,
-                15, 1.05,
+                10, 0.8,
+                15, 1.4,
               ],
               // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
@@ -5076,11 +5076,12 @@ function DeerIntelContent() {
               // v2.2: +1px from v2.0 — tight terrain lanes, not blobs
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 7,
-                15, 11,
-                18, 16,
+                10, 18,
+                13, 35,
+                15, 55,
+                18, 80,
               ],
-              'heatmap-opacity': 0.76,
+              'heatmap-opacity': 0.82,
             },
           });
         }
@@ -5125,9 +5126,10 @@ function DeerIntelContent() {
               // v2.0: Tight radius
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 5,
-                15, 9,
-                18, 14,
+                10, 14,
+                13, 28,
+                15, 45,
+                18, 65,
               ],
               'heatmap-opacity': 0.52,
             },
@@ -5177,9 +5179,10 @@ function DeerIntelContent() {
               // v2.0: Tight radius
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 5,
-                15, 9,
-                18, 14,
+                10, 14,
+                13, 28,
+                15, 45,
+                18, 65,
               ],
               'heatmap-opacity': 0.52,
             },
@@ -5229,9 +5232,10 @@ function DeerIntelContent() {
               // v2.0: Tight radius
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 5,
-                15, 9,
-                18, 14,
+                10, 14,
+                13, 28,
+                15, 45,
+                18, 65,
               ],
               'heatmap-opacity': 0.55,
             },
