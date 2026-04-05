@@ -4213,21 +4213,21 @@ function DeerIntelContent() {
         animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0, 400);
       }
       if (map.getLayer('tfp-pressure-heatmap')) {
-        const heatOpacity = visibility.ridgeSpines ? 0.28 : 0.38;
+        const heatOpacity = visibility.ridgeSpines ? 0.42 : 0.55;
         animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', heatOpacity, 400);
       }
       
       // Terrain Flow visibility — fill grid gated on master pressureHeatmap toggle
       const heatOn = flowVisibility.pressureHeatmap;
 
-      // Override B: master toggle — heatmap fades to 0.38; fill grid stays at 0
+      // Override B: master toggle — heatmap fades to 0.55; fill grid stays at 0
       if (map.getLayer('tfp-pressure-fill')) {
         animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0, 350);
       }
       if (map.getLayer('tfp-pressure-heatmap')) {
         if (heatOn) {
           map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', 'visible');
-          animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0.38, 550);
+          animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0.55, 550);
         } else {
           animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0, 350);
           setTimeout(() => {
@@ -4373,7 +4373,7 @@ function DeerIntelContent() {
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
           'interpolate', ['linear'], ['zoom'],
           10, 0.50 * fp.intensityMult,
-          15, 0.75 * fp.intensityMult,
+          15, 0.80 * fp.intensityMult,
         ]);
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
@@ -4381,9 +4381,9 @@ function DeerIntelContent() {
           15, Math.max(7, 11 + fp.radiusOffset),
           18, Math.max(10, 16 + fp.radiusOffset),
         ]);
-        // broad→0.30, balanced→0.38, focused→0.44 (ridges: −0.10)
-        const heatBase = 0.38;  // locked to balanced
-        const heatOpacity = visibility.ridgeSpines ? heatBase - 0.10 : heatBase;
+        // broad→0.45, balanced→0.55, focused→0.65 (ridges: −0.12)
+        const heatBase = 0.55;  // locked to balanced
+        const heatOpacity = visibility.ridgeSpines ? heatBase - 0.12 : heatBase;
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', heatOpacity);
       }
 
@@ -5090,7 +5090,7 @@ function DeerIntelContent() {
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
                 10, 0.5,
-                15, 0.75,
+                15, 0.8,
               ],
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
@@ -5111,7 +5111,7 @@ function DeerIntelContent() {
                 15, 28,
                 18, 36,
               ],
-              'heatmap-opacity': 0.38,  // whisper-quiet — soft warm hint under flow lines
+              'heatmap-opacity': 0.55,  // visible soft glow under flow corridors
             },
           });
         }
