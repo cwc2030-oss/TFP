@@ -4237,7 +4237,7 @@ function DeerIntelContent() {
       // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
       // V4 Step 11: Smooth fade for flow visibility
       if (map.getLayer('tfp-flow-primary')) {
-        if (flowVisibility.flowPrimary) {
+        if (isPressureMode && flowVisibility.flowPrimary) {
           map.setLayoutProperty('tfp-flow-primary', 'visibility', 'visible');
         } else {
           fadeLayerOut(map, 'tfp-flow-primary', 'line-opacity', FADE_OUT);
@@ -4254,7 +4254,7 @@ function DeerIntelContent() {
           0.55, 3,
           0.75, 4
         ]);
-        if (flowVisibility.flowPrimary) {
+        if (isPressureMode && flowVisibility.flowPrimary) {
           map.setPaintProperty('tfp-flow-primary', 'line-opacity', isPressureMode ? [
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
             0.4, 0.65,
@@ -4269,7 +4269,7 @@ function DeerIntelContent() {
         }
       }
       if (map.getLayer('tfp-flow-primary-glow')) {
-        if (flowVisibility.flowPrimary) {
+        if (isPressureMode && flowVisibility.flowPrimary) {
           fadeLayerIn(map, 'tfp-flow-primary-glow', isPressureMode ? 0.35 : 0.25, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-primary-glow', 'line-opacity', FADE_OUT);
@@ -4277,7 +4277,7 @@ function DeerIntelContent() {
       }
       // Nearest corridor highlight follows primary flow visibility + stand selection
       if (map.getLayer('tfp-flow-nearest-highlight')) {
-        const showHighlight = flowVisibility.flowPrimary && selectedStand !== null;
+        const showHighlight = isPressureMode && flowVisibility.flowPrimary && selectedStand !== null;
         if (showHighlight) {
           fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', FADE_IN);
         } else {
@@ -4286,7 +4286,7 @@ function DeerIntelContent() {
       }
       // v3.8.1 — Directional chevrons follow primary flow visibility
       if (map.getLayer('tfp-flow-direction-chevrons')) {
-        if (flowVisibility.flowPrimary) {
+        if (isPressureMode && flowVisibility.flowPrimary) {
           map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'visible');
         } else {
           map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'none');
@@ -4294,7 +4294,7 @@ function DeerIntelContent() {
       }
       if (map.getLayer('tfp-flow-secondary')) {
         const secTarget = isPressureMode ? 0.50 : 0.45;
-        if (flowVisibility.flowSecondary) {
+        if (isPressureMode && flowVisibility.flowSecondary) {
           fadeLayerIn(map, 'tfp-flow-secondary', secTarget, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-secondary', 'line-opacity', FADE_OUT);
@@ -4309,7 +4309,7 @@ function DeerIntelContent() {
       // Convergence zones — smooth fade with pressure-aware opacity
       if (map.getLayer('tfp-flow-convergence')) {
         const convTarget = isPressureMode ? 0.1 : 0.85;
-        if (flowVisibility.convergenceZones) {
+        if (isPressureMode && flowVisibility.convergenceZones) {
           fadeLayerIn(map, 'tfp-flow-convergence', convTarget, 'circle-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-convergence', 'circle-opacity', FADE_OUT);
@@ -4317,7 +4317,7 @@ function DeerIntelContent() {
       }
       if (map.getLayer('tfp-flow-convergence-pulse')) {
         const pulseTarget = isPressureMode ? 0.1 : 0.15;
-        if (flowVisibility.convergenceZones) {
+        if (isPressureMode && flowVisibility.convergenceZones) {
           fadeLayerIn(map, 'tfp-flow-convergence-pulse', pulseTarget, 'circle-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-convergence-pulse', 'circle-opacity', FADE_OUT);
