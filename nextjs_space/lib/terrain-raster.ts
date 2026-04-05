@@ -108,9 +108,9 @@ const MIN_CELLS = 20;   // minimum grid dimension
 const MAX_CELLS = 100;  // maximum grid dimension (prevents massive grids)
 
 // ============ TERRAIN WEIGHTS ============
-const W_BENCH  = 0.40;
-const W_SADDLE = 0.30;
-const W_RIDGE  = 0.30;
+const W_BENCH  = 0.45;
+const W_SADDLE = 0.35;
+const W_RIDGE  = 0.20;
 
 // ============ SIDEHILL / LEEWARD BONUS ============
 // Modest bonus for ridge shoulders and leeward benches — not dominant
@@ -882,11 +882,11 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // v2.0 — NO Gaussian smoothing. Smoothing inflates every feature into a
-  // circular blob and destroys directional structure. With tighter influence
-  // radii and steeper falloff, the raw raster already has natural transitions
-  // from overlapping feature kernels. Mapbox heatmap rendering adds its own
-  // pixel-level blur which provides visual softness without destroying shape.
+  // v2.3 — Re-enabled 2-pass Gaussian smoothing to spread pressure beyond
+  // the spine lines into surrounding terrain. The larger Mapbox radii now
+  // benefit from a pre-smoothed surface that blends neighboring cells.
+  applyGaussianSmoothing(grid);
+  applyGaussianSmoothing(grid);
 
   // Normalize pressure to 0-1 range
   let maxPressure = 0;
