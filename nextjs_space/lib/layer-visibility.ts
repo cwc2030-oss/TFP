@@ -63,8 +63,8 @@ export interface ReconcileState {
    * Merge visibility.* + flowVisibility.* + { beddingProbability: showBeddingProbability }.
    */
   toggles: Record<string, boolean>;
-  /** Current heatmap view ('pressure' | 'damage' | 'movement' | 'refuge') */
-  pressureView: string;
+  /** @deprecated pressureView locked to 'pressure' — kept for interface compat */
+  pressureView?: string;
   /** Whether parcel data exists (controls parcel layer visibility) */
   hasParcelData: boolean;
 }
@@ -204,7 +204,7 @@ function resolveVisibility(
     case 'hidden':      return false;
     case 'toggle':      return !!state.toggles[src.key];
     case 'flowToggle':  return !!state.toggles[src.key];
-    case 'heatmapView': return !!state.toggles.pressureHeatmap && state.pressureView === src.view;
+    case 'heatmapView': return !!state.toggles.pressureHeatmap && 'pressure' === src.view;
     case 'compound':    return src.anyOf.some(k => !!state.toggles[k]);
     case 'complex':     return null;  // skip — handled by specialized effects
     case 'interaction': return null;  // skip — handled by mouse event handlers

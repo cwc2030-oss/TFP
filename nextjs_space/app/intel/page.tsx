@@ -45,7 +45,7 @@ import type {
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
-import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams, type PressureFocus, type PressureView } from '@/lib/terrain-heatmap';
+import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, type RasterGrid } from '@/lib/terrain-raster';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
@@ -1826,8 +1826,7 @@ function DeerIntelContent() {
 
   // User controls
   const [season, setSeason] = useState<SeasonProfile>('rut');
-  const [pressureFocus, setPressureFocus] = useState<PressureFocus>('balanced');
-  const [pressureView, setPressureView] = useState<PressureView>('pressure');
+  // pressureFocus/pressureView removed — locked to 'balanced'/'pressure' permanently
   // v2.2: Parcel complexity score (0-1) — drives Deer Flow expression strength.
   // Simple parcels get lighter heatmap; irregular parcels get stronger expression.
   const parcelComplexityRef = useRef<number>(0);
@@ -2918,8 +2917,6 @@ function DeerIntelContent() {
   visibilityRef.current = visibility;
   const flowVisibilityRef = useRef(flowVisibility);
   flowVisibilityRef.current = flowVisibility;
-  const pressureViewRef = useRef(pressureView);
-  pressureViewRef.current = pressureView;
   const showBeddingProbRef = useRef(showBeddingProbability);
   showBeddingProbRef.current = showBeddingProbability;
 
@@ -3004,7 +3001,7 @@ function DeerIntelContent() {
             convergenceZones: fv.convergenceZones,
             beddingProbability: showBeddingProbRef.current,
           },
-          pressureView: pressureViewRef.current,
+          pressureView: 'pressure',
           hasParcelData: !!parcelPolygon,
         };
 
@@ -3966,7 +3963,7 @@ function DeerIntelContent() {
           beddingPolygons: layers?.beddingPolygons || undefined,
           ridgeSpineData: ridgeSpineData || undefined,
           season,
-          focusMode: pressureFocus,
+          focusMode: 'balanced',
         });
 
         if (rasterResult) {
@@ -4022,7 +4019,7 @@ function DeerIntelContent() {
               parcelCoords: parcelCoordsForGrid,
               season,
               convergenceMode: 'light',
-              focusMode: pressureFocus,
+              focusMode: 'balanced',
             });
             heatmapSource.setData(heatMapData);
           }
@@ -4037,7 +4034,7 @@ function DeerIntelContent() {
             parcelCoords: parcelCoordsForGrid,
             season,
             convergenceMode: 'light',
-            focusMode: pressureFocus,
+            focusMode: 'balanced',
           });
           heatmapSource.setData(heatMapData);
         }
@@ -4052,7 +4049,7 @@ function DeerIntelContent() {
     return () => {
       if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
     };
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, pressureFocus, parcelPolygon, ridgeSpineData, season]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, parcelPolygon, ridgeSpineData, season]);
 
   // ========== NEAREST CORRIDOR HIGHLIGHT (selected stand) ==========
   // When a stand is selected, find the primary flow segment nearest to it
@@ -4221,16 +4218,12 @@ function DeerIntelContent() {
         animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0, 400);
       }
       
-      // Terrain Flow visibility (movement likelihood layers)
-      // Pressure Simulation v1 — pressureView controls which of the 4 heat layers is active.
-      // All four share the master pressureHeatmap toggle; pressureView picks one.
-      // V4 Step 11b: Pressure view crossfade — fill grid replaces heatmap for 'pressure' view
+      // Terrain Flow visibility — fill grid gated on master pressureHeatmap toggle
       const heatOn = flowVisibility.pressureHeatmap;
 
-      // Fill grid: show when pressure view is active
+      // Pressure fill grid: show/hide based on Deer Flow master toggle
       if (map.getLayer('tfp-pressure-fill')) {
-        const showFill = heatOn && pressureView === 'pressure';
-        if (showFill) {
+        if (heatOn) {
           map.setLayoutProperty('tfp-pressure-fill', 'visibility', 'visible');
           animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0.55, 550);
         } else {
@@ -4241,27 +4234,13 @@ function DeerIntelContent() {
         }
       }
 
-      // Legacy heatmap layers crossfade (heatmap disabled at opacity 0, others still active)
-      const heatViews = [
-        { id: 'tfp-pressure-heatmap', view: 'pressure' },
-        { id: 'tfp-movement-delta', view: 'damage' },
-        { id: 'tfp-movement-post', view: 'movement' },
-        { id: 'tfp-refuge-zones', view: 'refuge' },
-      ];
-      heatViews.forEach(({ id, view }) => {
+      // Legacy heatmap + alt views: all hidden (view selector removed, locked to pressure/fill)
+      ['tfp-pressure-heatmap', 'tfp-movement-delta', 'tfp-movement-post', 'tfp-refuge-zones'].forEach(id => {
         if (!map.getLayer(id)) return;
-        const shouldShow = heatOn && pressureView === view;
-        // Legacy heatmap stays at 0 — fill grid is primary
-        const targetOpacity = id === 'tfp-pressure-heatmap' ? 0 : 0.58;
-        if (shouldShow) {
-          map.setLayoutProperty(id, 'visibility', 'visible');
-          animatePaint(map, id, 'heatmap-opacity', targetOpacity, 550);
-        } else {
-          animatePaint(map, id, 'heatmap-opacity', 0, 350);
-          setTimeout(() => {
-            try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
-          }, 380);
-        }
+        animatePaint(map, id, 'heatmap-opacity', 0, 350);
+        setTimeout(() => {
+          try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
+        }, 380);
       });
 
       // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
@@ -4362,7 +4341,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand, visibilityEpoch, huntabilityData]); // v4-fix8: visibilityEpoch forces re-run after reload; huntabilityData re-fires when bedding source populates
+  }, [visibility, flowVisibility, showBeddingProbability, isPressureMode, mapReady, selectedStand, visibilityEpoch, huntabilityData]); // v4-fix8: visibilityEpoch forces re-run after reload; huntabilityData re-fires when bedding source populates
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   // v2.2: Now parcel-aware — passes complexity score for adaptive expression.
@@ -4371,12 +4350,10 @@ function DeerIntelContent() {
     if (!map || !mapReady) return;
     try {
       const complexity = parcelComplexityRef.current;
-      const fp = getFocusPaintParams(pressureFocus, complexity);
-      // Pressure fill grid: adjust opacity by focus mode
+      const fp = getFocusPaintParams('balanced', complexity);
+      // Pressure fill grid: adjust opacity (locked to balanced = 0.55, ridges on: −0.10)
       if (map.getLayer('tfp-pressure-fill')) {
-        // broad → 0.45, balanced → 0.55, focused → 0.65 (ridges on: −0.10)
-        const fillBaseMap: Record<string, number> = { broad: 0.45, balanced: 0.55, focused: 0.65 };
-        const fillBase = fillBaseMap[pressureFocus] ?? 0.55;
+        const fillBase = 0.55;
         const fillOpacity = visibility.ridgeSpines ? fillBase - 0.10 : fillBase;
         map.setPaintProperty('tfp-pressure-fill', 'fill-opacity', fillOpacity);
       }
@@ -4407,11 +4384,11 @@ function DeerIntelContent() {
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', 0);
       }
 
-      console.log('[PressureFocus]', pressureFocus, 'complexity:', complexity.toFixed(3), fp, 'ridgeSpines:', visibility.ridgeSpines);
+      console.log('[PressureFocus] balanced complexity:', complexity.toFixed(3), fp, 'ridgeSpines:', visibility.ridgeSpines);
     } catch (err) {
       console.error('[PressureFocus] Error updating paint (non-fatal):', err);
     }
-  }, [pressureFocus, mapReady, visibility.ridgeSpines, parcelPolygon]);
+  }, [mapReady, visibility.ridgeSpines, parcelPolygon]);
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -9421,105 +9398,7 @@ function DeerIntelContent() {
                     </span>
                   </button>
 
-                  {/* Pressure Focus Slider */}
-                  {flowVisibility.pressureHeatmap && (
-                    <div className="px-2 py-2 bg-white/[0.03] rounded-lg border border-white/[0.06] mt-1">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] text-stone-400 uppercase tracking-wider font-medium">Focus</span>
-                        <span className="text-[10px] text-amber-400 font-semibold">
-                          {pressureFocus === 'broad' ? '🌲 Broad' : pressureFocus === 'focused' ? '🎯 Focused' : '⚖️ Balanced'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1">
-                        {([
-                          { key: 'broad' as PressureFocus, label: 'Broad', sub: 'Full parcel', icon: '🌲' },
-                          { key: 'balanced' as PressureFocus, label: 'Balanced', sub: 'Default', icon: '⚖️' },
-                          { key: 'focused' as PressureFocus, label: 'Focused', sub: 'Best spots', icon: '🎯' },
-                        ]).map(m => (
-                          <button
-                            key={m.key}
-                            onClick={() => setPressureFocus(m.key)}
-                            className={`p-1.5 rounded text-center transition-all ${
-                              pressureFocus === m.key
-                                ? 'bg-amber-500/25 border border-amber-500/60 text-white'
-                                : 'bg-white/[0.04] border border-white/[0.06] text-white/50 hover:bg-white/[0.08] hover:text-white/70'
-                            }`}
-                          >
-                            <span className="text-sm block">{m.icon}</span>
-                            <span className="text-[9px] font-medium block mt-0.5">{m.label}</span>
-                            <span className="text-[7px] text-white/40 block">{m.sub}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[8px] text-stone-600 mt-1.5 text-center">
-                        {pressureFocus === 'broad' ? 'Showing wider terrain pressure — overall huntability' :
-                         pressureFocus === 'focused' ? 'Suppressing weak zones — strongest hotspots only' :
-                         'Balanced terrain structure and strongest areas'}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Pressure View Selector */}
-                  {flowVisibility.pressureHeatmap && (
-                    <div className="px-2 py-2 bg-white/[0.03] rounded-lg border border-white/[0.06] mt-1">
-                      <span className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium block mb-1.5">View</span>
-                      <div className="grid grid-cols-4 gap-0.5 bg-stone-800/60 rounded p-0.5">
-                        {([
-                          { key: 'pressure' as PressureView, label: 'Deer Flow', gradient: 'linear-gradient(90deg, #facc15, #ef4444)' },
-                          { key: 'damage' as PressureView, label: 'Flow Disruption', gradient: 'linear-gradient(90deg, #facc15, #f97316)' },
-                          { key: 'movement' as PressureView, label: 'Flow Survival', gradient: 'linear-gradient(90deg, #facc15, #22c55e)' },
-                          { key: 'refuge' as PressureView, label: 'Flow Refuge', gradient: 'linear-gradient(90deg, #06b6d4, #3b82f6)' },
-                        ]).map(v => (
-                          <button
-                            key={v.key}
-                            onClick={() => setPressureView(v.key)}
-                            className={`relative px-1 py-1.5 rounded text-center transition-all ${
-                              pressureView === v.key
-                                ? 'bg-stone-700/80 text-white shadow-sm'
-                                : 'text-stone-500 hover:text-stone-300 hover:bg-stone-700/30'
-                            }`}
-                          >
-                            <div
-                              className="w-full h-1 rounded-sm mx-auto mb-1"
-                              style={{ background: v.gradient, opacity: pressureView === v.key ? 1 : 0.35 }}
-                            />
-                            <span className="text-[8px] font-medium leading-none">{v.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Layer Color Legend — contextual to active pressureView */}
-                  {flowVisibility.pressureHeatmap && (
-                    <div className="px-2 py-1.5 bg-white/[0.03] rounded-lg border border-white/[0.06] mt-1">
-                      <span className="text-[9px] text-stone-400 font-semibold block mb-1">
-                        {pressureView === 'pressure' && 'Deer Flow'}
-                        {pressureView === 'damage' && 'Flow Disruption'}
-                        {pressureView === 'movement' && 'Flow Survival'}
-                        {pressureView === 'refuge' && 'Flow Refuge'}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {pressureView === 'pressure' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316, #ef4444)' }} />}
-                        {pressureView === 'damage' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #f97316)' }} />}
-                        {pressureView === 'movement' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #facc15, #22c55e)' }} />}
-                        {pressureView === 'refuge' && <div className="w-10 h-1.5 rounded-sm" style={{ background: 'linear-gradient(90deg, #06b6d4, #3b82f6)' }} />}
-                        <span className="text-[8px] text-stone-500">
-                          {pressureView === 'pressure' && 'Low → High terrain pressure'}
-                          {pressureView === 'damage' && 'Low → High movement likelihood'}
-                          {pressureView === 'movement' && 'Low → High post-pressure quality'}
-                          {pressureView === 'refuge' && 'Low → High refuge value'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <div className="w-10 h-1.5 rounded-sm flex">
-                          <div className="flex-1 rounded-l-sm bg-amber-700/40" />
-                          <div className="flex-1 rounded-r-sm bg-amber-400" />
-                        </div>
-                        <span className="text-[8px] text-stone-500">Brighter stand = more resilient</span>
-                      </div>
-                    </div>
-                  )}
+                  {/* pressureFocus/pressureView UI removed — locked to balanced/pressure */}
                   {/* Divider with "Supporting Evidence" label */}
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-stone-700/50" />
