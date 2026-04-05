@@ -271,7 +271,6 @@ export interface RasterCell {
   sidehill: number;  // 0-1 sidehill/leeward bonus
   terrain: number;   // 0-1 season-independent terrain movement favorability
   pressure: number;  // combined 0-1 pressure score (season-weighted)
-  heatScore: number; // 0-1 heatmap-only score (ridge suppressed to 15%) — does NOT affect stands
 }
 
 export interface RasterGrid {
@@ -433,7 +432,6 @@ export function generateRasterGrid(parcelCoords: number[][]): RasterGrid | null 
         sidehill: 0,
         terrain: 0,
         pressure: 0,
-        heatScore: 0,
       });
     }
     cells.push(row);
@@ -770,7 +768,7 @@ function computeAspectScore(cell: RasterCell, grid: RasterGrid): number {
  * Apply Gaussian smoothing to the pressure surface.
  * Uses a 3x3 kernel (1-cell radius) for light smoothing.
  */
-function applyGaussianSmoothing(grid: RasterGrid, field: 'pressure' | 'heatScore' = 'pressure'): void {
+function applyGaussianSmoothing(grid: RasterGrid): void {
   // 3x3 Gaussian kernel (sigma ≈ 0.85)
   const kernel = [
     [0.0625, 0.125, 0.0625],
@@ -778,10 +776,10 @@ function applyGaussianSmoothing(grid: RasterGrid, field: 'pressure' | 'heatScore
     [0.0625, 0.125, 0.0625],
   ];
 
-  // Create a copy of field values
+  // Create a copy of pressure values
   const original: number[][] = [];
   for (let r = 0; r < grid.rows; r++) {
-    original.push(grid.cells[r].map(c => c[field]));
+    original.push(grid.cells[r].map(c => c.pressure));
   }
 
   // Apply convolution
@@ -793,7 +791,7 @@ function applyGaussianSmoothing(grid: RasterGrid, field: 'pressure' | 'heatScore
           sum += original[r + kr][c + kc] * kernel[kr + 1][kc + 1];
         }
       }
-      grid.cells[r][c][field] = sum;
+      grid.cells[r][c].pressure = sum;
     }
   }
 }
@@ -882,32 +880,20 @@ export function buildTerrainRaster(input: RasterInput): {
       const sidehillBonus = cell.sidehill * sw.sidehillMax * Math.min(1, basePressure * 2);
 
       cell.pressure = basePressure + sidehillBonus;
-
-      // heatScore: same formula but ridge suppressed to 15% of its weight.
-      // This makes the heatmap show saddle funnels / bench travel / draws
-      // instead of hugging the ridge spine. Stands still use full pressure.
-      const heatBase = benchW + saddleW + (ridgeW * 0.15);
-      const heatSidehillBonus = cell.sidehill * sw.sidehillMax * Math.min(1, heatBase * 2);
-      cell.heatScore = heatBase + heatSidehillBonus;
     }
   }
 
   // v2.3 — Re-enabled 2-pass Gaussian smoothing to spread pressure beyond
   // the spine lines into surrounding terrain. The larger Mapbox radii now
   // benefit from a pre-smoothed surface that blends neighboring cells.
-  applyGaussianSmoothing(grid, 'pressure');
-  applyGaussianSmoothing(grid, 'pressure');
-  // Same smoothing for heatScore (ridge-suppressed heatmap score)
-  applyGaussianSmoothing(grid, 'heatScore');
-  applyGaussianSmoothing(grid, 'heatScore');
+  applyGaussianSmoothing(grid);
+  applyGaussianSmoothing(grid);
 
   // Normalize pressure to 0-1 range
   let maxPressure = 0;
-  let maxHeatScore = 0;
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       maxPressure = Math.max(maxPressure, grid.cells[r][c].pressure);
-      maxHeatScore = Math.max(maxHeatScore, grid.cells[r][c].heatScore);
     }
   }
   if (maxPressure > 0) {
@@ -917,26 +903,17 @@ export function buildTerrainRaster(input: RasterInput): {
       }
     }
   }
-  if (maxHeatScore > 0) {
-    for (let r = 0; r < grid.rows; r++) {
-      for (let c = 0; c < grid.cols; c++) {
-        grid.cells[r][c].heatScore /= maxHeatScore;
-      }
-    }
-  }
 
   // Apply focus mode pressure multiplier AFTER normalization.
   // Broad (0.85) softens pressure → movement_delta rises, refuge expands.
   // Focus (1.2) intensifies pressure → movement_delta compresses, refuge shrinks.
   // Terrain computation is NOT affected — only pressure field is scaled.
-  // heatScore gets the same multiplier so the heatmap tracks focus mode.
   const pMul = focus.pressureMultiplier;
   if (pMul !== 1.0) {
     console.log(`[TerrainRaster] Applying focus pressure multiplier: ${pMul}`);
     for (let r = 0; r < grid.rows; r++) {
       for (let c = 0; c < grid.cols; c++) {
         grid.cells[r][c].pressure = Math.min(1, grid.cells[r][c].pressure * pMul);
-        grid.cells[r][c].heatScore = Math.min(1, grid.cells[r][c].heatScore * pMul);
       }
     }
   }
@@ -947,8 +924,6 @@ export function buildTerrainRaster(input: RasterInput): {
     for (let c = 0; c < grid.cols; c++) {
       const p = grid.cells[r][c].pressure;
       grid.cells[r][c].pressure = Math.min(1, Math.max(0, 1 - Math.exp(-2.0 * p)));
-      const h = grid.cells[r][c].heatScore;
-      grid.cells[r][c].heatScore = Math.min(1, Math.max(0, 1 - Math.exp(-2.0 * h)));
     }
   }
 
@@ -967,66 +942,11 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
-  // Convert to GeoJSON heat points with focus mode filtering
-  // v2.2 — slightly lowered floor from v2.0 (0.68→0.62) to allow more mid-range
-  // terrain signals through. Combined with the Mapbox-side weight dead zone (0.22),
-  // this gives Deer Flow enough expression to serve as a "why this works" layer
-  // without returning to the v1.x blob visuals.
+  // heatPoints: empty — pressure heatmap is permanently disabled.
+  // Source kept in map for potential future re-enable.
   const HARD_PRESSURE_FLOOR = 0.45;
   const parcelRing = input.parcelCoords;
-  let features: GeoJSON.Feature[] = [];
-  for (let r = 0; r < grid.rows; r++) {
-    for (let c = 0; c < grid.cols; c++) {
-      const cell = grid.cells[r][c];
-      // Gate on full pressure (keeps stand pipeline consistent)
-      const raw = cell.pressure;
-
-      // Apply hard pressure floor (filters ~80-90% of cells)
-      if (raw < HARD_PRESSURE_FLOOR) continue;
-
-      // Apply focus mode floor on top of hard floor
-      if (raw < focus.scoreFloor) continue;
-
-      // Clip to parcel boundary — no heat bleed onto lakes/neighbors
-      if (parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
-
-      // heatShaped: use ridge-suppressed heatScore for heatmap weight
-      // Same floor/gamma pipeline but driven by heatScore, not pressure
-      const heatRaw = cell.heatScore;
-      const heatNorm = (heatRaw - focus.scoreFloor) / (1 - focus.scoreFloor);
-      const heatShaped = Math.pow(Math.max(0, Math.min(1, heatNorm)), focus.scoreGamma);
-
-      features.push({
-        type: 'Feature',
-        properties: {
-          score: heatShaped,
-          intensity: heatShaped,
-          bench: cell.bench,
-          saddle: cell.saddle,
-          ridge: cell.ridge,
-          sidehill: cell.sidehill,
-          source: 'raster',
-        },
-        geometry: {
-          type: 'Point',
-          coordinates: [cell.lng, cell.lat],
-        },
-      });
-    }
-  }
-
-  // Hard cap: keep only the top 500 highest-scoring cells
-  if (features.length > 500) {
-    features.sort((a, b) => {
-      const ds = (b.properties?.score ?? 0) - (a.properties?.score ?? 0);
-      if (ds !== 0) return ds;
-      // Tie-break by coordinates for determinism
-      const ac = a.geometry?.type === 'Point' ? (a.geometry as GeoJSON.Point).coordinates : [0, 0];
-      const bc = b.geometry?.type === 'Point' ? (b.geometry as GeoJSON.Point).coordinates : [0, 0];
-      return ac[1] - bc[1] || ac[0] - bc[0];
-    });
-    features = features.slice(0, 1500);
-  }
+  const features: GeoJSON.Feature[] = [];
 
   // ============ PRESSURE POLYGON GRID ============
   // Convert scored cells into small rectangular Polygon features for a Mapbox fill layer.

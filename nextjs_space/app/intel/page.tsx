@@ -45,7 +45,7 @@ import type {
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
-import { buildTerrainHeatMap, rescoreStandSites, getFocusPaintParams } from '@/lib/terrain-heatmap';
+import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, type RasterGrid } from '@/lib/terrain-raster';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
@@ -4208,35 +4208,12 @@ function DeerIntelContent() {
         { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.6, opacityProp: 'circle-stroke-opacity' },
       ], FADE_IN, 45);
       
-      // Override A: ridge spines adjust heatmap opacity; fill grid stays hidden
-      if (map.getLayer('tfp-pressure-fill')) {
-        animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0, 400);
-      }
-      if (map.getLayer('tfp-pressure-heatmap')) {
-        const heatOpacity = visibility.ridgeSpines ? 0.42 : 0.55;
-        animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', heatOpacity, 400);
-      }
+      // Pressure overlays disabled — fill grid and heatmap both at 0
       
       // Terrain Flow visibility — fill grid gated on master pressureHeatmap toggle
       const heatOn = flowVisibility.pressureHeatmap;
 
-      // Override B: master toggle — heatmap fades to 0.55; fill grid stays at 0
-      if (map.getLayer('tfp-pressure-fill')) {
-        animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0, 350);
-      }
-      if (map.getLayer('tfp-pressure-heatmap')) {
-        if (heatOn) {
-          map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', 'visible');
-          animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0.55, 550);
-        } else {
-          animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0, 350);
-          setTimeout(() => {
-            try { if (map.getLayer('tfp-pressure-heatmap')) map.setLayoutProperty('tfp-pressure-heatmap', 'visibility', 'none'); } catch {}
-          }, 380);
-        }
-      }
-
-      // Alt heatmap views: all hidden (view selector removed)
+      // All heatmap layers disabled — pressure heatmap + alt views all at 0
       ['tfp-movement-delta', 'tfp-movement-post', 'tfp-refuge-zones'].forEach(id => {
         if (!map.getLayer(id)) return;
         animatePaint(map, id, 'heatmap-opacity', 0, 350);
@@ -4345,53 +4322,9 @@ function DeerIntelContent() {
     }
   }, [visibility, flowVisibility, showBeddingProbability, isPressureMode, mapReady, selectedStand, visibilityEpoch, huntabilityData]); // v4-fix8: visibilityEpoch forces re-run after reload; huntabilityData re-fires when bedding source populates
 
-  // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
-  // v2.2: Now parcel-aware — passes complexity score for adaptive expression.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-    try {
-      const complexity = parcelComplexityRef.current;
-      const fp = getFocusPaintParams('balanced', complexity);
-      // Override C: fill grid stays hidden; heatmap gets focus-level opacity
-      if (map.getLayer('tfp-pressure-fill')) {
-        map.setPaintProperty('tfp-pressure-fill', 'fill-opacity', 0);
-      }
-
-      // Heatmap: update weight/intensity/radius from focus params, set whisper-quiet opacity
-      if (map.getLayer('tfp-pressure-heatmap')) {
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
-          'interpolate', ['linear'],
-          ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
-          0.00, fp.weightCurve[0],
-          0.22, fp.weightCurve[1],
-          0.40, fp.weightCurve[2],
-          0.58, fp.weightCurve[3],
-          0.80, fp.weightCurve[4],
-          1.00, fp.weightCurve[5],
-        ]);
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
-          'interpolate', ['linear'], ['zoom'],
-          10, 0.50 * fp.intensityMult,
-          15, 0.80 * fp.intensityMult,
-        ]);
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
-          'interpolate', ['linear'], ['zoom'],
-          10, Math.max(4, 7 + fp.radiusOffset),
-          15, Math.max(7, 11 + fp.radiusOffset),
-          18, Math.max(10, 16 + fp.radiusOffset),
-        ]);
-        // broad→0.45, balanced→0.55, focused→0.65 (ridges: −0.12)
-        const heatBase = 0.55;  // locked to balanced
-        const heatOpacity = visibility.ridgeSpines ? heatBase - 0.12 : heatBase;
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', heatOpacity);
-      }
-
-      console.log('[PressureFocus] balanced complexity:', complexity.toFixed(3), fp, 'ridgeSpines:', visibility.ridgeSpines);
-    } catch (err) {
-      console.error('[PressureFocus] Error updating paint (non-fatal):', err);
-    }
-  }, [mapReady, visibility.ridgeSpines, parcelPolygon]);
+  // ========== PRESSURE FOCUS — DISABLED ==========
+  // Pressure heatmap + fill grid permanently dark. Overrides removed.
+  // useEffect kept as no-op placeholder in case we re-enable later.
 
   // ========== SINGLE MAPBOX MAP INSTANCE ==========
   // Track instance count for debugging double-mount issues
@@ -5111,7 +5044,7 @@ function DeerIntelContent() {
                 15, 28,
                 18, 36,
               ],
-              'heatmap-opacity': 0.55,  // visible soft glow under flow corridors
+              'heatmap-opacity': 0,  // DISABLED — layer kept in code but permanently dark
             },
           });
         }
