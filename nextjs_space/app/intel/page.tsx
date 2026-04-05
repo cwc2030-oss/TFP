@@ -4332,7 +4332,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
-  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand, visibilityEpoch]); // v4-fix8: visibilityEpoch forces re-run after reload
+  }, [visibility, flowVisibility, showBeddingProbability, pressureView, isPressureMode, mapReady, selectedStand, visibilityEpoch, huntabilityData]); // v4-fix8: visibilityEpoch forces re-run after reload; huntabilityData re-fires when bedding source populates
 
   // ========== PRESSURE FOCUS — DYNAMIC PAINT UPDATE ==========
   // v2.2: Now parcel-aware — passes complexity score for adaptive expression.
@@ -9250,6 +9250,7 @@ function DeerIntelContent() {
                       <button
                         onClick={() => setShowBeddingProbability(v => !v)}
                         className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
+                          !huntabilityData ? 'opacity-40 cursor-not-allowed' :
                           showBeddingProbability ? 'bg-purple-900/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                         }`}
                       >
