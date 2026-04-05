@@ -2591,6 +2591,7 @@ function DeerIntelContent() {
     'tfp-corridors-context-primary', 'tfp-corridors-context-possible',
     'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
     'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
+    'tfp-pressure-grid',
     'tfp-pressure-heatmap',
     'tfp-movement-delta',
     'tfp-movement-post',
@@ -3977,6 +3978,12 @@ function DeerIntelContent() {
             heatmapSource.setData(rasterResult.heatPoints);
           }
 
+          // Update pressure polygon grid (fill layer)
+          const gridSource = map.getSource('tfp-pressure-grid') as mapboxgl.GeoJSONSource;
+          if (gridSource) {
+            gridSource.setData(rasterResult.pressurePolygons);
+          }
+
           // Update movement delta layer
           const deltaSource = map.getSource('tfp-movement-delta') as mapboxgl.GeoJSONSource;
           if (deltaSource) {
@@ -3998,6 +4005,7 @@ function DeerIntelContent() {
           console.log('[TerrainRaster] Built pressure surface:', {
             grid: `${rasterResult.grid.rows}×${rasterResult.grid.cols}`,
             heatPoints: rasterResult.heatPoints.features.length,
+            pressurePolygons: rasterResult.pressurePolygons.features.length,
             movementDelta: rasterResult.movementDelta.features.length,
             movementPost: rasterResult.movementPost.features.length,
             refugeZones: rasterResult.refugeZones.features.length,
@@ -4203,17 +4211,37 @@ function DeerIntelContent() {
         { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.6, opacityProp: 'circle-stroke-opacity' },
       ], FADE_IN, 45);
       
-      // When ridge spines are ON, reduce heatmap opacity — smooth transition
+      // When ridge spines are ON, reduce pressure overlay opacity — smooth transition
+      if (map.getLayer('tfp-pressure-fill')) {
+        const fillOpacity = visibility.ridgeSpines ? 0.35 : 0.55;
+        animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', fillOpacity, 400);
+      }
       if (map.getLayer('tfp-pressure-heatmap')) {
-        const heatmapOpacity = visibility.ridgeSpines ? 0.44 : 0.58;
-        animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', heatmapOpacity, 400);
+        // Legacy heatmap kept at 0 while fill grid is active
+        animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', 0, 400);
       }
       
       // Terrain Flow visibility (movement likelihood layers)
       // Pressure Simulation v1 — pressureView controls which of the 4 heat layers is active.
       // All four share the master pressureHeatmap toggle; pressureView picks one.
-      // V4 Step 11b: Heatmap crossfade with improved easing and timing
+      // V4 Step 11b: Pressure view crossfade — fill grid replaces heatmap for 'pressure' view
       const heatOn = flowVisibility.pressureHeatmap;
+
+      // Fill grid: show when pressure view is active
+      if (map.getLayer('tfp-pressure-fill')) {
+        const showFill = heatOn && pressureView === 'pressure';
+        if (showFill) {
+          map.setLayoutProperty('tfp-pressure-fill', 'visibility', 'visible');
+          animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0.55, 550);
+        } else {
+          animatePaint(map, 'tfp-pressure-fill', 'fill-opacity', 0, 350);
+          setTimeout(() => {
+            try { if (map.getLayer('tfp-pressure-fill')) map.setLayoutProperty('tfp-pressure-fill', 'visibility', 'none'); } catch {}
+          }, 380);
+        }
+      }
+
+      // Legacy heatmap layers crossfade (heatmap disabled at opacity 0, others still active)
       const heatViews = [
         { id: 'tfp-pressure-heatmap', view: 'pressure' },
         { id: 'tfp-movement-delta', view: 'damage' },
@@ -4223,11 +4251,13 @@ function DeerIntelContent() {
       heatViews.forEach(({ id, view }) => {
         if (!map.getLayer(id)) return;
         const shouldShow = heatOn && pressureView === view;
+        // Legacy heatmap stays at 0 — fill grid is primary
+        const targetOpacity = id === 'tfp-pressure-heatmap' ? 0 : 0.58;
         if (shouldShow) {
           map.setLayoutProperty(id, 'visibility', 'visible');
-          animatePaint(map, id, 'heatmap-opacity', 0.58, 550); // Slower reveal — dialed back so flow corridors breathe
+          animatePaint(map, id, 'heatmap-opacity', targetOpacity, 550);
         } else {
-          animatePaint(map, id, 'heatmap-opacity', 0, 350); // Slightly faster exit
+          animatePaint(map, id, 'heatmap-opacity', 0, 350);
           setTimeout(() => {
             try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
           }, 380);
@@ -4342,9 +4372,17 @@ function DeerIntelContent() {
     try {
       const complexity = parcelComplexityRef.current;
       const fp = getFocusPaintParams(pressureFocus, complexity);
+      // Pressure fill grid: adjust opacity by focus mode
+      if (map.getLayer('tfp-pressure-fill')) {
+        // broad → 0.45, balanced → 0.55, focused → 0.65 (ridges on: −0.10)
+        const fillBaseMap: Record<string, number> = { broad: 0.45, balanced: 0.55, focused: 0.65 };
+        const fillBase = fillBaseMap[pressureFocus] ?? 0.55;
+        const fillOpacity = visibility.ridgeSpines ? fillBase - 0.10 : fillBase;
+        map.setPaintProperty('tfp-pressure-fill', 'fill-opacity', fillOpacity);
+      }
+
+      // Legacy heatmap kept at 0 while fill grid is active
       if (map.getLayer('tfp-pressure-heatmap')) {
-        // v2.2: Weight dead zone lowered from 0.30 → 0.22 — lets more terrain signal through
-        // while keeping the dead zone high enough to suppress random noise
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-weight', [
           'interpolate', ['linear'],
           ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
@@ -4355,22 +4393,18 @@ function DeerIntelContent() {
           0.80, fp.weightCurve[4],
           1.00, fp.weightCurve[5],
         ]);
-        // v2.2: Intensity: slight base lift from v2.0 (was 0.55/1.0)
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-intensity', [
           'interpolate', ['linear'], ['zoom'],
           10, 0.60 * fp.intensityMult,
           15, 1.05 * fp.intensityMult,
         ]);
-        // v2.2: Radius: +1px base lift from v2.0 — still tight, not blobby
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-radius', [
           'interpolate', ['linear'], ['zoom'],
           10, Math.max(4, 7 + fp.radiusOffset),
           15, Math.max(7, 11 + fp.radiusOffset),
           18, Math.max(10, 16 + fp.radiusOffset),
         ]);
-        // Opacity: reduce when ridge spines are visible so skeleton shows through
-        const baseOpacity = visibility.ridgeSpines ? 0.44 : fp.opacity;
-        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', baseOpacity);
+        map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', 0);
       }
 
       console.log('[PressureFocus]', pressureFocus, 'complexity:', complexity.toFixed(3), fp, 'ridgeSpines:', visibility.ridgeSpines);
@@ -5031,11 +5065,31 @@ function DeerIntelContent() {
           });
         }
         
-        // ========== TERRAIN PRESSURE HEAT MAP (PRIMARY VISUAL) ==========
-        // This is the MAIN visual story - shows hunting potential as a gradient
-        // Flow lines are demoted to supporting evidence only
-        
-        // Heat map from opportunity + convergence zones
+        // ========== PRESSURE POLYGON FILL GRID (NEW PRIMARY VISUAL) ==========
+        // Crisp per-cell rectangles colored by pressure score — no kernel bloom.
+        if (!map.getSource('tfp-pressure-grid')) {
+          map.addSource('tfp-pressure-grid', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-pressure-fill',
+            type: 'fill',
+            source: 'tfp-pressure-grid',
+            paint: {
+              'fill-color': [
+                'interpolate', ['linear'], ['get', 'score'],
+                0.0,  '#1a1a2e',   // near-zero → dark/invisible
+                0.35, '#f59e0b',   // low pressure → amber
+                0.55, '#f97316',   // medium → orange
+                0.75, '#ef4444',   // high → red
+                1.0,  '#7f1d1d'    // peak → deep red
+              ],
+              'fill-opacity': 0.55,
+              'fill-antialias': false,
+            },
+          });
+        }
+
+        // ========== TERRAIN PRESSURE HEAT MAP (DISABLED — kept for comparison) ==========
+        // Legacy point-based heatmap — hidden (opacity 0) while fill grid is active.
         if (!map.getSource('tfp-pressure-heatmap')) {
           map.addSource('tfp-pressure-heatmap', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -5043,8 +5097,6 @@ function DeerIntelContent() {
             type: 'heatmap',
             source: 'tfp-pressure-heatmap',
             paint: {
-              // v2.2: Modest lift from v2.0 — readable secondary layer, not blobby
-              // Dead zone lowered from 0.30→0.22, mid-range ramp slightly eased
               'heatmap-weight': [
                 'interpolate', ['linear'],
                 ['coalesce', ['get', 'score'], ['get', 'intensity'], 0.5],
@@ -5060,20 +5112,18 @@ function DeerIntelContent() {
                 10, 0.7,
                 15, 1.0,
               ],
-              // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
                 'interpolate', ['linear'], ['heatmap-density'],
                 0.00, 'rgba(0,0,0,0)',
-                0.10, 'rgba(254,240,138,0.18)',  // yellow-200
-                0.20, 'rgba(250,204,21,0.30)',   // yellow-400
-                0.35, 'rgba(245,158,11,0.44)',   // amber-500
-                0.50, 'rgba(249,115,22,0.56)',   // orange-500
-                0.65, 'rgba(239,68,68,0.66)',    // red-500
-                0.80, 'rgba(220,38,38,0.76)',    // red-600
-                0.92, 'rgba(185,28,28,0.82)',    // red-700
-                1.00, 'rgba(153,27,27,0.88)',    // red-800 (hot)
+                0.10, 'rgba(254,240,138,0.18)',
+                0.20, 'rgba(250,204,21,0.30)',
+                0.35, 'rgba(245,158,11,0.44)',
+                0.50, 'rgba(249,115,22,0.56)',
+                0.65, 'rgba(239,68,68,0.66)',
+                0.80, 'rgba(220,38,38,0.76)',
+                0.92, 'rgba(185,28,28,0.82)',
+                1.00, 'rgba(153,27,27,0.88)',
               ],
-              // v2.2: Tighter radii so corridors breathe above heatmap
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
                 10, 18,
@@ -5081,7 +5131,7 @@ function DeerIntelContent() {
                 15, 38,
                 18, 50,
               ],
-              'heatmap-opacity': 0.82,
+              'heatmap-opacity': 0,  // DISABLED — fill grid is now the primary visual
             },
           });
         }
@@ -6213,7 +6263,9 @@ function DeerIntelContent() {
           'tfp-corridors-primary',
           'tfp-corridors-possible',
           'tfp-corridors-exploratory',
-          // Pressure heatmap
+          // Pressure polygon fill grid (new primary visual)
+          'tfp-pressure-fill',
+          // Pressure heatmap (disabled — kept for comparison)
           'tfp-pressure-heatmap',
           // Movement delta (damage map)
           'tfp-movement-delta',

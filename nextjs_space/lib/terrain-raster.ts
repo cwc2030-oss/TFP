@@ -805,6 +805,7 @@ function applyGaussianSmoothing(grid: RasterGrid): void {
 export function buildTerrainRaster(input: RasterInput): {
   grid: RasterGrid;
   heatPoints: GeoJSON.FeatureCollection;
+  pressurePolygons: GeoJSON.FeatureCollection;
   movementDelta: GeoJSON.FeatureCollection;
   movementPost: GeoJSON.FeatureCollection;
   refugeZones: GeoJSON.FeatureCollection;
@@ -999,6 +1000,41 @@ export function buildTerrainRaster(input: RasterInput): {
     features = features.slice(0, 1500);
   }
 
+  // ============ PRESSURE POLYGON GRID ============
+  // Convert scored cells into small rectangular Polygon features for a Mapbox fill layer.
+  // This gives crisp, per-cell coloring without kernel-density bloom.
+  const halfW = (grid.bounds.maxLng - grid.bounds.minLng) / grid.cols / 2;
+  const halfH = (grid.bounds.maxLat - grid.bounds.minLat) / grid.rows / 2;
+  const polyFeatures: GeoJSON.Feature[] = [];
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const cell = grid.cells[r][c];
+      if (cell.pressure < HARD_PRESSURE_FLOOR) continue;
+      // Clip to parcel boundary
+      if (parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
+      polyFeatures.push({
+        type: 'Feature',
+        properties: {
+          score: cell.pressure,
+          terrain: cell.terrain,
+          bench: cell.bench,
+          saddle: cell.saddle,
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [cell.lng - halfW, cell.lat - halfH],
+            [cell.lng + halfW, cell.lat - halfH],
+            [cell.lng + halfW, cell.lat + halfH],
+            [cell.lng - halfW, cell.lat + halfH],
+            [cell.lng - halfW, cell.lat - halfH],
+          ]],
+        },
+      });
+    }
+  }
+  console.log(`[TerrainRaster] Pressure polygon grid: ${polyFeatures.length} cells`);
+
   // Extract Prime Stand Sites using Kill Window model
   // (offset from hotspot centers toward intercept edges)
   const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing);
@@ -1131,6 +1167,7 @@ export function buildTerrainRaster(input: RasterInput): {
   return {
     grid,
     heatPoints: { type: 'FeatureCollection', features },
+    pressurePolygons: { type: 'FeatureCollection', features: polyFeatures },
     movementDelta: { type: 'FeatureCollection', features: deltaFeatures },
     movementPost: { type: 'FeatureCollection', features: postFeatures },
     refugeZones: { type: 'FeatureCollection', features: refugeFeatures },
