@@ -946,7 +946,7 @@ export function buildTerrainRaster(input: RasterInput): {
   // terrain signals through. Combined with the Mapbox-side weight dead zone (0.22),
   // this gives Deer Flow enough expression to serve as a "why this works" layer
   // without returning to the v1.x blob visuals.
-  const HARD_PRESSURE_FLOOR = 0.62;
+  const HARD_PRESSURE_FLOOR = 0.45;
   const parcelRing = input.parcelCoords;
   let features: GeoJSON.Feature[] = [];
   for (let r = 0; r < grid.rows; r++) {
@@ -996,7 +996,7 @@ export function buildTerrainRaster(input: RasterInput): {
       const bc = b.geometry?.type === 'Point' ? (b.geometry as GeoJSON.Point).coordinates : [0, 0];
       return ac[1] - bc[1] || ac[0] - bc[0];
     });
-    features = features.slice(0, 500);
+    features = features.slice(0, 1500);
   }
 
   // Extract Prime Stand Sites using Kill Window model
@@ -1097,7 +1097,7 @@ export function buildTerrainRaster(input: RasterInput): {
         debugSamples++;
       }
 
-      if (post < 0.06) continue; // v1.5: lowered from 0.15 — more movement lanes visible
+      if (post < 0.25) continue; // v1.5: lowered from 0.15 — more movement lanes visible
       // Clip to parcel boundary
       if (parcelRing && parcelRing.length >= 3 && !pointInPolygon(cell.lng, cell.lat, parcelRing)) continue;
       postFeatures.push({
