@@ -302,6 +302,37 @@ function filterBeddingNearBuildings(
   }
 }
 
+/**
+ * Extract building centroid coordinates from Mapbox composite tiles.
+ * Used to feed structure proximity filter into the raster engine so
+ * stand candidates near barns / houses / sheds get rejected.
+ */
+function extractBuildingCentroids(map: mapboxgl.Map): [number, number][] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buildings = (map as any).querySourceFeatures('composite', { sourceLayer: 'building' }) as mapboxgl.MapboxGeoJSONFeature[];
+    if (!buildings || !buildings.length) return [];
+
+    const pts: [number, number][] = [];
+    buildings.forEach((b: mapboxgl.MapboxGeoJSONFeature) => {
+      if (!b.geometry) return;
+      const coords: number[][] = [];
+      if (b.geometry.type === 'Polygon') {
+        coords.push(...(b.geometry as GeoJSON.Polygon).coordinates[0]);
+      } else if (b.geometry.type === 'MultiPolygon') {
+        (b.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+      }
+      if (!coords.length) return;
+      const cx = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+      const cy = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+      pts.push([cx, cy]);
+    });
+    return pts;
+  } catch {
+    return [];
+  }
+}
+
 // SEASONS & WIND_DIRECTIONS now imported from components/intel/*
 
 // ========== V2 STYLING RULES (Tiered Corridors + Funnels) ==========
@@ -3958,12 +3989,19 @@ function DeerIntelContent() {
 
       // Try raster-based approach if we have parcel coords
       if (parcelCoordsForGrid && parcelCoordsForGrid.length >= 3) {
+        // Extract building centroids for structure proximity filter
+        const structurePts = extractBuildingCentroids(map);
+        if (structurePts.length) {
+          console.log(`[TerrainRaster] Passing ${structurePts.length} structure point(s) for stand filtering`);
+        }
+
         const rasterResult = buildTerrainRaster({
           parcelCoords: parcelCoordsForGrid,
           beddingPolygons: layers?.beddingPolygons || undefined,
           ridgeSpineData: ridgeSpineData || undefined,
           season,
           focusMode: 'balanced',
+          structurePoints: structurePts.length ? structurePts : undefined,
         });
 
         if (rasterResult) {

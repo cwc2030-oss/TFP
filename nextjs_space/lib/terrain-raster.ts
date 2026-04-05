@@ -258,6 +258,8 @@ export interface RasterInput {
   season: SeasonProfile;
   /** Focus mode */
   focusMode?: PressureFocus;
+  /** Structure centroids [lng, lat] — stands within buffer are filtered out */
+  structurePoints?: [number, number][];
 }
 
 export interface RasterCell {
@@ -985,7 +987,7 @@ export function buildTerrainRaster(input: RasterInput): {
 
   // Extract Prime Stand Sites using Kill Window model
   // (offset from hotspot centers toward intercept edges)
-  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing);
+  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing, input.structurePoints);
 
   // ============ STAND RESILIENCE SCORING ============
   // For each stand, sample raster values within 60m radius and compute:
@@ -1449,7 +1451,8 @@ function extractPrimeStandSites(
     ridges_secondary?: GeoJSON.FeatureCollection;
   } | null,
   huntabilityScore?: number, // Optional: pass score to apply weak parcel limits
-  parcelRing?: number[][]    // Optional: clip stand sites to parcel boundary
+  parcelRing?: number[][],   // Optional: clip stand sites to parcel boundary
+  structurePoints?: [number, number][] // Optional: [lng,lat] centroids — reject candidates within buffer
 ): PrimeStandSite[] {
   // Step 0: Determine effective max count based on huntability score
   let effectiveMaxCount = maxCount;
@@ -1528,6 +1531,25 @@ function extractPrimeStandSites(
             hotspot.cell.lng.toFixed(5), hotspot.cell.lat.toFixed(5));
           continue;
         }
+      }
+    }
+
+    // === STRUCTURE PROXIMITY FILTER ===
+    // Skip candidates within 150m of any known structure (barn, house, shed)
+    const STRUCTURE_BUFFER_M = 150;
+    if (structurePoints && structurePoints.length > 0) {
+      let nearStructure = false;
+      for (const sp of structurePoints) {
+        const d = distanceMeters([hotspot.cell.lng, hotspot.cell.lat], sp);
+        if (d < STRUCTURE_BUFFER_M) {
+          nearStructure = true;
+          break;
+        }
+      }
+      if (nearStructure) {
+        console.log('[PrimeStandSites] Rejected near-structure candidate at',
+          hotspot.cell.lng.toFixed(5), hotspot.cell.lat.toFixed(5));
+        continue;
       }
     }
 
