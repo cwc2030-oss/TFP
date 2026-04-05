@@ -9543,84 +9543,6 @@ function DeerIntelContent() {
               </div>
 
 
-              {/* ========== HUNTING POTENTIAL CARD (PRIMARY ANSWER) ========== */}
-              {/* This is THE answer to "Does this parcel have hunting potential?" */}
-              {!exportMode && parcelPolygon && (
-                <div className="p-3 border-b border-white/[0.06]">
-                  <HuntingPotentialCard
-                    flowData={terrainFlowData ? (() => {
-                      // Build a TerrainFlowResponse-compatible object
-                      const defaultMetadata = {
-                        processing_time_seconds: 0,
-                        mode: 'terrain_driven' as const,
-                        dem_source: 'unknown',
-                        resolution_m: 30,
-                        buffer_m: 1000,
-                        weights: {
-                          bench_likelihood: 0.28,
-                          saddle_proximity: 0.24,
-                          spine_proximity: 0.20,
-                          terrain_convergence: 0.18,
-                          moderate_slope: 0.10,
-                        },
-                        thresholds: {
-                          primary_min: 0.55,
-                          secondary_min: 0.35,
-                          min_length_m_primary: 150,
-                          min_length_m_secondary: 80,
-                          convergence_threshold: 0.5,
-                          opportunity_threshold: 0.6,
-                        },
-                        stats: {
-                          flow_count_primary: terrainFlowData.flow_primary?.features?.length || 0,
-                          flow_count_secondary: terrainFlowData.flow_secondary?.features?.length || 0,
-                          convergence_count: terrainFlowData.convergence_zones?.features?.length || 0,
-                          opportunity_count: 0, // merged into convergence
-                          total_flow_length_m: 0,
-                          coverage_pct: 0,
-                        },
-                      };
-                      return {
-                        success: true,
-                        bbox: [0, 0, 0, 0] as [number, number, number, number],
-                        flow_primary: terrainFlowData.flow_primary,
-                        flow_secondary: terrainFlowData.flow_secondary,
-                        convergence_zones: terrainFlowData.convergence_zones,
-                        opportunity_zones: terrainFlowData.opportunity_zones,
-                        metadata: terrainFlowData.metadata ? { ...defaultMetadata, ...terrainFlowData.metadata } : defaultMetadata,
-                      } as TerrainFlowResponse;
-                    })() : null}
-                    acreage={(() => {
-                      // Extract acreage from URL params or calculate rough estimate
-                      const searchParams = new URLSearchParams(window.location.search);
-                      const acreageParam = searchParams.get('acreage');
-                      if (acreageParam) return parseFloat(acreageParam);
-                      // Rough estimate from parcel bbox
-                      if (parcelPolygon) {
-                        try {
-                          const coords = parcelPolygon.geometry.type === 'Polygon' 
-                            ? parcelPolygon.geometry.coordinates[0]
-                            : parcelPolygon.geometry.coordinates[0][0];
-                          if (coords && coords.length >= 4) {
-                            const lngs = coords.map(c => c[0]);
-                            const lats = coords.map(c => c[1]);
-                            const widthDeg = Math.max(...lngs) - Math.min(...lngs);
-                            const heightDeg = Math.max(...lats) - Math.min(...lats);
-                            const centerLat = (Math.max(...lats) + Math.min(...lats)) / 2;
-                            const widthM = widthDeg * 111320 * Math.cos(centerLat * Math.PI / 180);
-                            const heightM = heightDeg * 111320;
-                            return (widthM * heightM * 0.8) / 4046.86; // Approx acres
-                          }
-                        } catch {}
-                      }
-                      return undefined;
-                    })()}
-                    isLoading={terrainFlowLoading}
-                    onHighlightOpportunity={() => {}}
-                  />
-                </div>
-              )}
-
               {/* ========== TERRAIN STORY PANEL (Secondary detail) ========== */}
               {(terrainStory || terrainFlowLoading) && !exportMode && (
                 <div className="p-3 border-b border-white/[0.06]">
@@ -9634,32 +9556,7 @@ function DeerIntelContent() {
                 </div>
               )}
 
-              {/* ========== TERRAIN RATING PANEL (always visible after analysis) ========== */}
-              {!exportMode && qaBrokerScore && !terrainFlowLoading && (
-                <div className="p-3 border-b border-white/[0.06]">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-medium text-white flex items-center gap-2 text-sm">
-                      <Target className="h-4 w-4 text-amber-400" />
-                      Terrain Rating
-                    </h3>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                      qaBrokerScore.brokerClass === 'broker_ready' ? 'bg-emerald-900/60 text-emerald-400' :
-                      qaBrokerScore.brokerClass === 'potential_demo' ? 'bg-amber-900/60 text-amber-400' :
-                      'bg-slate-900/60 text-slate-400'
-                    }`}>
-                      {qaBrokerScore.brokerScore}/100
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    {qaBrokerScore.components && Object.entries(qaBrokerScore.components).map(([key, val]) => (
-                      <div key={key} className="flex items-center justify-between text-xs">
-                        <span className="text-stone-400 capitalize">{key.replace(/_/g, ' ')}</span>
-                        <span className="text-white font-medium">{typeof val === 'number' ? val.toFixed(1) : String(val)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Terrain Rating panel removed — data (qaBrokerScore) still computed for export/tooltips */}
 
               {/* ========== TERRAIN WORK MODE NOTICE ========== */}
               {TERRAIN_WORK_MODE && <TerrainWorkModeNotice />}
