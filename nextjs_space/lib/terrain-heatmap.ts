@@ -325,7 +325,7 @@ export function getFocusPaintParams(focus: PressureFocus, complexity: number = 0
         weightCurve: [0.0, 0.0, 0.22 + 0.04 * cBoost, 0.52 + 0.05 * cBoost, 0.84, 1.0],
         intensityMult: 0.90 + 0.08 * cBoost,
         radiusOffset: 3 + Math.round(2 * cBoost),
-        opacity: 0.68 + 0.06 * cBoost,
+        opacity: 0.55 + 0.06 * cBoost,
         oppZoneMaxCount: 3,
       };
     case 'focused':
@@ -333,7 +333,7 @@ export function getFocusPaintParams(focus: PressureFocus, complexity: number = 0
         weightCurve: [0.0, 0.0, 0.08 + 0.03 * cBoost, 0.42 + 0.04 * cBoost, 0.90, 1.0],
         intensityMult: 1.22 + 0.06 * cBoost,
         radiusOffset: -2 + Math.round(1 * cBoost),
-        opacity: 0.82 + 0.04 * cBoost,
+        opacity: 0.68 + 0.04 * cBoost,
         oppZoneMaxCount: 1,
       };
     default: // balanced
@@ -341,7 +341,7 @@ export function getFocusPaintParams(focus: PressureFocus, complexity: number = 0
         weightCurve: [0.0, 0.0, 0.18 + 0.04 * cBoost, 0.58 + 0.05 * cBoost, 0.90, 1.0],
         intensityMult: 1.04 + 0.08 * cBoost,
         radiusOffset: 1 + Math.round(2 * cBoost),
-        opacity: 0.76 + 0.06 * cBoost,
+        opacity: 0.62 + 0.06 * cBoost,
         oppZoneMaxCount: 3,
       };
   }

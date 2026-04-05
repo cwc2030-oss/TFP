@@ -4205,7 +4205,7 @@ function DeerIntelContent() {
       
       // When ridge spines are ON, reduce heatmap opacity — smooth transition
       if (map.getLayer('tfp-pressure-heatmap')) {
-        const heatmapOpacity = visibility.ridgeSpines ? 0.55 : 0.75;
+        const heatmapOpacity = visibility.ridgeSpines ? 0.44 : 0.58;
         animatePaint(map, 'tfp-pressure-heatmap', 'heatmap-opacity', heatmapOpacity, 400);
       }
       
@@ -4225,7 +4225,7 @@ function DeerIntelContent() {
         const shouldShow = heatOn && pressureView === view;
         if (shouldShow) {
           map.setLayoutProperty(id, 'visibility', 'visible');
-          animatePaint(map, id, 'heatmap-opacity', 0.75, 550); // Slower reveal
+          animatePaint(map, id, 'heatmap-opacity', 0.58, 550); // Slower reveal — dialed back so flow corridors breathe
         } else {
           animatePaint(map, id, 'heatmap-opacity', 0, 350); // Slightly faster exit
           setTimeout(() => {
@@ -4369,7 +4369,7 @@ function DeerIntelContent() {
           18, Math.max(10, 16 + fp.radiusOffset),
         ]);
         // Opacity: reduce when ridge spines are visible so skeleton shows through
-        const baseOpacity = visibility.ridgeSpines ? 0.54 : fp.opacity;
+        const baseOpacity = visibility.ridgeSpines ? 0.44 : fp.opacity;
         map.setPaintProperty('tfp-pressure-heatmap', 'heatmap-opacity', baseOpacity);
       }
 
@@ -5057,8 +5057,8 @@ function DeerIntelContent() {
               ],
               'heatmap-intensity': [
                 'interpolate', ['linear'], ['zoom'],
-                10, 0.8,
-                15, 1.4,
+                10, 0.7,
+                15, 1.0,
               ],
               // Color gradient: yellow → orange → red (9-stop for smooth blending)
               'heatmap-color': [
@@ -5073,13 +5073,13 @@ function DeerIntelContent() {
                 0.92, 'rgba(185,28,28,0.82)',    // red-700
                 1.00, 'rgba(153,27,27,0.88)',    // red-800 (hot)
               ],
-              // v2.2: +1px from v2.0 — tight terrain lanes, not blobs
+              // v2.2: Tighter radii so corridors breathe above heatmap
               'heatmap-radius': [
                 'interpolate', ['linear'], ['zoom'],
                 10, 18,
-                13, 35,
-                15, 55,
-                18, 80,
+                13, 28,
+                15, 38,
+                18, 50,
               ],
               'heatmap-opacity': 0.82,
             },
