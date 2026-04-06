@@ -89,6 +89,7 @@ export default function InteractiveMap({
   
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   const [parcelData, setParcelData] = useState<ParcelData | null>(null);
+  const [terrainLinkCopied, setTerrainLinkCopied] = useState(false);
   const [neighboringParcels, setNeighboringParcels] = useState<ParcelData[]>([]);
   // All layers included in reports - Basic + Premium
   const selectedLayers = [
@@ -1322,6 +1323,27 @@ export default function InteractiveMap({
                 </div>
               </div>
             </div>
+
+            {/* Mailing Address */}
+            {parcelData.mailingAddress && parcelData.mailingAddress !== 'Not Available' && (
+              <div className="bg-stone-50 rounded p-2 text-xs border-t border-stone-100">
+                <p className="text-stone-500 uppercase text-[10px] tracking-wide mb-0.5">Mailing Address</p>
+                <p className="text-stone-700 text-[11px]">{parcelData.mailingAddress}</p>
+              </div>
+            )}
+
+            {/* Copy Terrain Link */}
+            <button
+              onClick={() => {
+                const link = `https://terrafirma.partners/intel?lat=${parcelData.lat}&lng=${parcelData.lng}&address=${encodeURIComponent(parcelData.siteAddress || '')}`;
+                navigator.clipboard.writeText(link);
+                setTerrainLinkCopied(true);
+                setTimeout(() => setTerrainLinkCopied(false), 2000);
+              }}
+              className="w-full mt-1 py-2.5 bg-[#1a3a2a] hover:bg-[#224a35] text-[#c9a84c] border border-[#2d6a4f] rounded-lg text-xs font-bold transition-colors"
+            >
+              {terrainLinkCopied ? '✓ Link Copied!' : `📋 Copy Terrain Link for ${parcelData.owner?.split(' ')[0] ?? 'Owner'}`}
+            </button>
 
             {/* Neighboring parcels count */}
             {neighboringParcels.length > 0 && (
