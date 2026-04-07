@@ -320,7 +320,8 @@ export default function InteractiveMap({
 
     if (!isSelected) {
       polygon.addListener("click", () => {
-        // When clicking a neighboring parcel, make it selected
+        // When clicking a neighboring parcel, clear old polygons then make it selected
+        clearParcelPolygons();
         setParcelData(parcel);
         setSelectedParcel({
           address: parcel.siteAddress,
@@ -539,6 +540,7 @@ export default function InteractiveMap({
         if (data.parcels && data.parcels.length > 0) {
           const mainParcel = data.parcels[0];
           setParcelData(mainParcel);
+          setShowFullPanel(true);
           setSearchQuery(mainParcel.siteAddress || "");
           setHasSearched(true);
           
@@ -766,6 +768,7 @@ export default function InteractiveMap({
       parcelId: `PARCEL-${result.placeId.slice(0, 8).toUpperCase()}`,
     };
     setSelectedParcel(parcel);
+    setShowFullPanel(true);
     onParcelSelect?.(parcel);
 
     if (googleMapRef.current) {
