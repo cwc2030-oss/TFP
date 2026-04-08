@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 
 // Version 2.1 - Regrid Pro API with caching
@@ -121,6 +122,23 @@ export async function GET(request: NextRequest) {
     if (lat && lng) {
       const cached = await getCachedParcel(parseFloat(lat), parseFloat(lng));
       if (cached) {
+        // Validate cached geometry — if no polygon coordinates, evict and re-fetch from Regrid
+        const hasValidGeometry = cached.coordinates && 
+          Array.isArray(cached.coordinates) && 
+          cached.coordinates.length > 0;
+        if (!hasValidGeometry) {
+          console.log(`[CACHE EVICT] No geometry for parcel at ${lat}, ${lng} — forcing fresh Regrid fetch`);
+          const roundedLat = Math.round(parseFloat(lat) * 100000) / 100000;
+          const roundedLng = Math.round(parseFloat(lng) * 100000) / 100000;
+          try {
+            await prisma.parcelCache.delete({
+              where: { lat_lng: { lat: roundedLat, lng: roundedLng } },
+            });
+          } catch (e) {
+            console.error('[CACHE EVICT] Delete failed (non-fatal):', e);
+          }
+          // Fall through to fresh Regrid fetch below
+        } else {
         // Return cached data in the expected format
         const parcel: ParcelResponse = {
           parcelId: cached.parcelId,
@@ -168,6 +186,7 @@ export async function GET(request: NextRequest) {
           unifiedSchoolDistrict: null,
         };
         return NextResponse.json({ parcels: [parcel], cached: true });
+        }
       }
     }
 
