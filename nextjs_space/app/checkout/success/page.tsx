@@ -174,7 +174,7 @@ function SuccessContent() {
                 ) : (
                   <>
                     <Download className="w-5 h-5 mr-2" />
-                    {orderDetails?.productType === 'hunt_report' ? 'Download Hunt Package (2 Reports)' : 'Download PDF Report'}
+                    Download Land Intelligence Report
                   </>
                 )}
               </Button>
@@ -199,6 +199,9 @@ function SuccessContent() {
                   </a>
                   <p style={{fontSize: 11, color: '#666', marginTop: 8}}>
                     Your parcel is saved — access your Terrain Analyzer anytime
+                  </p>
+                  <p style={{fontSize: 13, color: '#666', textAlign: 'center', marginTop: 8}}>
+                    Open your analyzer, run the terrain analysis, then click &quot;Download Parcel Hunt File&quot; inside the analyzer to get your Hunt Intelligence Report.
                   </p>
                 </div>
               )}
