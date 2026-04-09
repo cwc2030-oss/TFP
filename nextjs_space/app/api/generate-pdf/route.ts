@@ -494,8 +494,12 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(terrainPayload),
       });
       const html = await huntRes.text();
-      return new NextResponse(html, {
-        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      const base64 = Buffer.from(html).toString('base64');
+
+      return NextResponse.json({
+        pdf: base64,
+        filename: `TFP-Hunt-Report-${order.parcelAddress?.split(',')[0]?.replace(/\s+/g, '-') || 'Property'}.html`,
+        contentType: 'text/html',
       });
     }
 

@@ -86,13 +86,15 @@ function SuccessContent() {
       }
 
       if (data.pdf) {
+        // Handle both PDF and HTML content types (hunt reports are HTML)
+        const contentType = data.contentType || 'application/pdf';
         const byteCharacters = atob(data.pdf);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
           byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
         const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: "application/pdf" });
+        const blob = new Blob([byteArray], { type: contentType });
 
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
