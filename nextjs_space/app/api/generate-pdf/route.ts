@@ -8,6 +8,7 @@ import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapab
 import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 export const revalidate = 0;
 
 interface ParcelData {
@@ -488,21 +489,23 @@ export async function POST(request: NextRequest) {
             seasonScores: null,
           };
 
-      // Fetch Hunt Intelligence HTML
-      const huntRes = await fetch(new URL('/api/parcel-hunt-file', request.url), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(terrainPayload),
-      });
-      const huntHtml = await huntRes.text();
-
-      // Fetch Land Intelligence PDF (broker-quick-look generates the 2-page land report)
-      const landRes = await fetch(new URL('/api/broker-quick-look', request.url), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: order.id }),
-      });
-      const landPdfBuffer = await landRes.arrayBuffer();
+      // Fetch Hunt HTML + Land PDF in parallel to cut wait time in half
+      const [huntRes, landRes] = await Promise.all([
+        fetch(new URL('/api/parcel-hunt-file', request.url), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(terrainPayload),
+        }),
+        fetch(new URL('/api/broker-quick-look', request.url), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: order.id }),
+        }),
+      ]);
+      const [huntHtml, landPdfBuffer] = await Promise.all([
+        huntRes.text(),
+        landRes.arrayBuffer(),
+      ]);
       const landPdfBase64 = Buffer.from(landPdfBuffer).toString('base64');
 
       // Combine both into a single HTML package with embedded PDF link
