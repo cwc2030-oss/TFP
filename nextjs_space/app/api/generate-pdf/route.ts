@@ -491,12 +491,12 @@ export async function POST(request: NextRequest) {
 
       // Fetch Hunt HTML + Land PDF in parallel to cut wait time in half
       const [huntRes, landRes] = await Promise.all([
-        fetch(new URL('/api/parcel-hunt-file', request.url), {
+        fetch(new URL('/api/parcel-hunt-file', 'http://localhost:3000'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(terrainPayload),
         }),
-        fetch(new URL('/api/broker-quick-look', request.url), {
+        fetch(new URL('/api/broker-quick-look', 'http://localhost:3000'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ orderId: order.id }),
@@ -589,7 +589,7 @@ ${huntHtml.replace(/<!DOCTYPE html>/i, '').replace(/<html[^>]*>/i, '').replace(/
     if (order.productType === 'land_report') {
       console.log('[generate-pdf] land_report branch hit, orderId:', order.id);
       // Forward to existing land report generator
-      const landRes = await fetch(new URL('/api/broker-quick-look', request.url), {
+      const landRes = await fetch(new URL('/api/broker-quick-look', 'http://localhost:3000'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order.id }),
