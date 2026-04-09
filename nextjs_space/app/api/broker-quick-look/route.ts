@@ -212,6 +212,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { orderId } = body;
+    console.log('[broker-quick-look] called, orderId:', orderId);
 
     if (!orderId) {
       return NextResponse.json({ error: "Order ID required" }, { status: 400 });

@@ -587,6 +587,7 @@ ${huntHtml.replace(/<!DOCTYPE html>/i, '').replace(/<html[^>]*>/i, '').replace(/
     }
 
     if (order.productType === 'land_report') {
+      console.log('[generate-pdf] land_report branch hit, orderId:', order.id);
       // Forward to existing land report generator
       const landRes = await fetch(new URL('/api/broker-quick-look', request.url), {
         method: 'POST',
