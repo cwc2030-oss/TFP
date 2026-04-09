@@ -6,6 +6,7 @@ import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
 import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
+import { generateLandPdfDirect, generateHuntHtmlDirect } from "@/lib/report-generators";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -489,24 +490,12 @@ export async function POST(request: NextRequest) {
             seasonScores: null,
           };
 
-      // Fetch Hunt HTML + Land PDF in parallel to cut wait time in half
-      const [huntRes, landRes] = await Promise.all([
-        fetch(new URL('/api/parcel-hunt-file', 'http://localhost:3000'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(terrainPayload),
-        }),
-        fetch(new URL('/api/broker-quick-look', 'http://localhost:3000'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: order.id }),
-        }),
+      // Generate Hunt HTML + Land PDF in parallel (direct function calls — no HTTP)
+      const [huntHtml, landPdfResult] = await Promise.all([
+        generateHuntHtmlDirect(terrainPayload),
+        generateLandPdfDirect(order.id),
       ]);
-      const [huntHtml, landPdfBuffer] = await Promise.all([
-        huntRes.text(),
-        landRes.arrayBuffer(),
-      ]);
-      const landPdfBase64 = Buffer.from(landPdfBuffer).toString('base64');
+      const landPdfBase64 = landPdfResult.pdf;
 
       // Combine both into a single HTML package with embedded PDF link
       const propertyName = order.parcelAddress?.split(',')[0]?.replace(/\s+/g, '-') || 'Property';
@@ -588,14 +577,11 @@ ${huntHtml.replace(/<!DOCTYPE html>/i, '').replace(/<html[^>]*>/i, '').replace(/
 
     if (order.productType === 'land_report') {
       console.log('[generate-pdf] land_report branch hit, orderId:', order.id);
-      // Forward to existing land report generator
-      const landRes = await fetch(new URL('/api/broker-quick-look', 'http://localhost:3000'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: order.id }),
-      });
-      return new NextResponse(await landRes.arrayBuffer(), {
-        headers: { 'Content-Type': 'application/pdf' },
+      // Direct function call — no HTTP round-trip
+      const result = await generateLandPdfDirect(order.id);
+      return NextResponse.json({
+        pdf: result.pdf,
+        filename: result.filename,
       });
     }
 

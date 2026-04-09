@@ -223,11 +223,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    // Verify this is a quick_look order
-    if (order.productType !== "quick_look") {
-      return NextResponse.json({ error: "This is not a Quick Look order" }, { status: 400 });
-    }
-
     const parcelData = await fetchRegridParcelData(order.parcelLat, order.parcelLng);
     if (!parcelData) {
       return NextResponse.json({ error: "Failed to fetch parcel data" }, { status: 500 });
