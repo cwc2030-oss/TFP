@@ -96,7 +96,7 @@ export default function PricingPage() {
                 <span className="text-stone-500 text-sm ml-1">per report</span>
               </div>
               <p className="text-stone-500 mt-2 text-sm">
-                Complete terrain intelligence for serious hunters
+                Complete terrain intelligence + full land analysis. Two premium reports in one package — terrain analysis, stand placement, wind strategy, satellite hunt map, soil data, flood risk, county hunting seasons, and market data. Indefinite parcel access included.
               </p>
             </div>
 
@@ -111,6 +111,9 @@ export default function PricingPage() {
                   "Top 3 stand placements with wind strategy",
                   "Seasonal huntability scoring",
                   "Satellite terrain hunt map",
+                  "12-page Land Intelligence Report included",
+                  "County hunting seasons & CWD status",
+                  "Soil, flood & market analysis",
                   "Indefinite parcel access",
                 ].map((feature, idx) => (
                   <li key={idx} className="flex items-start gap-2.5">

@@ -49,7 +49,7 @@ type ProductType = "hunt_report" | "land_report";
 const PRODUCTS = {
   hunt_report: {
     name: "Hunt Intelligence Report",
-    description: "Terrain analysis, stand placement, wind strategy, and satellite hunt map. Indefinite parcel access.",
+    description: "Complete terrain intelligence + full land analysis. Two premium reports in one package. Indefinite parcel access.",
     price: 149,
     color: "red",
     badge: "🦌 MOST POPULAR",

@@ -174,7 +174,7 @@ function SuccessContent() {
                 ) : (
                   <>
                     <Download className="w-5 h-5 mr-2" />
-                    Download PDF Report
+                    {orderDetails?.productType === 'hunt_report' ? 'Download Hunt Package (2 Reports)' : 'Download PDF Report'}
                   </>
                 )}
               </Button>
