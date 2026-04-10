@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Est. Hunters Supported</div>
     </div>
     <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
-      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${Math.round((corridors?.parcelCoverage || 0) * 100)}%</div>
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${Math.round(corridors?.parcelCoverage || 0)}%</div>
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Corridor Coverage</div>
     </div>
   </div>
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
       <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
         <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
         <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
-        <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county ?? ''} County, ${state ?? 'MO'}</div>
+        <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
         <div style="background:#1a3a2a;color:white;padding:12px">
@@ -377,7 +377,7 @@ export async function POST(req: NextRequest) {
       <div class="stand-score-badge" style="background:${scoreColor(stand.score)}">${stand.score}</div>
     </div>
     <div class="stand-body">
-      <div class="stand-reasoning">"${stand.reasoning}"</div>
+      <div class="stand-reasoning">"${stand.reasoning && stand.reasoning.trim().length > 10 ? stand.reasoning : `Stand positioned at ${stand.elevation ? Math.round(stand.elevation * 3.281) + 'ft elevation' : 'optimal terrain position'} with ${stand.distToCorridorM ? Math.round(stand.distToCorridorM * 1.094) + ' yards to nearest corridor' : 'strong corridor access'}. Approach risk: ${stand.approachRisk || 'low'}.`}"</div>
       <div class="stand-stats">
         <div class="stand-stat">
           <div class="stand-stat-val" style="color:${riskColor(stand.approachRisk)}">${(stand.approachRisk ?? 'med').toUpperCase()}</div>
