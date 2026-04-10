@@ -10,7 +10,7 @@ import {
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
-  Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User
+  Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User, Share2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -1946,6 +1946,7 @@ function DeerIntelContent() {
 
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
@@ -8721,9 +8722,28 @@ function DeerIntelContent() {
                   <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Parcel Identity</span>
                   <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
                 </div>
-                {/* Address */}
-                <p className="text-xs text-white/90 font-semibold leading-tight">{address}</p>
-                <p className="text-[10px] text-stone-600 mt-0.5">{lat.toFixed(5)}, {lng.toFixed(5)}</p>
+                {/* Address + Share */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-white/90 font-semibold leading-tight">{address}</p>
+                    <p className="text-[10px] text-stone-600 mt-0.5">{lat.toFixed(5)}, {lng.toFixed(5)}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.href).then(() => {
+                        setShareCopied(true);
+                        setTimeout(() => setShareCopied(false), 2000);
+                      });
+                    }}
+                    className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-stone-400 hover:text-amber-400 transition-all duration-200"
+                    title="Copy shareable link"
+                  >
+                    {shareCopied ? <Check className="h-3 w-3 text-emerald-400" /> : <Share2 className="h-3 w-3" />}
+                    <span className="text-[9px] font-medium uppercase tracking-wider">
+                      {shareCopied ? 'Copied!' : 'Share'}
+                    </span>
+                  </button>
+                </div>
                 {/* Compact stat row */}
                 <div className="grid grid-cols-3 gap-1.5 mt-2.5">
                   <div className="bg-white/[0.04] rounded-lg px-2 py-1.5 text-center">
