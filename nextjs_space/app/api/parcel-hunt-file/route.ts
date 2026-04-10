@@ -395,7 +395,7 @@ export async function POST(req: NextRequest) {
       <div class="stand-score-badge" style="background:${scoreColor(stand.score)}">${stand.score}</div>
     </div>
     <div class="stand-body">
-      <div class="stand-reasoning">"${stand.reasoning && stand.reasoning.trim().length > 10 ? stand.reasoning : `Stand positioned at ${stand.elevation ? Math.round(stand.elevation * 3.281) + 'ft elevation' : 'optimal terrain position'} with ${stand.distToCorridorM ? Math.round(stand.distToCorridorM * 1.094) + ' yards to nearest corridor' : 'strong corridor access'}. Approach risk: ${stand.approachRisk || 'low'}.`}"</div>
+      <div class="stand-reasoning">"${stand.reasoning && stand.reasoning.trim().length > 10 ? stand.reasoning : `Intercept point at ${stand.elevation ? Math.round(stand.elevation * 3.281) + 'ft elevation' : 'optimal terrain position'} with ${stand.distToCorridorM ? Math.round(stand.distToCorridorM * 1.094) + ' yards to nearest corridor' : 'strong corridor access'}. Approach risk: ${stand.approachRisk || 'low'}.`}"</div>
       <div class="stand-stats">
         <div class="stand-stat">
           <div class="stand-stat-val" style="color:${riskColor(stand.approachRisk)}">${(stand.approachRisk ?? 'med').toUpperCase()}</div>
@@ -447,17 +447,17 @@ export async function POST(req: NextRequest) {
     </div>
     <div style="font-size:11px;color:#333;line-height:1.7">
       <strong>Hard Funnels</strong> are tight terrain pinch points — saddles, creek crossings, ridge gaps — that physically 
-      force deer through a narrow zone. Stands near hard funnels intercept nearly all deer movement in that area.<br><br>
+      force deer through a narrow zone. Positions near hard funnels intercept nearly all deer movement in that area.<br><br>
       <strong>Slight Funnels</strong> are softer compressions — benches, field edges, gentle draws — where deer prefer 
       to travel but aren't forced. These are excellent intercept locations but require more precise wind management.<br><br>
       <strong>Pro Tip:</strong> ${(corridors?.hardFunnelCount ?? 0) > 0 
-        ? `This property has ${corridors.hardFunnelCount} hard funnel${corridors.hardFunnelCount > 1 ? 's' : ''} — prioritize stand placement within 50 yards of these natural pinch points for maximum encounter rates.`
-        : 'Focus stands on slight funnels with favorable wind — approach from downwind for best results.'}
+        ? `This property has ${corridors.hardFunnelCount} hard funnel${corridors.hardFunnelCount > 1 ? 's' : ''} — prioritize intercept placement within 50 yards of these natural pinch points for maximum encounter rates.`
+        : 'Focus intercept points on slight funnels with favorable wind — approach from downwind for best results.'}
     </div>
   </div>
   <div class="disclaimer">
-    This report is generated from satellite terrain analysis and predictive modeling. Stand placement recommendations are based on terrain geometry,
-    historical deer movement patterns, and wind modeling. Always scout properties in person before placing permanent stands.
+    This report is generated from satellite terrain analysis and predictive modeling. Intercept point recommendations are based on terrain geometry,
+    historical deer movement patterns, and wind modeling. Always scout properties in person before committing to intercept positions.
     Terra Firma Partners is not responsible for hunting outcomes. Data sources: Regrid, USGS DEM, USDA. Report ID: ${reportId}
   </div>
   <div class="footer">
@@ -488,7 +488,7 @@ ${mapImageBase64 ? `
     <img src="${mapImageBase64}" style="width:100%;display:block" alt="Terrain Hunt Map"/>
     <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(26,58,42,0.85);padding:8px 12px;display:flex;gap:24px;align-items:center">
       <span style="color:white;font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:bold">Legend:</span>
-      <span style="color:white;font-size:10px">🎯 #1 Intercept — ${stands?.[0]?.name ?? 'Top Stand'}</span>
+      <span style="color:white;font-size:10px">🎯 #1 Intercept — ${stands?.[0]?.name ?? 'Top Intercept'}</span>
       ${stands?.[1] ? `<span style="color:white;font-size:10px">🎯 #2 Intercept — ${stands[1].name}</span>` : ''}
       ${stands?.[2] ? `<span style="color:white;font-size:10px">🎯 #3 Intercept — ${stands[2].name}</span>` : ''}
     </div>
@@ -518,16 +518,16 @@ ${mapImageBase64 ? `
   <div class="section-title">Approach & Wind Strategy</div>
   <div style="background:#f8f6f0;border:1px solid #ddd;padding:16px;margin-bottom:16px">
     <div style="font-size:12px;color:#333;line-height:1.8">
-      <div style="margin-bottom:8px"><strong>Prevailing Wind:</strong> ${prevailingWind ?? 'Not set'} — plan entry routes to keep wind in your favor approaching each stand.</div>
-      <div style="margin-bottom:8px"><strong>Top Stand (${stands?.[0]?.name ?? '—'}):</strong> Best hunted on ${(stands?.[0]?.windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands?.[0]?.approachRisk ?? '—'}.</div>
-      ${stands?.[1] ? `<div style="margin-bottom:8px"><strong>Stand 2 (${stands[1].name}):</strong> Best hunted on ${(stands[1].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[1].approachRisk ?? '—'}.</div>` : ''}
-      ${stands?.[2] ? `<div><strong>Stand 3 (${stands[2].name}):</strong> Best hunted on ${(stands[2].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[2].approachRisk ?? '—'}.</div>` : ''}
+      <div style="margin-bottom:8px"><strong>Prevailing Wind:</strong> ${prevailingWind ?? 'Not set'} — plan entry routes to keep wind in your favor approaching each intercept point.</div>
+      <div style="margin-bottom:8px"><strong>Top Intercept (${stands?.[0]?.name ?? '—'}):</strong> Best hunted on ${(stands?.[0]?.windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands?.[0]?.approachRisk ?? '—'}.</div>
+      ${stands?.[1] ? `<div style="margin-bottom:8px"><strong>Intercept 2 (${stands[1].name}):</strong> Best hunted on ${(stands[1].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[1].approachRisk ?? '—'}.</div>` : ''}
+      ${stands?.[2] ? `<div><strong>Intercept 3 (${stands[2].name}):</strong> Best hunted on ${(stands[2].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[2].approachRisk ?? '—'}.</div>` : ''}
     </div>
   </div>
 
   <div style="background:#1a3a2a;color:white;padding:12px 16px;font-size:11px;line-height:1.6">
-    <strong>PRO TIP:</strong> Always approach stands from downwind. Check wind forecast the night before and select the stand whose good wind directions match tomorrow's forecast. 
-    Deer will smell you from 300+ yards — your entry route matters as much as your stand location.
+    <strong>PRO TIP:</strong> Always approach intercept points from downwind. Check wind forecast the night before and select the intercept whose good wind directions match tomorrow's forecast. 
+    Deer will smell you from 300+ yards — your entry route matters as much as your intercept position.
   </div>
 
   <div class="footer">
