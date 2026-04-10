@@ -383,7 +383,10 @@ export async function POST(req: NextRequest) {
   <div class="stand-card">
     <div class="stand-header" style="background:${i === 0 ? '#1a3a2a' : '#f8f6f0'};color:${i === 0 ? 'white' : '#1a1a1a'}">
       <div style="display:flex;align-items:center">
-        <div class="stand-rank">#${stand.rank}</div>
+        <div style="text-align:center;margin-right:12px">
+          <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:2px">INTERCEPT</div>
+          <div style="font-size:24px;font-weight:bold;color:#c9a84c">#${stand.rank}</div>
+        </div>
         <div>
           <div class="stand-name">${stand.name}</div>
           <div class="stand-tier">${stand.tier} · ${stand.resilience}</div>
@@ -485,9 +488,9 @@ ${mapImageBase64 ? `
     <img src="${mapImageBase64}" style="width:100%;display:block" alt="Terrain Hunt Map"/>
     <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(26,58,42,0.85);padding:8px 12px;display:flex;gap:24px;align-items:center">
       <span style="color:white;font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:bold">Legend:</span>
-      <span style="color:white;font-size:10px">🟢 #1 Stand — ${stands?.[0]?.name ?? 'Top Stand'}</span>
-      ${stands?.[1] ? `<span style="color:white;font-size:10px">🟡 #2 Stand — ${stands[1].name}</span>` : ''}
-      ${stands?.[2] ? `<span style="color:white;font-size:10px">🟤 #3 Stand — ${stands[2].name}</span>` : ''}
+      <span style="color:white;font-size:10px">🎯 #1 Intercept — ${stands?.[0]?.name ?? 'Top Stand'}</span>
+      ${stands?.[1] ? `<span style="color:white;font-size:10px">🎯 #2 Intercept — ${stands[1].name}</span>` : ''}
+      ${stands?.[2] ? `<span style="color:white;font-size:10px">🎯 #3 Intercept — ${stands[2].name}</span>` : ''}
     </div>
   </div>
 
@@ -495,6 +498,7 @@ ${mapImageBase64 ? `
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
     ${(stands ?? []).slice(0,3).map((s: any, i: number) => `
     <div style="border:2px solid #1a3a2a;padding:12px;background:#f8f6f0">
+      <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:2px">INTERCEPT</div>
       <div style="font-size:11px;font-weight:bold;color:#c9a84c;margin-bottom:4px">#${s.rank} — ${s.name}</div>
       <div style="font-size:10px;color:#666;margin-bottom:6px">${s.tier}</div>
       <div style="font-size:18px;font-weight:bold;color:#1a3a2a;margin-bottom:6px">${s.score}</div>
