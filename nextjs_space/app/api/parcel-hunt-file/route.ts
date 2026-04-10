@@ -83,6 +83,113 @@ export async function POST(req: NextRequest) {
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
+    // Lease Intelligence computed variables
+    const leaseValuePerAcre = (summary?.topStandScore ?? 0) >= 80 ? '$18-25' 
+      : (summary?.topStandScore ?? 0) >= 60 ? '$12-18' 
+      : (summary?.topStandScore ?? 0) >= 40 ? '$8-12' 
+      : '$4-8';
+
+    const certifiedBadge = (summary?.topStandScore ?? 0) >= 70 
+      ? `<div style="background:#1a3a2a;color:#c9a84c;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10003; CERTIFIED HUNTABLE</div>`
+      : (summary?.topStandScore ?? 0) >= 40
+      ? `<div style="background:#8b6f47;color:white;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#9680; CONDITIONALLY HUNTABLE</div>`
+      : `<div style="background:#8b0000;color:white;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10007; LIMITED HUNTABILITY</div>`;
+
+    const carryingCapacity = Math.max(1, Math.round((acreage ?? 40) / 40));
+    const standInventory = (stands ?? []).length;
+
+    const leaseIntelHTML = `
+<div style="border:2px solid #c9a84c;padding:20px;margin-bottom:24px;background:#fdf9f0">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;color:#1a3a2a">Lease Intelligence</div>
+    ${certifiedBadge}
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${leaseValuePerAcre}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Est. Lease / Acre / Yr</div>
+    </div>
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${standInventory}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Quality Stand Sites</div>
+    </div>
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${carryingCapacity}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Est. Hunters Supported</div>
+    </div>
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${Math.round((corridors?.parcelCoverage || 0) * 100)}%</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Corridor Coverage</div>
+    </div>
+  </div>
+  <div style="background:#f0ede4;padding:10px 14px;border-left:3px solid #c9a84c;font-size:11px;color:#555;line-height:1.6">
+    <strong>Note:</strong> Deer movement does not stop at property lines. Adjacent parcel analysis available 
+    at terrafirma.partners to complete the full terrain picture for larger hunting operations.
+  </div>
+  <div style="margin-top:8px;font-size:10px;color:#aaa;font-style:italic">
+    Lease value estimates based on Missouri/Kansas regional averages and terrain huntability scoring. Actual rates vary by location, access, and amenities.
+  </div>
+</div>`;
+
+    // Hunt Certificate computed variables
+    const huntGrade = (summary?.topStandScore ?? 0) >= 90 ? 'A+' 
+      : (summary?.topStandScore ?? 0) >= 80 ? 'A' 
+      : (summary?.topStandScore ?? 0) >= 70 ? 'B' 
+      : (summary?.topStandScore ?? 0) >= 60 ? 'C' 
+      : 'D';
+
+    const gradeColor = (summary?.topStandScore ?? 0) >= 70 ? '#1a3a2a' 
+      : (summary?.topStandScore ?? 0) >= 50 ? '#8b6f47' 
+      : '#8b0000';
+
+    const certificatePage = `
+<div class="page border">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:900px;text-align:center;padding:48px">
+    <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
+    <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
+      <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">TERRAIN HUNT CERTIFICATE</div>
+      <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:32px"></div>
+      <div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
+      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:32px">HUNTABILITY GRADE</div>
+      <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
+        <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
+        <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
+        <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county ?? ''} County, ${state ?? 'MO'}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
+        <div style="background:#1a3a2a;color:white;padding:12px">
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${summary?.topStandScore ?? 0}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">HUNTABILITY SCORE</div>
+        </div>
+        <div style="background:#1a3a2a;color:white;padding:12px">
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(stands ?? []).length}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">STAND SITES</div>
+        </div>
+        <div style="background:#1a3a2a;color:white;padding:12px">
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${corridors?.primaryCount || 0}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS</div>
+        </div>
+      </div>
+      <div style="height:1px;background:#ddd;margin-bottom:16px"></div>
+      <div style="font-size:10px;color:#999;line-height:1.6;margin-bottom:16px">
+        This certificate confirms that the above property has been analyzed using satellite terrain 
+        intelligence, elevation modeling, and deer movement prediction. 
+        Assessment valid at time of generation. Adjacent parcel analysis available separately.
+      </div>
+      <div style="padding-top:16px;border-top:1px solid #ddd">
+        <div style="font-size:11px;font-weight:bold;color:#1a3a2a;letter-spacing:1px">TERRA FIRMA PARTNERS</div>
+        <div style="font-size:10px;color:#888">terrafirma.partners | Terrain Intelligence for Serious Hunters</div>
+      </div>
+    </div>
+    <div style="margin-top:24px;font-size:10px;color:#ccc;letter-spacing:2px">Report ID: ${reportId}</div>
+  </div>
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Certificate of Terrain Analysis</span>
+  </div>
+</div>`;
+
     // Better county/state parsing from full address string
     // Google format: "425 SE 850th Rd, Leeton, MO 64761, USA"
     // Regrid format: "425 SE 850TH RD, LEETON, MO 64761"
@@ -191,6 +298,7 @@ export async function POST(req: NextRequest) {
     <div style="font-size:18px;letter-spacing:3px;margin-top:8px;color:${scoreColor(summary?.topStandScore ?? 0)}">${scoreLabel(summary?.topStandScore ?? 0)}</div>
     <div class="score-sub">Based on terrain analysis, corridor strength, bedding proximity, and wind alignment</div>
   </div>
+  ${leaseIntelHTML}
   <div class="grid-3">
     <div class="stat-box">
       <div class="stat-value">${summary?.totalBeddingAcres?.toFixed(1) ?? '0'}</div>
@@ -239,7 +347,7 @@ export async function POST(req: NextRequest) {
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 1 of 2</span>
+    <span>Page 1 of ${mapImageBase64 ? '4' : '3'}</span>
   </div>
 </div>
 
@@ -337,7 +445,7 @@ export async function POST(req: NextRequest) {
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 2 of ${mapImageBase64 ? '3' : '2'}</span>
+    <span>Page 2 of ${mapImageBase64 ? '4' : '3'}</span>
   </div>
 </div>
 
@@ -406,10 +514,12 @@ ${mapImageBase64 ? `
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 3 of 3</span>
+    <span>Page 3 of 4</span>
   </div>
 </div>
 ` : ''}
+
+${certificatePage}
 
 </body>
 </html>`;
