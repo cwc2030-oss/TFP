@@ -556,7 +556,7 @@ export default function LeafletMap({
 
           marker.bindPopup(`
             <div class="font-sans min-w-[200px]">
-              <h3 class="font-bold text-red-600 mb-2">🎯 Intercept Site #${props.rank}</h3>
+              <h3 class="font-bold text-red-600 mb-2">🎯 Stand Site #${props.rank}</h3>
               <p><strong>Score:</strong> <span class="text-lg font-bold">${props.score}</span>/100</p>
               <p><strong>Elevation:</strong> ${props.elevation?.toFixed(0)}m</p>
               <p><strong>To Corridor:</strong> ${props.distToCorridorMeters?.toFixed(0)}m</p>
@@ -565,7 +565,7 @@ export default function LeafletMap({
               <p><strong>Good Winds:</strong> ${props.windOk?.join(', ') || 'N/A'}</p>
               <p><strong>Bad Winds:</strong> ${props.windBad?.join(', ') || 'N/A'}</p>
               ${props.reasoning ? `<p class="mt-2 text-sm text-gray-600 italic">${props.reasoning}</p>` : ''}
-              <p class="text-xs text-gray-500 mt-2">Provenance: Multi-criteria intercept optimization</p>
+              <p class="text-xs text-gray-500 mt-2">Provenance: Multi-criteria stand optimization</p>
             </div>
           `);
 

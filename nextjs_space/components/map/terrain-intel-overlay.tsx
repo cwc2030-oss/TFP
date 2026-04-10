@@ -325,7 +325,7 @@ export default function TerrainIntelOverlay({
               padding: 4px 10px;
               border-radius: 12px;
               font-size: 14px;
-            ">Intercept #${props.rank}</span>
+            ">Stand #${props.rank}</span>
             <span style="font-weight: 600; font-size: 18px;">${props.score}/100</span>
           </div>
           
@@ -550,14 +550,14 @@ export default function TerrainIntelOverlay({
                   className="rounded border-gray-300"
                 />
                 <span className="w-4 h-4 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
-                <span className="text-sm text-gray-700">Intercept Sites (10)</span>
+                <span className="text-sm text-gray-700">Stand Sites (10)</span>
               </label>
 
               {/* Summary Stats */}
               {summary && (
                 <div className="pt-3 mt-3 border-t border-gray-200 text-xs text-gray-600 space-y-1">
                   <p>💤 {summary.totalBeddingAcres.toFixed(1)} acres bedding</p>
-                  <p>🎯 Top intercept: {summary.topStandScore}/100</p>
+                  <p>🎯 Top stand: {summary.topStandScore}/100</p>
                   <p>📍 {summary.analysisAreaAcres.toFixed(0)} acre analysis area</p>
                 </div>
               )}
@@ -581,7 +581,7 @@ export default function TerrainIntelOverlay({
       {visibility.stands && (
         <div className="absolute top-4 right-4 bg-white/95 backdrop-blur rounded-lg shadow-lg w-64 max-h-96 overflow-auto z-10">
           <div className="px-4 py-3 border-b border-gray-200 sticky top-0 bg-white/95">
-            <h3 className="font-semibold text-gray-800">Top 10 Intercept Sites</h3>
+            <h3 className="font-semibold text-gray-800">Top 10 Stand Sites</h3>
             <p className="text-xs text-gray-500">Click markers or list items</p>
           </div>
           <div className="divide-y divide-gray-100">
