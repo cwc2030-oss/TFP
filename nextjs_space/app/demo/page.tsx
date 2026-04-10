@@ -124,7 +124,7 @@ export default function DemoPage() {
           See What Your Land Is Hiding
         </h1>
         <p className="text-stone-400 mt-3 text-sm sm:text-base max-w-xl mx-auto">
-          Tap a property below to explore real terrain intelligence — deer movement corridors, funnel zones, and optimal stand placements — powered by LiDAR elevation data.
+          Tap a property below to explore real terrain intelligence — deer movement corridors, funnel zones, and optimal intercept placements — powered by LiDAR elevation data.
         </p>
       </div>
 

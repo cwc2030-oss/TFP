@@ -536,7 +536,7 @@ export async function POST(request: NextRequest) {
     <div style="background:#0d2018;padding:24px;border:1px solid #2d6a4f;border-radius:8px">
       <div style="color:#c9a84c;font-size:11px;letter-spacing:2px;margin-bottom:8px">INCLUDED</div>
       <div style="color:white;font-size:15px;font-weight:bold;margin-bottom:4px">Hunt Intelligence Report</div>
-      <div style="color:#888;font-size:12px">Terrain analysis, deer movement, stand placement, wind strategy, satellite hunt map</div>
+      <div style="color:#888;font-size:12px">Terrain analysis, deer movement, intercept placement, wind strategy, satellite hunt map</div>
     </div>
     <div style="background:#0d2018;padding:24px;border:1px solid #2d6a4f;border-radius:8px">
       <div style="color:#c9a84c;font-size:11px;letter-spacing:2px;margin-bottom:8px">INCLUDED</div>

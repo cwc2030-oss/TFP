@@ -96,7 +96,7 @@ export default function PricingPage() {
                 <span className="text-stone-500 text-sm ml-1">per report</span>
               </div>
               <p className="text-stone-500 mt-2 text-sm">
-                Complete terrain intelligence + full land analysis. Two premium reports in one package — terrain analysis, stand placement, wind strategy, satellite hunt map, soil data, flood risk, county hunting seasons, and market data. Indefinite parcel access included.
+                Complete terrain intelligence + full land analysis. Two premium reports in one package — terrain analysis, intercept placement, wind strategy, satellite hunt map, soil data, flood risk, county hunting seasons, and market data. Indefinite parcel access included.
               </p>
             </div>
 
@@ -108,7 +108,7 @@ export default function PricingPage() {
                 {[
                   "Everything in Land Report",
                   "Deer movement corridor analysis",
-                  "Top 3 stand placements with wind strategy",
+                  "Top 3 intercept placements with wind strategy",
                   "Seasonal huntability scoring",
                   "Satellite terrain hunt map",
                   "12-page Land Intelligence Report included",

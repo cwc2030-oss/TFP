@@ -515,7 +515,7 @@ function MapLayersSection() {
 
   // Custom layer descriptions with folksy language
   const layerDescriptions: Record<string, string> = {
-    "flood-zones": "Will your deer stand be underwater come spring?",
+    "flood-zones": "Will your intercept point be underwater come spring?",
     "topography": "Find those ridges and hollows deer love",
     "wetlands": "Protected areas you need to know about",
     "soil-types": "Can you plant food plots? We'll tell ya",

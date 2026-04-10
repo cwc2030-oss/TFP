@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const PRODUCT_INFO: Record<string, { name: string; description: string }> = {
       hunt_report: {
         name: 'TerraFirma Hunt Intelligence Report',
-        description: 'Complete terrain analysis, stand placement, wind strategy, and satellite hunt map. Indefinite parcel access included.',
+        description: 'Complete terrain analysis, intercept placement, wind strategy, and satellite hunt map. Indefinite parcel access included.',
       },
       land_report: {
         name: 'TerraFirma Land Intelligence Report',
