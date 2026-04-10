@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
     </div>
     <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
       <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${standInventory}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Quality Stand Sites</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Prime Intercept Points</div>
     </div>
     <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
       <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${carryingCapacity}</div>
@@ -128,6 +128,20 @@ export async function POST(req: NextRequest) {
   </div>
   <div style="margin-top:8px;font-size:10px;color:#aaa;font-style:italic">
     Lease value estimates based on Missouri/Kansas regional averages and terrain huntability scoring. Actual rates vary by location, access, and amenities.
+  </div>
+</div>`;
+
+    const dualAudienceHTML = `
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:2px solid #1a3a2a;margin-bottom:24px">
+  <div style="padding:20px;border-right:1px solid #1a3a2a">
+    <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:8px">For the Landowner</div>
+    <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">Lease With Confidence</div>
+    <div style="font-size:11px;color:#444;line-height:1.7">This terrain assessment certifies the hunting quality of your property using satellite intelligence. Share this report with prospective lessees to justify premium lease rates and attract serious hunters who understand land quality.</div>
+  </div>
+  <div style="padding:20px;background:#f8f6f0">
+    <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:8px">For the Hunter</div>
+    <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">Hunt With Intelligence</div>
+    <div style="font-size:11px;color:#444;line-height:1.7">Your terrain analysis identifies exactly where deer move, bed, and converge on this property. Use the intercept points and wind strategy in this report to put yourself in the right position before opening day.</div>
   </div>
 </div>`;
 
@@ -163,7 +177,7 @@ export async function POST(req: NextRequest) {
         </div>
         <div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(stands ?? []).length}</div>
-          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">STAND SITES</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">INTERCEPT POINTS</div>
         </div>
         <div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${corridors?.primaryCount || 0}</div>
@@ -208,7 +222,7 @@ export async function POST(req: NextRequest) {
     const width = 720;
     const height = 480;
 
-    // Build stand markers for the static map (up to 3)
+    // Build position markers for the static map (up to 3)
     const markerOverlays = stands && stands.length > 0 
       ? (stands ?? []).slice(0, 3).map((s: any, i: number) => {
           const colors = ['2d6a4f', 'c9a84c', '8b4513'];
@@ -313,6 +327,7 @@ export async function POST(req: NextRequest) {
       <div class="stat-label">Funnel Zones</div>
     </div>
   </div>
+  ${dualAudienceHTML}
   <div class="section-title">Seasonal Huntability</div>
   <div class="season-grid">
     ${['early','rut','late'].map((s: string) => `
@@ -360,8 +375,8 @@ export async function POST(req: NextRequest) {
     </div>
   </div>
   <div style="text-align:center;margin-bottom:24px">
-    <div style="font-size:22px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">STAND PLACEMENT ANALYSIS</div>
-    <div style="font-size:12px;color:#666;margin-top:6px">Top recommended stand locations based on terrain, wind, and deer movement intelligence</div>
+    <div style="font-size:22px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">INTERCEPT POINT ANALYSIS</div>
+    <div style="font-size:12px;color:#666;margin-top:6px">Top recommended intercept locations based on terrain, wind, and deer movement intelligence</div>
   </div>
   <div class="gold-bar"></div>
   ${(stands ?? []).map((stand: any, i: number) => `
@@ -419,7 +434,7 @@ export async function POST(req: NextRequest) {
       <div class="stat-value">${corridors?.hardFunnelCount ?? 0} hard · ${corridors?.slightFunnelCount ?? 0} slight</div>
       <div class="stat-label">Funnel Zones Detected</div>
       <div style="font-size:11px;color:#1a3a2a;margin-top:8px;font-weight:bold">
-        ${(corridors?.hardFunnelCount ?? 0) > 0 ? '★ Hard funnels present — high value stand locations' : 'Soft funnels only — terrain dependent movement'}
+        ${(corridors?.hardFunnelCount ?? 0) > 0 ? '★ Hard funnels present — high value intercept locations' : 'Soft funnels only — terrain dependent movement'}
       </div>
     </div>
   </div>
@@ -431,7 +446,7 @@ export async function POST(req: NextRequest) {
       <strong>Hard Funnels</strong> are tight terrain pinch points — saddles, creek crossings, ridge gaps — that physically 
       force deer through a narrow zone. Stands near hard funnels intercept nearly all deer movement in that area.<br><br>
       <strong>Slight Funnels</strong> are softer compressions — benches, field edges, gentle draws — where deer prefer 
-      to travel but aren't forced. These are excellent stand locations but require more precise wind management.<br><br>
+      to travel but aren't forced. These are excellent intercept locations but require more precise wind management.<br><br>
       <strong>Pro Tip:</strong> ${(corridors?.hardFunnelCount ?? 0) > 0 
         ? `This property has ${corridors.hardFunnelCount} hard funnel${corridors.hardFunnelCount > 1 ? 's' : ''} — prioritize stand placement within 50 yards of these natural pinch points for maximum encounter rates.`
         : 'Focus stands on slight funnels with favorable wind — approach from downwind for best results.'}
@@ -476,7 +491,7 @@ ${mapImageBase64 ? `
     </div>
   </div>
 
-  <div class="section-title">Stand Location Summary</div>
+  <div class="section-title">Intercept Location Summary</div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
     ${(stands ?? []).slice(0,3).map((s: any, i: number) => `
     <div style="border:2px solid #1a3a2a;padding:12px;background:#f8f6f0">
