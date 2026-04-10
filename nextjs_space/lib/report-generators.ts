@@ -20,7 +20,12 @@ export async function generateLandPdfDirect(orderId: string): Promise<{ pdf: str
   return { pdf: data.pdf, filename: data.filename };
 }
 
-export async function generateHuntHtmlDirect(payload: any): Promise<string> {
+/**
+ * Generates the Hunt Intelligence Report as a PDF (via HTML2PDF).
+ * Returns { pdf: base64string, contentType: string }
+ * Falls back to HTML if PDF conversion fails.
+ */
+export async function generateHuntPdfDirect(payload: any): Promise<{ pdf: string; contentType: string }> {
   const { POST } = await import('@/app/api/parcel-hunt-file/route');
   const req = new NextRequest('http://internal/api/parcel-hunt-file', {
     method: 'POST',
@@ -28,16 +33,25 @@ export async function generateHuntHtmlDirect(payload: any): Promise<string> {
     body: JSON.stringify(payload),
   });
   const res = await POST(req);
-  const text = await res.text();
-  // If the response is JSON error, parse and throw
+
   if (res.status !== 200) {
+    // Try to parse JSON error
+    const text = await res.text();
     try {
       const errData = JSON.parse(text);
-      throw new Error(errData.error || 'Hunt HTML generation failed');
+      throw new Error(errData.error || 'Hunt report generation failed');
     } catch (e: any) {
       if (e.message.includes('generation failed')) throw e;
-      throw new Error('Hunt HTML generation failed');
+      throw new Error('Hunt report generation failed');
     }
   }
-  return text;
+
+  const ct = res.headers.get('content-type') || '';
+  const buf = Buffer.from(await res.arrayBuffer());
+  const base64 = buf.toString('base64');
+
+  return {
+    pdf: base64,
+    contentType: ct.includes('application/pdf') ? 'application/pdf' : 'text/html',
+  };
 }

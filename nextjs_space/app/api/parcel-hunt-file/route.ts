@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 60;
+
 const seasonLabel = (s: string) =>
   s === 'early' ? 'Early Season' : s === 'rut' ? 'Rut Season' : 'Late Season';
 
@@ -543,12 +545,90 @@ ${certificatePage}
 </body>
 </html>`;
 
-    return new NextResponse(html, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'X-Report-ID': reportId,
+    // --- Convert HTML to PDF via Abacus HTML2PDF API (Playwright) ---
+    console.log(`[parcel-hunt-file] Converting HTML to PDF for report ${reportId}...`);
+
+    try {
+      const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deployment_token: process.env.ABACUSAI_API_KEY,
+          html_content: html,
+          pdf_options: {
+            format: 'Letter',
+            print_background: true,
+            margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' },
+          },
+          base_url: process.env.NEXTAUTH_URL || '',
+        }),
+      });
+
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        console.error('[parcel-hunt-file] HTML2PDF create request failed:', errText);
+        // Fallback to raw HTML
+        return new NextResponse(html, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Report-ID': reportId },
+        });
       }
-    });
+
+      const { request_id } = await createRes.json();
+      if (!request_id) {
+        console.error('[parcel-hunt-file] HTML2PDF returned no request_id');
+        return new NextResponse(html, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Report-ID': reportId },
+        });
+      }
+
+      // Poll for completion (max ~90 seconds)
+      let pdfBuffer: Buffer | null = null;
+      for (let attempt = 0; attempt < 90; attempt++) {
+        await new Promise(r => setTimeout(r, 1000));
+
+        const statusRes = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
+        });
+
+        const statusData = await statusRes.json();
+        const status = statusData?.status || 'FAILED';
+
+        if (status === 'SUCCESS' && statusData?.result?.result) {
+          pdfBuffer = Buffer.from(statusData.result.result, 'base64');
+          console.log(`[parcel-hunt-file] PDF ready — ${pdfBuffer.length} bytes (attempt ${attempt + 1})`);
+          break;
+        } else if (status === 'FAILED') {
+          console.error('[parcel-hunt-file] HTML2PDF conversion failed:', statusData?.result?.error);
+          break;
+        }
+        // PROCESSING — keep polling
+      }
+
+      if (pdfBuffer) {
+        return new NextResponse(pdfBuffer, {
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="TFP-Hunt-Report-${reportId}.pdf"`,
+            'X-Report-ID': reportId,
+          },
+        });
+      }
+
+      // Fallback: return HTML if PDF conversion timed out
+      console.warn('[parcel-hunt-file] PDF conversion timed out, falling back to HTML');
+      return new NextResponse(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Report-ID': reportId },
+      });
+
+    } catch (pdfErr: any) {
+      console.error('[parcel-hunt-file] PDF conversion error:', pdfErr);
+      // Graceful fallback to HTML
+      return new NextResponse(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Report-ID': reportId },
+      });
+    }
 
   } catch (err: any) {
     console.error('[parcel-hunt-file] Error:', err);

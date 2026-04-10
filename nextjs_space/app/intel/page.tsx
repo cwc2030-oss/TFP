@@ -2592,12 +2592,14 @@ function DeerIntelContent() {
 
       if (!response.ok) throw new Error('Report generation failed');
 
-      const html = await response.text();
-      const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+      const ct = response.headers.get('content-type') || '';
+      const buf = await response.arrayBuffer();
+      const isPdf = ct.includes('application/pdf');
+      const blob = new Blob([buf], { type: isPdf ? 'application/pdf' : 'text/html; charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `TFP-Hunt-Report-${new Date().toISOString().slice(0,10)}.html`;
+      a.download = `TFP-Hunt-Report-${new Date().toISOString().slice(0,10)}.${isPdf ? 'pdf' : 'html'}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
