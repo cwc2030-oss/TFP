@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
@@ -10,6 +10,7 @@ import {
   FileText,
   Loader2,
   ArrowRight,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +30,9 @@ function SuccessContent() {
     parcelLng: number;
     parcelAddress: string;
   } | null>(null);
+  // Part 1 & 2: Track whether hunt_report has terrainData ready
+  const [terrainDataReady, setTerrainDataReady] = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Complete the order when page loads
   useEffect(() => {
@@ -52,6 +56,10 @@ function SuccessContent() {
               parcelAddress: data.order.parcelAddress,
             });
             trackPurchaseCompleted(orderId, data.order.productType, data.order.parcelAddress || '');
+            // Check if terrainData is already populated (e.g. user ran analyzer before checkout)
+            if (data.order.terrainData) {
+              setTerrainDataReady(true);
+            }
           }
           setOrderCompleted(true);
         }
@@ -62,6 +70,50 @@ function SuccessContent() {
     
     completeOrder();
   }, [orderId, sessionId, orderCompleted]);
+
+  // Part 2: Poll every 5s for terrainData on hunt_report orders that don't have it yet
+  useEffect(() => {
+    // Only poll if: hunt_report, no terrainData yet, and order is completed
+    if (
+      !orderId ||
+      !orderCompleted ||
+      terrainDataReady ||
+      orderDetails?.productType !== 'hunt_report'
+    ) {
+      return;
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/orders/${orderId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.order?.terrainData) {
+            setTerrainDataReady(true);
+            // Stop polling once data is found
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+          }
+        }
+      } catch {
+        // Silently retry on next interval
+      }
+    };
+
+    pollingRef.current = setInterval(poll, 5000);
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [orderId, orderCompleted, terrainDataReady, orderDetails?.productType]);
+
+  // Determine if download should be blocked for hunt_report without terrain data
+  const isHuntReport = orderDetails?.productType === 'hunt_report';
+  const huntDownloadBlocked = isHuntReport && !terrainDataReady;
 
   const handleDownload = async () => {
     if (!orderId) return;
@@ -156,9 +208,24 @@ function SuccessContent() {
             )}
 
             <div className="space-y-4">
+              {/* Part 1: Show warning when hunt_report terrainData not yet available */}
+              {huntDownloadBlocked && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-amber-800 text-sm font-medium">
+                      Run the Terrain Analyzer first to generate your Hunt Report
+                    </p>
+                    <p className="text-amber-600 text-xs mt-1">
+                      Your download will unlock automatically when complete.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <Button
                 onClick={handleDownload}
-                disabled={isDownloading || downloadComplete}
+                disabled={isDownloading || downloadComplete || huntDownloadBlocked}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white h-12"
               >
                 {isDownloading ? (
@@ -171,18 +238,23 @@ function SuccessContent() {
                     <CheckCircle className="w-5 h-5 mr-2" />
                     Downloaded!
                   </>
+                ) : huntDownloadBlocked ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Waiting for Terrain Analysis...
+                  </>
                 ) : (
                   <>
                     <Download className="w-5 h-5 mr-2" />
-                    Download Land Intelligence Report
+                    {isHuntReport ? 'Download Hunt Package (2 Reports)' : 'Download Land Intelligence Report'}
                   </>
                 )}
               </Button>
 
-              {orderDetails?.productType === 'hunt_report' && (
+              {isHuntReport && (
                 <div style={{marginTop: 16, textAlign: 'center'}}>
                   <a
-                    href={`/intel?lat=${orderDetails.parcelLat}&lng=${orderDetails.parcelLng}&address=${encodeURIComponent(orderDetails.parcelAddress)}`}
+                    href={`/intel?lat=${orderDetails?.parcelLat}&lng=${orderDetails?.parcelLng}&address=${encodeURIComponent(orderDetails?.parcelAddress || '')}&orderId=${orderId}`}
                     style={{
                       display: 'inline-block',
                       background: '#1a3a2a',
@@ -200,9 +272,16 @@ function SuccessContent() {
                   <p style={{fontSize: 11, color: '#666', marginTop: 8}}>
                     Your parcel is saved — access your Terrain Analyzer anytime
                   </p>
-                  <p style={{fontSize: 13, color: '#666', textAlign: 'center', marginTop: 8}}>
-                    Open your analyzer, run the terrain analysis, then click &quot;Download Parcel Hunt File&quot; inside the analyzer to get your Hunt Intelligence Report.
-                  </p>
+                  {!terrainDataReady && (
+                    <p style={{fontSize: 13, color: '#666', textAlign: 'center', marginTop: 8}}>
+                      Open your analyzer, run the terrain analysis, then click &quot;Download Parcel Hunt File&quot; inside the analyzer to get your Hunt Intelligence Report. Your download button here will also unlock automatically.
+                    </p>
+                  )}
+                  {terrainDataReady && (
+                    <p style={{fontSize: 12, color: '#2d6a4f', textAlign: 'center', marginTop: 8, fontWeight: 600}}>
+                      ✅ Terrain analysis complete — your Hunt Package is ready to download above!
+                    </p>
+                  )}
                 </div>
               )}
 

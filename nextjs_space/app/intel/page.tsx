@@ -1786,6 +1786,8 @@ function DeerIntelContent() {
   const urlLng = parseFloat(searchParams.get('lng') || '-94.345581');
   const urlAddress = searchParams.get('address') || 'Sample Property';
   const urlAcreage = searchParams.get('acreage');
+  // Part 3: orderId from URL param (checkout success link) takes priority over localStorage
+  const urlOrderId = searchParams.get('orderId');
   const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features
   // Demo mode: ?demo=true → always load Pineville parcel, skip parcel lookup
   const demoMode = searchParams.get('demo') === 'true';
@@ -2565,10 +2567,12 @@ function DeerIntelContent() {
       };
 
       // Save terrain results to order for report generation
+      // Part 3: prefer URL param orderId (from checkout success link) over localStorage
+      // This eliminates the broken-tab race condition where localStorage isn't shared across tabs
       try {
-        const savedOrder = localStorage.getItem('tfp_current_order_id');
-        if (savedOrder) {
-          await fetch(`/api/orders/${savedOrder}/save-terrain`, {
+        const targetOrderId = urlOrderId || localStorage.getItem('tfp_current_order_id');
+        if (targetOrderId) {
+          await fetch(`/api/orders/${targetOrderId}/save-terrain`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2604,7 +2608,7 @@ function DeerIntelContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory]);
+  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, urlOrderId]);
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
