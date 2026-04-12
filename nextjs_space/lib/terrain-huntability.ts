@@ -47,6 +47,8 @@ import {
   type TerrainFeaturePoint,
 } from './dem-analysis';
 
+import { pointInAnyWaterBody } from './terrain-raster';
+
 // ========== CONFIGURATION ==========
 
 // Grid resolution for huntability analysis
@@ -115,6 +117,8 @@ export interface HuntabilityInput {
     ridges_secondary?: GeoJSON.FeatureCollection;
     saddle_nodes?: GeoJSON.FeatureCollection;
   } | null;
+  /** NHD water body polygons — cells inside are excluded from corridors + bedding */
+  waterBodies?: Array<{ coordinates: number[][][] }>;
 }
 
 export interface HuntabilityCell {
@@ -565,10 +569,19 @@ function computeDrainagePenalty(grid: HuntabilityGrid): void {
 /**
  * Compute the travel favorability surface by combining terrain components.
  */
-function computeFavorabilitySurface(grid: HuntabilityGrid): void {
+function computeFavorabilitySurface(
+  grid: HuntabilityGrid,
+  waterBodies?: Array<{ coordinates: number[][][] }>
+): void {
   for (let r = 0; r < grid.rows; r++) {
     for (let c = 0; c < grid.cols; c++) {
       const cell = grid.cells[r][c];
+
+      // Water body exclusion — zero out cells inside water
+      if (waterBodies?.length && pointInAnyWaterBody(cell.lng, cell.lat, waterBodies)) {
+        cell.favorability = 0;
+        continue;
+      }
       
       // Weighted combination
       let favorability = 
@@ -1525,7 +1538,8 @@ const BEDDING_CONFIG = {
  */
 function computeBeddingProbability(
   grid: HuntabilityGrid, 
-  corridors: Corridor[]
+  corridors: Corridor[],
+  waterBodies?: Array<{ coordinates: number[][][] }>
 ): void {
   // Build a quick lookup for corridor cells
   const corridorCells = new Set<string>();
@@ -1538,6 +1552,13 @@ function computeBeddingProbability(
   for (let r = 1; r < grid.rows - 1; r++) {
     for (let c = 1; c < grid.cols - 1; c++) {
       const cell = grid.cells[r][c];
+
+      // Zero out bedding probability for water body cells
+      if (waterBodies?.length && pointInAnyWaterBody(cell.lng, cell.lat, waterBodies)) {
+        (cell as any).bedding_probability = 0;
+        (cell as any).bedding_factors = null;
+        continue;
+      }
       
       // v3.6.1: Tightened upper-slope scoring
       // Sweet spot narrowed to 0.45-0.70 (ridge-shoulder focus)
@@ -1672,7 +1693,7 @@ function computeBeddingProbability(
  * v3.6.1: Extract bedding zones from computed probabilities.
  * Tightened with prominence filter, patch quality gate, and expanded neighborhood.
  */
-function extractBeddingZones(grid: HuntabilityGrid): BeddingZone[] {
+function extractBeddingZones(grid: HuntabilityGrid, waterBodies?: Array<{ coordinates: number[][][] }>): BeddingZone[] {
   const candidates: Array<{
     row: number;
     col: number;
@@ -1773,6 +1794,10 @@ function extractBeddingZones(grid: HuntabilityGrid): BeddingZone[] {
     
     if (tooClose) continue;
     
+    // Skip zones inside water bodies
+    const zCell = grid.cells[cand.row][cand.col];
+    if (waterBodies?.length && pointInAnyWaterBody(zCell.lng, zCell.lat, waterBodies)) continue;
+    
     // Mark zone and surrounding cells as used
     for (let dr = -1; dr <= 1; dr++) {
       for (let dc = -1; dc <= 1; dc++) {
@@ -1859,7 +1884,7 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   console.log('[Huntability] Terrain components computed');
   
   // Step 2: Build travel favorability surface
-  computeFavorabilitySurface(grid);
+  computeFavorabilitySurface(grid, input.waterBodies);
   console.log('[Huntability] Favorability surface computed');
   
   // Step 3: Extract travel corridors
@@ -1878,8 +1903,8 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   console.log('[Huntability] Score computed:', { overall: score.overall, grade: score.grade });
   
   // Step 6 (v3.6.0): Compute bedding probability zones
-  computeBeddingProbability(grid, corridors);
-  const beddingZones = extractBeddingZones(grid);
+  computeBeddingProbability(grid, corridors, input.waterBodies);
+  const beddingZones = extractBeddingZones(grid, input.waterBodies);
   console.log('[Huntability] Bedding zones extracted:', beddingZones.length);
   
   // Convert to GeoJSON

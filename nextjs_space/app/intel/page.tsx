@@ -46,7 +46,7 @@ import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corrid
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
-import { buildTerrainRaster, primeStandSitesToGeoJSON, type RasterGrid } from '@/lib/terrain-raster';
+import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
@@ -1644,7 +1644,8 @@ function generateGhostSaddles(
 // Generate draw/funnel extensions beyond parcel boundary
 function generateDrawExtensions(
   funnels: GeoJSON.FeatureCollection,
-  parcelCoords: number[][]
+  parcelCoords: number[][],
+  waterBodies?: Array<{ coordinates: number[][][] }>
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   const EXTENSION_LENGTH = 60; // meters beyond boundary
@@ -1673,6 +1674,9 @@ function generateDrawExtensions(
 
       if (distToBoundary < BOUNDARY_THRESHOLD) {
         const extensionEnd = movePoint(closest.point, direction, EXTENSION_LENGTH);
+
+        // Water body exclusion — skip if extension projects into water
+        if (waterBodies?.length && pointInAnyWaterBody(extensionEnd[0], extensionEnd[1], waterBodies)) return;
 
         // Create dashed extension line
         features.push({
@@ -3169,6 +3173,7 @@ function DeerIntelContent() {
   // were included. Fix: refit is ALWAYS parcel-only. Stands outside parcel
   // are visible if the user pans, but never force camera zoom-out.
   const hasPostAnalysisFit = useRef(false);
+  const nhdWaterBodiesRef = useRef<Array<{ coordinates: number[][][] }>>([]);
 
   // ========== GENERATE EDGE INTELLIGENCE DATA ==========
   useEffect(() => {
@@ -3219,7 +3224,7 @@ function DeerIntelContent() {
       const ghostBedding = generateGhostBedding(cleanBeddingFC, parcelCoords);
       const funnelsFC = layers.funnels || { type: 'FeatureCollection', features: [] };
       const ghostSaddles = generateGhostSaddles(funnelsFC, parcelCoords);
-      const drawExtensions = generateDrawExtensions(funnelsFC, parcelCoords);
+      const drawExtensions = generateDrawExtensions(funnelsFC, parcelCoords, nhdWaterBodiesRef.current.length ? nhdWaterBodiesRef.current : undefined);
       const pressureArrows = generatePressureArrows(corridorsFC, parcelCoords);
       const adjacentBoundary = generateAdjacentParcelBoundary(parcelCoords);
 
@@ -3505,7 +3510,7 @@ function DeerIntelContent() {
         } else {
           console.warn('[Backbone] Ridge spine generation failed, using empty fallback');
           // Generate synthetic as fallback
-          const synthetic = generateSyntheticRidgeSpines(parcelPolygon);
+          const synthetic = generateSyntheticRidgeSpines(parcelPolygon, nhdWaterBodiesRef.current?.length ? nhdWaterBodiesRef.current : undefined);
           setRidgeSpineData({
             ridges_primary: synthetic.ridges_primary,
             ridges_secondary: synthetic.ridges_secondary,
@@ -3594,6 +3599,7 @@ function DeerIntelContent() {
             ridges_secondary: ridgeSpineData.ridges_secondary,
             saddle_nodes: ridgeSpineData.saddle_nodes,
           } : undefined,
+          waterBodies: nhdWaterBodiesRef.current?.length ? nhdWaterBodiesRef.current : undefined,
         });
 
         if (result) {
@@ -4057,6 +4063,7 @@ function DeerIntelContent() {
             maxLat = Math.max(maxLat, c[1]);
           }
           nhdWaterBodies = await fetchNHDWaterBodies(minLat, maxLat, minLng, maxLng);
+          nhdWaterBodiesRef.current = nhdWaterBodies;
           if (nhdWaterBodies.length > 0) {
             console.log(`[NHD] Fetched ${nhdWaterBodies.length} water body polygon(s) for exclusion`);
           }

@@ -32,6 +32,7 @@ import type {
   RidgeSpineMetadata,
   RidgeTier,
 } from '@/types/terrain';
+import { pointInAnyWaterBody } from './terrain-raster';
 
 // ========== CONSERVATIVE THRESHOLDS FOR BACKBONE DETECTION ==========
 // Higher thresholds = fewer but more confident ridges
@@ -330,7 +331,8 @@ function computeBackboneConfidence(
  * If no backbone shows, that's better than showing a wrong one.
  */
 export function generateSyntheticRidgeSpines(
-  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+  waterBodies?: Array<{ coordinates: number[][][] }>
 ): RidgeSpineResponse {
   const startTime = Date.now();
   
@@ -441,7 +443,42 @@ export function generateSyntheticRidgeSpines(
     }
   }
   
-  const primaryLength = lineLength(primaryCoords);
+  // Filter out coordinates inside water bodies
+  const filteredPrimaryCoords = waterBodies?.length
+    ? primaryCoords.filter(c => !pointInAnyWaterBody(c[0], c[1], waterBodies))
+    : primaryCoords;
+  if (filteredPrimaryCoords.length < 2) {
+    return {
+      success: true,
+      bbox: [
+        Math.min(...coords.map(c => c[0])),
+        Math.min(...coords.map(c => c[1])),
+        Math.max(...coords.map(c => c[0])),
+        Math.max(...coords.map(c => c[1])),
+      ] as [number, number, number, number],
+      ridges_primary: { type: 'FeatureCollection' as const, features: [] },
+      ridges_secondary: { type: 'FeatureCollection' as const, features: [] },
+      saddle_nodes: { type: 'FeatureCollection' as const, features: [] },
+      metadata: {
+        processing_time_seconds: (Date.now() - startTime) / 1000,
+        dem_source: 'SYNTHETIC_AXIS',
+        resolution_m: 0,
+        thresholds: {
+          min_prominence_ft_primary: MIN_PROMINENCE_FT_PRIMARY,
+          min_prominence_ft_secondary: MIN_PROMINENCE_FT_SECONDARY,
+          min_length_m_primary: MIN_LENGTH_M_PRIMARY,
+          min_length_m_secondary: MIN_LENGTH_M_SECONDARY,
+        },
+        total_ridge_length_m: 0,
+        ridge_count_primary: 0,
+        ridge_count_secondary: 0,
+        saddle_count: 0,
+        fallback_reason: 'Primary ridge entirely within water body',
+      },
+    };
+  }
+
+  const primaryLength = lineLength(filteredPrimaryCoords);
   
   const primaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [{
     type: 'Feature',
@@ -456,7 +493,7 @@ export function generateSyntheticRidgeSpines(
     },
     geometry: {
       type: 'LineString',
-      coordinates: primaryCoords,
+      coordinates: filteredPrimaryCoords,
     },
   }];
   
@@ -464,8 +501,8 @@ export function generateSyntheticRidgeSpines(
   const secondaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
   
   if (parcelAcres >= 25) {
-    const midIdx = Math.floor(primaryCoords.length / 2);
-    const branchStart = primaryCoords[midIdx];
+    const midIdx = Math.floor(filteredPrimaryCoords.length / 2);
+    const branchStart = filteredPrimaryCoords[midIdx];
     const branchBearing = (axisBearing + 35 + (seed % 30)) % 360;
     const branchLen = maxDist * 0.25;
     
@@ -473,12 +510,20 @@ export function generateSyntheticRidgeSpines(
     // Inset branch end away from boundary
     const branchMid = movePoint(branchStart, branchBearing, branchLen * 0.5);
     
-    const branchCoords: [number, number][] = [
+    const branchCoordsRaw: [number, number][] = [
       branchStart,
       movePoint(branchMid, (branchBearing + 90) % 360, branchLen * 0.03),
       movePoint(branchEnd, (branchBearing + 180) % 360, branchLen * 0.1),
     ];
+
+    // Filter branch coords inside water bodies
+    const branchCoords = waterBodies?.length
+      ? branchCoordsRaw.filter(c => !pointInAnyWaterBody(c[0], c[1], waterBodies))
+      : branchCoordsRaw;
     
+    if (branchCoords.length < 2) {
+      // Branch entirely in water — skip secondary
+    } else {
     const branchLength = lineLength(branchCoords);
     
     secondaryFeatures.push({
@@ -497,19 +542,20 @@ export function generateSyntheticRidgeSpines(
         coordinates: branchCoords,
       },
     });
+    } // end else (branch not in water)
   }
   
   // Generate 1-2 saddle nodes where backbone changes direction most
   const saddleFeatures: GeoJSON.Feature<GeoJSON.Point, SaddleNodeProperties>[] = [];
   
-  if (primaryCoords.length >= 4) {
+  if (filteredPrimaryCoords.length >= 4) {
     // Place saddle at point of maximum curvature along backbone
     let maxCurve = 0;
-    let saddleIdx = Math.floor(primaryCoords.length / 2);
+    let saddleIdx = Math.floor(filteredPrimaryCoords.length / 2);
     
-    for (let i = 1; i < primaryCoords.length - 1; i++) {
-      const b1 = calculateBearing(primaryCoords[i - 1], primaryCoords[i]);
-      const b2 = calculateBearing(primaryCoords[i], primaryCoords[i + 1]);
+    for (let i = 1; i < filteredPrimaryCoords.length - 1; i++) {
+      const b1 = calculateBearing(filteredPrimaryCoords[i - 1], filteredPrimaryCoords[i]);
+      const b2 = calculateBearing(filteredPrimaryCoords[i], filteredPrimaryCoords[i + 1]);
       const curve = bearingDiff(b1, b2);
       if (curve > maxCurve) {
         maxCurve = curve;
@@ -527,7 +573,7 @@ export function generateSyntheticRidgeSpines(
       },
       geometry: {
         type: 'Point',
-        coordinates: primaryCoords[saddleIdx],
+        coordinates: filteredPrimaryCoords[saddleIdx],
       },
     });
   }

@@ -103,7 +103,7 @@ function pointInPolygon(lng: number, lat: number, ring: number[][]): boolean {
 }
 
 // ============ WATER BODY EXCLUSION ============
-function pointInAnyWaterBody(
+export function pointInAnyWaterBody(
   lng: number,
   lat: number,
   waterBodies: Array<{ coordinates: number[][][] }>
