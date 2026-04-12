@@ -3698,33 +3698,36 @@ function DeerIntelContent() {
         const filteredBedProb = mapInst
           ? filterBeddingNearBuildings(huntabilityData.beddingProbabilityGeoJSON, mapInst, 120)
           : huntabilityData.beddingProbabilityGeoJSON;
-        console.log('[BeddingDebug] Sample features:', 
-          filteredBedProb?.features?.slice(0,3).map((f: any) => ({
-            beddingType: f.properties?.beddingType,
-            beddingScore: f.properties?.beddingScore,
-            id: f.properties?.id,
-          }))
-        );
         beddingProbSource.setData(filteredBedProb);
 
         // Force Mapbox to re-evaluate data-driven paint expressions against new beddingType values
-        if (map.getLayer('tfp-bedding-probability-fill')) {
-          map.setPaintProperty('tfp-bedding-probability-fill', 'circle-color', [
-            'match', ['get', 'beddingType'],
-            'sanctuary', '#1a5c2a',
-            'thermal',   '#52b788',
-            'staging',   '#95d5b2',
-            'escape',    '#74c69d',
-            '#52b788',
-          ]);
-          map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', [
-            'match', ['get', 'beddingType'],
-            'sanctuary', 0.45,
-            'thermal',   0.35,
-            'staging',   0.28,
-            'escape',    0.32,
-            0.35,
-          ]);
+        try {
+          if (map.getLayer('tfp-bedding-probability-fill')) {
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-color', [
+              'match', ['get', 'beddingType'],
+              'sanctuary', '#1a5c2a',
+              'thermal',   '#52b788',
+              'staging',   '#95d5b2',
+              'escape',    '#74c69d',
+              '#52b788',
+            ]);
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', [
+              'match', ['get', 'beddingType'],
+              'sanctuary', 0.45,
+              'thermal',   0.35,
+              'staging',   0.28,
+              'escape',    0.32,
+              0.35,
+            ]);
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
+              'interpolate', ['linear'], ['get', 'beddingScore'],
+              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
+              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 26, 'staging', 16, 20],
+              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 34, 'staging', 20, 28],
+            ]);
+          }
+        } catch (e) {
+          console.warn('[BeddingStyle] setPaintProperty failed:', e);
         }
       }
 
