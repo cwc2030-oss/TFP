@@ -4487,7 +4487,7 @@ function DeerIntelContent() {
       // v3.6.0: Bedding Probability visibility — smooth fade
       fadeToggleLayers(map, showBeddingProbability, [
         { id: 'tfp-bedding-probability-glow', targetOpacity: 0.4, opacityProp: 'circle-opacity' },
-        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.25, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.40, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-outline', targetOpacity: 0.5 },
       ], FADE_IN);
     } catch (err) {
@@ -6028,57 +6028,93 @@ function DeerIntelContent() {
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
         if (!map.getSource('tfp-bedding-probability')) {
           map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
-          // v3.6.1: Outer glow — tighter, more compact pockets
+          // v3.7: Outer glow — deeper for sanctuary zones
           map.addLayer({
             id: 'tfp-bedding-probability-glow',
             type: 'circle',
             source: 'tfp-bedding-probability',
-            layout: { visibility: 'none' }, // Controlled by showBeddingProbability toggle
+            layout: { visibility: 'none' },
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, 28,  // v2: raised threshold, smaller radius
-                0.75, 38,  // High probability = modest radius increase
-                1.0, 45,   // Max stays compact
+                0.55, 28,
+                0.75, 38,
+                1.0, 45,
               ],
-              'circle-color': LAYER_COLORS.beddingProbabilityGlow,
-              'circle-opacity': 0.15,
+              'circle-color': [
+                'match', ['get', 'beddingType'],
+                'sanctuary', '#1a5c2a',
+                '#2d6a4f',
+              ] as any,
+              'circle-opacity': [
+                'match', ['get', 'beddingType'],
+                'sanctuary', 0.25,
+                0.15,
+              ] as any,
               'circle-blur': 1.2,
             },
           });
-          // v3.6.1: Inner fill — tighter pockets
+          // v3.7: Inner fill — data-driven colors by bedding type
           map.addLayer({
             id: 'tfp-bedding-probability-fill',
             type: 'circle',
             source: 'tfp-bedding-probability',
-            layout: { visibility: 'none' }, // Controlled by showBeddingProbability toggle
+            layout: { visibility: 'none' },
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, 14,  // v2: tighter
-                0.75, 20,  
-                1.0, 28,   // Matches radiusM config
-              ],
-              'circle-color': LAYER_COLORS.beddingProbability,
-              'circle-opacity': 0.30,
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 26, 'staging', 16, 20],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 34, 'staging', 20, 28],
+              ] as any,
+              'circle-color': [
+                'match', ['get', 'beddingType'],
+                'sanctuary', '#1a5c2a',
+                'thermal',   '#52b788',
+                'staging',   '#95d5b2',
+                'escape',    '#74c69d',
+                '#52b788',
+              ] as any,
+              'circle-opacity': [
+                'match', ['get', 'beddingType'],
+                'sanctuary', 0.45,
+                'thermal',   0.35,
+                'staging',   0.28,
+                'escape',    0.32,
+                0.35,
+              ] as any,
             },
           });
-          // v3.6.1: Outline ring — matches fill
+          // v3.7: Outline ring — type-specific stroke
           map.addLayer({
             id: 'tfp-bedding-probability-outline',
             type: 'circle',
             source: 'tfp-bedding-probability',
-            layout: { visibility: 'none' }, // Controlled by showBeddingProbability toggle
+            layout: { visibility: 'none' },
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, 14,
-                0.75, 20,
-                1.0, 28,
-              ],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 26, 'staging', 16, 20],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 34, 'staging', 20, 28],
+              ] as any,
               'circle-color': 'transparent',
-              'circle-stroke-color': LAYER_COLORS.beddingProbabilityOutline,
-              'circle-stroke-width': 2,
+              'circle-stroke-color': [
+                'match', ['get', 'beddingType'],
+                'sanctuary', '#1a5c2a',
+                'thermal',   '#40916c',
+                'staging',   '#74c69d',
+                'escape',    '#52b788',
+                '#40916c',
+              ] as any,
+              'circle-stroke-width': [
+                'match', ['get', 'beddingType'],
+                'sanctuary', 2.5,
+                'thermal',   1.8,
+                'staging',   1.2,
+                'escape',    1.5,
+                1.8,
+              ] as any,
               'circle-stroke-opacity': 0.45,
             },
           });
@@ -6789,12 +6825,14 @@ function DeerIntelContent() {
             detail: {
               id: props.id,
               beddingScore: props.beddingScore || 0.5,
+              beddingType: props.beddingType || 'thermal',
               upperSlope: props.upperSlope || 0,
-              leewardAspect: props.leewardAspect || 0,
+              solarAspect: props.solarAspect || 0,
               ridgeDistance: props.ridgeDistance || 0,
               slopeSuitability: props.slopeSuitability || 0,
               terrainShelter: props.terrainShelter || 0,
               corridorOffset: props.corridorOffset || 0,
+              humanPressure: props.humanPressure || 0,
               radiusM: props.radiusM || 35,
               lng: coords[0],
               lat: coords[1],
@@ -7848,12 +7886,14 @@ function DeerIntelContent() {
         {
           score: detail.beddingScore,
           beddingScore: detail.beddingScore,
+          beddingType: detail.beddingType,
           upperSlope: detail.upperSlope,
-          leewardAspect: detail.leewardAspect,
+          solarAspect: detail.solarAspect,
           ridgeDistance: detail.ridgeDistance,
           slopeSuitability: detail.slopeSuitability,
           terrainShelter: detail.terrainShelter,
           corridorOffset: detail.corridorOffset,
+          humanPressure: detail.humanPressure,
         },
         { lng: detail.lng, lat: detail.lat }
       );
@@ -9398,31 +9438,49 @@ function DeerIntelContent() {
               <div className="p-3 border-b border-white/[0.06]">
                 <div className="space-y-1">
                   
-                  {/* v3.6.1: Bedding Probability Toggle (v2 tightening) */}
+                  {/* v3.7: Bedding Zone Toggle with type legend */}
                   {(() => {
                     const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
                     const hasData = beddingCount > 0;
                     
                     return (
-                      <button
-                        onClick={() => setShowBeddingProbability(v => !v)}
-                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                          !huntabilityData ? 'opacity-40 cursor-not-allowed' :
-                          showBeddingProbability ? 'bg-purple-900/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                        }`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.beddingProbability, opacity: showBeddingProbability ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
-                        {hasData ? (
-                          <span className="text-[9px] text-purple-300 px-1.5 py-0.5 bg-purple-800/40 rounded">
-                            {beddingCount}
-                          </span>
-                        ) : (
-                          <span className="text-[8px] text-purple-400/60 px-1 py-0.5 bg-purple-900/30 rounded uppercase tracking-wider">
-                            v2
-                          </span>
+                      <>
+                        <button
+                          onClick={() => setShowBeddingProbability(v => !v)}
+                          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
+                            !huntabilityData ? 'opacity-40 cursor-not-allowed' :
+                            showBeddingProbability ? 'bg-emerald-900/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#52b788', opacity: showBeddingProbability ? 1 : 0.4 }} />
+                          <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
+                          {hasData ? (
+                            <span className="text-[9px] text-emerald-300 px-1.5 py-0.5 bg-emerald-800/40 rounded">
+                              {beddingCount}
+                            </span>
+                          ) : (
+                            <span className="text-[8px] text-emerald-400/60 px-1 py-0.5 bg-emerald-900/30 rounded uppercase tracking-wider">
+                              v3
+                            </span>
+                          )}
+                        </button>
+                        {showBeddingProbability && hasData && (
+                          <div className="ml-5 mt-1 space-y-0.5">
+                            {[
+                              { type: 'Sanctuary', color: '#1a5c2a', desc: 'Remote ridge pocket' },
+                              { type: 'Thermal', color: '#52b788', desc: 'South-facing warmth' },
+                              { type: 'Staging', color: '#95d5b2', desc: 'Near corridor offset' },
+                              { type: 'Escape', color: '#74c69d', desc: 'High ridge cover' },
+                            ].map(b => (
+                              <div key={b.type} className="flex items-center gap-1.5 text-[9px]">
+                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                                <span className="text-stone-400">{b.type}</span>
+                                <span className="text-stone-600">— {b.desc}</span>
+                              </div>
+                            ))}
+                          </div>
                         )}
-                      </button>
+                      </>
                     );
                   })()}
                 </div>

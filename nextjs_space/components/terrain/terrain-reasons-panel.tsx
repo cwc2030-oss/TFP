@@ -417,12 +417,21 @@ export function extractBeddingReasons(
     });
   }
   
-  if (props.leewardAspect > 0.1) {
+  if (props.solarAspect > 0.1) {
     reasons.push({
-      key: 'leeward_setup',
-      label: 'Leeward Aspect',
-      value: props.leewardAspect,
-      description: 'Wind-sheltered side of ridge/hill—thermal advantage.',
+      key: 'solar_aspect',
+      label: 'Solar Aspect',
+      value: props.solarAspect,
+      description: 'South/SE-facing slope holds thermal warmth—November advantage.',
+    });
+  }
+  
+  if (props.humanPressure > 0.1) {
+    reasons.push({
+      key: 'human_pressure',
+      label: 'Human Pressure Distance',
+      value: props.humanPressure,
+      description: 'Well away from structures and human activity zones.',
     });
   }
   

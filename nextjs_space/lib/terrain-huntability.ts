@@ -185,19 +185,23 @@ export interface HuntabilityScore {
   explanation: string;
 }
 
+export type BeddingType = 'sanctuary' | 'thermal' | 'staging' | 'escape';
+
 export interface BeddingZone {
   id: number;
   lng: number;
   lat: number;
   probability: number;     // 0-1 bedding likelihood
   radiusM: number;
+  beddingType: BeddingType; // v3.7: classified by dominant factor profile
   factors: {
     upperSlope: number;      // 0-1 upper-slope preference
-    leewardAspect: number;   // 0-1 leeward aspect bonus
-    ridgeDistance: number;   // 0-1 ridge-distance band (just below crest)
+    solarAspect: number;     // 0-1 south/SE aspect thermal warmth
+    ridgeDistance: number;    // 0-1 ridge-distance band (just below crest)
     slopeSuitability: number; // 0-1 moderate slope
     terrainShelter: number;  // 0-1 concave terrain shelter
     corridorOffset: number;  // 0-1 offset from primary corridors
+    humanPressure: number;   // 0-1 distance from structures
   };
 }
 
@@ -1782,11 +1786,12 @@ function extractBeddingZones(grid: HuntabilityGrid, waterBodies?: Array<{ coordi
         patchQuality,
         factors: (cell as any).bedding_factors || {
           upperSlope: 0,
-          leewardAspect: 0,
+          solarAspect: 0,
           ridgeDistance: 0,
           slopeSuitability: 0,
           terrainShelter: 0,
           corridorOffset: 0,
+          humanPressure: 0,
         },
       });
     }
@@ -1832,6 +1837,17 @@ function extractBeddingZones(grid: HuntabilityGrid, waterBodies?: Array<{ coordi
     
     // Get coordinates
     const cell = grid.cells[cand.row][cand.col];
+
+    // v3.7: Classify bedding type by dominant factor profile
+    const beddingType: BeddingType = (() => {
+      const f = cand.factors;
+      if (!f) return 'thermal';
+      if (f.humanPressure >= 0.85 && f.ridgeDistance >= 0.75) return 'sanctuary';
+      if (f.solarAspect >= 0.60 && f.terrainShelter >= 0.60) return 'thermal';
+      if (f.corridorOffset >= 0.80 && f.humanPressure >= 0.60) return 'staging';
+      if (f.upperSlope >= 0.75 && f.ridgeDistance >= 0.50) return 'escape';
+      return 'thermal';
+    })();
     
     zones.push({
       id: zones.length + 1,
@@ -1839,6 +1855,7 @@ function extractBeddingZones(grid: HuntabilityGrid, waterBodies?: Array<{ coordi
       lat: cell.lat,
       probability: cand.probability,
       radiusM: BEDDING_CONFIG.radiusM,
+      beddingType,
       factors: cand.factors,
     });
   }
@@ -1856,14 +1873,16 @@ function beddingZonesToGeoJSON(zones: BeddingZone[]): GeoJSON.FeatureCollection 
     properties: {
       id: `bedding_${zone.id}`,
       beddingScore: zone.probability,
+      beddingType: zone.beddingType || 'thermal',
       radiusM: zone.radiusM,
       // Expose factors for terrain reasons panel
       upperSlope: zone.factors.upperSlope,
-      leewardAspect: zone.factors.leewardAspect,
+      solarAspect: zone.factors.solarAspect,
       ridgeDistance: zone.factors.ridgeDistance,
       slopeSuitability: zone.factors.slopeSuitability,
       terrainShelter: zone.factors.terrainShelter,
       corridorOffset: zone.factors.corridorOffset,
+      humanPressure: zone.factors.humanPressure,
     },
     geometry: {
       type: 'Point' as const,
