@@ -3174,6 +3174,7 @@ function DeerIntelContent() {
   // are visible if the user pans, but never force camera zoom-out.
   const hasPostAnalysisFit = useRef(false);
   const nhdWaterBodiesRef = useRef<Array<{ coordinates: number[][][] }>>([]);
+  const structurePointsRef = useRef<[number, number][]>([]);
 
   // ========== GENERATE EDGE INTELLIGENCE DATA ==========
   useEffect(() => {
@@ -3631,6 +3632,7 @@ function DeerIntelContent() {
             saddle_nodes: ridgeSpineData.saddle_nodes,
           } : undefined,
           waterBodies: nhdWaterBodiesRef.current?.length ? nhdWaterBodiesRef.current : undefined,
+          structurePoints: structurePointsRef.current?.length ? structurePointsRef.current : undefined,
         });
 
         if (result) {
@@ -4103,6 +4105,7 @@ function DeerIntelContent() {
       if (parcelCoordsForGrid && parcelCoordsForGrid.length >= 3) {
         // Extract building centroids for structure proximity filter
         const structurePts = extractBuildingCentroids(map);
+        structurePointsRef.current = structurePts;
         if (structurePts.length) {
           console.log(`[TerrainRaster] Passing ${structurePts.length} structure point(s) for stand filtering`);
         }

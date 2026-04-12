@@ -119,6 +119,8 @@ export interface HuntabilityInput {
   } | null;
   /** NHD water body polygons — cells inside are excluded from corridors + bedding */
   waterBodies?: Array<{ coordinates: number[][][] }>;
+  /** Building/structure centroids [lng, lat] — used for human-pressure bedding factor */
+  structurePoints?: [number, number][];
 }
 
 export interface HuntabilityCell {
@@ -1510,14 +1512,15 @@ function convergenceNodesToGeoJSON(nodes: ConvergenceNode[]): GeoJSON.FeatureCol
  */
 
 // v3.6.1: Bedding Probability v2 — Tightened weights
-// Shifted focus to ridge-shoulder, shelter, and corridor offset
+// v3.7 — 7-factor bedding model: solar aspect replaces leeward, adds human pressure
 const BEDDING_WEIGHTS = {
   upperSlope: 0.18,        // Upper-slope elevation position
-  leewardAspect: 0.14,     // Leeward (NW/N in most regions) bonus
-  ridgeDistance: 0.24,     // Ridge-shoulder band (strengthened)
-  slopeSuitability: 0.12,  // Moderate slope (8-25%)
-  terrainShelter: 0.18,    // Concave terrain pocket (strengthened)
-  corridorOffset: 0.14,    // Not on movement lanes (strengthened)
+  solarAspect: 0.16,       // South/SE facing = thermal warmth (MO November)
+  ridgeDistance: 0.20,     // Ridge-shoulder band
+  slopeSuitability: 0.10,  // Moderate slope (8-25%)
+  terrainShelter: 0.18,    // Concave terrain pocket
+  corridorOffset: 0.10,    // Not on movement lanes
+  humanPressure: 0.08,     // Distance from structures (barns, houses)
 };
 
 // v3.6.1: Bedding detection thresholds — tightened for fewer, better pockets
@@ -1539,7 +1542,8 @@ const BEDDING_CONFIG = {
 function computeBeddingProbability(
   grid: HuntabilityGrid, 
   corridors: Corridor[],
-  waterBodies?: Array<{ coordinates: number[][][] }>
+  waterBodies?: Array<{ coordinates: number[][][] }>,
+  structurePoints?: [number, number][]
 ): void {
   // Build a quick lookup for corridor cells
   const corridorCells = new Set<string>();
@@ -1577,15 +1581,18 @@ function computeBeddingProbability(
         upperSlope = 0.10; // Valley/low terrain — deer don't bed here
       }
       
-      // 2. Leeward aspect (simplified: assume NW/N winds dominant)
-      const ridgeN = grid.cells[r - 1][c].ridge_prox;
-      const ridgeS = grid.cells[r + 1][c].ridge_prox;
-      const ridgeE = grid.cells[r][c + 1].ridge_prox;
-      const ridgeW = grid.cells[r][c - 1].ridge_prox;
-      
-      // Leeward = ridge is to the NW (upslope to NW = leeward on SE side)
-      const leewardSignal = (ridgeN + ridgeW) / 2 - (ridgeS + ridgeE) / 2;
-      const leewardAspect = leewardSignal > 0.05 ? Math.min(1, leewardSignal * 3) : 0;
+      // 2. Solar aspect — south/SE facing holds thermal warmth in MO November
+      const solarAspect = (() => {
+        const n = grid.cells[r - 1]?.[c]?.ridge_prox ?? cell.ridge_prox;
+        const s = grid.cells[r + 1]?.[c]?.ridge_prox ?? cell.ridge_prox;
+        const e = grid.cells[r]?.[c + 1]?.ridge_prox ?? cell.ridge_prox;
+        const w = grid.cells[r]?.[c - 1]?.ridge_prox ?? cell.ridge_prox;
+        // Positive southSignal = ridge mass to N/W, cell faces S/SE
+        const southSignal = (n - s + w - e) / 2;
+        if (southSignal > 0.08) return Math.min(1, southSignal * 4);
+        if (southSignal > 0.03) return 0.45;
+        return 0.10;
+      })();
       
       // v3.6.1: Ridge-distance band tightened (optimal: 0.55-0.70)
       // This is the "ridge-shoulder" — just below crest, sheltered
@@ -1667,24 +1674,42 @@ function computeBeddingProbability(
         }
       }
       
+      // 7. Human pressure — distance from structures (barns, houses)
+      const humanPressure = (() => {
+        if (!structurePoints || structurePoints.length === 0) return 0.75;
+        let minDistM = Infinity;
+        for (const sp of structurePoints) {
+          const dLat = (cell.lat - sp[1]) * 111320;
+          const dLng = (cell.lng - sp[0]) * 111320 * Math.cos(cell.lat * Math.PI / 180);
+          minDistM = Math.min(minDistM, Math.sqrt(dLat * dLat + dLng * dLng));
+        }
+        if (minDistM < 100) return 0.05;
+        if (minDistM < 200) return 0.25;
+        if (minDistM < 400) return 0.60;
+        if (minDistM < 600) return 0.85;
+        return 0.95;
+      })();
+
       // Store factors in cell (for inspection)
       (cell as any).bedding_factors = {
         upperSlope,
-        leewardAspect,
+        solarAspect,
         ridgeDistance,
         slopeSuitability,
         terrainShelter,
         corridorOffset,
+        humanPressure,
       };
       
-      // Weighted combination
+      // Weighted combination (7-factor v3.7)
       (cell as any).bedding_probability = 
-        upperSlope * BEDDING_WEIGHTS.upperSlope +
-        leewardAspect * BEDDING_WEIGHTS.leewardAspect +
-        ridgeDistance * BEDDING_WEIGHTS.ridgeDistance +
+        upperSlope      * BEDDING_WEIGHTS.upperSlope +
+        solarAspect     * BEDDING_WEIGHTS.solarAspect +
+        ridgeDistance    * BEDDING_WEIGHTS.ridgeDistance +
         slopeSuitability * BEDDING_WEIGHTS.slopeSuitability +
-        terrainShelter * BEDDING_WEIGHTS.terrainShelter +
-        corridorOffset * BEDDING_WEIGHTS.corridorOffset;
+        terrainShelter  * BEDDING_WEIGHTS.terrainShelter +
+        corridorOffset  * BEDDING_WEIGHTS.corridorOffset +
+        humanPressure   * BEDDING_WEIGHTS.humanPressure;
     }
   }
 }
@@ -1903,7 +1928,7 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   console.log('[Huntability] Score computed:', { overall: score.overall, grade: score.grade });
   
   // Step 6 (v3.6.0): Compute bedding probability zones
-  computeBeddingProbability(grid, corridors, input.waterBodies);
+  computeBeddingProbability(grid, corridors, input.waterBodies, input.structurePoints);
   const beddingZones = extractBeddingZones(grid, input.waterBodies);
   console.log('[Huntability] Bedding zones extracted:', beddingZones.length);
   
