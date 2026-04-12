@@ -3713,11 +3713,11 @@ function DeerIntelContent() {
             ]);
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', [
               'match', ['get', 'beddingType'],
-              'sanctuary', 0.28,
-              'thermal',   0.20,
-              'staging',   0.15,
-              'escape',    0.18,
-              0.20,
+              'sanctuary', 0.20,
+              'thermal',   0.14,
+              'staging',   0.10,
+              'escape',    0.13,
+              0.14,
             ]);
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
               'interpolate', ['linear'], ['get', 'beddingScore'],
@@ -3725,7 +3725,7 @@ function DeerIntelContent() {
               0.75, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
               1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 24, 'staging', 14, 20],
             ]);
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 0.85);
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 1.2);
           }
         } catch (e) {
           console.warn('[BeddingStyle] setPaintProperty failed:', e);
@@ -5163,9 +5163,12 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 4,          // Smaller
-              'circle-color': LAYER_COLORS.saddleNode,
-              'circle-opacity': 0.50,      // Subtle
+              'circle-radius': 5,
+              'circle-color': 'transparent',
+              'circle-stroke-color': '#f59e0b',
+              'circle-stroke-width': 2,
+              'circle-stroke-opacity': 0.80,
+              'circle-opacity': 0,
             },
           });
           map.addLayer({
@@ -5173,11 +5176,11 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 5,
+              'circle-radius': 7,
               'circle-color': 'transparent',
-              'circle-stroke-color': LAYER_COLORS.saddleNode,
+              'circle-stroke-color': '#f59e0b',
               'circle-stroke-width': 1,
-              'circle-stroke-opacity': 0.60,
+              'circle-stroke-opacity': 0.30,
             },
           });
         }
@@ -6059,7 +6062,7 @@ function DeerIntelContent() {
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
         if (!map.getSource('tfp-bedding-probability')) {
           map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
-          // v3.7: Outer glow — soft ambient halo
+          // v3.7: Outer glow — ultra-soft ambient halo
           map.addLayer({
             id: 'tfp-bedding-probability-glow',
             type: 'circle',
@@ -6077,12 +6080,8 @@ function DeerIntelContent() {
                 'sanctuary', '#1a5c2a',
                 '#2d6a4f',
               ] as any,
-              'circle-opacity': [
-                'match', ['get', 'beddingType'],
-                'sanctuary', 0.12,
-                0.08,
-              ] as any,
-              'circle-blur': 1.4,
+              'circle-opacity': 0.06,
+              'circle-blur': 1.8,
             },
           });
           // v3.7: Inner fill — softened data-driven colors by bedding type
@@ -6114,7 +6113,7 @@ function DeerIntelContent() {
                 'escape',    0.18,
                 0.20,
               ] as any,
-              'circle-blur': 0.85,
+              'circle-blur': 1.2,
             },
           });
           // v3.7: Outline ring — disabled (hard edges removed)
