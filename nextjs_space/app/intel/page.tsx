@@ -3699,6 +3699,26 @@ function DeerIntelContent() {
           ? filterBeddingNearBuildings(huntabilityData.beddingProbabilityGeoJSON, mapInst, 120)
           : huntabilityData.beddingProbabilityGeoJSON;
         beddingProbSource.setData(filteredBedProb);
+
+        // Force Mapbox to re-evaluate data-driven paint expressions against new beddingType values
+        if (map.getLayer('tfp-bedding-probability-fill')) {
+          map.setPaintProperty('tfp-bedding-probability-fill', 'circle-color', [
+            'match', ['get', 'beddingType'],
+            'sanctuary', '#1a5c2a',
+            'thermal',   '#52b788',
+            'staging',   '#95d5b2',
+            'escape',    '#74c69d',
+            '#52b788',
+          ]);
+          map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', [
+            'match', ['get', 'beddingType'],
+            'sanctuary', 0.45,
+            'thermal',   0.35,
+            'staging',   0.28,
+            'escape',    0.32,
+            0.35,
+          ]);
+        }
       }
 
       console.log('[Huntability] Updated map sources:', {
