@@ -3698,6 +3698,13 @@ function DeerIntelContent() {
         const filteredBedProb = mapInst
           ? filterBeddingNearBuildings(huntabilityData.beddingProbabilityGeoJSON, mapInst, 120)
           : huntabilityData.beddingProbabilityGeoJSON;
+        console.log('[BeddingDebug] Sample features:', 
+          filteredBedProb?.features?.slice(0,3).map((f: any) => ({
+            beddingType: f.properties?.beddingType,
+            beddingScore: f.properties?.beddingScore,
+            id: f.properties?.id,
+          }))
+        );
         beddingProbSource.setData(filteredBedProb);
 
         // Force Mapbox to re-evaluate data-driven paint expressions against new beddingType values
