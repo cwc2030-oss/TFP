@@ -3492,9 +3492,40 @@ function DeerIntelContent() {
             synthetic: result.isSynthetic,
           });
 
+          // Post-process: strip any spine coordinates that fall inside NHD water bodies
+          let filteredPrimary = result.data.ridges_primary;
+          let filteredSecondary = result.data.ridges_secondary;
+          if (nhdWaterBodiesRef.current?.length) {
+            const wb = nhdWaterBodiesRef.current;
+            filteredPrimary = {
+              ...filteredPrimary,
+              features: filteredPrimary.features.map((feature: any) => ({
+                ...feature,
+                geometry: {
+                  ...feature.geometry,
+                  coordinates: feature.geometry.coordinates.filter(
+                    ([lng, lat]: number[]) => !pointInAnyWaterBody(lng, lat, wb)
+                  ),
+                },
+              })).filter((f: any) => f.geometry.coordinates.length >= 2),
+            };
+            filteredSecondary = {
+              ...filteredSecondary,
+              features: filteredSecondary.features.map((feature: any) => ({
+                ...feature,
+                geometry: {
+                  ...feature.geometry,
+                  coordinates: feature.geometry.coordinates.filter(
+                    ([lng, lat]: number[]) => !pointInAnyWaterBody(lng, lat, wb)
+                  ),
+                },
+              })).filter((f: any) => f.geometry.coordinates.length >= 2),
+            };
+          }
+
           setRidgeSpineData({
-            ridges_primary: result.data.ridges_primary,
-            ridges_secondary: result.data.ridges_secondary,
+            ridges_primary: filteredPrimary,
+            ridges_secondary: filteredSecondary,
             saddle_nodes: result.data.saddle_nodes,
             isSynthetic: result.isSynthetic,
             metadata: {
