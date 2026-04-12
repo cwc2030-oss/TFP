@@ -4828,14 +4828,14 @@ function DeerIntelContent() {
           });
         }
         
-        // Bedding source - HIDE in Terrain Work Mode (deer interpretation)
+        // Bedding source — legacy polygon layer (replaced by tfp-bedding-probability-* circles)
         if (!map.getSource('tfp-bedding')) {
           map.addSource('tfp-bedding', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
             id: 'tfp-bedding-fill',
             type: 'fill',
             source: 'tfp-bedding',
-            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
+            layout: { visibility: 'none' },
             paint: {
               'fill-color': LAYER_COLORS.bedding,
               'fill-opacity': 0.25,
@@ -4845,7 +4845,7 @@ function DeerIntelContent() {
             id: 'tfp-bedding-outline',
             type: 'line',
             source: 'tfp-bedding',
-            layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
+            layout: { visibility: 'none' },
             paint: {
               'line-color': LAYER_COLORS.beddingOutline,
               'line-width': 2,
@@ -9405,19 +9405,7 @@ function DeerIntelContent() {
                   </button>
                 </div>
               </div>
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, bedding: !v.bedding }))}
-                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                      visibility.bedding ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                    }`}
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.bedding, opacity: visibility.bedding ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.bedding ? 'text-white' : 'text-stone-500'}`}>Bedding</span>
-                  </button>
-                </div>
-              </div>
+              {/* Legacy "Bedding" toggle removed — replaced by Bedding Zones (tfp-bedding-probability) */}
               <div className="p-3 border-b border-white/[0.06]">
                 {/* v3.6.0: Terrain Reasons Toggle */}
                 <div className="mt-1">
