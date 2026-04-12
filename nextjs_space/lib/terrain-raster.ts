@@ -102,6 +102,20 @@ function pointInPolygon(lng: number, lat: number, ring: number[][]): boolean {
   return inside;
 }
 
+// ============ WATER BODY EXCLUSION ============
+function pointInAnyWaterBody(
+  lng: number,
+  lat: number,
+  waterBodies: Array<{ coordinates: number[][][] }>
+): boolean {
+  for (const wb of waterBodies) {
+    if (wb.coordinates?.[0] && pointInPolygon(lng, lat, wb.coordinates[0])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ============ GRID RESOLUTION ============
 const CELL_SIZE_M = 15; // 15 meter cells (between 10-20m as requested)
 const MIN_CELLS = 20;   // minimum grid dimension
@@ -260,6 +274,8 @@ export interface RasterInput {
   focusMode?: PressureFocus;
   /** Structure centroids [lng, lat] — stands within buffer are filtered out */
   structurePoints?: [number, number][];
+  /** NHD water body polygons — cells inside are excluded from pressure + stand placement */
+  waterBodies?: Array<{ coordinates: number[][][] }>;
 }
 
 export interface RasterCell {
@@ -885,6 +901,30 @@ export function buildTerrainRaster(input: RasterInput): {
     }
   }
 
+  // Pass 3b: Zero out cells inside NHD water bodies (ponds, lakes, stream bodies)
+  // Done before smoothing so water cells don't bleed pressure into neighbors.
+  const waterBodies = input.waterBodies;
+  if (waterBodies && waterBodies.length > 0) {
+    let waterCellCount = 0;
+    for (let r = 0; r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) {
+        const cell = grid.cells[r][c];
+        if (pointInAnyWaterBody(cell.lng, cell.lat, waterBodies)) {
+          cell.pressure = 0;
+          cell.terrain = 0;
+          cell.bench = 0;
+          cell.saddle = 0;
+          cell.ridge = 0;
+          cell.sidehill = 0;
+          waterCellCount++;
+        }
+      }
+    }
+    if (waterCellCount > 0) {
+      console.log(`[TerrainRaster] Zeroed ${waterCellCount} cells inside NHD water bodies`);
+    }
+  }
+
   // v2.3 — Re-enabled 2-pass Gaussian smoothing to spread pressure beyond
   // the spine lines into surrounding terrain. The larger Mapbox radii now
   // benefit from a pre-smoothed surface that blends neighboring cells.
@@ -987,7 +1027,7 @@ export function buildTerrainRaster(input: RasterInput): {
 
   // Extract Prime Stand Sites using Kill Window model
   // (offset from hotspot centers toward intercept edges)
-  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing, input.structurePoints);
+  const primeStandSites = extractPrimeStandSites(grid, 3, input.ridgeSpineData, undefined, parcelRing, input.structurePoints, waterBodies);
 
   // ============ STAND RESILIENCE SCORING ============
   // For each stand, sample raster values within 60m radius and compute:
@@ -1452,7 +1492,8 @@ function extractPrimeStandSites(
   } | null,
   huntabilityScore?: number, // Optional: pass score to apply weak parcel limits
   parcelRing?: number[][],   // Optional: clip stand sites to parcel boundary
-  structurePoints?: [number, number][] // Optional: [lng,lat] centroids — reject candidates within buffer
+  structurePoints?: [number, number][], // Optional: [lng,lat] centroids — reject candidates within buffer
+  nhdWaterBodies?: Array<{ coordinates: number[][][] }> // Optional: NHD water bodies — reject candidates inside water
 ): PrimeStandSite[] {
   // Step 0: Determine effective max count based on huntability score
   let effectiveMaxCount = maxCount;
@@ -1548,6 +1589,16 @@ function extractPrimeStandSites(
       }
       if (nearStructure) {
         console.log('[PrimeStandSites] Rejected near-structure candidate at',
+          hotspot.cell.lng.toFixed(5), hotspot.cell.lat.toFixed(5));
+        continue;
+      }
+    }
+
+    // === WATER BODY EXCLUSION (NHD) ===
+    // Skip candidates inside ponds, lakes, or stream bodies
+    if (nhdWaterBodies && nhdWaterBodies.length > 0) {
+      if (pointInAnyWaterBody(hotspot.cell.lng, hotspot.cell.lat, nhdWaterBodies)) {
+        console.log('[PrimeStandSites] Rejected water-body candidate at',
           hotspot.cell.lng.toFixed(5), hotspot.cell.lat.toFixed(5));
         continue;
       }

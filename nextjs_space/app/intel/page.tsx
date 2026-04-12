@@ -333,6 +333,50 @@ function extractBuildingCentroids(map: mapboxgl.Map): [number, number][] {
   }
 }
 
+// ============ NHD WATER BODY FETCH ============
+// Queries USGS National Hydrography Dataset for water body polygons within a bounding box.
+// Returns polygon coordinate arrays for ponds, lakes, and stream bodies.
+// Graceful: returns [] on timeout or error — never blocks terrain analysis.
+async function fetchNHDWaterBodies(
+  minLat: number, maxLat: number,
+  minLng: number, maxLng: number
+): Promise<Array<{ coordinates: number[][][] }>> {
+  try {
+    const url = `https://hydro.nationalmap.gov/arcgis/rest/services/NHDPlus_HR/MapServer/2/query?` +
+      `geometry=${minLng},${minLat},${maxLng},${maxLat}` +
+      `&geometryType=esriGeometryEnvelope` +
+      `&spatialRel=esriSpatialRelIntersects` +
+      `&outFields=*` +
+      `&returnGeometry=true` +
+      `&f=geojson`;
+
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+
+    return (data.features || [])
+      .filter((f: Record<string, unknown>) => {
+        const geom = f.geometry as { type?: string } | undefined;
+        return geom?.type === 'Polygon' || geom?.type === 'MultiPolygon';
+      })
+      .map((f: Record<string, unknown>) => {
+        const geom = f.geometry as { type: string; coordinates: number[][][] | number[][][][] };
+        return {
+          coordinates: geom.type === 'Polygon'
+            ? (geom.coordinates as number[][][])
+            : (geom.coordinates as number[][][][])[0],
+        };
+      });
+  } catch {
+    console.warn('[NHD] Water body fetch failed or timed out — proceeding without water exclusion');
+    return [];
+  }
+}
+
 // SEASONS & WIND_DIRECTIONS now imported from components/intel/*
 
 // ========== V2 STYLING RULES (Tiered Corridors + Funnels) ==========
@@ -3946,7 +3990,7 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
 
     if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
-    terrainFlowDebounceRef.current = setTimeout(() => {
+    terrainFlowDebounceRef.current = setTimeout(async () => {
     terrainFlowDebounceRef.current = null;
 
     // Select data source based on comparison mode
@@ -4002,6 +4046,24 @@ function DeerIntelContent() {
           console.log(`[TerrainRaster] Passing ${structurePts.length} structure point(s) for stand filtering`);
         }
 
+        // Fetch NHD water bodies for water exclusion (non-blocking)
+        let nhdWaterBodies: Array<{ coordinates: number[][][] }> = [];
+        try {
+          let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+          for (const c of parcelCoordsForGrid) {
+            minLng = Math.min(minLng, c[0]);
+            maxLng = Math.max(maxLng, c[0]);
+            minLat = Math.min(minLat, c[1]);
+            maxLat = Math.max(maxLat, c[1]);
+          }
+          nhdWaterBodies = await fetchNHDWaterBodies(minLat, maxLat, minLng, maxLng);
+          if (nhdWaterBodies.length > 0) {
+            console.log(`[NHD] Fetched ${nhdWaterBodies.length} water body polygon(s) for exclusion`);
+          }
+        } catch {
+          console.warn('[NHD] Water body fetch failed — proceeding without water exclusion');
+        }
+
         const rasterResult = buildTerrainRaster({
           parcelCoords: parcelCoordsForGrid,
           beddingPolygons: layers?.beddingPolygons || undefined,
@@ -4009,6 +4071,7 @@ function DeerIntelContent() {
           season,
           focusMode: 'balanced',
           structurePoints: structurePts.length ? structurePts : undefined,
+          waterBodies: nhdWaterBodies.length > 0 ? nhdWaterBodies : undefined,
         });
 
         if (rasterResult) {
