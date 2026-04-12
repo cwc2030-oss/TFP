@@ -4040,22 +4040,46 @@ function DeerIntelContent() {
     const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
     try {
-      // Update primary flow source
+      // Helper: filter out flow LineString features whose midpoint falls inside a water body
+      const filterFlowLines = (fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection => {
+        if (!nhdWaterBodiesRef.current?.length) return fc;
+        return {
+          ...fc,
+          features: fc.features.filter((f: any) => {
+            if (f.geometry.type !== 'LineString') return true;
+            const coords = f.geometry.coordinates;
+            const mid = coords[Math.floor(coords.length / 2)];
+            return !pointInAnyWaterBody(mid[0], mid[1], nhdWaterBodiesRef.current);
+          }),
+        };
+      };
+
+      // Update primary flow source (filter lines through water bodies)
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(flowData?.flow_primary || emptyFC);
+        primarySource.setData(filterFlowLines(flowData?.flow_primary || emptyFC));
       }
 
-      // Update secondary flow source
+      // Update secondary flow source (filter lines through water bodies)
       const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(flowData?.flow_secondary || emptyFC);
+        secondarySource.setData(filterFlowLines(flowData?.flow_secondary || emptyFC));
       }
 
-      // Update convergence zones source
+      // Update convergence zones source (filter points inside water bodies)
       const convergenceSource = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
       if (convergenceSource) {
-        convergenceSource.setData(flowData?.convergence_zones || emptyFC);
+        const rawConvergence = flowData?.convergence_zones || emptyFC;
+        const filteredConvergence = nhdWaterBodiesRef.current?.length
+          ? {
+              ...rawConvergence,
+              features: rawConvergence.features.filter((f: any) => {
+                const [lng, lat] = f.geometry.coordinates;
+                return !pointInAnyWaterBody(lng, lat, nhdWaterBodiesRef.current);
+              }),
+            }
+          : rawConvergence;
+        convergenceSource.setData(filteredConvergence);
       }
 
       // v3.0 RASTER-BASED PRESSURE SURFACE
