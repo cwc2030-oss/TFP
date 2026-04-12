@@ -4074,17 +4074,44 @@ function DeerIntelContent() {
 
     try {
       // Helper: filter out flow LineString features whose midpoint falls inside a water body
-      const filterFlowLines = (fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection => {
-        if (!nhdWaterBodiesRef.current?.length) return fc;
+      const filterFlowLines = (fc: any) => {
+        if (!fc?.features) return fc;
         return {
           ...fc,
           features: fc.features.filter((f: any) => {
             if (f.geometry.type !== 'LineString') return true;
-            return !f.geometry.coordinates.some(
-              ([lng, lat]: number[]) =>
-                pointInAnyWaterBody(lng, lat, nhdWaterBodiesRef.current)
-            );
-          }),
+
+            // Gate 1 — Remove any line where ANY vertex touches water
+            if (nhdWaterBodiesRef.current?.length) {
+              const touchesWater = f.geometry.coordinates.some(
+                ([lng, lat]: number[]) =>
+                  pointInAnyWaterBody(lng, lat, nhdWaterBodiesRef.current)
+              );
+              if (touchesWater) return false;
+            }
+
+            // Gate 2 — Remove very short lines under 100m — likely noise
+            const coords = f.geometry.coordinates;
+            if (coords.length >= 2) {
+              const first = coords[0];
+              const last = coords[coords.length - 1];
+              const dLat = (last[1] - first[1]) * 111320;
+              const dLng = (last[0] - first[0]) * 111320 *
+                Math.cos(first[1] * Math.PI / 180);
+              const lengthM = Math.sqrt(dLat * dLat + dLng * dLng);
+              if (lengthM < 100) return false;
+            }
+
+            // Gate 3 — Remove low confidence lines
+            const confidence =
+              f.properties?.confidence ??
+              f.properties?.strength ??
+              f.properties?.score ??
+              1;
+            if (confidence < 0.25) return false;
+
+            return true;
+          })
         };
       };
 
