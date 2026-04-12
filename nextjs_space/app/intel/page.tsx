@@ -3713,18 +3713,19 @@ function DeerIntelContent() {
             ]);
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', [
               'match', ['get', 'beddingType'],
-              'sanctuary', 0.45,
-              'thermal',   0.35,
-              'staging',   0.28,
-              'escape',    0.32,
-              0.35,
+              'sanctuary', 0.28,
+              'thermal',   0.20,
+              'staging',   0.15,
+              'escape',    0.18,
+              0.20,
             ]);
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
               'interpolate', ['linear'], ['get', 'beddingScore'],
-              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
-              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 26, 'staging', 16, 20],
-              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 34, 'staging', 20, 28],
+              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
+              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
+              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 24, 'staging', 14, 20],
             ]);
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 0.85);
           }
         } catch (e) {
           console.warn('[BeddingStyle] setPaintProperty failed:', e);
@@ -6058,7 +6059,7 @@ function DeerIntelContent() {
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
         if (!map.getSource('tfp-bedding-probability')) {
           map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
-          // v3.7: Outer glow — deeper for sanctuary zones
+          // v3.7: Outer glow — soft ambient halo
           map.addLayer({
             id: 'tfp-bedding-probability-glow',
             type: 'circle',
@@ -6067,10 +6068,10 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, 28,
-                0.75, 38,
-                1.0, 45,
-              ],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 22, 'staging', 14, 18],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 30, 'staging', 18, 24],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 38, 'staging', 22, 30],
+              ] as any,
               'circle-color': [
                 'match', ['get', 'beddingType'],
                 'sanctuary', '#1a5c2a',
@@ -6078,13 +6079,13 @@ function DeerIntelContent() {
               ] as any,
               'circle-opacity': [
                 'match', ['get', 'beddingType'],
-                'sanctuary', 0.25,
-                0.15,
+                'sanctuary', 0.12,
+                0.08,
               ] as any,
-              'circle-blur': 1.2,
+              'circle-blur': 1.4,
             },
           });
-          // v3.7: Inner fill — data-driven colors by bedding type
+          // v3.7: Inner fill — softened data-driven colors by bedding type
           map.addLayer({
             id: 'tfp-bedding-probability-fill',
             type: 'circle',
@@ -6093,9 +6094,9 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 26, 'staging', 16, 20],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 34, 'staging', 20, 28],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 24, 'staging', 14, 20],
               ] as any,
               'circle-color': [
                 'match', ['get', 'beddingType'],
@@ -6107,45 +6108,26 @@ function DeerIntelContent() {
               ] as any,
               'circle-opacity': [
                 'match', ['get', 'beddingType'],
-                'sanctuary', 0.45,
-                'thermal',   0.35,
-                'staging',   0.28,
-                'escape',    0.32,
-                0.35,
+                'sanctuary', 0.28,
+                'thermal',   0.20,
+                'staging',   0.15,
+                'escape',    0.18,
+                0.20,
               ] as any,
+              'circle-blur': 0.85,
             },
           });
-          // v3.7: Outline ring — type-specific stroke
+          // v3.7: Outline ring — disabled (hard edges removed)
           map.addLayer({
             id: 'tfp-bedding-probability-outline',
             type: 'circle',
             source: 'tfp-bedding-probability',
             layout: { visibility: 'none' },
             paint: {
-              'circle-radius': [
-                'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 26, 'staging', 16, 20],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 34, 'staging', 20, 28],
-              ] as any,
+              'circle-radius': 0,
               'circle-color': 'transparent',
-              'circle-stroke-color': [
-                'match', ['get', 'beddingType'],
-                'sanctuary', '#1a5c2a',
-                'thermal',   '#40916c',
-                'staging',   '#74c69d',
-                'escape',    '#52b788',
-                '#40916c',
-              ] as any,
-              'circle-stroke-width': [
-                'match', ['get', 'beddingType'],
-                'sanctuary', 2.5,
-                'thermal',   1.8,
-                'staging',   1.2,
-                'escape',    1.5,
-                1.8,
-              ] as any,
-              'circle-stroke-opacity': 0.45,
+              'circle-stroke-width': 0,
+              'circle-stroke-opacity': 0,
             },
           });
         }
