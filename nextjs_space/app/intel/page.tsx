@@ -4080,9 +4080,10 @@ function DeerIntelContent() {
           ...fc,
           features: fc.features.filter((f: any) => {
             if (f.geometry.type !== 'LineString') return true;
-            const coords = f.geometry.coordinates;
-            const mid = coords[Math.floor(coords.length / 2)];
-            return !pointInAnyWaterBody(mid[0], mid[1], nhdWaterBodiesRef.current);
+            return !f.geometry.coordinates.some(
+              ([lng, lat]: number[]) =>
+                pointInAnyWaterBody(lng, lat, nhdWaterBodiesRef.current)
+            );
           }),
         };
       };
