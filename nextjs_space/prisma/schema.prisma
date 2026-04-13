@@ -106,6 +106,8 @@ model SavedProperty {
   standCount      Int?
   bedAcres        Float?
   notes           String?
+  shareId         String?  @unique @default(cuid())
+  isShared        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

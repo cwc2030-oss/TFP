@@ -2008,6 +2008,9 @@ function DeerIntelContent() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [saveConfirmed, setSaveConfirmed] = useState(false);
+  const [lastSavedPropertyId, setLastSavedPropertyId] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
 
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
@@ -2632,8 +2635,90 @@ function DeerIntelContent() {
     });
 
     if (res.ok) {
+      const data = await res.json();
+      setLastSavedPropertyId(data.property?.id || null);
+      setShareLink(null); // Reset share link on new save
       setSaveConfirmed(true);
       setTimeout(() => setSaveConfirmed(false), 3000);
+    }
+  }
+
+  async function handleShareTerritory() {
+    // If we already have a share link, just copy it
+    if (shareLink) {
+      try {
+        await navigator.clipboard.writeText(shareLink);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2500);
+      } catch { /* fallback below */ }
+      return;
+    }
+
+    // If not saved yet, save first then share
+    let propertyId = lastSavedPropertyId;
+    if (!propertyId) {
+      // Trigger save first
+      await handleSaveProperty();
+      // Wait a tick for state to update — use a direct fetch instead
+      const payload = territoryMode ? {
+        name: territoryName || 'My Territory',
+        type: 'territory',
+        parcels: territoryParcels.map(p => ({
+          address: p.address, acres: p.acreage, geometry: p.polygon
+        })),
+        totalAcres: totalTerritoryAcres,
+        centroidLat: territoryCentroid.lat,
+        centroidLng: territoryCentroid.lng,
+        terrainScore: currentScore,
+        primaryMovement: currentPrimaryMovement,
+        funnelCount: currentFunnelCount,
+        standCount: currentStandCount,
+        bedAcres: currentBedAcres
+      } : {
+        name: activeAddress || 'Saved Parcel',
+        type: 'single',
+        parcels: [{ address: activeAddress, acres: activeAcres, geometry: parcelPolygon }],
+        totalAcres: activeAcres,
+        centroidLat: activeLat,
+        centroidLng: activeLng,
+        terrainScore: currentScore,
+        primaryMovement: currentPrimaryMovement,
+        funnelCount: currentFunnelCount,
+        standCount: currentStandCount,
+        bedAcres: currentBedAcres
+      };
+      const saveRes = await fetch('/api/properties/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!saveRes.ok) return;
+      const saveData = await saveRes.json();
+      propertyId = saveData.property?.id;
+      if (propertyId) setLastSavedPropertyId(propertyId);
+    }
+
+    if (!propertyId) return;
+
+    setShareLoading(true);
+    try {
+      const res = await fetch('/api/territory/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ propertyId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const fullUrl = `${window.location.origin}${data.shareUrl}`;
+        setShareLink(fullUrl);
+        await navigator.clipboard.writeText(fullUrl);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2500);
+      }
+    } catch (e) {
+      console.error('Share error:', e);
+    } finally {
+      setShareLoading(false);
     }
   }
 
@@ -9015,14 +9100,26 @@ function DeerIntelContent() {
 
               {/* Save Territory */}
               {session?.user ? (
-                <button
-                  onClick={handleSaveProperty}
-                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
-                             bg-green-700 hover:bg-green-600 text-white font-semibold
-                             transition-colors duration-200 mt-2"
-                >
-                  {saveConfirmed ? '✅ Territory Saved!' : '⭐ Save Territory'}
-                </button>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={handleSaveProperty}
+                    className="flex items-center gap-2 flex-1 px-4 py-2 rounded-lg
+                               bg-green-700 hover:bg-green-600 text-white font-semibold
+                               transition-colors duration-200"
+                  >
+                    {saveConfirmed ? '✅ Saved!' : '⭐ Save Territory'}
+                  </button>
+                  <button
+                    onClick={handleShareTerritory}
+                    disabled={shareLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg
+                               bg-blue-700 hover:bg-blue-600 text-white font-semibold
+                               transition-colors duration-200 disabled:opacity-50"
+                    title="Save & get shareable link"
+                  >
+                    {shareLoading ? '…' : shareCopied ? '✅ Copied!' : '🔗 Share'}
+                  </button>
+                </div>
               ) : (
                 <button
                   onClick={() => router.push('/signin')}
@@ -10921,14 +11018,26 @@ function DeerIntelContent() {
 
               {/* Save to My Properties */}
               {session?.user ? (
-                <button
-                  onClick={handleSaveProperty}
-                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
-                             bg-green-700 hover:bg-green-600 text-white font-semibold
-                             transition-colors duration-200 mt-2"
-                >
-                  {saveConfirmed ? '✅ Saved!' : '⭐ Save to My Properties'}
-                </button>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={handleSaveProperty}
+                    className="flex items-center gap-2 flex-1 px-4 py-2 rounded-lg
+                               bg-green-700 hover:bg-green-600 text-white font-semibold
+                               transition-colors duration-200"
+                  >
+                    {saveConfirmed ? '✅ Saved!' : '⭐ Save'}
+                  </button>
+                  <button
+                    onClick={handleShareTerritory}
+                    disabled={shareLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg
+                               bg-blue-700 hover:bg-blue-600 text-white font-semibold
+                               transition-colors duration-200 disabled:opacity-50"
+                    title="Save & get shareable link"
+                  >
+                    {shareLoading ? '…' : shareCopied ? '✅ Copied!' : '🔗 Share'}
+                  </button>
+                </div>
               ) : (
                 <button
                   onClick={() => router.push('/signin')}
