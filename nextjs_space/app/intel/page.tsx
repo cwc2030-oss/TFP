@@ -8913,6 +8913,38 @@ function DeerIntelContent() {
               >
                 Analyze Territory
               </button>
+
+              {/* Open Territory in onX Hunt */}
+              <button
+                onClick={() => {
+                  const bounds = getTerritoryBounds(territoryParcels);
+                  const centerLat = (bounds[1] + bounds[3]) / 2;
+                  const centerLng = (bounds[0] + bounds[2]) / 2;
+                  const zoom = 14; // slightly wider for multi-parcel
+                  const url = `https://app.onxmaps.com/hunt/map/${zoom}/${centerLat}/${centerLng}`;
+                  window.open(url, '_blank', 'noopener,noreferrer');
+                }}
+                style={{
+                  width: '100%',
+                  marginTop: 8,
+                  padding: '10px 0',
+                  background: '#FF6B00',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/onx-icon.png" alt="" style={{ height: 16, width: 16, borderRadius: 2 }} />
+                Open Territory in onX
+              </button>
             </>
           )}
         </div>
@@ -10774,6 +10806,30 @@ function DeerIntelContent() {
                   5-page terrain & alignment report
                 </p>
               </div>
+
+              {/* ========== OPEN IN onX HUNT ========== */}
+              {activeLat && activeLng && (
+                <div className="px-3 pb-3">
+                  <button
+                    onClick={() => {
+                      const zoom = 15;
+                      const url = `https://app.onxmaps.com/hunt/map/${zoom}/${activeLat}/${activeLng}`;
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                      transition-all text-sm font-semibold
+                      bg-[#FF6B00] hover:bg-[#e05f00] text-white"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/onx-icon.png" alt="" className="h-4 w-4 rounded-sm" />
+                    <span>Open in onX Hunt</span>
+                    <ExternalLink className="h-3.5 w-3.5 opacity-70" />
+                  </button>
+                  <p className="text-[10px] text-stone-500 text-center mt-1.5">
+                    View this parcel on onX Maps
+                  </p>
+                </div>
+              )}
 
               {/* Fade-in keyframe animation */}
               <style jsx>{`
