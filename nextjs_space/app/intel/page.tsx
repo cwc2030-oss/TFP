@@ -8557,6 +8557,139 @@ function DeerIntelContent() {
         </div>
       )}
 
+      {/* ========== TERRITORY BUILDER PANEL ========== */}
+      {territoryMode && (
+        <div style={{
+          position: 'absolute',
+          top: 60,
+          left: 16,
+          zIndex: 20,
+          background: '#0d1f17',
+          border: '1px solid #c9a84c',
+          borderRadius: 12,
+          padding: 16,
+          width: 260,
+          maxHeight: 400,
+          overflowY: 'auto',
+        }}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+            <div style={{fontSize:11,letterSpacing:2,color:'#c9a84c',textTransform:'uppercase'}}>
+              Territory Builder
+            </div>
+            <button
+              onClick={clearTerritory}
+              style={{fontSize:11,color:'#888',background:'none',border:'none',cursor:'pointer'}}
+            >
+              Clear all
+            </button>
+          </div>
+
+          <input
+            value={territoryName}
+            onChange={e => setTerritoryName(e.target.value)}
+            placeholder="Name your territory..."
+            style={{
+              width: '100%',
+              padding: '8px 10px',
+              background: '#1a3a2a',
+              border: '1px solid #2d6a4f',
+              borderRadius: 6,
+              color: 'white',
+              fontSize: 13,
+              marginBottom: 12,
+              boxSizing: 'border-box',
+            }}
+          />
+
+          {territoryParcels.length === 0 ? (
+            <div style={{fontSize:12,color:'#555',textAlign:'center',padding:'16px 0'}}>
+              Click any parcel on the map to add it to your territory
+            </div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
+              {territoryParcels.map((p, i) => (
+                <div key={p.id} style={{
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'space-between',
+                  background:'#1a3a2a',
+                  borderRadius:6,
+                  padding:'8px 10px',
+                }}>
+                  <div>
+                    <div style={{fontSize:12,color:'#c9a84c',fontWeight:'bold'}}>
+                      Parcel {i + 1}
+                    </div>
+                    <div style={{fontSize:11,color:'#aaa',marginTop:2}}>
+                      {p.address.split(',')[0]} — {Math.round(p.acreage)} ac
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => removeParcelFromTerritory(p.id)}
+                    style={{fontSize:11,color:'#666',background:'none',border:'none',cursor:'pointer'}}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {territoryParcels.length > 0 && (
+            <>
+              <div style={{
+                display:'flex',
+                justifyContent:'space-between',
+                fontSize:11,
+                color:'#666',
+                marginBottom:12,
+                paddingTop:8,
+                borderTop:'1px solid #1a3a2a',
+              }}>
+                <span>{territoryParcels.length} parcels selected</span>
+                <span style={{color:'#52b788',fontWeight:'bold'}}>
+                  {Math.round(totalTerritoryAcreage)} total acres
+                </span>
+              </div>
+
+              <button
+                onClick={() => {
+                  const merged = mergeParcelPolygons(territoryParcels);
+                  if (!merged) return;
+                  const bounds = getTerritoryBounds(territoryParcels);
+                  const centerLat = (bounds[1] + bounds[3]) / 2;
+                  const centerLng = (bounds[0] + bounds[2]) / 2;
+                  const totalAcres = String(totalTerritoryAcreage);
+                  setParcelPolygon(merged);
+                  setActiveLat(centerLat);
+                  setActiveLng(centerLng);
+                  setActiveAcreage(totalAcres);
+                  setActiveAddress(territoryName);
+                  activeLatRef.current = centerLat;
+                  activeLngRef.current = centerLng;
+                  activeAcreageRef.current = totalAcres;
+                  setTimeout(() => runAnalysis(), 100);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px 0',
+                  background: '#c9a84c',
+                  color: '#1a3a2a',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  letterSpacing: 1,
+                }}
+              >
+                Analyze Territory
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
         <div className="flex items-center justify-between px-4 py-3 pointer-events-auto">
