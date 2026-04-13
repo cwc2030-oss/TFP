@@ -7544,21 +7544,25 @@ function DeerIntelContent() {
     setParcelPickLoading(true);
     
     // Clear previous state — clean slate for new parcel
-    clearAllOverlaySources();
-    setParcelPolygon(null);
-    setTerrainFlowData(null);
-    setLayers(null);
-    setTieredCorridorData(null);
-    setRidgeSpineData(null);
-    setEdgeIntelData(null);
-    setAlignedStands([]);
-    setSelectedStand(null);
-    setHuntabilityData(null);
-    // vNext: Clear stand GeoJSON + popup
-    if (mapRef.current?.getSource('tfp-stands')) {
-      (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
+    // In territory mode, skip the wipe so previously-added parcels keep their
+    // gold boundaries and overlay data intact.
+    if (!territoryMode) {
+      clearAllOverlaySources();
+      setParcelPolygon(null);
+      setTerrainFlowData(null);
+      setLayers(null);
+      setTieredCorridorData(null);
+      setRidgeSpineData(null);
+      setEdgeIntelData(null);
+      setAlignedStands([]);
+      setSelectedStand(null);
+      setHuntabilityData(null);
+      // vNext: Clear stand GeoJSON + popup
+      if (mapRef.current?.getSource('tfp-stands')) {
+        (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
+      }
+      if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
     }
-    if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
     
     try {
       const response = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
