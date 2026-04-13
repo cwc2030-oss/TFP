@@ -9121,6 +9121,16 @@ function DeerIntelContent() {
                   // instead of snapping them to full opacity.
                   territoryFadeInPending.current = true;
                   setTimeout(() => runAnalysis(), 100);
+                  setTimeout(() => {
+                    setTerritoryMode(false);
+                    setParcelPickMode(false);
+                    territoryModeRef.current = false;
+                    if (mapRef.current) {
+                      try {
+                        mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
+                      } catch(e) {}
+                    }
+                  }, 500);
                 }}
                 style={{
                   width: '100%',
