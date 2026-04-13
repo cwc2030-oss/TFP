@@ -2005,6 +2005,7 @@ function DeerIntelContent() {
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [saveConfirmed, setSaveConfirmed] = useState(false);
 
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
@@ -2569,6 +2570,70 @@ function DeerIntelContent() {
       setTimeout(() => setAlignmentPanelExpanded(false), 500);
     }
   }, [userHasInteracted]);
+
+  // ========== SAVE PROPERTY — derived values & handler ==========
+  const totalTerritoryAcres = territoryParcels.reduce((sum, p) => sum + p.acreage, 0);
+  const territoryCentroid = (() => {
+    if (!territoryParcels.length) return { lat: activeLat, lng: activeLng };
+    const avgLat = territoryParcels.reduce((s, p) => s + p.lat, 0) / territoryParcels.length;
+    const avgLng = territoryParcels.reduce((s, p) => s + p.lng, 0) / territoryParcels.length;
+    return { lat: avgLat, lng: avgLng };
+  })();
+  const currentScore = summary?.topStandScore ?? null;
+  const currentPrimaryMovement = tieredCorridorData?.corridors_primary?.features?.[0]?.properties?.bearing
+    ? String(tieredCorridorData.corridors_primary.features[0].properties.bearing)
+    : null;
+  const currentFunnelCount = summary?.funnelCount ?? null;
+  const currentStandCount = layers?.standPoints?.features?.length ?? null;
+  const currentBedAcres = summary?.totalBeddingAcres ?? null;
+  const activeAcres = parseFloat(activeAcreage || '0') || 0;
+
+  async function handleSaveProperty() {
+    const payload = territoryMode ? {
+      name: territoryName || 'My Territory',
+      type: 'territory',
+      parcels: territoryParcels.map(p => ({
+        address: p.address,
+        acres: p.acreage,
+        geometry: p.polygon
+      })),
+      totalAcres: totalTerritoryAcres,
+      centroidLat: territoryCentroid.lat,
+      centroidLng: territoryCentroid.lng,
+      terrainScore: currentScore,
+      primaryMovement: currentPrimaryMovement,
+      funnelCount: currentFunnelCount,
+      standCount: currentStandCount,
+      bedAcres: currentBedAcres
+    } : {
+      name: activeAddress || 'Saved Parcel',
+      type: 'single',
+      parcels: [{
+        address: activeAddress,
+        acres: activeAcres,
+        geometry: parcelPolygon
+      }],
+      totalAcres: activeAcres,
+      centroidLat: activeLat,
+      centroidLng: activeLng,
+      terrainScore: currentScore,
+      primaryMovement: currentPrimaryMovement,
+      funnelCount: currentFunnelCount,
+      standCount: currentStandCount,
+      bedAcres: currentBedAcres
+    };
+
+    const res = await fetch('/api/properties/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      setSaveConfirmed(true);
+      setTimeout(() => setSaveConfirmed(false), 3000);
+    }
+  }
 
   // Download Parcel-Hunt File PDF
   const handleDownloadParcelHuntFile = useCallback(async () => {
