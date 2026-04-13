@@ -2573,11 +2573,17 @@ function DeerIntelContent() {
     setIsDownloading(true);
     try {
       const top3 = alignedStands.slice(0, 3);
+      const isTerritory = territoryParcelsRef.current.length > 1;
+      const territoryAcreageSum = territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0);
       const payload = {
-        address,
+        address: isTerritory
+          ? `${territoryName} (${territoryParcels.length} parcels)`
+          : address,
         lat,
         lng,
-        acreage: acreageParam ?? 40,
+        acreage: isTerritory
+          ? territoryAcreageSum
+          : (acreageParam ?? 40),
         county: parcelPolygon?.properties?.county ?? 
           address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
         state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
@@ -2631,6 +2637,15 @@ function DeerIntelContent() {
               .filter((_: any, i: number) => i % 3 === 0) // take every 3rd point = ~33% of coords
               .slice(0, 15) // hard cap at 15 points
           : null,
+        isTerritory,
+        territoryName: isTerritory ? territoryName : undefined,
+        territoryParcelCount: isTerritory ? territoryParcels.length : undefined,
+        territoryParcels: isTerritory ? territoryParcelsRef.current.map(p => ({
+          address: p.address,
+          acreage: Math.round(p.acreage),
+          owner: p.owner,
+          county: p.county,
+        })) : undefined,
       };
 
       // Save terrain results to order for report generation
@@ -2677,7 +2692,7 @@ function DeerIntelContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, urlOrderId]);
+  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, urlOrderId, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');

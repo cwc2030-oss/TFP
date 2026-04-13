@@ -65,7 +65,11 @@ export async function POST(req: NextRequest) {
     const {
       address, lat, lng, acreage, county, state,
       prevailingWind, stands, summary, corridors, seasonScores, parcelCoords,
-      terrainHeadline, terrainNarrative, terrainDriver, terrainConfidence, elevRange
+      terrainHeadline, terrainNarrative, terrainDriver, terrainConfidence, elevRange,
+      isTerritory = false,
+      territoryName = 'My Territory',
+      territoryParcelCount = 1,
+      territoryParcels: territoryParcelList = null,
     } = data;
 
     // Derive elevation range from stand elevations if demMetrics unavailable
@@ -158,12 +162,33 @@ export async function POST(req: NextRequest) {
       : (summary?.topStandScore ?? 0) >= 50 ? '#8b6f47' 
       : '#8b0000';
 
+    const certificateTitle = isTerritory
+      ? `TERRITORY HUNT CERTIFICATE`
+      : `TERRAIN HUNT CERTIFICATE`;
+
+    const territorySection = isTerritory && territoryParcelList ? `
+<div style="margin-bottom:20px;text-align:left">
+  <div style="font-size:10px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:2px">
+    TERRITORY PARCELS
+  </div>
+  ${(territoryParcelList as any[]).map((p: any, i: number) => `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:11px">
+      <span style="color:#333">Parcel ${i + 1} — ${(p.address || '').split(',')[0]}</span>
+      <span style="color:#1a3a2a;font-weight:bold">${p.acreage} ac</span>
+    </div>
+  `).join('')}
+  <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12px;font-weight:bold">
+    <span style="color:#1a3a2a">Total Territory</span>
+    <span style="color:#c9a84c">${Math.round(acreage)} acres across ${territoryParcelCount} parcels</span>
+  </div>
+</div>` : '';
+
     const certificatePage = `
 <div class="page border">
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:900px;text-align:center;padding:48px">
     <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
     <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
-      <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">TERRAIN HUNT CERTIFICATE</div>
+      <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">${certificateTitle}</div>
       <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:32px"></div>
       <div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
       <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:32px">HUNTABILITY GRADE</div>
@@ -172,6 +197,7 @@ export async function POST(req: NextRequest) {
         <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
         <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
       </div>
+      ${territorySection}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
         <div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${summary?.topStandScore ?? 0}</div>
@@ -288,8 +314,8 @@ export async function POST(req: NextRequest) {
     </div>
   </div>
   <div style="text-align:center;margin-bottom:24px">
-    <div style="font-size:28px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">HUNTING INTELLIGENCE REPORT</div>
-    <div style="font-size:13px;color:#666;margin-top:6px">${address}</div>
+    <div style="font-size:28px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">${isTerritory ? 'TERRITORY INTELLIGENCE REPORT' : 'HUNTING INTELLIGENCE REPORT'}</div>
+    <div style="font-size:13px;color:#666;margin-top:6px">${isTerritory ? `${territoryName} — ${territoryParcelCount} parcels — ${Math.round(acreage)} total acres` : address}</div>
     <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
   </div>
   <div class="gold-bar"></div>
