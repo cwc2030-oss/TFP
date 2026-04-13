@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Map, Mail, Lock, User, Building2, AlertCircle, Loader2 } from "lucide-react";
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams?.get('callbackUrl') || '/dashboard';
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -54,7 +56,7 @@ export default function SignupPage() {
       if (result?.error) {
         router.push("/login");
       } else {
-        router.replace("/dashboard");
+        router.replace(callbackUrl);
       }
     } catch (err) {
       setError("An error occurred. Please try again.");

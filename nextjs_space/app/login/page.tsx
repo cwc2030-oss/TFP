@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Map, Mail, Lock, AlertCircle, Loader2 } from "lucide-react";
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams?.get('callbackUrl') || '/dashboard';
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -32,7 +34,7 @@ export default function LoginPage() {
       if (result?.error) {
         setError("Invalid email or password");
       } else {
-        router.replace("/dashboard");
+        router.replace(callbackUrl);
       }
     } catch (err) {
       setError("An error occurred. Please try again.");
@@ -121,7 +123,7 @@ export default function LoginPage() {
             <div className="mt-6 text-center text-sm text-stone-600">
               Don't have an account?{" "}
               <Link
-                href="/signup"
+                href={callbackUrl !== '/dashboard' ? `/signup?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/signup'}
                 className="text-emerald-700 hover:text-emerald-800 font-medium"
               >
                 Create one

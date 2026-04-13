@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { MapPin, TreePine, Crosshair, Layers, ArrowRight, Share2, Loader2 } from 'lucide-react';
+import { useSession } from 'next-auth/react';
+import { MapPin, TreePine, Crosshair, Layers, ArrowRight, Share2, Loader2, ExternalLink, Star } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,14 +32,23 @@ interface TerritoryData {
 
 export default function SharedTerritoryPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { data: session, status } = useSession() || {};
   const shareId = params?.shareId as string;
+  const autoClaim = searchParams?.get('claim') === 'true';
+
   const [territory, setTerritory] = useState<TerritoryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const mapInitializedRef = useRef(false);
+  const autoClaimFired = useRef(false);
 
   useEffect(() => {
     if (!shareId) return;
@@ -50,6 +60,15 @@ export default function SharedTerritoryPage() {
       .then(data => { setTerritory(data); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [shareId]);
+
+  // Auto-claim after signin redirect
+  useEffect(() => {
+    if (autoClaim && session?.user && territory && !autoClaimFired.current && !claimed) {
+      autoClaimFired.current = true;
+      handleClaim();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoClaim, session, territory, claimed]);
 
   const initMap = useCallback(() => {
     if (!territory || !mapRef.current || mapInitializedRef.current) return;
@@ -102,13 +121,11 @@ export default function SharedTerritoryPage() {
   useEffect(() => {
     if (!territory) return;
 
-    // Check if Google Maps is already loaded
     if (typeof google !== 'undefined' && google.maps) {
       initMap();
       return;
     }
 
-    // Load Google Maps script
     const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
     if (existingScript) {
       existingScript.addEventListener('load', initMap);
@@ -133,7 +150,6 @@ export default function SharedTerritoryPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      // Fallback
       const input = document.createElement('input');
       input.value = url;
       document.body.appendChild(input);
@@ -144,6 +160,37 @@ export default function SharedTerritoryPage() {
       setTimeout(() => setCopied(false), 2500);
     }
   };
+
+  async function handleClaim() {
+    if (!session?.user) {
+      // Redirect to signin with callback back here with ?claim=true
+      router.push(`/login?callbackUrl=${encodeURIComponent(`/territory/${shareId}?claim=true`)}`);
+      return;
+    }
+
+    setClaiming(true);
+    setClaimError(null);
+    try {
+      const res = await fetch('/api/territory/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shareId })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setClaimError(data.error || 'Failed to save territory');
+        return;
+      }
+      setClaimed(true);
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 2000);
+    } catch (e) {
+      setClaimError('Network error — please try again');
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -173,6 +220,8 @@ export default function SharedTerritoryPage() {
 
   const scoreColor = (territory.terrainScore ?? 0) >= 80 ? 'text-green-400' :
     (territory.terrainScore ?? 0) >= 60 ? 'text-yellow-400' : 'text-red-400';
+
+  const onxUrl = `https://app.onxmaps.com/hunt/map/14/${territory.centroidLat}/${territory.centroidLng}`;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -256,6 +305,76 @@ export default function SharedTerritoryPage() {
               <span className="text-xs text-gray-600">#{i + 1}</span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Action Buttons: onX → Claim → Pro Nudge */}
+      <div className="max-w-6xl mx-auto px-4 pb-8">
+        <div className="flex flex-col gap-3 max-w-md mx-auto">
+
+          {/* Button 1 — onX (orange) */}
+          <a
+            href={onxUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2.5 w-full px-5 py-3 rounded-xl
+                       font-semibold text-white transition-all duration-200
+                       shadow-lg shadow-orange-900/20 hover:shadow-orange-900/40"
+            style={{ backgroundColor: '#FF6B00' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e05f00')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF6B00')}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/onx-icon.png" alt="" className="h-5 w-5 rounded-sm" />
+            <span>Open Territory in onX Hunt</span>
+            <ExternalLink className="w-4 h-4 opacity-70" />
+          </a>
+
+          {/* Button 2 — Claim (amber) */}
+          {!claimed ? (
+            <div>
+              <button
+                onClick={handleClaim}
+                disabled={claiming}
+                className="flex items-center justify-center gap-2.5 w-full px-5 py-3 rounded-xl
+                           font-semibold text-white transition-all duration-200
+                           bg-amber-600 hover:bg-amber-500 disabled:opacity-60 disabled:cursor-wait
+                           shadow-lg shadow-amber-900/20 hover:shadow-amber-900/40"
+              >
+                {claiming ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Star className="w-5 h-5 fill-current" />
+                )}
+                <span>{claiming ? 'Saving…' : '⭐ Save to My TerraFirma Account'}</span>
+              </button>
+              {!session?.user && status !== 'loading' && (
+                <p className="text-center text-xs text-gray-500 mt-2">
+                  Free account required — 30 seconds
+                </p>
+              )}
+              {claimError && (
+                <p className="text-center text-xs text-red-400 mt-2">{claimError}</p>
+              )}
+            </div>
+          ) : (
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-2 w-full px-5 py-3 rounded-xl
+                              bg-green-700 text-white font-semibold">
+                ✅ Saved! Taking you to My Properties...
+              </div>
+              {/* Button 3 — Pro nudge (green, after success) */}
+              <div className="mt-4 bg-gradient-to-r from-green-900/50 to-emerald-900/40 border border-green-700/40 rounded-xl p-4">
+                <p className="text-sm text-green-300 font-medium mb-2.5">Pro members save unlimited territories</p>
+                <Link
+                  href="/pricing"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold text-sm transition-colors"
+                >
+                  Upgrade to Pro <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
