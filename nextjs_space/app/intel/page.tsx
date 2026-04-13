@@ -7833,6 +7833,11 @@ function DeerIntelContent() {
         const data = await resp.json();
         if (!data.found || !data.parcel) { setParcelPickLoading(false); return; }
         const parcel = data.parcel;
+        if ((parcel?.acreage || 0) < 5) {
+          console.log('[Territory] Skipping tiny parcel under 5 acres:', parcel?.acreage);
+          setParcelPickLoading(false);
+          return;
+        }
         const coords = [...(parcel.coordinates || [])];
         if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
           coords.push(coords[0]);
