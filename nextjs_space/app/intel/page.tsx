@@ -8874,6 +8874,26 @@ function DeerIntelContent() {
                 {geometryDebugMode ? 'Debug ON' : 'Debug'}
               </Button>
             )}
+            {/* Territory Builder toggle */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`${territoryMode 
+                ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
+                : 'text-white/80 hover:text-white hover:bg-white/10'
+              }`}
+              onClick={() => {
+                setTerritoryMode(!territoryMode);
+                if (!territoryMode) {
+                  setParcelPickMode(true);
+                  setActiveHeroSlug(null);
+                }
+              }}
+              title="Territory Builder — select multiple parcels for combined analysis"
+            >
+              <Layers className="h-4 w-4 mr-1" />
+              {territoryMode ? 'Building…' : 'Territory'}
+            </Button>
             {/* Parcel Pick Mode — de-emphasized in demo, available for exploration */}
             <Button
               size="sm"
