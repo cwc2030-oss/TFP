@@ -1989,6 +1989,12 @@ function DeerIntelContent() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
 
+  // ========== TERRITORY (MULTI-PARCEL) STATE ==========
+  const [territoryParcels, setTerritoryParcels] = useState<TerritoryParcel[]>([]);
+  const [territoryMode, setTerritoryMode] = useState<boolean>(false);
+  const [territoryName, setTerritoryName] = useState<string>('My Territory');
+  const territoryParcelsRef = useRef<TerritoryParcel[]>([]);
+
   // Raster grid state — persisted so the compare card can sample nearby cells
   const [rasterGrid, setRasterGrid] = useState<RasterGrid | null>(null);
 
@@ -2024,6 +2030,18 @@ function DeerIntelContent() {
 
   // ========== ONBOARDING / DEMO POLISH STATE ==========
   const [showOnboarding, setShowOnboarding] = useState(demoMode && !heroSlug);
+
+  // ========== TERRITORY (MULTI-PARCEL) STATE ==========
+  interface TerritoryParcel {
+    id: string;
+    address: string;
+    lat: number;
+    lng: number;
+    acreage: number;
+    polygon: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+    owner?: string;
+    county?: string;
+  }
 
   // ========== ADJACENT PARCELS STATE ==========
   interface AdjacentParcelInfo {
@@ -2693,6 +2711,82 @@ function DeerIntelContent() {
     'tfp-stand-tertiary',
     'tfp-stands',
   ]);
+
+  // ========== TERRITORY (MULTI-PARCEL) HELPERS ==========
+  // Keep ref in sync with state
+  useEffect(() => {
+    territoryParcelsRef.current = territoryParcels;
+  }, [territoryParcels]);
+
+  const mergeParcelPolygons = useCallback((parcels: TerritoryParcel[]): GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null => {
+    if (parcels.length === 0) return null;
+    if (parcels.length === 1) return parcels[0].polygon;
+
+    const allCoordinates = parcels.map(p => {
+      const geom = p.polygon.geometry;
+      if (geom.type === 'Polygon') return geom.coordinates;
+      return geom.coordinates[0]; // first polygon ring set from MultiPolygon
+    });
+
+    return {
+      type: 'Feature',
+      properties: {
+        address: parcels.map(p => p.address).join(' + '),
+        acreage: parcels.reduce((sum, p) => sum + p.acreage, 0),
+        isTerritory: true,
+        parcelCount: parcels.length,
+      },
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: allCoordinates,
+      }
+    };
+  }, []);
+
+  const getTerritoryBounds = useCallback((parcels: TerritoryParcel[]): [number, number, number, number] => {
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    for (const parcel of parcels) {
+      const geom = parcel.polygon.geometry;
+      const coords = geom.type === 'Polygon' ? geom.coordinates[0] : geom.coordinates[0][0];
+      for (const [lng, lat] of coords) {
+        minLng = Math.min(minLng, lng);
+        minLat = Math.min(minLat, lat);
+        maxLng = Math.max(maxLng, lng);
+        maxLat = Math.max(maxLat, lat);
+      }
+    }
+    return [minLng, minLat, maxLng, maxLat];
+  }, []);
+
+  const addParcelToTerritory = useCallback((parcel: TerritoryParcel) => {
+    setTerritoryParcels(prev => {
+      const exists = prev.find(p => p.id === parcel.id);
+      if (exists) return prev;
+      const updated = [...prev, parcel];
+      territoryParcelsRef.current = updated;
+      return updated;
+    });
+  }, []);
+
+  const removeParcelFromTerritory = useCallback((parcelId: string) => {
+    setTerritoryParcels(prev => {
+      const updated = prev.filter(p => p.id !== parcelId);
+      territoryParcelsRef.current = updated;
+      return updated;
+    });
+  }, []);
+
+  const clearTerritory = useCallback(() => {
+    setTerritoryParcels([]);
+    territoryParcelsRef.current = [];
+    setTerritoryMode(false);
+    setTerritoryName('My Territory');
+  }, []);
+
+  const totalTerritoryAcreage = useMemo(() =>
+    territoryParcels.reduce((sum, p) => sum + p.acreage, 0),
+    [territoryParcels]
+  );
 
   const clearAllOverlaySources = useCallback(() => {
     const map = mapRef.current;
