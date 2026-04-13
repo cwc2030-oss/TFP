@@ -1994,6 +1994,10 @@ function DeerIntelContent() {
   const [territoryMode, setTerritoryMode] = useState<boolean>(false);
   const [territoryName, setTerritoryName] = useState<string>('My Territory');
   const territoryParcelsRef = useRef<TerritoryParcel[]>([]);
+  // Flag: when true, the data-painting useEffect will fade terrain layers in
+  // instead of snapping them to full opacity. Set before territory analysis,
+  // consumed once after new data arrives.
+  const territoryFadeInPending = useRef(false);
 
   // Raster grid state — persisted so the compare card can sample nearby cells
   const [rasterGrid, setRasterGrid] = useState<RasterGrid | null>(null);
@@ -3202,6 +3206,44 @@ function DeerIntelContent() {
         };
 
         reconcileVisibility(map, reconcileState);
+
+        // Territory fade-in: if territory analysis just delivered new data,
+        // fade layers in over 1 s instead of snapping to full opacity.
+        if (territoryFadeInPending.current) {
+          territoryFadeInPending.current = false;
+          console.log('[TERRITORY] Fade-in pending — animating new analysis results');
+          const propMapFade: Record<string, string> = {
+            line: 'line-opacity', fill: 'fill-opacity',
+            circle: 'circle-opacity', heatmap: 'heatmap-opacity',
+            symbol: 'icon-opacity',
+          };
+          const fadePrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
+          const currentStyle = map.getStyle();
+          if (currentStyle?.layers) {
+            for (const layer of currentStyle.layers) {
+              if (!layer.id.startsWith('tfp-')) continue;
+              if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
+              const prop = propMapFade[(layer as any).type] || 'line-opacity';
+              // Start at 0, animate up to reconciled target
+              try {
+                map.setPaintProperty(layer.id, prop, 0);
+              } catch { /* ignore */ }
+            }
+          }
+          // After a brief 400 ms pause, fade everything back in over 1 s
+          setTimeout(() => {
+            const postStyle = map.getStyle();
+            if (postStyle?.layers) {
+              for (const layer of postStyle.layers) {
+                if (!layer.id.startsWith('tfp-')) continue;
+                if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
+                const prop = propMapFade[(layer as any).type] || 'line-opacity';
+                fadeLayerIn(map, layer.id, 0.8, prop, 1000);
+              }
+              console.log('[TERRITORY] Fade-in started: 1000ms');
+            }
+          }, 400);
+        }
 
         // Bump epoch to trigger specialized effects for 'complex' layers
         // (flow-primary with data-driven expressions, nearest-highlight, etc.)
@@ -7567,6 +7609,45 @@ function DeerIntelContent() {
   // Replicates the full direct-parcel-select → analyze path in a single pass:
   //  1. lookup parcel  2. highlight boundary  3. populate parcel features/info
   //  4. fit map  5. promote into active selected-parcel state  6. run analyzer
+  // ── Territory transition: fade terrain overlays out/in ──
+  // When adding 2nd+ parcel in territory mode, existing single-parcel flow
+  // data becomes stale. Fade it out to signal the handoff, then fade new
+  // territory-wide results back in when analysis completes.
+  const TERRITORY_FADE_PRESERVE = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
+  const fadeTerrainOverlays = useCallback((
+    map: mapboxgl.Map,
+    direction: 'out' | 'in',
+    durationMs: number = 1500,
+  ): Promise<void> => {
+    return new Promise((resolve) => {
+      const style = map.getStyle();
+      if (!style?.layers) { resolve(); return; }
+
+      const propMap: Record<string, string> = {
+        line: 'line-opacity', fill: 'fill-opacity',
+        circle: 'circle-opacity', heatmap: 'heatmap-opacity',
+        symbol: 'icon-opacity',
+      };
+
+      let layerCount = 0;
+      for (const layer of style.layers) {
+        if (!layer.id.startsWith('tfp-')) continue;
+        if (TERRITORY_FADE_PRESERVE.some(p => layer.id.startsWith(p))) continue;
+        const prop = propMap[(layer as any).type] || 'line-opacity';
+        if (direction === 'out') {
+          fadeLayerOut(map, layer.id, prop, durationMs);
+        } else {
+          // For fade-in, read targetOpacity from current paint (reconcileVisibility
+          // will have set correct values) — just animate from 0.
+          fadeLayerIn(map, layer.id, 0.8, prop, durationMs);
+        }
+        layerCount++;
+      }
+      console.log(`[TERRITORY] Fade ${direction}: ${layerCount} layers over ${durationMs}ms`);
+      setTimeout(resolve, durationMs + 50);
+    });
+  }, []);
+
   const handleParcelPick = useCallback(async (clickLng: number, clickLat: number) => {
     if (parcelPickLoading || isLoading) return;
     
@@ -7636,6 +7717,13 @@ function DeerIntelContent() {
         if (existingParcel) {
           removeParcelFromTerritory(parcelId);
         } else {
+          // When adding the 2nd+ parcel, stale single-parcel flow is visible —
+          // fade it out over 1.5 s so the user reads the handoff visually.
+          if (territoryParcelsRef.current.length >= 1 && mapRef.current) {
+            fadeTerrainOverlays(mapRef.current, 'out', 1500);
+            // NOTE: we don't await — the fade runs in the background while
+            // the territory source updates and gold boundaries repaint.
+          }
           const parcelFeatureForTerritory: TerritoryParcel = {
             id: parcelId,
             address: parcel.address || `Parcel at ${clickLat.toFixed(4)}, ${clickLng.toFixed(4)}`,
@@ -8798,6 +8886,9 @@ function DeerIntelContent() {
                   activeLatRef.current = centerLat;
                   activeLngRef.current = centerLng;
                   activeAcreageRef.current = totalAcres;
+                  // Signal the data-painting useEffect to fade new results in
+                  // instead of snapping them to full opacity.
+                  territoryFadeInPending.current = true;
                   setTimeout(() => runAnalysis(), 100);
                 }}
                 style={{
