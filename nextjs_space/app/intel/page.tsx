@@ -4146,6 +4146,33 @@ function DeerIntelContent() {
     console.log('[Adjacent] Updated map source with', fc.features.length, 'parcels');
   }, [adjacentParcels, showAdjacentParcels, mapReady]);
 
+  // ========== UPDATE TERRITORY PARCELS MAP SOURCE ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const source = map.getSource('tfp-territory-parcels') as mapboxgl.GeoJSONSource;
+    if (!source) return;
+
+    if (territoryParcels.length === 0) {
+      source.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    source.setData({
+      type: 'FeatureCollection',
+      features: territoryParcels.map(p => p.polygon),
+    });
+
+    if (territoryParcels.length >= 2) {
+      const bounds = getTerritoryBounds(territoryParcels);
+      map.fitBounds(
+        [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
+        { padding: 80, duration: 800 }
+      );
+    }
+  }, [territoryParcels, mapReady, getTerritoryBounds]);
+
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
   // v3.8.4 — debounce 300ms so rapid season/wind clicks coalesce into one setData pass
   const terrainFlowDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -5760,7 +5787,37 @@ function DeerIntelContent() {
         }
         
         // (Opportunity layers removed — convergence IS opportunity)
-        
+
+        // ========== TERRITORY HIGHLIGHT LAYER ==========
+        if (!map.getSource('tfp-territory-parcels')) {
+          map.addSource('tfp-territory-parcels', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+
+          map.addLayer({
+            id: 'tfp-territory-fill',
+            type: 'fill',
+            source: 'tfp-territory-parcels',
+            paint: {
+              'fill-color': '#c9a84c',
+              'fill-opacity': 0.12,
+            }
+          });
+
+          map.addLayer({
+            id: 'tfp-territory-outline',
+            type: 'line',
+            source: 'tfp-territory-parcels',
+            paint: {
+              'line-color': '#c9a84c',
+              'line-width': 2.5,
+              'line-dasharray': [4, 2],
+              'line-opacity': 0.9,
+            }
+          });
+        }
+
         // ========== HUNT POCKET LAYER (v3.8.6) ==========
         // Upstream-biased teardrop intercept zones with corridor-axis intensity bias.
         // Opacity = base curve × opacityScale × corridorBias for flow-reinforced fade.
@@ -7520,6 +7577,30 @@ function DeerIntelContent() {
         geometry: { type: 'Polygon', coordinates: [coords] },
       };
       
+      // ── TERRITORY MODE INTERCEPT ──
+      // In territory mode, add/remove the clicked parcel and bail out
+      // before promoting it as the single active parcel.
+      if (territoryMode) {
+        const parcelId = parcel.parcelId || `parcel_${Math.round(clickLat * 10000)}_${Math.round(clickLng * 10000)}`;
+
+        const existingParcel = territoryParcelsRef.current.find(p => p.id === parcelId);
+        if (existingParcel) {
+          removeParcelFromTerritory(parcelId);
+        } else {
+          const parcelFeatureForTerritory: TerritoryParcel = {
+            id: parcelId,
+            address: parcel.address || `Parcel at ${clickLat.toFixed(4)}, ${clickLng.toFixed(4)}`,
+            lat: clickLat,
+            lng: clickLng,
+            acreage: parcel.acreage || 0,
+            polygon: parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+          };
+          addParcelToTerritory(parcelFeatureForTerritory);
+        }
+        setParcelPickLoading(false);
+        return;
+      }
+
       // Set parcelPolygon state (triggers painting useEffect on next render)
       setParcelPolygon(parcelFeature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
       console.log('[PICK] Set parcelPolygon from lookup data:', parcel.parcelId);
