@@ -5825,10 +5825,22 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-territory-parcels',
             paint: {
-              'line-color': '#c9a84c',
+              'line-color': '#f59e0b',
               'line-width': 2.5,
-              'line-dasharray': [4, 2],
-              'line-opacity': 0.9,
+              'line-opacity': 0.95,
+            }
+          });
+
+          // Outer glow for territory parcels (matches tfp-parcel-glow)
+          map.addLayer({
+            id: 'tfp-territory-glow',
+            type: 'line',
+            source: 'tfp-territory-parcels',
+            paint: {
+              'line-color': '#fbbf24',
+              'line-width': 5,
+              'line-opacity': 0.35,
+              'line-blur': 3,
             }
           });
         }
