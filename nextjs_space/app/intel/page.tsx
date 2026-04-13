@@ -4381,6 +4381,11 @@ function DeerIntelContent() {
 
     if (territoryParcels.length === 0) {
       source.setData({ type: 'FeatureCollection', features: [] });
+      try {
+        map.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
+        map.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
+        map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+      } catch { /* layers may not exist yet */ }
       console.log('[TERRITORY] Cleared territory source (0 parcels)');
       return;
     }
@@ -4392,11 +4397,9 @@ function DeerIntelContent() {
     console.log('[TERRITORY] Syncing territory source:', fc.features.length, 'features from', territoryParcels.length, 'parcels');
     source.setData(fc);
 
-    // Safety net: ensure territory layers are visible with correct opacity.
+    // Only show territory fill/outline/glow when we have parcels.
     // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
-    // so if any code path calls clearAllOverlaySources while territory mode
-    // is active, the territory fill/outline/glow get faded to invisible even
-    // though their source data is intact. Force them back here.
+    // so force them back here when parcels are present.
     try {
       map.setLayoutProperty('tfp-territory-fill', 'visibility', 'visible');
       map.setPaintProperty('tfp-territory-fill', 'fill-opacity', 0.12);
@@ -6041,6 +6044,7 @@ function DeerIntelContent() {
             id: 'tfp-territory-fill',
             type: 'fill',
             source: 'tfp-territory-parcels',
+            layout: { visibility: 'none' },
             paint: {
               'fill-color': '#c9a84c',
               'fill-opacity': 0.12,
@@ -6051,6 +6055,7 @@ function DeerIntelContent() {
             id: 'tfp-territory-outline',
             type: 'line',
             source: 'tfp-territory-parcels',
+            layout: { visibility: 'none' },
             paint: {
               'line-color': '#f59e0b',
               'line-width': 2.5,
@@ -6063,6 +6068,7 @@ function DeerIntelContent() {
             id: 'tfp-territory-glow',
             type: 'line',
             source: 'tfp-territory-parcels',
+            layout: { visibility: 'none' },
             paint: {
               'line-color': '#fbbf24',
               'line-width': 5,
@@ -8281,6 +8287,13 @@ function DeerIntelContent() {
           // In territory mode, Esc exits both territory + pick mode
           if (territoryMode) {
             setTerritoryMode(false);
+            if (mapRef.current) {
+              try {
+                mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
+                mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
+                mapRef.current.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+              } catch(e) {}
+            }
           }
           setParcelPickMode(false);
         } else if (qaParcel) {
@@ -9257,6 +9270,13 @@ function DeerIntelContent() {
                   // Exiting territory mode — deactivate both
                   setTerritoryMode(false);
                   setParcelPickMode(false);
+                  if (mapRef.current) {
+                    try {
+                      mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
+                      mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
+                      mapRef.current.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+                    } catch(e) {}
+                  }
                 } else {
                   // Entering territory mode — fresh slate + auto-activate pick
                   setTerritoryMode(true);
@@ -9330,7 +9350,16 @@ function DeerIntelContent() {
             <button
               onClick={() => {
                 setParcelPickMode(false);
-                if (territoryMode) setTerritoryMode(false);
+                if (territoryMode) {
+                  setTerritoryMode(false);
+                  if (mapRef.current) {
+                    try {
+                      mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
+                      mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
+                      mapRef.current.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+                    } catch(e) {}
+                  }
+                }
               }}
               className="ml-3 text-amber-300/60 hover:text-amber-100 transition-colors"
             >
