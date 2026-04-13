@@ -2820,7 +2820,7 @@ function DeerIntelContent() {
 
     // v4-fix13: Preserve parcel boundary layers during clear — they don't change
     // between re-analysis runs and should stay visually stable.
-    gracefulClear(map, ALL_TFP_SOURCES.current, 220, ['tfp-parcel-']).then(() => {
+    gracefulClear(map, ALL_TFP_SOURCES.current, 220, ['tfp-parcel-', 'tfp-territory-']).then(() => {
       console.error('[INTEL-DIAG] OVERLAYS CLEARED — sources wiped, layers faded');
     });
   }, []);
@@ -2837,14 +2837,15 @@ function DeerIntelContent() {
     if (!map || !map.isStyleLoaded()) return;
 
     if (parcelViewHold) {
-      // Hide all tfp- layers except the parcel boundary
+      // Hide all tfp- layers except parcel boundary and territory layers
       const hidden: string[] = [];
       const style = map.getStyle();
       if (style?.layers) {
         for (const layer of style.layers) {
           if (
             layer.id.startsWith('tfp-') &&
-            !layer.id.startsWith('tfp-parcel-')
+            !layer.id.startsWith('tfp-parcel-') &&
+            !layer.id.startsWith('tfp-territory-')
           ) {
             try {
               map.setLayoutProperty(layer.id, 'visibility', 'none');
@@ -4171,13 +4172,30 @@ function DeerIntelContent() {
 
     if (territoryParcels.length === 0) {
       source.setData({ type: 'FeatureCollection', features: [] });
+      console.log('[TERRITORY] Cleared territory source (0 parcels)');
       return;
     }
 
-    source.setData({
+    const fc: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: territoryParcels.map(p => p.polygon),
-    });
+    };
+    console.log('[TERRITORY] Syncing territory source:', fc.features.length, 'features from', territoryParcels.length, 'parcels');
+    source.setData(fc);
+
+    // Safety net: ensure territory layers are visible with correct opacity.
+    // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
+    // so if any code path calls clearAllOverlaySources while territory mode
+    // is active, the territory fill/outline/glow get faded to invisible even
+    // though their source data is intact. Force them back here.
+    try {
+      map.setLayoutProperty('tfp-territory-fill', 'visibility', 'visible');
+      map.setPaintProperty('tfp-territory-fill', 'fill-opacity', 0.12);
+      map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+      map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.95);
+      map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
+      map.setPaintProperty('tfp-territory-glow', 'line-opacity', 0.35);
+    } catch { /* layers may not exist yet */ }
 
     if (territoryParcels.length >= 2) {
       const bounds = getTerritoryBounds(territoryParcels);
