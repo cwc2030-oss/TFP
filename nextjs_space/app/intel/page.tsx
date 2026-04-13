@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo, Component, ErrorInfo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 // NOTE: Deck.gl removed - using native Mapbox sources/layers only for stability
@@ -1820,6 +1821,7 @@ export default function DeerIntelPage() {
 function DeerIntelContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { data: session } = useSession() || {};
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -9010,6 +9012,27 @@ function DeerIntelContent() {
                 <img src="/onx-icon.png" alt="" style={{ height: 16, width: 16, borderRadius: 2 }} />
                 Open Territory in onX
               </button>
+
+              {/* Save Territory */}
+              {session?.user ? (
+                <button
+                  onClick={handleSaveProperty}
+                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
+                             bg-green-700 hover:bg-green-600 text-white font-semibold
+                             transition-colors duration-200 mt-2"
+                >
+                  {saveConfirmed ? '✅ Territory Saved!' : '⭐ Save Territory'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => router.push('/signin')}
+                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
+                             bg-green-900 hover:bg-green-800 text-white font-semibold
+                             transition-colors duration-200 mt-2"
+                >
+                  ⭐ Save Territory — Sign In
+                </button>
+              )}
             </>
           )}
         </div>
@@ -10894,6 +10917,27 @@ function DeerIntelContent() {
                     View this parcel on onX Maps
                   </p>
                 </div>
+              )}
+
+              {/* Save to My Properties */}
+              {session?.user ? (
+                <button
+                  onClick={handleSaveProperty}
+                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
+                             bg-green-700 hover:bg-green-600 text-white font-semibold
+                             transition-colors duration-200 mt-2"
+                >
+                  {saveConfirmed ? '✅ Saved!' : '⭐ Save to My Properties'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => router.push('/signin')}
+                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
+                             bg-green-900 hover:bg-green-800 text-white font-semibold
+                             transition-colors duration-200 mt-2"
+                >
+                  ⭐ Save to My Properties — Sign In
+                </button>
               )}
 
               {/* Fade-in keyframe animation */}
