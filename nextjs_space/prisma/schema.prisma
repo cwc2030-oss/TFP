@@ -18,7 +18,8 @@ model User {
   role         String   @default("user")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  orders       Order[]
+  orders          Order[]
+  savedProperties SavedProperty[]
 }
 
 model MapLayer {
@@ -87,4 +88,26 @@ model ParcelCache {
   
   @@unique([lat, lng])
   @@index([lat, lng])
+}
+
+model SavedProperty {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  name            String
+  type            String
+  parcels         Json
+  totalAcres      Float
+  centroidLat     Float
+  centroidLng     Float
+  terrainScore    Int?
+  primaryMovement String?
+  funnelCount     Int?
+  standCount      Int?
+  bedAcres        Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
 }
