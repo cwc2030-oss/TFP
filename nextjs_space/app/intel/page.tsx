@@ -9130,7 +9130,7 @@ function DeerIntelContent() {
                         mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
                       } catch(e) {}
                     }
-                  }, 500);
+                  }, 2000);
                 }}
                 style={{
                   width: '100%',
