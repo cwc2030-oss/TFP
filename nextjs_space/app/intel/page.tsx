@@ -3054,8 +3054,10 @@ function DeerIntelContent() {
     // Check if a caller (Pick Parcel / Explore) already fetched the parcel
     // geometry. When present we skip the redundant Regrid lookup and keep the
     // gold boundary visible — no full-screen loading overlay needed.
-    const prefetchedParcel = prefetchedParcelRef.current;
-    prefetchedParcelRef.current = null; // consume once
+    // In territory mode, ignore single-parcel prefetch — we re-fetch via centroid.
+    const isTerritoryRun = territoryParcelsRef.current.length > 1;
+    const prefetchedParcel = isTerritoryRun ? null : prefetchedParcelRef.current;
+    if (!isTerritoryRun) prefetchedParcelRef.current = null; // consume once (single-parcel only)
 
     // Only wipe overlay sources when we DON'T already have the boundary painted
     if (!prefetchedParcel) {
@@ -3082,9 +3084,21 @@ function DeerIntelContent() {
     // the latest values even when called via stale setTimeout closures.
     const currentSeason = seasonRef.current;
     const currentWind = windDirectionRef.current;
-    const currentLat = activeLatRef.current;
-    const currentLng = activeLngRef.current;
     const currentAcreage = activeAcreageRef.current;
+
+    // TERRITORY MODE — use centroid of all territory parcels so Re-Align
+    // runs on the territory center rather than the single-parcel coords.
+    const isTerritory = territoryParcelsRef.current.length > 1;
+    let currentLat = activeLatRef.current;
+    let currentLng = activeLngRef.current;
+
+    if (isTerritory) {
+      const [minLng, minLat, maxLng, maxLat] = getTerritoryBounds(territoryParcelsRef.current);
+      currentLat = (minLat + maxLat) / 2;
+      currentLng = (minLng + maxLng) / 2;
+      console.error('[INTEL-DIAG] TERRITORY MODE — using centroid:', currentLat, currentLng,
+        `(${territoryParcelsRef.current.length} parcels)`);
+    }
     
     const startTime = Date.now();
     console.error('[INTEL-DIAG] === ANALYSIS START ===');
@@ -3106,9 +3120,9 @@ function DeerIntelContent() {
         console.error('[INTEL-DIAG] Using PREFETCHED parcel, skipping Regrid lookup');
       } else if (demoMode || heroParcel) {
         // Demo / hero mode: skip Regrid lookup, use cached parcel directly
-        const dLat = activeLatRef.current;
-        const dLng = activeLngRef.current;
-        const dAcres = parseFloat(activeAcreageRef.current || '100');
+        const dLat = currentLat;
+        const dLng = currentLng;
+        const dAcres = parseFloat(currentAcreage || '100');
         console.error('[INTEL-DIAG] DEMO/HERO MODE — skipping parcel lookup, fetching cached parcel at', dLat, dLng);
         setProgress(15);
         setProgressStep('Loading demo parcel\u2026');
@@ -3252,7 +3266,8 @@ function DeerIntelContent() {
   // NOTE: season and windDirection intentionally excluded from deps.
   // Season/wind changes only affect the heatmap repaint (handled by the terrain flow painting effect),
   // NOT the full terrain analysis pipeline. This prevents data loss on season/wind toggle.
-  }, [lat, lng, acreageParam, clearAllOverlaySources]); // eslint-disable-line react-hooks/exhaustive-deps
+  // getTerritoryBounds is a stable useCallback([]) so it never triggers re-creation.
+  }, [lat, lng, acreageParam, clearAllOverlaySources, getTerritoryBounds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== NATIVE MAPBOX SOURCES INITIALIZED FLAG ==========
   const overlaySourcesCreated = useRef(false);
