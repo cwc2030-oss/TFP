@@ -7956,8 +7956,10 @@ function DeerIntelContent() {
       activeLngRef.current = newLng;
       activeAcreageRef.current = newAcreage;
       
-      // ── 5. Exit pick mode ──
-      setParcelPickMode(false);
+      // ── 5. Exit pick mode (single-parcel only — territory keeps picking) ──
+      if (!territoryMode) {
+        setParcelPickMode(false);
+      }
       setParcelPickLoading(false);
       
       // ── 6. (DISABLED) Clean parcel view hold ──
@@ -7984,7 +7986,7 @@ function DeerIntelContent() {
       console.error('[PICK] Lookup error:', err);
       setParcelPickLoading(false);
     }
-  }, [parcelPickLoading, isLoading, clearAllOverlaySources, runAnalysis]);
+  }, [parcelPickLoading, isLoading, clearAllOverlaySources, runAnalysis, territoryMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ═══ HERO PARCEL LOADER — one-click curated parcel switch ═══
   const heroLoadingRef = useRef(false);
@@ -8276,6 +8278,10 @@ function DeerIntelContent() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (parcelPickMode) {
+          // In territory mode, Esc exits both territory + pick mode
+          if (territoryMode) {
+            setTerritoryMode(false);
+          }
           setParcelPickMode(false);
         } else if (qaParcel) {
           handleQaParcelClear();
@@ -8285,7 +8291,7 @@ function DeerIntelContent() {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [qaParcel, handleQaParcelClear, parcelPickMode]);
+  }, [qaParcel, handleQaParcelClear, parcelPickMode, territoryMode]);
 
   // ========== TERRAIN FLOW CLICK EVENT LISTENERS ==========
   useEffect(() => {
@@ -9247,9 +9253,17 @@ function DeerIntelContent() {
                 : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
               onClick={() => {
-                setTerritoryMode(!territoryMode);
-                if (!territoryMode) {
+                if (territoryMode) {
+                  // Exiting territory mode — deactivate both
+                  setTerritoryMode(false);
+                  setParcelPickMode(false);
+                } else {
+                  // Entering territory mode — fresh slate + auto-activate pick
+                  setTerritoryMode(true);
                   setParcelPickMode(true);
+                  setTerritoryParcels([]);
+                  territoryParcelsRef.current = [];
+                  setTerritoryName('My Territory');
                   setActiveHeroSlug(null);
                 }
               }}
@@ -9314,7 +9328,10 @@ function DeerIntelContent() {
               <p className="text-amber-300/70 text-xs">We&apos;ll find the parcel boundary and run the Terrain Analyzer</p>
             </div>
             <button
-              onClick={() => setParcelPickMode(false)}
+              onClick={() => {
+                setParcelPickMode(false);
+                if (territoryMode) setTerritoryMode(false);
+              }}
               className="ml-3 text-amber-300/60 hover:text-amber-100 transition-colors"
             >
               <X className="h-4 w-4" />
