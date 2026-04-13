@@ -8886,6 +8886,13 @@ function DeerIntelContent() {
                   activeLatRef.current = centerLat;
                   activeLngRef.current = centerLng;
                   activeAcreageRef.current = totalAcres;
+                  // Pass the merged MultiPolygon as prefetched parcel so
+                  // runAnalysis() skips the Regrid re-fetch (which would
+                  // return a single wrong parcel at the center point) and
+                  // uses the full territory geometry for terrain analysis.
+                  // This also prevents clearAllOverlaySources() from firing
+                  // and keeps backgroundAnalysis=true (no full-screen overlay).
+                  prefetchedParcelRef.current = merged;
                   // Signal the data-painting useEffect to fade new results in
                   // instead of snapping them to full opacity.
                   territoryFadeInPending.current = true;
