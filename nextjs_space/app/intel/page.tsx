@@ -1996,6 +1996,8 @@ function DeerIntelContent() {
   const [territoryMode, setTerritoryMode] = useState<boolean>(false);
   const [territoryName, setTerritoryName] = useState<string>('My Territory');
   const territoryParcelsRef = useRef<TerritoryParcel[]>([]);
+  const territoryModeRef = useRef(false);
+  useEffect(() => { territoryModeRef.current = territoryMode; }, [territoryMode]);
   // Flag: when true, the data-painting useEffect will fade terrain layers in
   // instead of snapping them to full opacity. Set before territory analysis,
   // consumed once after new data arrives.
@@ -4401,8 +4403,7 @@ function DeerIntelContent() {
     // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
     // so force them back here when parcels are present.
     try {
-      map.setLayoutProperty('tfp-territory-fill', 'visibility', 'visible');
-      map.setPaintProperty('tfp-territory-fill', 'fill-opacity', 0.12);
+      // Show outline + glow only — fill stays at opacity 0 to prevent salmon wash
       map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
       map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.95);
       map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
@@ -6047,7 +6048,7 @@ function DeerIntelContent() {
             layout: { visibility: 'none' },
             paint: {
               'fill-color': '#c9a84c',
-              'fill-opacity': 0.12,
+              'fill-opacity': 0,
             }
           });
 
@@ -7823,13 +7824,45 @@ function DeerIntelContent() {
 
   const handleParcelPick = useCallback(async (clickLng: number, clickLat: number) => {
     if (parcelPickLoading || isLoading) return;
+
+    // ── TERRITORY MODE — add parcel only, no analysis ──
+    if (territoryModeRef.current) {
+      setParcelPickLoading(true);
+      try {
+        const resp = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
+        const data = await resp.json();
+        if (!data.found || !data.parcel) { setParcelPickLoading(false); return; }
+        const parcel = data.parcel;
+        const coords = [...(parcel.coordinates || [])];
+        if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+          coords.push(coords[0]);
+        }
+        const parcelFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
+          type: 'Feature',
+          properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
+          geometry: { type: 'Polygon', coordinates: [coords] },
+        };
+        addParcelToTerritory({
+          id: parcel.parcelId || `p_${Date.now()}`,
+          address: parcel.siteAddress || parcel.address || `Parcel at ${clickLat.toFixed(4)}, ${clickLng.toFixed(4)}`,
+          lat: clickLat,
+          lng: clickLng,
+          acreage: parcel.acreage || 0,
+          polygon: parcelFeature,
+          owner: parcel.owner,
+          county: parcel.county,
+        });
+      } catch (err) {
+        console.error('[PICK] Territory add failed:', err);
+      }
+      setParcelPickLoading(false);
+      return;
+    }
     
     console.log('[PICK] Picking parcel at:', clickLat.toFixed(6), clickLng.toFixed(6));
     setParcelPickLoading(true);
     
     // Clear previous state — clean slate for new parcel
-    // In territory mode, skip the wipe so previously-added parcels keep their
-    // gold boundaries and overlay data intact.
     if (!territoryMode) {
       clearAllOverlaySources();
       setParcelPolygon(null);
