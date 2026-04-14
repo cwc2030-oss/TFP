@@ -98,8 +98,7 @@ function HeroSection() {
     }
     
     try {
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-      // Use Places Autocomplete API via proxy to avoid CORS
+      // Mapbox-powered autocomplete via proxy
       const res = await fetch(`/api/places-autocomplete?input=${encodeURIComponent(input)}`);
       const data = await res.json();
       
@@ -118,24 +117,31 @@ function HeroSection() {
     fetchSuggestions(value);
   };
   
-  const handleSuggestionClick = async (suggestion: {description: string, place_id: string}) => {
+  const handleSuggestionClick = async (suggestion: {description: string, place_id: string, lat?: number, lng?: number}) => {
     setAddress(suggestion.description);
     setShowSuggestions(false);
     setIsSearching(true);
     setSearchError('');
     
     try {
-      // Get place details for coordinates
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(suggestion.description)}&key=${apiKey}`;
+      // Coordinates are pre-resolved from the autocomplete proxy
+      if (suggestion.lat && suggestion.lng) {
+        trackAddressSearch(suggestion.description);
+        router.push(`/preview?lat=${suggestion.lat}&lng=${suggestion.lng}&address=${encodeURIComponent(suggestion.description)}`);
+        return;
+      }
+      
+      // Fallback: geocode via Mapbox
+      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(suggestion.description)}.json?access_token=${mapboxToken}&country=us&limit=1`;
       
       const res = await fetch(geocodeUrl);
       const data = await res.json();
       
-      if (data.status === 'OK' && data.results.length > 0) {
-        const location = data.results[0].geometry.location;
+      if (data.features && data.features.length > 0) {
+        const [lng, lat] = data.features[0].center;
         trackAddressSearch(suggestion.description);
-        router.push(`/preview?lat=${location.lat}&lng=${location.lng}&address=${encodeURIComponent(suggestion.description)}`);
+        router.push(`/preview?lat=${lat}&lng=${lng}&address=${encodeURIComponent(suggestion.description)}`);
       } else {
         setSearchError('Could not locate address.');
         setIsSearching(false);
@@ -155,20 +161,20 @@ function HeroSection() {
     setShowSuggestions(false);
     
     try {
-      // Geocode the address using Google Maps API
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+      // Geocode the address using Mapbox Geocoding API
+      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxToken}&country=us&limit=1`;
       
       const res = await fetch(geocodeUrl);
       const data = await res.json();
       
-      if (data.status === 'OK' && data.results.length > 0) {
-        const location = data.results[0].geometry.location;
-        const formattedAddress = data.results[0].formatted_address;
+      if (data.features && data.features.length > 0) {
+        const [lng, lat] = data.features[0].center;
+        const formattedAddress = data.features[0].place_name;
         
         // Track & redirect to cinematic preview
         trackAddressSearch(formattedAddress);
-        router.push(`/preview?lat=${location.lat}&lng=${location.lng}&address=${encodeURIComponent(formattedAddress)}`);
+        router.push(`/preview?lat=${lat}&lng=${lng}&address=${encodeURIComponent(formattedAddress)}`);
       } else {
         setSearchError('Address not found. Try including city and state.');
         setIsSearching(false);

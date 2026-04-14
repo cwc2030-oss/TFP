@@ -17,20 +17,20 @@ export default function ShareLinkGenerator() {
     setCopied(false);
 
     try {
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!apiKey) throw new Error('Google Maps API key not configured');
+      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      if (!mapboxToken) throw new Error('Mapbox token not configured');
 
       const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address.trim())}&key=${apiKey}`
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address.trim())}.json?access_token=${mapboxToken}&country=us&limit=1`
       );
       const data = await res.json();
 
-      if (data.status !== 'OK' || !data.results?.length) {
+      if (!data.features?.length) {
         throw new Error('Could not geocode that address. Try a more specific address.');
       }
 
-      const { lat, lng } = data.results[0].geometry.location;
-      const formatted = data.results[0].formatted_address || address.trim();
+      const [lng, lat] = data.features[0].center;
+      const formatted = data.features[0].place_name || address.trim();
       const url = `https://terrafirma.partners/intel?lat=${lat}&lng=${lng}&address=${encodeURIComponent(formatted)}`;
       setLink(url);
     } catch (err: unknown) {

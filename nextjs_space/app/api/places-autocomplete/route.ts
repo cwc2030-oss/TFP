@@ -8,28 +8,33 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ predictions: [] });
   }
   
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  if (!mapboxToken) {
+    return NextResponse.json({ error: 'Mapbox token not configured' }, { status: 500 });
   }
   
   try {
-    // Use Google Places Autocomplete API
-    const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&types=address&components=country:us&key=${apiKey}`;
+    // Use Mapbox Geocoding API (v5) — returns suggestions with place names and coordinates
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(input)}.json?access_token=${mapboxToken}&country=us&types=address,place,locality,neighborhood&limit=5&autocomplete=true`;
     
     const res = await fetch(url);
     const data = await res.json();
     
-    if (data.status === 'OK' || data.status === 'ZERO_RESULTS') {
-      return NextResponse.json({
-        predictions: data.predictions || []
-      });
+    if (data.features && data.features.length > 0) {
+      // Transform Mapbox features into a predictions-like format for the frontend
+      const predictions = data.features.map((feature: any) => ({
+        description: feature.place_name,
+        place_id: feature.id,
+        // Include coordinates directly so we don't need a separate geocode call
+        lat: feature.center[1],
+        lng: feature.center[0],
+      }));
+      return NextResponse.json({ predictions });
     } else {
-      console.error('Places API error:', data.status, data.error_message);
       return NextResponse.json({ predictions: [] });
     }
   } catch (error) {
-    console.error('Places autocomplete error:', error);
+    console.error('Mapbox autocomplete error:', error);
     return NextResponse.json({ predictions: [] });
   }
 }

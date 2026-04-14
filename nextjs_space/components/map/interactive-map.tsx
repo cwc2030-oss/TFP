@@ -718,8 +718,9 @@ export default function InteractiveMap({
       return;
     }
 
-    if (!apiKey) {
-      console.error("Google Maps API key not configured");
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (!mapboxToken) {
+      console.error("Mapbox token not configured");
       return;
     }
 
@@ -728,19 +729,19 @@ export default function InteractiveMap({
 
     try {
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
           searchQuery + ", USA"
-        )}&key=${apiKey}`
+        )}.json?access_token=${mapboxToken}&country=us&limit=5&types=address,place,locality`
       );
 
       const data = await response.json();
 
-      if (data.status === "OK" && data.results) {
-        const results: SearchResult[] = data.results.slice(0, 5).map((result: any) => ({
-          address: result.formatted_address,
-          lat: result.geometry.location.lat,
-          lng: result.geometry.location.lng,
-          placeId: result.place_id,
+      if (data.features && data.features.length > 0) {
+        const results: SearchResult[] = data.features.map((feature: any) => ({
+          address: feature.place_name,
+          lat: feature.center[1],
+          lng: feature.center[0],
+          placeId: feature.id,
         }));
         setSearchResults(results);
         
