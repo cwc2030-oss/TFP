@@ -91,9 +91,12 @@ function HeroSection() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
   
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
   const fetchSuggestions = async (input: string) => {
     if (input.length < 3) {
       setSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
     
@@ -114,7 +117,9 @@ function HeroSection() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setAddress(value);
-    fetchSuggestions(value);
+    // Debounce autocomplete to avoid excessive API calls
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(value), 300);
   };
   
   const handleSuggestionClick = async (suggestion: {description: string, place_id: string, lat?: number, lng?: number}) => {
