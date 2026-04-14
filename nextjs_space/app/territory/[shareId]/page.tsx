@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { MapPin, TreePine, Crosshair, Layers, ArrowRight, Share2, Loader2, ExternalLink, Star } from 'lucide-react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +48,7 @@ export default function SharedTerritoryPage() {
   const [claimed, setClaimed] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const mapInstanceRef = useRef<mapboxgl.Map | null>(null);
   const mapInitializedRef = useRef(false);
   const autoClaimFired = useRef(false);
 
@@ -70,78 +72,84 @@ export default function SharedTerritoryPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoClaim, session, territory, claimed]);
 
-  const initMap = useCallback(() => {
+  // Initialize Mapbox map
+  useEffect(() => {
     if (!territory || !mapRef.current || mapInitializedRef.current) return;
-    if (typeof google === 'undefined' || !google.maps) return;
+    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (!token) return;
     mapInitializedRef.current = true;
+    (mapboxgl as any).accessToken = token;
 
-    const map = new google.maps.Map(mapRef.current, {
-      center: { lat: territory.centroidLat, lng: territory.centroidLng },
+    const map = new mapboxgl.Map({
+      container: mapRef.current,
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      center: [territory.centroidLng, territory.centroidLat],
       zoom: 14,
-      mapTypeId: 'hybrid',
-      disableDefaultUI: true,
-      zoomControl: true,
+      attributionControl: false,
     });
+
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
     mapInstanceRef.current = map;
 
-    const bounds = new google.maps.LatLngBounds();
-    territory.parcels.forEach((parcel, idx) => {
-      const geo = parcel.geometry;
-      const coords = geo?.geometry?.coordinates;
-      if (!coords) return;
+    map.on('load', () => {
+      const bounds = new mapboxgl.LngLatBounds();
+      const features: GeoJSON.Feature[] = [];
 
-      const geoType = geo?.geometry?.type;
-      const rings: number[][][] = geoType === 'MultiPolygon'
-        ? (coords as number[][][][]).flatMap(p => p)
-        : coords as number[][][];
+      territory.parcels.forEach((parcel, idx) => {
+        const geo = parcel.geometry;
+        const coords = geo?.geometry?.coordinates;
+        if (!coords) return;
 
-      const paths = rings.map(ring =>
-        ring.map(([lng, lat]) => {
-          const ll = new google.maps.LatLng(lat, lng);
-          bounds.extend(ll);
-          return ll;
-        })
-      );
+        const geoType = geo?.geometry?.type;
+        const rings: number[][][] = geoType === 'MultiPolygon'
+          ? (coords as number[][][][]).flatMap(p => p)
+          : coords as number[][][];
 
-      new google.maps.Polygon({
-        map,
-        paths,
-        strokeColor: idx === 0 ? '#22c55e' : '#60a5fa',
-        strokeWeight: 2,
-        fillColor: idx === 0 ? '#22c55e' : '#60a5fa',
-        fillOpacity: 0.25,
+        rings.forEach(ring => {
+          ring.forEach(([lng, lat]) => {
+            bounds.extend([lng, lat] as [number, number]);
+          });
+        });
+
+        features.push({
+          type: 'Feature',
+          properties: { idx, color: idx === 0 ? '#22c55e' : '#60a5fa' },
+          geometry: geo?.geometry as GeoJSON.Geometry
+        });
       });
+
+      map.addSource('territory-parcels', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features }
+      });
+
+      map.addLayer({
+        id: 'territory-fill',
+        type: 'fill',
+        source: 'territory-parcels',
+        paint: {
+          'fill-color': ['get', 'color'],
+          'fill-opacity': 0.25
+        }
+      });
+
+      map.addLayer({
+        id: 'territory-line',
+        type: 'line',
+        source: 'territory-parcels',
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 2
+        }
+      });
+
+      if (bounds.getNorthEast() && bounds.getSouthWest()) {
+        map.fitBounds(bounds, { padding: 60, maxZoom: 16 });
+      }
     });
 
-    if (!bounds.isEmpty()) {
-      map.fitBounds(bounds, 60);
-    }
+    return () => { map.remove(); };
   }, [territory]);
-
-  useEffect(() => {
-    if (!territory) return;
-
-    if (typeof google !== 'undefined' && google.maps) {
-      initMap();
-      return;
-    }
-
-    const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
-    if (existingScript) {
-      existingScript.addEventListener('load', initMap);
-      return;
-    }
-
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) return;
-
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
-    script.async = true;
-    script.defer = true;
-    script.onload = initMap;
-    document.head.appendChild(script);
-  }, [territory, initMap]);
 
   const handleCopyLink = async () => {
     const url = `${window.location.origin}/territory/${shareId}`;

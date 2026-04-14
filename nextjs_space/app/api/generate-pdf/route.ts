@@ -251,46 +251,51 @@ async function loadLogoImage(): Promise<string | null> {
   return null;
 }
 
-function buildParcelPath(coordinates: number[][][] | number[][][][] | null): string {
+function buildGeoJsonOverlay(coordinates: number[][][] | number[][][][] | null): string {
   if (!coordinates || coordinates.length === 0 || !coordinates[0]) return "";
   const ring = coordinates[0];
   if (ring.length < 3) return "";
   const maxPoints = 50;
   const step = ring.length > maxPoints ? Math.ceil(ring.length / maxPoints) : 1;
-  const pathPoints = ring
-    .filter((_, i) => i % step === 0 || i === ring.length - 1)
-    .map(coord => `${coord[1]},${coord[0]}`)
-    .join("|");
-  return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
+  const simplified = ring.filter((_: any, i: number) => i % step === 0 || i === ring.length - 1);
+  const geojson = {
+    type: "Feature",
+    properties: { stroke: "#22C55E", "stroke-width": 3, "stroke-opacity": 1, fill: "#22C55E", "fill-opacity": 0.2 },
+    geometry: { type: "Polygon", coordinates: [simplified] }
+  };
+  return encodeURIComponent(JSON.stringify(geojson));
 }
 
-async function fetchGoogleMapImage(
+async function fetchMapboxStaticImage(
   lat: number, lng: number, mapType: string = "satellite", zoom: number = 15,
   parcelCoordinates: number[][][] | number[][][][] | null = null
 ): Promise<string | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    console.error("Google Maps API key not configured");
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  if (!token) {
+    console.error("Mapbox token not configured");
     return null;
   }
 
   try {
-    const parcelPath = buildParcelPath(parcelCoordinates);
-    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
-    const params = new URLSearchParams({
-      center: `${lat},${lng}`,
-      zoom: zoom.toString(),
-      size: "640x400",
-      maptype: mapType,
-      key: apiKey
-    });
-    const mapUrl = `${baseUrl}?${params.toString()}${parcelPath}`;
-    
+    const styleMap: Record<string, string> = {
+      satellite: "satellite-v9",
+      terrain: "outdoors-v12",
+      hybrid: "satellite-streets-v12",
+      roadmap: "streets-v12",
+    };
+    const style = styleMap[mapType] || "satellite-streets-v12";
+    const overlay = buildGeoJsonOverlay(parcelCoordinates);
+    const baseUrl = 'https://api.mapbox.com/styles/v1/mapbox/' + style + '/static';
+    const location = `${lng},${lat},${zoom},0`;
+    const size = "640x400@2x";
+    const mapUrl = overlay
+      ? `${baseUrl}/geojson(${overlay})/${location}/${size}?access_token=${token}`
+      : `${baseUrl}/${location}/${size}?access_token=${token}`;
+
     const response = await fetch(mapUrl, { signal: AbortSignal.timeout(15000) });
     if (response.ok && response.headers.get('content-type')?.includes('image')) {
       const buffer = await response.arrayBuffer();
-      const imageType = mapType === "terrain" ? "png" : "jpeg";
-      return `data:image/${imageType};base64,${Buffer.from(buffer).toString("base64")}`;
+      return `data:image/png;base64,${Buffer.from(buffer).toString("base64")}`;
     } else {
       console.error("Map fetch failed:", response.status, response.statusText);
     }
@@ -539,9 +544,9 @@ export async function POST(request: NextRequest) {
     else if (acreage > 20) optimalZoom = 15;
     else optimalZoom = 16;
 
-    const aerialMap = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, "satellite", optimalZoom, parcelData.coordinates);
-    const topoMap = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, "terrain", optimalZoom, parcelData.coordinates);
-    const hybridMap = await fetchGoogleMapImage(order.parcelLat, order.parcelLng, "hybrid", optimalZoom, parcelData.coordinates);
+    const aerialMap = await fetchMapboxStaticImage(order.parcelLat, order.parcelLng, "satellite", optimalZoom, parcelData.coordinates);
+    const topoMap = await fetchMapboxStaticImage(order.parcelLat, order.parcelLng, "terrain", optimalZoom, parcelData.coordinates);
+    const hybridMap = await fetchMapboxStaticImage(order.parcelLat, order.parcelLng, "hybrid", optimalZoom, parcelData.coordinates);
     const hardinessMap = await fetchHardinessZoneMap();
 
     // ============================================

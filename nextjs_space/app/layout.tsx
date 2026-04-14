@@ -75,7 +75,7 @@ export default function RootLayout({
               var origError = console.error;
               console.error = function() {
                 var msg = arguments[0];
-                if (typeof msg === 'string' && (msg.indexOf('BillingNotEnabledMapError') !== -1 || msg.indexOf('Google Maps JavaScript API error') !== -1 || msg.indexOf('data-hydration-error') !== -1)) return;
+                if (typeof msg === 'string' && msg.indexOf('data-hydration-error') !== -1) return;
                 origError.apply(console, arguments);
               };
             })();

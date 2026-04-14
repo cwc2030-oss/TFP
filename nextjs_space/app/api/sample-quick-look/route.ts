@@ -24,7 +24,7 @@ const SAMPLE_SOIL = {
   drainageClass: "Well Drained",
 };
 
-function buildSampleParcelPath(): string {
+function buildSampleGeoJsonOverlay(): string {
   // Polygon matching the sample property location (761 Schlessman Rd, Pineville)
   const coords = [
     [-94.351, 36.644],  // NW corner
@@ -33,30 +33,32 @@ function buildSampleParcelPath(): string {
     [-94.351, 36.633],  // SW corner
     [-94.351, 36.644],  // Close polygon
   ];
-  const pathPoints = coords.map(c => `${c[1]},${c[0]}`).join("|");
-  return `&path=color:0x22C55EFF|weight:5|fillcolor:0x22C55E30|${pathPoints}`;
+  const geojson = {
+    type: "Feature",
+    properties: { stroke: "#22C55E", "stroke-width": 3, "stroke-opacity": 1, fill: "#22C55E", "fill-opacity": 0.2 },
+    geometry: { type: "Polygon", coordinates: [coords] }
+  };
+  return encodeURIComponent(JSON.stringify(geojson));
 }
 
-async function fetchGoogleMapImage(): Promise<string | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
+async function fetchMapboxStaticImage(): Promise<string | null> {
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  if (!token) return null;
 
   try {
-    const parcelPath = buildSampleParcelPath();
-    const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
-    const params = new URLSearchParams({
-      center: `${SAMPLE_DATA.lat},${SAMPLE_DATA.lng}`,
-      zoom: "16",
-      size: "640x400",
-      maptype: "satellite",
-      key: apiKey
-    });
-    const mapUrl = `${baseUrl}?${params.toString()}${parcelPath}`;
-    
+    const overlay = buildSampleGeoJsonOverlay();
+    const style = "satellite-v9";
+    const baseUrl = 'https://api.mapbox.com/styles/v1/mapbox/' + style + '/static';
+    const location = `${SAMPLE_DATA.lng},${SAMPLE_DATA.lat},16,0`;
+    const size = "640x400@2x";
+    const mapUrl = overlay
+      ? `${baseUrl}/geojson(${overlay})/${location}/${size}?access_token=${token}`
+      : `${baseUrl}/${location}/${size}?access_token=${token}`;
+
     const response = await fetch(mapUrl, { signal: AbortSignal.timeout(15000) });
     if (response.ok && response.headers.get('content-type')?.includes('image')) {
       const buffer = await response.arrayBuffer();
-      return `data:image/jpeg;base64,${Buffer.from(buffer).toString("base64")}`;
+      return `data:image/png;base64,${Buffer.from(buffer).toString("base64")}`;
     }
   } catch (error) {
     console.error("Failed to fetch map image:", error);
@@ -113,7 +115,7 @@ export async function GET() {
   try {
     const [logoImage, mapImageSatellite] = await Promise.all([
       loadLogoImage(),
-      fetchGoogleMapImage(),
+      fetchMapboxStaticImage(),
     ]);
 
     const cwdStatusResult = getCWDStatus(SAMPLE_DATA.county);
