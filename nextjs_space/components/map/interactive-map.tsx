@@ -407,6 +407,7 @@ export default function InteractiveMap({
   }, [clearParcelLayers, drawSelectedParcel, showNeighbors, drawNeighborParcels]);
 
   // Initialize Mapbox map
+  const [mapError, setMapError] = useState<string | null>(null);
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -414,15 +415,22 @@ export default function InteractiveMap({
     if (!token) return;
     (mapboxgl as any).accessToken = token;
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: MAPBOX_STYLES.hybrid,
-      center: [-98.5795, 39.8283],
-      zoom: 4,
-      pitch: 45,
-      bearing: 0,
-      attributionControl: false,
-    });
+    let map: mapboxgl.Map;
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: MAPBOX_STYLES.hybrid,
+        center: [-98.5795, 39.8283],
+        zoom: 4,
+        pitch: 45,
+        bearing: 0,
+        attributionControl: false,
+      });
+    } catch (err) {
+      console.error('Failed to initialize Mapbox map:', err);
+      setMapError('Map failed to load. Please try refreshing the page or using a WebGL-capable browser.');
+      return;
+    }
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new (mapboxgl as any).AttributionControl({ compact: true }), 'bottom-left');
@@ -516,14 +524,75 @@ export default function InteractiveMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update map style when mapType changes
+  // Update map style when mapType changes — re-apply parcel layers after style swap
+  // Refs hold latest state so the style.load callback always sees current data
+  const parcelDataRef = useRef(parcelData);
+  parcelDataRef.current = parcelData;
+  const neighboringParcelsRef = useRef(neighboringParcels);
+  neighboringParcelsRef.current = neighboringParcels;
+
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     const newStyle = MAPBOX_STYLES[mapType];
-    if (newStyle && (map.getStyle() as any)?.name !== newStyle) {
-      (map as any).setStyle(newStyle);
-    }
+    if (!newStyle) return;
+
+    // setStyle wipes all user-added sources/layers — must re-add after style loads
+    const reapplyParcelLayers = () => {
+      const currentParcel = parcelDataRef.current;
+      const currentNeighbors = neighboringParcelsRef.current;
+
+      // Re-draw selected parcel
+      if (currentParcel) {
+        const feature = buildParcelGeoJSON(currentParcel);
+        if (feature && !map.getSource('selected-parcel')) {
+          map.addSource('selected-parcel', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [feature] }
+          });
+          map.addLayer({
+            id: 'selected-parcel-fill',
+            type: 'fill',
+            source: 'selected-parcel',
+            paint: { 'fill-color': '#059669', 'fill-opacity': 0.25 }
+          });
+          map.addLayer({
+            id: 'selected-parcel-line',
+            type: 'line',
+            source: 'selected-parcel',
+            paint: { 'line-color': '#059669', 'line-width': 3, 'line-opacity': 1 }
+          });
+        }
+      }
+      // Re-draw neighbor parcels
+      if (currentNeighbors.length > 0) {
+        const features = currentNeighbors
+          .map(p => buildParcelGeoJSON(p))
+          .filter((f): f is GeoJSON.Feature => f !== null);
+        if (features.length > 0 && !map.getSource('neighbor-parcels')) {
+          map.addSource('neighbor-parcels', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features }
+          });
+          map.addLayer({
+            id: 'neighbor-parcels-fill',
+            type: 'fill',
+            source: 'neighbor-parcels',
+            paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.1 }
+          });
+          map.addLayer({
+            id: 'neighbor-parcels-line',
+            type: 'line',
+            source: 'neighbor-parcels',
+            paint: { 'line-color': '#f59e0b', 'line-width': 2, 'line-opacity': 0.6 }
+          });
+        }
+      }
+    };
+
+    (map as any).setStyle(newStyle);
+    map.once('style.load', reapplyParcelLayers);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapType]);
 
   // Send parcel details via email
@@ -695,6 +764,18 @@ export default function InteractiveMap({
     if (acres >= 1) return `${acres.toFixed(2)} acres`;
     return `${(acres * 43560).toFixed(0)} sq ft`;
   };
+
+  if (mapError) {
+    return (
+      <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-stone-900 flex items-center justify-center">
+        <div className="text-center p-8">
+          <MapIcon className="w-12 h-12 text-stone-500 mx-auto mb-4" />
+          <p className="text-stone-300 text-lg mb-2">Map Unavailable</p>
+          <p className="text-stone-500 text-sm">{mapError}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-stone-900">

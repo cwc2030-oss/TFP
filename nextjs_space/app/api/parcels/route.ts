@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
           zoning: cached.zoning,
           useDescription: cached.useDescription,
           coordinates: cached.coordinates || [],
-          geometryType: "Polygon",
+          geometryType: cached.geometryType || "Polygon",
           lat: parseFloat(lat),
           lng: parseFloat(lng),
           regridPath: "",

@@ -79,16 +79,26 @@ function PreviewContent() {
             displayAddress = address || 'Rural Property';
           }
           
-          // Extract parcel bounds from coordinates - format is [[[lng,lat], [lng,lat], ...]]
+          // Extract parcel bounds from coordinates — handles both Polygon and MultiPolygon
           let bounds: { lat: number; lng: number }[] | undefined;
           if (parcel.coordinates && Array.isArray(parcel.coordinates)) {
             try {
-              // Get the first polygon ring (outer boundary)
-              const ring = parcel.coordinates[0];
-              if (Array.isArray(ring) && ring.length > 0) {
-                bounds = ring
-                  .filter((coord: any) => Array.isArray(coord) && coord.length >= 2)
-                  .map((coord: any) => ({ lng: coord[0], lat: coord[1] }));
+              let coords: number[][] = [];
+              if (parcel.geometryType === 'MultiPolygon') {
+                // MultiPolygon: coordinates[polygonIdx][ringIdx][pointIdx]
+                const mp = parcel.coordinates as number[][][][];
+                mp.forEach((polygon: number[][][]) => {
+                  if (polygon[0]) coords = coords.concat(polygon[0]);
+                });
+              } else {
+                // Polygon: coordinates[ringIdx][pointIdx]
+                const ring = parcel.coordinates[0];
+                if (Array.isArray(ring) && ring.length > 0) {
+                  coords = ring.filter((coord: any) => Array.isArray(coord) && coord.length >= 2);
+                }
+              }
+              if (coords.length > 0) {
+                bounds = coords.map((coord: any) => ({ lng: coord[0], lat: coord[1] }));
               }
             } catch (e) {
               console.error('Error parsing bounds:', e);
