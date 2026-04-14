@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo, Component, ErrorInfo } from 'react';
+import { toast, Toaster } from 'sonner';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import mapboxgl from 'mapbox-gl';
@@ -2933,8 +2934,19 @@ function DeerIntelContent() {
 
   const addParcelToTerritory = useCallback((parcel: TerritoryParcel) => {
     setTerritoryParcels(prev => {
+      // Duplicate guard
       const exists = prev.find(p => p.id === parcel.id);
       if (exists) return prev;
+
+      // Hard cap at 3 parcels
+      if (prev.length >= 3) {
+        toast.error(
+          'Territory limit reached — upgrade to Pro for expanded territories.',
+          { duration: 4000 }
+        );
+        return prev;
+      }
+
       const updated = [...prev, parcel];
       territoryParcelsRef.current = updated;
       return updated;
@@ -8093,8 +8105,12 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map || !mapReady || !parcelPickMode) return;
     
-    // Change cursor to crosshair
-    map.getCanvas().style.cursor = 'crosshair';
+    // Change cursor — crosshair when under cap, default when locked
+    if (territoryMode && territoryParcels.length >= 3) {
+      map.getCanvas().style.cursor = 'default';
+    } else {
+      map.getCanvas().style.cursor = 'crosshair';
+    }
     
     const handlePickClick = (e: mapboxgl.MapMouseEvent) => {
       // Don't intercept clicks on existing stand markers or terrain features
@@ -8116,7 +8132,7 @@ function DeerIntelContent() {
       map.getCanvas().style.cursor = '';
       console.log('[PICK] Click handler removed');
     };
-  }, [mapReady, parcelPickMode, handleParcelPick]);
+  }, [mapReady, parcelPickMode, handleParcelPick, territoryMode, territoryParcels.length]);
 
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
@@ -8976,6 +8992,7 @@ function DeerIntelContent() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
+      <Toaster position="top-center" richColors />
       {/* Map Container — double-div pattern: outer div owns layout (absolute inset-0),
            inner div is the Mapbox target. Mapbox overrides position to 'relative' on its
            container, which breaks inset-0 sizing. By giving the inner div explicit 100%
@@ -9088,10 +9105,14 @@ function DeerIntelContent() {
                 paddingTop:8,
                 borderTop:'1px solid #1a3a2a',
               }}>
-                <span>{territoryParcels.length} parcels selected</span>
-                <span style={{color:'#52b788',fontWeight:'bold'}}>
-                  {Math.round(totalTerritoryAcreage)} total acres
-                </span>
+                <span>{territoryParcels.length} of 3 parcels selected</span>
+                {territoryParcels.length >= 3 ? (
+                  <span style={{color:'#f59e0b',fontWeight:600,fontSize:12}}>✓ Territory locked</span>
+                ) : (
+                  <span style={{color:'#52b788',fontWeight:'bold'}}>
+                    {Math.round(totalTerritoryAcreage)} total acres
+                  </span>
+                )}
               </div>
 
               <button
