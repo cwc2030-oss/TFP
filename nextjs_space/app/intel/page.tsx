@@ -15,6 +15,7 @@ import {
   Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User, Share2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import ScoreCard from '@/components/ScoreCard';
 import Link from 'next/link';
 import {
   scoreStandsWithExceptional,
@@ -1826,6 +1827,7 @@ function DeerIntelContent() {
   const isPro = session?.user?.subscriptionStatus === 'pro';
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
+  const [showScoreCard, setShowScoreCard] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -10054,6 +10056,20 @@ function DeerIntelContent() {
                     </div>
                   </div>
 
+                  {/* ── Share Score Card ── */}
+                  {!isLoading && summary.topStandScore > 0 && (
+                    <button
+                      onClick={() => setShowScoreCard(true)}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 mb-2
+                                 rounded-lg bg-amber-500/10 border border-amber-500/20
+                                 text-amber-400 text-[11px] font-semibold
+                                 hover:bg-amber-500/20 transition-colors"
+                    >
+                      📤 Share My Score
+                    </button>
+                  )}
+
+
                   {/* ── Key Opportunity ── */}
                   {terrainStory?.keyOpportunity && (
                     <div className="bg-amber-500/[0.06] border border-amber-500/10 rounded-lg px-2 py-1.5 mb-2">
@@ -11274,6 +11290,28 @@ function DeerIntelContent() {
           )}
         </div>
       </div>
+
+      {/* ========== SCORE CARD MODAL ========== */}
+      {showScoreCard && summary && (
+        <ScoreCard
+          address={activeAddress || 'Unknown Property'}
+          acres={parseFloat(activeAcreage || '0') || summary?.analysisAreaAcres || 0}
+          score={summary.topStandScore || 0}
+          grade={
+            (summary.topStandScore >= 90) ? 'A+' :
+            (summary.topStandScore >= 80) ? 'A' :
+            (summary.topStandScore >= 70) ? 'B+' :
+            (summary.topStandScore >= 60) ? 'B' :
+            (summary.topStandScore >= 50) ? 'C+' :
+            (summary.topStandScore >= 40) ? 'C' : 'D'
+          }
+          primaryMovement={terrainStory?.primaryDriver?.label || 'Terrain-driven'}
+          funnelCount={summary.funnelCount || 0}
+          standCount={alignedStands?.length || 0}
+          bedAcres={Math.round((summary.totalBeddingAcres || 0) * 10) / 10}
+          onClose={() => setShowScoreCard(false)}
+        />
+      )}
 
       {/* ========== UPGRADE TO PRO MODAL ========== */}
       {showUpgradeModal && (
