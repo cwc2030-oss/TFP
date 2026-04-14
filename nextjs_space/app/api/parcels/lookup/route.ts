@@ -61,7 +61,7 @@ export interface ParcelLookupResponse {
     acreage: number;
     owner: string;
     zoning: string;
-    coordinates: number[][];
+    coordinates: number[][] | number[][][] | number[][][][];
     centroid: [number, number];
     bounds: [[number, number], [number, number]];
     geometryType: 'Polygon' | 'MultiPolygon';
@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
               acreage: cached.acreage || validation.area || calculateAcreage(normalizedCoords),
               owner: cached.owner || 'Unknown',
               zoning: cached.zoning || 'N/A',
-              coordinates: normalizedCoords,
+              coordinates: cached.coordinates || [normalizedCoords],
               centroid: validation.centroid || calculateCentroid(normalizedCoords),
               bounds: validation.bounds || calculateBounds(normalizedCoords),
               geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
@@ -297,10 +297,10 @@ export async function GET(request: NextRequest) {
         acreage: fields.ll_gisacre || fields.gisacre || fields.acres || validation.area || calculateAcreage(normalizedCoords),
         owner: fields.owner || 'Unknown',
         zoning: fields.zoning || 'N/A',
-        coordinates: normalizedCoords,
+        coordinates: feature.geometry?.coordinates || [normalizedCoords],
         centroid: validation.centroid || calculateCentroid(normalizedCoords),
         bounds: validation.bounds || calculateBounds(normalizedCoords),
-        geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
+        geometryType: feature.geometry?.type === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
         legalDescription: fields.legaldesc || fields.legal_description || undefined,
         plss: plssParts.length > 0 ? plssParts.join(' ') : undefined,
       },
