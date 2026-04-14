@@ -407,7 +407,6 @@ export default function InteractiveMap({
   }, [clearParcelLayers, drawSelectedParcel, showNeighbors, drawNeighborParcels]);
 
   // Initialize Mapbox map
-  const [mapError, setMapError] = useState<string | null>(null);
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -415,22 +414,15 @@ export default function InteractiveMap({
     if (!token) return;
     (mapboxgl as any).accessToken = token;
 
-    let map: mapboxgl.Map;
-    try {
-      map = new mapboxgl.Map({
-        container: mapContainerRef.current,
-        style: MAPBOX_STYLES.hybrid,
-        center: [-98.5795, 39.8283],
-        zoom: 4,
-        pitch: 45,
-        bearing: 0,
-        attributionControl: false,
-      });
-    } catch (err) {
-      console.error('Failed to initialize Mapbox map:', err);
-      setMapError('Map failed to load. Please try refreshing the page or using a WebGL-capable browser.');
-      return;
-    }
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: MAPBOX_STYLES.hybrid,
+      center: [-98.5795, 39.8283],
+      zoom: 4,
+      pitch: 45,
+      bearing: 0,
+      attributionControl: false,
+    });
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new (mapboxgl as any).AttributionControl({ compact: true }), 'bottom-left');
@@ -764,18 +756,6 @@ export default function InteractiveMap({
     if (acres >= 1) return `${acres.toFixed(2)} acres`;
     return `${(acres * 43560).toFixed(0)} sq ft`;
   };
-
-  if (mapError) {
-    return (
-      <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-stone-900 flex items-center justify-center">
-        <div className="text-center p-8">
-          <MapIcon className="w-12 h-12 text-stone-500 mx-auto mb-4" />
-          <p className="text-stone-300 text-lg mb-2">Map Unavailable</p>
-          <p className="text-stone-500 text-sm">{mapError}</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden shadow-lg bg-stone-900">
