@@ -652,38 +652,7 @@ export default function InteractiveMap({
     }
   }, [mapType]);
 
-  // Initialize Google Places Autocomplete
-  useEffect(() => {
-    if (!mapLoaded || !searchInputRef.current || !window.google?.maps?.places || autocompleteRef.current) return;
-
-    const autocomplete = new google.maps.places.Autocomplete(searchInputRef.current, {
-      types: ["address"],
-      componentRestrictions: { country: "us" },
-      fields: ["formatted_address", "geometry", "place_id"],
-    });
-
-    autocomplete.addListener("place_changed", () => {
-      const place = autocomplete.getPlace();
-      if (place.geometry?.location && place.formatted_address) {
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        
-        setSearchQuery(place.formatted_address);
-        setSearchResults([]);
-        setHasSearched(true);
-        
-        // Directly select this location
-        selectParcel({
-          address: place.formatted_address,
-          lat,
-          lng,
-          placeId: place.place_id || "",
-        });
-      }
-    });
-
-    autocompleteRef.current = autocomplete;
-  }, [mapLoaded]);
+  // Note: Google Places Autocomplete removed — using Mapbox geocoding via handleSearch instead
 
   const toggle3DMode = () => {
     if (!googleMapRef.current) return;
@@ -1543,4 +1512,3 @@ export default function InteractiveMap({
     </div>
   );
 }
-

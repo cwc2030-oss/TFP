@@ -73,7 +73,7 @@ function HeroSection() {
   const [address, setAddress] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
-  const [suggestions, setSuggestions] = useState<Array<{description: string, place_id: string}>>([]);
+  const [suggestions, setSuggestions] = useState<Array<{description: string, place_id: string, lat?: number, lng?: number}>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);

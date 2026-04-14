@@ -69,6 +69,18 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script src="https://apps.abacus.ai/chatllm/appllm-lib.js"></script>
+        <Script id="suppress-known-errors" strategy="beforeInteractive">
+          {`
+            (function() {
+              var origError = console.error;
+              console.error = function() {
+                var msg = arguments[0];
+                if (typeof msg === 'string' && (msg.indexOf('BillingNotEnabledMapError') !== -1 || msg.indexOf('Google Maps JavaScript API error') !== -1 || msg.indexOf('data-hydration-error') !== -1)) return;
+                origError.apply(console, arguments);
+              };
+            })();
+          `}
+        </Script>
         {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (
           <>
             <Script

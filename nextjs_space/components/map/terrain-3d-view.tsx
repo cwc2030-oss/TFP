@@ -494,7 +494,7 @@ export default function Terrain3DView({
                 </h2>
                 <p className="text-sm text-stone-400">
                   {parcelAddress || "Selected Parcel"}
-                  {acreage && ` • ${acreage.toFixed(1)} acres`}
+                  {(acreage ?? 0) > 0 && ` • ${acreage!.toFixed(1)} acres`}
                 </p>
               </div>
             </div>
