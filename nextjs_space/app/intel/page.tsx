@@ -9265,6 +9265,19 @@ function DeerIntelContent() {
                 Open Territory in onX
               </button>
 
+              {/* Share Territory Score — Pro only, after analysis */}
+              {territoryMode && summary && isPro && (
+                <button
+                  onClick={() => setShowScoreCard(true)}
+                  className="flex items-center gap-2 w-full px-4 py-2
+                             rounded-lg mt-2 font-semibold text-sm
+                             bg-amber-600 hover:bg-amber-500
+                             text-white transition-colors duration-200"
+                >
+                  📤 Share Territory Score
+                </button>
+              )}
+
               {/* Save Territory — Pro only */}
               {session?.user && isPro ? (
                 <div className="flex gap-2 mt-2">
@@ -11294,8 +11307,16 @@ function DeerIntelContent() {
       {/* ========== SCORE CARD MODAL ========== */}
       {showScoreCard && summary && (
         <ScoreCard
-          address={activeAddress || 'Unknown Property'}
-          acres={parseFloat(activeAcreage || '0') || summary?.analysisAreaAcres || 0}
+          address={
+            territoryMode
+              ? `${territoryParcels.length}-Parcel Territory`
+              : activeAddress || 'Your Property'
+          }
+          acres={
+            territoryMode
+              ? totalTerritoryAcres
+              : (parseFloat(activeAcreage || '0') || summary?.analysisAreaAcres || 0)
+          }
           score={summary.topStandScore || 0}
           grade={
             (summary.topStandScore >= 90) ? 'A+' :
