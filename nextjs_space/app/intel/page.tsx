@@ -1822,7 +1822,10 @@ export default function DeerIntelPage() {
 function DeerIntelContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { data: session } = useSession() || {};
+  const { data: session, update: updateSession } = useSession() || {};
+  const isPro = session?.user?.subscriptionStatus === 'pro';
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -2595,6 +2598,65 @@ function DeerIntelContent() {
   const currentStandCount = layers?.standPoints?.features?.length ?? null;
   const currentBedAcres = summary?.totalBeddingAcres ?? null;
   const activeAcres = parseFloat(activeAcreage || '0') || 0;
+
+  // ── Upgrade success detection ──
+  useEffect(() => {
+    if (searchParams.get('upgrade') === 'success') {
+      // Refresh session to pick up new subscriptionStatus
+      updateSession?.();
+      toast.success('Welcome to TerraFirma Pro!');
+      // Clean URL without reload
+      const url = new URL(window.location.href);
+      url.searchParams.delete('upgrade');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleUpgrade(plan: 'monthly' | 'annual') {
+    if (!session?.user) {
+      router.push('/signin');
+      return;
+    }
+    setUpgradeLoading(plan);
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await res.json();
+      if (data.alreadyPro) {
+        toast.success('You already have Pro!');
+        setShowUpgradeModal(false);
+        updateSession?.();
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error(data.error || 'Checkout failed');
+      }
+    } catch {
+      toast.error('Something went wrong');
+    } finally {
+      setUpgradeLoading(null);
+    }
+  }
+
+  async function handleManageSubscription() {
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch {
+      toast.error('Could not open billing portal');
+    }
+  }
 
   async function handleSaveProperty() {
     const payload = territoryMode ? {
@@ -9201,8 +9263,8 @@ function DeerIntelContent() {
                 Open Territory in onX
               </button>
 
-              {/* Save Territory */}
-              {session?.user ? (
+              {/* Save Territory — Pro only */}
+              {session?.user && isPro ? (
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={handleSaveProperty}
@@ -9223,6 +9285,15 @@ function DeerIntelContent() {
                     {shareLoading ? '…' : shareCopied ? '✅ Copied!' : '🔗 Share'}
                   </button>
                 </div>
+              ) : session?.user && !isPro ? (
+                <button
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
+                             bg-amber-600 hover:bg-amber-500 text-white font-semibold
+                             transition-colors duration-200 mt-2"
+                >
+                  ⭐ Upgrade to Pro to Save & Share
+                </button>
               ) : (
                 <button
                   onClick={() => router.push('/signin')}
@@ -9346,6 +9417,9 @@ function DeerIntelContent() {
                       mapRef.current.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
                     } catch(e) {}
                   }
+                } else if (!isPro) {
+                  // Not Pro — show upgrade modal
+                  setShowUpgradeModal(true);
                 } else {
                   // Entering territory mode — fresh slate + auto-activate pick
                   setTerritoryMode(true);
@@ -9356,10 +9430,11 @@ function DeerIntelContent() {
                   setActiveHeroSlug(null);
                 }
               }}
-              title="Territory Builder — select multiple parcels for combined analysis"
+              title={isPro ? "Territory Builder — select multiple parcels for combined analysis" : "Upgrade to Pro for Territory Builder"}
             >
               <Layers className="h-4 w-4 mr-1" />
               {territoryMode ? 'Building…' : 'Territory'}
+              {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded">PRO</span>}
             </Button>
             {/* Parcel Pick Mode — de-emphasized in demo, available for exploration */}
             <Button
@@ -11146,8 +11221,8 @@ function DeerIntelContent() {
                 </div>
               )}
 
-              {/* Save to My Properties */}
-              {session?.user ? (
+              {/* Save to My Properties — Pro only */}
+              {session?.user && isPro ? (
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={handleSaveProperty}
@@ -11168,6 +11243,15 @@ function DeerIntelContent() {
                     {shareLoading ? '…' : shareCopied ? '✅ Copied!' : '🔗 Share'}
                   </button>
                 </div>
+              ) : session?.user && !isPro ? (
+                <button
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
+                             bg-amber-600 hover:bg-amber-500 text-white font-semibold
+                             transition-colors duration-200 mt-2"
+                >
+                  ⭐ Upgrade to Pro to Save & Share
+                </button>
               ) : (
                 <button
                   onClick={() => router.push('/signin')}
@@ -11190,6 +11274,90 @@ function DeerIntelContent() {
           )}
         </div>
       </div>
+
+      {/* ========== UPGRADE TO PRO MODAL ========== */}
+      {showUpgradeModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowUpgradeModal(false); }}
+        >
+          <div className="bg-[#0d1f17] border border-[#c9a84c]/40 rounded-2xl p-6 max-w-md w-[90vw] shadow-2xl">
+            <div className="text-center mb-5">
+              <div className="text-2xl mb-1">🦌</div>
+              <h3 className="text-xl font-bold text-white">Upgrade to TerraFirma Pro</h3>
+              <p className="text-sm text-stone-400 mt-2">
+                Unlock Territory Builder, Save Properties, and Share Territories
+              </p>
+            </div>
+
+            <div className="space-y-3 mb-5">
+              <div className="flex items-center gap-2 text-sm text-stone-300">
+                <span className="text-green-400">✓</span> Territory Builder — combine up to 3 parcels
+              </div>
+              <div className="flex items-center gap-2 text-sm text-stone-300">
+                <span className="text-green-400">✓</span> Save unlimited properties to your account
+              </div>
+              <div className="flex items-center gap-2 text-sm text-stone-300">
+                <span className="text-green-400">✓</span> Share territories with shareable links
+              </div>
+              <div className="flex items-center gap-2 text-sm text-stone-300">
+                <span className="text-green-400">✓</span> Everything in Free — unlimited analysis, PDFs, onX
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleUpgrade('annual')}
+                disabled={!!upgradeLoading}
+                className="flex-1 py-3 rounded-xl font-bold text-sm
+                           bg-[#c9a84c] text-[#0d1f17] hover:bg-[#d4b85d]
+                           disabled:opacity-50 transition-colors relative"
+              >
+                {upgradeLoading === 'annual' ? (
+                  <span className="animate-pulse">Processing…</span>
+                ) : (
+                  <>
+                    $99/year
+                    <span className="block text-[10px] font-normal opacity-80 mt-0.5">Save 31%</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => handleUpgrade('monthly')}
+                disabled={!!upgradeLoading}
+                className="flex-1 py-3 rounded-xl font-bold text-sm
+                           border border-[#c9a84c]/40 text-[#c9a84c] hover:bg-[#c9a84c]/10
+                           disabled:opacity-50 transition-colors"
+              >
+                {upgradeLoading === 'monthly' ? (
+                  <span className="animate-pulse">Processing…</span>
+                ) : (
+                  <>
+                    $12/month
+                    <span className="block text-[10px] font-normal opacity-60 mt-0.5">Billed monthly</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowUpgradeModal(false)}
+              className="w-full mt-3 py-2 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+            >
+              Maybe later
+            </button>
+
+            {isPro && (
+              <button
+                onClick={handleManageSubscription}
+                className="w-full mt-1 py-2 text-xs text-amber-400/70 hover:text-amber-300 transition-colors"
+              >
+                Manage subscription →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Loading Overlay — full-screen for fresh load, compact chip for background analysis */}
       {isLoading && !backgroundAnalysis && (
