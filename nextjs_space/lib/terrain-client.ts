@@ -184,8 +184,8 @@ export async function fetchParcelGeometry(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
-    console.error('[TerrainClient] Parcel fetch timed out after 30s');
-  }, 30_000);
+    console.error('[TerrainClient] Parcel fetch timed out after 15s');
+  }, 15_000);
 
   try {
     const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`, {
