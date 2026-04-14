@@ -20,6 +20,13 @@ model User {
   updatedAt    DateTime @updatedAt
   orders          Order[]
   savedProperties SavedProperty[]
+
+  // Stripe subscription fields
+  stripeCustomerId     String?   @unique
+  stripePriceId        String?
+  stripeSubscriptionId String?   @unique
+  subscriptionStatus   String?   @default("free")
+  subscriptionEnds     DateTime?
 }
 
 model MapLayer {
