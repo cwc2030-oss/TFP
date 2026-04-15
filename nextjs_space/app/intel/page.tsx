@@ -3002,10 +3002,10 @@ function DeerIntelContent() {
       const exists = prev.find(p => p.id === parcel.id);
       if (exists) return prev;
 
-      // Hard cap at 3 parcels
-      if (prev.length >= 3) {
+      // Hard cap at 5 parcels
+      if (prev.length >= 5) {
         toast.error(
-          'Territory limit reached — upgrade to Pro for expanded territories.',
+          'Territory limit reached (5 parcel max on Pro)',
           { duration: 4000 }
         );
         return prev;
@@ -8170,7 +8170,7 @@ function DeerIntelContent() {
     if (!map || !mapReady || !parcelPickMode) return;
     
     // Change cursor — crosshair when under cap, default when locked
-    if (territoryMode && territoryParcels.length >= 3) {
+    if (territoryMode && territoryParcels.length >= 5) {
       map.getCanvas().style.cursor = 'default';
     } else {
       map.getCanvas().style.cursor = 'crosshair';
@@ -9169,8 +9169,8 @@ function DeerIntelContent() {
                 paddingTop:8,
                 borderTop:'1px solid #1a3a2a',
               }}>
-                <span>{territoryParcels.length} of 3 parcels selected</span>
-                {territoryParcels.length >= 3 ? (
+                <span>{territoryParcels.length} of 5 parcels selected</span>
+                {territoryParcels.length >= 5 ? (
                   <span style={{color:'#f59e0b',fontWeight:600,fontSize:12}}>✓ Territory locked</span>
                 ) : (
                   <span style={{color:'#52b788',fontWeight:'bold'}}>
@@ -11351,7 +11351,7 @@ function DeerIntelContent() {
 
             <div className="space-y-3 mb-5">
               <div className="flex items-center gap-2 text-sm text-stone-300">
-                <span className="text-green-400">✓</span> Territory Builder — combine up to 3 parcels
+                <span className="text-green-400">✓</span> Territory Builder — combine up to 5 parcels
               </div>
               <div className="flex items-center gap-2 text-sm text-stone-300">
                 <span className="text-green-400">✓</span> Save unlimited properties to your account
