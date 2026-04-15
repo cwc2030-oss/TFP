@@ -2602,16 +2602,51 @@ function DeerIntelContent() {
   const activeAcres = parseFloat(activeAcreage || '0') || 0;
 
   // ── Upgrade success detection ──
+  // Race condition: Stripe redirects here instantly but the webhook
+  // (customer.subscription.created) may not have landed yet. Poll the
+  // session up to 5 times (every 2 s) until subscriptionStatus flips to 'pro'.
   useEffect(() => {
-    if (searchParams.get('upgrade') === 'success') {
-      // Refresh session to pick up new subscriptionStatus
-      updateSession?.();
-      toast.success('Welcome to TerraFirma Pro!');
+    if (searchParams.get('upgrade') !== 'success') return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5;
+    const POLL_INTERVAL = 2000;
+
+    const pollSession = async () => {
+      while (!cancelled && attempts < MAX_ATTEMPTS) {
+        attempts++;
+        try {
+          const updated = await updateSession?.();
+          const status = (updated as any)?.user?.subscriptionStatus;
+          console.log(`[UPGRADE] Poll ${attempts}/${MAX_ATTEMPTS} → status: ${status}`);
+          if (status === 'pro') {
+            if (!cancelled) toast.success('Welcome to TerraFirma Pro! 🎉');
+            break;
+          }
+        } catch (err) {
+          console.warn('[UPGRADE] Session refresh error:', err);
+        }
+        if (attempts < MAX_ATTEMPTS && !cancelled) {
+          await new Promise(r => setTimeout(r, POLL_INTERVAL));
+        }
+      }
+      // Show a toast even if we didn't get 'pro' yet — webhook may still be in flight
+      if (!cancelled && attempts >= MAX_ATTEMPTS) {
+        toast.success('Welcome to TerraFirma Pro! Your access is activating…');
+        // One final refresh after a longer delay
+        setTimeout(() => { updateSession?.(); }, 5000);
+      }
       // Clean URL without reload
-      const url = new URL(window.location.href);
-      url.searchParams.delete('upgrade');
-      window.history.replaceState({}, '', url.toString());
-    }
+      if (!cancelled) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('upgrade');
+        window.history.replaceState({}, '', url.toString());
+      }
+    };
+
+    pollSession();
+    return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleUpgrade(plan: 'monthly' | 'annual') {
