@@ -3185,13 +3185,15 @@ function DeerIntelContent() {
     }
     analysisInFlightRef.current = true;
 
-    // Check if a caller (Pick Parcel / Explore) already fetched the parcel
-    // geometry. When present we skip the redundant Regrid lookup and keep the
-    // gold boundary visible — no full-screen loading overlay needed.
-    // In territory mode, ignore single-parcel prefetch — we re-fetch via centroid.
+    // Check if a caller (Pick Parcel / Explore / Analyze Territory) already
+    // fetched the parcel geometry. When present we skip the redundant Regrid
+    // lookup and keep the gold boundary visible — no full-screen loading overlay.
+    // TERRITORY MODE: The "Analyze Territory" button merges all territory parcels
+    // into a MultiPolygon and stores it in prefetchedParcelRef — we MUST use it
+    // because a Regrid lookup on the centroid would return a single wrong parcel.
     const isTerritoryRun = territoryParcelsRef.current.length > 1;
-    const prefetchedParcel = isTerritoryRun ? null : prefetchedParcelRef.current;
-    if (!isTerritoryRun) prefetchedParcelRef.current = null; // consume once (single-parcel only)
+    const prefetchedParcel = prefetchedParcelRef.current;
+    prefetchedParcelRef.current = null; // consume once
 
     // Only wipe overlay sources when we DON'T already have the boundary painted
     if (!prefetchedParcel) {
@@ -3325,19 +3327,20 @@ function DeerIntelContent() {
       setProgressStep('Running terrain analysis...');
       console.error('[INTEL-DIAG] Got real parcel:', parcel.properties?.parcelId);
 
-      // Run terrain analysis with 120s timeout
+      // Territory runs need longer timeout (multi-parcel DEM fetch + stitching)
+      const analysisTimeout = isTerritoryRun ? 90_000 : 45_000;
       const result = await fetchTerrainAnalysis(
         {
           parcel,
           seasonProfile: currentSeason,
           prevailingWinds: [currentWind],
-          bufferMeters: 800,
+          bufferMeters: isTerritoryRun ? 1200 : 800, // wider buffer for territory
         },
         (step, prog) => {
           setProgressStep(step);
-          setProgress(20 + Math.round(prog * 0.8)); // Scale 0-100 to 20-100
+          setProgress(20 + Math.round(prog * 0.8));
         },
-        45_000 // 45 second timeout
+        analysisTimeout
       );
 
       const totalDuration = Date.now() - startTime;
@@ -3365,8 +3368,9 @@ function DeerIntelContent() {
       const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
       console.error('[INTEL] Analysis error:', errorMsg);
 
-      // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch
-      if (!demoFallbackAttempted.current) {
+      // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch.
+      // Never fire demo fallback for territory runs — user chose specific parcels.
+      if (!demoFallbackAttempted.current && !isTerritoryRun) {
         console.error('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to verified demo parcel');
         demoFallbackAttempted.current = true;
         const df = DEMO_FALLBACK.current;
@@ -8564,6 +8568,10 @@ function DeerIntelContent() {
     
     // Adjacent parcel click handler — clear terrain features from current parcel first
     const handleAdjacentParcelClick = (e: Event) => {
+      // In territory mode, adjacent parcel clicks are handled by the pick handler
+      // which adds parcels to the territory — don't interfere by clearing overlays.
+      if (territoryModeRef.current) return;
+
       const detail = (e as CustomEvent).detail;
       clearAllOverlaySources();
       // Null out React state so useEffects don't repaint stale saddles/draws/ridges
@@ -9529,13 +9537,32 @@ function DeerIntelContent() {
                   // Not Pro — show upgrade modal
                   setShowUpgradeModal(true);
                 } else {
-                  // Entering territory mode — fresh slate + auto-activate pick
+                  // Entering territory mode — auto-activate pick + seed with current parcel
                   setTerritoryMode(true);
                   setParcelPickMode(true);
-                  setTerritoryParcels([]);
-                  territoryParcelsRef.current = [];
                   setTerritoryName('My Territory');
                   setActiveHeroSlug(null);
+
+                  // Auto-add the currently analyzed parcel as the first territory member
+                  // so the user doesn't have to re-click it.
+                  const currentPoly = parcelPolygon;
+                  if (currentPoly && activeLat && activeLng) {
+                    const seedParcel: TerritoryParcel = {
+                      id: currentPoly.properties?.parcelId || `p_${Date.now()}`,
+                      address: activeAddress || `Parcel at ${activeLat.toFixed(4)}, ${activeLng.toFixed(4)}`,
+                      lat: activeLat,
+                      lng: activeLng,
+                      acreage: parseFloat(activeAcreage || '0'),
+                      polygon: currentPoly,
+                      owner: currentPoly.properties?.owner,
+                      county: currentPoly.properties?.county,
+                    };
+                    setTerritoryParcels([seedParcel]);
+                    territoryParcelsRef.current = [seedParcel];
+                  } else {
+                    setTerritoryParcels([]);
+                    territoryParcelsRef.current = [];
+                  }
                 }
               }}
               title={isPro ? "Territory Builder — select multiple parcels for combined analysis" : "Upgrade to Pro for Territory Builder"}

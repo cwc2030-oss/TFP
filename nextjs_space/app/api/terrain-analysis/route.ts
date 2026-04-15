@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
 
 const MAX_AOI_ACRES = 5000;
-const REQUEST_TIMEOUT_MS = 25_000; // 25 seconds - reduced for faster feedback
+const REQUEST_TIMEOUT_MS = 55_000; // 55 seconds — territory multi-parcel needs headroom
 
 // HARDCODED Modal v3 URL - do NOT rely on env vars for this critical path
 const GEOPROCESSOR_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/v1/terrain-analysis';
