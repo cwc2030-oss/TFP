@@ -3013,6 +3013,18 @@ function DeerIntelContent() {
 
       const updated = [...prev, parcel];
       territoryParcelsRef.current = updated;
+
+      // Safety catch: hide adjacent parcel layers on first territory parcel add
+      if (prev.length === 0) {
+        const map = mapRef.current;
+        if (map) {
+          try {
+            map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
+            map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
+          } catch { /* layers may not exist yet */ }
+        }
+      }
+
       return updated;
     });
   }, []);
@@ -3030,6 +3042,15 @@ function DeerIntelContent() {
     territoryParcelsRef.current = [];
     setTerritoryMode(false);
     setTerritoryName('My Territory');
+
+    // Restore adjacent parcel layers hidden during territory mode
+    const map = mapRef.current;
+    if (map) {
+      try {
+        map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'visible');
+        map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'visible');
+      } catch { /* layers may not exist yet */ }
+    }
   }, []);
 
   const totalTerritoryAcreage = useMemo(() =>
@@ -4463,8 +4484,11 @@ function DeerIntelContent() {
         map.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
         map.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
         map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+        // Restore adjacent parcel layers when territory is cleared
+        map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'visible');
+        map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'visible');
       } catch { /* layers may not exist yet */ }
-      console.log('[TERRITORY] Cleared territory source (0 parcels)');
+      console.log('[TERRITORY] Cleared territory source (0 parcels) — adjacent layers restored');
       return;
     }
 
@@ -4484,6 +4508,9 @@ function DeerIntelContent() {
       map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.95);
       map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
       map.setPaintProperty('tfp-territory-glow', 'line-opacity', 0.35);
+      // Hide adjacent parcel layers to prevent grey film overlay on territory parcels
+      map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
+      map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
     } catch { /* layers may not exist yet */ }
 
     if (territoryParcels.length >= 2) {
