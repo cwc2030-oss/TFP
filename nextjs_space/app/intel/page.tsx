@@ -11461,9 +11461,30 @@ function DeerIntelContent() {
               </button>
             </div>
 
+            {/* Manual session refresh for users whose webhook already landed */}
+            <button
+              onClick={async () => {
+                try {
+                  const updated = await updateSession?.();
+                  const status = (updated as any)?.user?.subscriptionStatus;
+                  if (status === 'pro') {
+                    toast.success('Pro activated! 🎉');
+                    setShowUpgradeModal(false);
+                  } else {
+                    toast.error('Subscription not found yet — please wait a moment and try again.');
+                  }
+                } catch {
+                  toast.error('Could not refresh session.');
+                }
+              }}
+              className="w-full mt-3 py-2 text-xs text-stone-400 hover:text-emerald-400 transition-colors underline underline-offset-2"
+            >
+              Already subscribed? Click to activate
+            </button>
+
             <button
               onClick={() => setShowUpgradeModal(false)}
-              className="w-full mt-3 py-2 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+              className="w-full mt-1 py-2 text-xs text-stone-500 hover:text-stone-300 transition-colors"
             >
               Maybe later
             </button>
