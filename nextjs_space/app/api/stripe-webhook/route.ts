@@ -6,6 +6,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-02-25.clover' as any,
 });
 
+// Health-check GET so we can verify the route is reachable
+export async function GET() {
+  return NextResponse.json({ status: 'ok', route: '/api/stripe-webhook', ts: Date.now() });
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const sig = req.headers.get('stripe-signature');
