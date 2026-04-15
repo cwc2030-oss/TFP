@@ -7966,14 +7966,17 @@ function DeerIntelContent() {
     // ── TERRITORY MODE — add parcel only, no analysis ──
     if (territoryModeRef.current) {
       setParcelPickLoading(true);
-      try {
+
+      const attemptTerritoryLookup = async (attempt: number): Promise<void> => {
         const resp = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
         const data = await resp.json();
-        if (!data.found || !data.parcel) { setParcelPickLoading(false); return; }
+        if (!data.found || !data.parcel) { return; }
         const parcel = data.parcel;
         if ((parcel?.acreage || 0) < 5) {
           console.log('[Territory] Skipping tiny parcel under 5 acres:', parcel?.acreage);
-          setParcelPickLoading(false);
           return;
         }
         const coords = [...(parcel.coordinates || [])];
@@ -7995,8 +7998,20 @@ function DeerIntelContent() {
           owner: parcel.owner,
           county: parcel.county,
         });
+      };
+
+      try {
+        await attemptTerritoryLookup(1);
       } catch (err) {
-        console.error('[PICK] Territory add failed:', err);
+        console.warn('[PICK] Territory lookup attempt 1 failed:', err);
+        toast.info('Loading parcel — retrying…');
+        try {
+          await new Promise(r => setTimeout(r, 3000));
+          await attemptTerritoryLookup(2);
+        } catch (retryErr) {
+          console.error('[PICK] Territory add failed after retry:', retryErr);
+          toast.error('Could not load parcel. Please try again.');
+        }
       }
       setParcelPickLoading(false);
       return;
@@ -8025,8 +8040,21 @@ function DeerIntelContent() {
     }
     
     try {
-      const response = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
-      const data = await response.json();
+      const fetchParcelWithRetry = async (): Promise<any> => {
+        const resp = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+      };
+
+      let data: any;
+      try {
+        data = await fetchParcelWithRetry();
+      } catch (firstErr) {
+        console.warn('[PICK] Lookup attempt 1 failed:', firstErr);
+        toast.info('Loading parcel — retrying…');
+        await new Promise(r => setTimeout(r, 3000));
+        data = await fetchParcelWithRetry();
+      }
       
       if (!data.found || !data.parcel) {
         console.warn('[PICK] No parcel found at click location');
@@ -8467,7 +8495,9 @@ function DeerIntelContent() {
           // In territory mode, Esc exits both territory + pick mode
           if (territoryMode) {
             setTerritoryMode(false);
-            if (mapRef.current) {
+            // Only hide territory layers if no parcels were added yet.
+            // If parcels exist (analysis was run or pending), keep them visible.
+            if (territoryParcelsRef.current.length === 0 && mapRef.current) {
               try {
                 mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
                 mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
@@ -9272,11 +9302,10 @@ function DeerIntelContent() {
                     setTerritoryMode(false);
                     setParcelPickMode(false);
                     territoryModeRef.current = false;
-                    if (mapRef.current) {
-                      try {
-                        mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
-                      } catch(e) {}
-                    }
+                    // NOTE: Do NOT hide territory outline/glow here.
+                    // The territory sync useEffect manages layer visibility
+                    // based on territoryParcels — hiding here causes parcels
+                    // to vanish while analysis results are rendering.
                   }, 2000);
                 }}
                 style={{
@@ -9487,7 +9516,9 @@ function DeerIntelContent() {
                   // Exiting territory mode — deactivate both
                   setTerritoryMode(false);
                   setParcelPickMode(false);
-                  if (mapRef.current) {
+                  // Only hide territory layers if no parcels were added.
+                  // If parcels exist, keep boundaries visible during/after analysis.
+                  if (territoryParcelsRef.current.length === 0 && mapRef.current) {
                     try {
                       mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
                       mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
@@ -9573,7 +9604,8 @@ function DeerIntelContent() {
                 setParcelPickMode(false);
                 if (territoryMode) {
                   setTerritoryMode(false);
-                  if (mapRef.current) {
+                  // Only hide territory layers if no parcels were added.
+                  if (territoryParcelsRef.current.length === 0 && mapRef.current) {
                     try {
                       mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
                       mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
