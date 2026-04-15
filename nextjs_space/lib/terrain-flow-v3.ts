@@ -683,19 +683,8 @@ export function generateTerrainFlowV3(
 ): TerrainFlowResponse {
   const startTime = Date.now();
   
-  // Extract parcel coordinates
-  let coords: number[][] = [];
-  if (parcel.geometry.type === 'Polygon') {
-    coords = parcel.geometry.coordinates[0];
-  } else {
-    let maxLen = 0;
-    parcel.geometry.coordinates.forEach(poly => {
-      if (poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        coords = poly[0];
-      }
-    });
-  }
+  // Extract parcel coordinates — union ALL sub-polygons for territory mode
+  const { allCoords: coords, rings: parcelRings } = extractMultiPolygonData(parcel);
   
   if (coords.length < 4) {
     return emptyFlowResponse('Insufficient parcel coordinates');
@@ -709,8 +698,8 @@ export function generateTerrainFlowV3(
   // Compute parcel scale
   const parcelScale = computeParcelScale(widthM, heightM);
   
-  console.log('[TerrainFlowV3] Parcel: %d x %d m (~%d acres)', 
-    Math.round(widthM), Math.round(heightM), Math.round(parcelScale.areaAcres));
+  console.log('[TerrainFlowV3] Parcel: %d x %d m (~%d acres), rings=%d', 
+    Math.round(widthM), Math.round(heightM), Math.round(parcelScale.areaAcres), parcelRings.length);
   
   // Classify flow pattern
   const pattern = classifyFlowPattern(coords, corridorData, ridgeData, parcelScale);
@@ -722,8 +711,8 @@ export function generateTerrainFlowV3(
   // Generate pattern-based flows
   const { primary, secondary } = generatePatternBasedFlow(coords, pattern, parcelScale);
   
-  // Generate convergence zones (if flows exist)
-  const convergenceZones = generateConvergenceFromFlows(primary, secondary, coords, parcelScale);
+  // Generate convergence zones (if flows exist) — pass all rings for multi-parcel containment
+  const convergenceZones = generateConvergenceFromFlows(primary, secondary, parcelRings, parcelScale);
   
   // Generate opportunity zones scored by 4-component terrain formula
   const opportunityZones = generateOpportunityZones(convergenceZones, parcelScale, ridgeData, beddingPolygons, funnels);
@@ -785,7 +774,7 @@ export function generateTerrainFlowV3(
 function generateConvergenceFromFlows(
   primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
-  parcelCoords: number[][],
+  parcelRings: number[][][],
   scale: ParcelScaleMetrics
 ): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
   const allFlows = [...primary, ...secondary];
@@ -807,8 +796,8 @@ function generateConvergenceFromFlows(
           if (dist < proximityM) {
             const midpoint: [number, number] = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
             
-            // Check if inside parcel
-            if (!pointInPolygon(midpoint, parcelCoords)) continue;
+            // Check if inside any parcel ring (territory multi-parcel support)
+            if (!pointInAnyRing(midpoint, parcelRings)) continue;
             
             // Merge with nearby found point or add new
             const existing = foundPoints.find(fp => 
@@ -837,7 +826,7 @@ function generateConvergenceFromFlows(
     const midIdx = Math.floor(primaryCoords.length / 2);
     const midpoint: [number, number] = [primaryCoords[midIdx][0], primaryCoords[midIdx][1]];
     
-    if (pointInPolygon(midpoint, parcelCoords)) {
+    if (pointInAnyRing(midpoint, parcelRings)) {
       foundPoints.push({
         coord: midpoint,
         intensity: 0.55,
@@ -1034,6 +1023,32 @@ function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
     }
   }
   return inside;
+}
+
+/** Check if a point is inside ANY polygon ring (territory multi-parcel support). */
+function pointInAnyRing(point: [number, number], rings: number[][][]): boolean {
+  return rings.some(ring => pointInPolygon(point, ring));
+}
+
+/**
+ * Extract ALL coordinate rings from a Polygon or MultiPolygon feature.
+ * Returns { allCoords: flat array of all vertices for bbox/centroid,
+ *           rings: individual polygon rings for point-in-polygon tests }
+ */
+function extractMultiPolygonData(
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+): { allCoords: number[][]; rings: number[][][] } {
+  if (parcel.geometry.type === 'Polygon') {
+    return { allCoords: parcel.geometry.coordinates[0], rings: [parcel.geometry.coordinates[0]] };
+  }
+  const rings: number[][][] = [];
+  const allCoords: number[][] = [];
+  for (const poly of parcel.geometry.coordinates) {
+    const outerRing = poly[0];
+    rings.push(outerRing);
+    allCoords.push(...outerRing);
+  }
+  return { allCoords, rings };
 }
 
 function emptyFlowResponse(reason: string): TerrainFlowResponse {

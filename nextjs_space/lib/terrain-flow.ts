@@ -127,12 +127,43 @@ function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
 }
 
 /**
- * Calculate the percentage of a line that falls inside the parcel
- * Uses midpoint sampling for segment containment
+ * Check if a point is inside ANY polygon ring in a set of rings.
+ * Used for territory mode where multiple parcels form a MultiPolygon.
+ */
+function pointInAnyRing(point: [number, number], rings: number[][][]): boolean {
+  return rings.some(ring => pointInPolygon(point, ring));
+}
+
+/**
+ * Extract ALL coordinate rings from a Polygon or MultiPolygon feature.
+ * Returns { allCoords: flat array of all vertices for bbox/centroid,
+ *           rings: individual polygon rings for point-in-polygon tests }
+ */
+function extractMultiPolygonData(
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+): { allCoords: number[][]; rings: number[][][] } {
+  if (parcel.geometry.type === 'Polygon') {
+    return { allCoords: parcel.geometry.coordinates[0], rings: [parcel.geometry.coordinates[0]] };
+  }
+  // MultiPolygon: gather all outer rings
+  const rings: number[][][] = [];
+  const allCoords: number[][] = [];
+  for (const poly of parcel.geometry.coordinates) {
+    const outerRing = poly[0];
+    rings.push(outerRing);
+    allCoords.push(...outerRing);
+  }
+  return { allCoords, rings };
+}
+
+/**
+ * Calculate the percentage of a line that falls inside the parcel.
+ * Supports multiple polygon rings (territory mode) — a segment counts
+ * as "inside" if its midpoint falls within ANY of the rings.
  */
 function lineParcelOverlapPercent(
   lineCoords: [number, number][],
-  parcelCoords: number[][]
+  parcelRings: number[][][]
 ): number {
   if (lineCoords.length < 2) return 0;
   
@@ -147,7 +178,7 @@ function lineParcelOverlapPercent(
     ];
     
     totalLen += segLen;
-    if (pointInPolygon(midpoint, parcelCoords)) {
+    if (pointInAnyRing(midpoint, parcelRings)) {
       insideLen += segLen;
     }
   }
@@ -156,18 +187,18 @@ function lineParcelOverlapPercent(
 }
 
 /**
- * Clip flow lines to parcel boundary
- * Keeps lines that have significant overlap (>=40%) with the parcel
- * Returns new FeatureCollection with clipped/filtered lines
+ * Clip flow lines to parcel boundary.
+ * Supports multiple polygon rings (territory mode) — a line is kept
+ * if ≥minOverlapPercent of its length falls inside ANY of the rings.
  */
 function clipFlowLinesToParcel(
   flowLines: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
-  parcelCoords: number[][],
+  parcelRings: number[][][],
   minOverlapPercent: number = 0.40
 ): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] {
   return flowLines.filter(feature => {
     const coords = feature.geometry.coordinates as [number, number][];
-    const overlap = lineParcelOverlapPercent(coords, parcelCoords);
+    const overlap = lineParcelOverlapPercent(coords, parcelRings);
     
     // Keep if significant portion is inside parcel
     return overlap >= minOverlapPercent;
@@ -179,7 +210,7 @@ function clipFlowLinesToParcel(
         ...feature.properties,
         parcelOverlapPct: lineParcelOverlapPercent(
           feature.geometry.coordinates as [number, number][],
-          parcelCoords
+          parcelRings
         ),
       },
     };
@@ -187,28 +218,30 @@ function clipFlowLinesToParcel(
 }
 
 /**
- * Filter convergence zones to only include those inside the parcel
+ * Filter convergence zones to only include those inside the parcel.
+ * Supports multiple polygon rings (territory mode).
  */
 function filterConvergenceZonesToParcel(
   zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
-  parcelCoords: number[][]
+  parcelRings: number[][][]
 ): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
   return zones.filter(zone => {
     const point = zone.geometry.coordinates as [number, number];
-    return pointInPolygon(point, parcelCoords);
+    return pointInAnyRing(point, parcelRings);
   });
 }
 
 /**
- * Filter opportunity zones to only include those inside the parcel
+ * Filter opportunity zones to only include those inside the parcel.
+ * Supports multiple polygon rings (territory mode).
  */
 function filterOpportunityZonesToParcel(
   zones: GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[],
-  parcelCoords: number[][]
+  parcelRings: number[][][]
 ): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
   return zones.filter(zone => {
     const point = zone.geometry.coordinates as [number, number];
-    return pointInPolygon(point, parcelCoords);
+    return pointInAnyRing(point, parcelRings);
   });
 }
 
@@ -349,24 +382,14 @@ export function generateTerrainDrivenFlow(
   console.log('[TerrainFlow] === TERRAIN-DRIVEN GENERATION ===');
   console.log('[TerrainFlow] Parcel ID:', parcelId);
   
-  // Extract parcel coordinates
-  let coords: number[][] = [];
-  if (parcel.geometry.type === 'Polygon') {
-    coords = parcel.geometry.coordinates[0];
-  } else {
-    let maxLen = 0;
-    parcel.geometry.coordinates.forEach(poly => {
-      if (poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        coords = poly[0];
-      }
-    });
-  }
+  // Extract parcel coordinates — union ALL sub-polygons for territory mode
+  const { allCoords: coords, rings: parcelRings } = extractMultiPolygonData(parcel);
   
   if (coords.length < 4) {
     return emptyFlowResponse('Insufficient parcel coordinates');
   }
   
+  const isTerritory = parcelRings.length > 1;
   const parcelBbox = getBbox(coords);
   const bufferedBbox = expandBbox(parcelBbox, ANALYSIS_BUFFER_M);
   
@@ -483,15 +506,19 @@ export function generateTerrainDrivenFlow(
   );
   
   // ========== CRITICAL: CLIP TO PARCEL BOUNDARY ==========
-  // This ensures adjacent parcels don't show identical results
-  console.log('[TerrainFlow] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
+  // Uses parcelRings (all polygon rings) so territory-mode flow lines
+  // that cross between parcels are kept as long as ≥40% overlaps ANY parcel.
+  console.log('[TerrainFlow] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d (rings=%d)',
     rawFlowLines.primary.length, rawFlowLines.secondary.length, 
-    rawConvergenceZones.length, rawOpportunityZones.length);
+    rawConvergenceZones.length, rawOpportunityZones.length, parcelRings.length);
   
-  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, coords, 0.40);
-  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, coords, 0.40);
-  const clippedConvergence = filterConvergenceZonesToParcel(rawConvergenceZones, coords);
-  const clippedOpportunity = filterOpportunityZonesToParcel(rawOpportunityZones, coords);
+  // For territory (multi-parcel), lower the overlap threshold so flow lines
+  // that bridge the gap between two parcels survive the clip.
+  const overlapThreshold = isTerritory ? 0.20 : 0.40;
+  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, parcelRings, overlapThreshold);
+  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, parcelRings, overlapThreshold);
+  const clippedConvergence = filterConvergenceZonesToParcel(rawConvergenceZones, parcelRings);
+  const clippedOpportunity = filterOpportunityZonesToParcel(rawOpportunityZones, parcelRings);
   
   console.log('[TerrainFlow] POST-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
     clippedPrimary.length, clippedSecondary.length, 
@@ -957,19 +984,8 @@ export function generateLegacySyntheticFlow(
   
   console.log('[TerrainFlow] === LEGACY SYNTHETIC (comparison only) ===');
   
-  // Extract parcel coordinates
-  let coords: number[][] = [];
-  if (parcel.geometry.type === 'Polygon') {
-    coords = parcel.geometry.coordinates[0];
-  } else {
-    let maxLen = 0;
-    parcel.geometry.coordinates.forEach(poly => {
-      if (poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        coords = poly[0];
-      }
-    });
-  }
+  // Extract parcel coordinates — union ALL sub-polygons for territory mode
+  const { allCoords: coords } = extractMultiPolygonData(parcel);
   
   if (coords.length < 4) {
     return emptyFlowResponse('Insufficient parcel coordinates');

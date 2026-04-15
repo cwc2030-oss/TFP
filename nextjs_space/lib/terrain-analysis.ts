@@ -265,36 +265,34 @@ export function createBufferedParcel(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   bufferM: number
 ): GeoJSON.Feature<GeoJSON.Polygon> {
-  // Extract coordinates
-  let coords: number[][] = [];
+  // Extract ALL outer rings from Polygon or MultiPolygon
+  let allCoords: number[][] = [];
   if (parcel.geometry.type === 'Polygon') {
-    coords = parcel.geometry.coordinates[0];
+    allCoords = parcel.geometry.coordinates[0];
   } else {
-    let maxLen = 0;
-    parcel.geometry.coordinates.forEach(poly => {
-      if (poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        coords = poly[0];
-      }
-    });
+    // MultiPolygon: gather vertices from ALL sub-polygons so the
+    // buffered extent covers the entire territory, not just the largest parcel.
+    for (const poly of parcel.geometry.coordinates) {
+      allCoords.push(...poly[0]);
+    }
   }
   
-  if (coords.length < 4) {
+  if (allCoords.length < 4) {
     // Return original if too simple
     return {
       type: 'Feature',
       properties: {},
       geometry: {
         type: 'Polygon',
-        coordinates: [coords],
+        coordinates: [allCoords],
       },
     };
   }
   
-  const centroid = getCentroid(coords);
+  const centroid = getCentroid(allCoords);
   
   // Simple radial buffer: push each vertex outward from centroid
-  const bufferedCoords = coords.map(coord => {
+  const bufferedCoords = allCoords.map(coord => {
     const bearing = calculateBearing(centroid, [coord[0], coord[1]]);
     const dist = distanceMeters(centroid, [coord[0], coord[1]]);
     const newDist = dist + bufferM;
