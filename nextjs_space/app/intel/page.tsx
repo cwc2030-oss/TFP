@@ -2004,6 +2004,17 @@ function DeerIntelContent() {
   const territoryParcelsRef = useRef<TerritoryParcel[]>([]);
   const territoryModeRef = useRef(false);
   useEffect(() => { territoryModeRef.current = territoryMode; }, [territoryMode]);
+
+  // TERRITORY FIREWALL: Auto-clear any analysis error that fires while
+  // territory mode is active — the user shouldn't see "Analysis Failed"
+  // when they're just adding parcels to the builder.
+  useEffect(() => {
+    if (territoryMode && error) {
+      setError(null);
+      setIsLoading(false);
+      setBackgroundAnalysis(false);
+    }
+  }, [territoryMode, error]);
   // Flag: when true, the data-painting useEffect will fade terrain layers in
   // instead of snapping them to full opacity. Set before territory analysis,
   // consumed once after new data arrives.
@@ -3183,6 +3194,17 @@ function DeerIntelContent() {
       console.error('[INTEL-DIAG] runAnalysis SKIPPED — analysis already in flight');
       return;
     }
+
+    // TERRITORY FIREWALL: When territory mode is active, runAnalysis must ONLY
+    // execute if explicitly invoked by "Analyze Territory" / "Re-Align Territory"
+    // which always set prefetchedParcelRef first (or have >1 territory parcels).
+    // Stale mount calls, setTimeout leftovers, and demo fallbacks must be blocked.
+    const isTerritoryRun = territoryParcelsRef.current.length > 1;
+    if (territoryModeRef.current && !prefetchedParcelRef.current && !isTerritoryRun) {
+      console.error('[INTEL-DIAG] runAnalysis BLOCKED — territory mode active, no prefetched parcel, not a territory run');
+      return;
+    }
+
     analysisInFlightRef.current = true;
 
     // Check if a caller (Pick Parcel / Explore / Analyze Territory) already
@@ -3191,7 +3213,6 @@ function DeerIntelContent() {
     // TERRITORY MODE: The "Analyze Territory" button merges all territory parcels
     // into a MultiPolygon and stores it in prefetchedParcelRef — we MUST use it
     // because a Regrid lookup on the centroid would return a single wrong parcel.
-    const isTerritoryRun = territoryParcelsRef.current.length > 1;
     const prefetchedParcel = prefetchedParcelRef.current;
     prefetchedParcelRef.current = null; // consume once
 
@@ -3407,8 +3428,14 @@ function DeerIntelContent() {
         return;
       }
 
-      setError(errorMsg);
-      setProgressStep('Failed');
+      // TERRITORY FIREWALL: In territory mode, swallow the error silently.
+      // The user is just building — they'll run the real analysis via "Analyze Territory".
+      if (territoryModeRef.current) {
+        console.error('[INTEL] Suppressing error in territory mode:', errorMsg);
+      } else {
+        setError(errorMsg);
+        setProgressStep('Failed');
+      }
     } finally {
       analysisInFlightRef.current = false;
       setIsLoading(false);
@@ -9129,7 +9156,20 @@ function DeerIntelContent() {
   };
 
   // ========== GLOBAL ERROR PANEL — v4-fix: graceful recovery, no "reboot" language ==========
-  if (globalError) {
+  // TERRITORY FIREWALL: In territory mode, suppress the full-screen error panel.
+  // Instead, auto-clear the error and show a gentle toast so the builder stays usable.
+  // NOTE: We can't call setState during render, so we schedule it for the next tick.
+  if (globalError && territoryMode) {
+    setTimeout(() => {
+      setGlobalError(null);
+      setError(null);
+      setIsLoading(false);
+      setBackgroundAnalysis(false);
+      toast.info('Parcel added — hit Analyze Territory to run the full report.');
+    }, 0);
+    // Don't return the full-screen error panel — fall through to normal render
+  }
+  if (globalError && !territoryMode) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
         <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
@@ -11702,8 +11742,10 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* Error Toast - shows actual error message */}
-      {error && (
+      {/* Error Toast - shows actual error message.
+          TERRITORY FIREWALL: In territory mode, suppress the scary error modal
+          and auto-clear it — the user should just see a gentle toast instead. */}
+      {error && !territoryMode && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-red-900/95 border border-red-500/50 rounded-lg px-6 py-4 shadow-xl max-w-lg">
           <div className="flex items-start gap-4">
             <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
