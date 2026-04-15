@@ -3195,8 +3195,9 @@ function DeerIntelContent() {
     const prefetchedParcel = prefetchedParcelRef.current;
     prefetchedParcelRef.current = null; // consume once
 
-    // Only wipe overlay sources when we DON'T already have the boundary painted
-    if (!prefetchedParcel) {
+    // Only wipe overlay sources when we DON'T already have the boundary painted.
+    // Territory re-aligns also skip the wipe — the merged boundary is still valid.
+    if (!prefetchedParcel && !isTerritoryRun) {
       clearAllOverlaySources();
     }
 
@@ -3250,10 +3251,22 @@ function DeerIntelContent() {
       let parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null = null;
 
       if (prefetchedParcel) {
-        // Parcel already fetched by Pick Parcel / Explore — use it directly,
-        // boundary is already painted on the map, camera already fitted.
+        // Parcel already fetched by Pick Parcel / Explore / Analyze Territory
+        // — use it directly, boundary is already painted, camera already fitted.
         parcel = prefetchedParcel;
         console.error('[INTEL-DIAG] Using PREFETCHED parcel, skipping Regrid lookup');
+      } else if (isTerritoryRun) {
+        // TERRITORY RE-ALIGN: no prefetched parcel (consumed on first run),
+        // but territory parcels still exist → re-merge them into a MultiPolygon
+        // instead of fetching a single wrong parcel from Regrid.
+        const merged = mergeParcelPolygons(territoryParcelsRef.current);
+        if (merged) {
+          parcel = merged;
+          setParcelPolygon(merged);
+          console.error('[INTEL-DIAG] TERRITORY RE-ALIGN — re-merged', territoryParcelsRef.current.length, 'parcels');
+        } else {
+          console.error('[INTEL-DIAG] TERRITORY RE-ALIGN — merge failed, falling through to Regrid');
+        }
       } else if (demoMode || heroParcel) {
         // Demo / hero mode: skip Regrid lookup, use cached parcel directly
         const dLat = currentLat;
@@ -7637,6 +7650,8 @@ function DeerIntelContent() {
   // ========== EXPLORATION PARCEL LOOKUP HANDLERS ==========
   const handleQaParcelLookup = useCallback(async (clickLng: number, clickLat: number) => {
     if (qaParcelLoading) return;
+    // TERRITORY FIREWALL: QA lookup must not fire in territory mode
+    if (territoryModeRef.current) return;
     
     // Clear previous overlays and parcel before loading new one
     clearAllOverlaySources();
@@ -7785,6 +7800,8 @@ function DeerIntelContent() {
 
   const handleQaParcelAnalyze = useCallback(async () => {
     if (!qaParcel || qaParcelAnalyzing) return;
+    // TERRITORY FIREWALL: QA analyze must not fire in territory mode
+    if (territoryModeRef.current) return;
 
     // Wipe all visual data before running new analysis
     clearAllOverlaySources();
@@ -7890,6 +7907,9 @@ function DeerIntelContent() {
   }, [qaParcel, qaParcelAnalyzing, geometryValidationError, geometryTrace, geometryDebugMode, runAnalysis, clearAllOverlaySources]);
 
   const handleQaParcelClear = useCallback(() => {
+    // TERRITORY FIREWALL: never run QA clear → runAnalysis while territory mode active
+    if (territoryModeRef.current) return;
+
     console.log('[EXPLORE] === CLEARING EXPLORE PARCEL STATE ===');
     
     setQaParcel(null);
@@ -8206,6 +8226,9 @@ function DeerIntelContent() {
   const heroLoadingRef = useRef(false);
   const loadHeroParcel = useCallback(async (hero: HeroParcel) => {
     if (heroLoadingRef.current || isLoading) return;
+    // TERRITORY FIREWALL: hero loading must not nuke territory state
+    if (territoryModeRef.current) return;
+
     heroLoadingRef.current = true;
     setActiveHeroSlug(hero.slug);
     
