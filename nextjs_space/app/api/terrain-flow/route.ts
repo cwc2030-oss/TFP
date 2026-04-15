@@ -50,8 +50,41 @@ const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL ||
 const RIDGE_API_URL = process.env.RIDGE_API_URL || 
   'https://cwc2030--terrain-brain-v3-ridges-ridges-web.modal.run/v1/ridges';
 
-const REQUEST_TIMEOUT_MS = 50000; // 50 seconds for buffered analysis
+const CORRIDOR_TIMEOUT_MS = 45000; // 45s — allows Modal cold-start
+const RIDGE_TIMEOUT_MS = 30000;    // 30s — allows Modal cold-start
 const API_VERSION = 'v2.0-terrain-driven-2026-03-11';
+
+/**
+ * Fetch with timeout + one automatic retry on abort/timeout.
+ * Returns the Response on success or null on double failure.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit & { timeout: number },
+  label: string,
+): Promise<Response | null> {
+  const { timeout, ...fetchInit } = init;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      const res = await fetch(url, { ...fetchInit, signal: controller.signal });
+      clearTimeout(timeoutId);
+      return res;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isTimeout = errMsg.includes('abort');
+      if (attempt === 1 && isTimeout) {
+        console.warn(`[TerrainFlow] ${label} attempt 1 timed out after ${init.timeout}ms — retrying`);
+        continue;
+      }
+      console.warn(`[TerrainFlow] ${label} attempt ${attempt} failed: ${errMsg}`);
+      return null;
+    }
+  }
+  return null;
+}
 
 interface TerrainFlowRequest {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
@@ -129,21 +162,18 @@ export async function POST(request: NextRequest) {
     let ridgeData: any = null;
     let usedRealDEM = false;
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    console.log('[TerrainFlow] Fetching corridor data from Modal with buffer (timeout %dms, 1 retry)', CORRIDOR_TIMEOUT_MS);
 
-      console.log('[TerrainFlow] Fetching corridor data from Modal with buffer');
-      
-      // Fetch corridor data with buffered extent
-      const corridorResponse = await fetch(CORRIDOR_API_URL, {
+    const corridorResponse = await fetchWithRetry(
+      CORRIDOR_API_URL,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
         },
         body: JSON.stringify({
-          parcel: bufferedParcel, // Use buffered parcel for analysis
+          parcel: bufferedParcel,
           parcel_id: parcel_id + '_buffered',
           state: 'mo',
           county: 'unknown',
@@ -154,14 +184,15 @@ export async function POST(request: NextRequest) {
             output_format: 'geojson',
           },
         }),
-        signal: controller.signal,
-      });
+        timeout: CORRIDOR_TIMEOUT_MS,
+      },
+      'Corridor',
+    );
 
-      clearTimeout(timeoutId);
-
-      if (corridorResponse.ok) {
+    if (corridorResponse?.ok) {
+      try {
         corridorData = await corridorResponse.json();
-        if (corridorData.success && 
+        if (corridorData.success &&
             (corridorData.corridors?.features?.length > 0 || corridorData.features?.length > 0)) {
           usedRealDEM = true;
           console.log('[TerrainFlow] Got corridor data from Modal:', {
@@ -172,21 +203,20 @@ export async function POST(request: NextRequest) {
           console.warn('[TerrainFlow] Corridor data empty or unsuccessful');
           corridorData = null;
         }
-      } else {
-        const errorText = await corridorResponse.text();
-        console.warn('[TerrainFlow] Corridor API error:', errorText);
+      } catch (parseErr) {
+        console.warn('[TerrainFlow] Corridor response parse failed:', parseErr);
       }
-    } catch (corridorErr) {
-      const errMsg = corridorErr instanceof Error ? corridorErr.message : String(corridorErr);
-      console.warn('[TerrainFlow] Corridor fetch failed:', errMsg);
+    } else if (corridorResponse) {
+      const errorText = await corridorResponse.text().catch(() => 'unreadable');
+      console.warn('[TerrainFlow] Corridor API error:', corridorResponse.status, errorText);
     }
 
-    // Try fetching ridge data (optional)
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for ridges
+    // Fetch ridge data (optional — timeout %dms, 1 retry)
+    console.log('[TerrainFlow] Fetching ridge data from Modal (timeout %dms, 1 retry)', RIDGE_TIMEOUT_MS);
 
-      const ridgeResponse = await fetch(RIDGE_API_URL, {
+    const ridgeResponse = await fetchWithRetry(
+      RIDGE_API_URL,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -202,12 +232,13 @@ export async function POST(request: NextRequest) {
             min_length_m: 200,
           },
         }),
-        signal: controller.signal,
-      });
+        timeout: RIDGE_TIMEOUT_MS,
+      },
+      'Ridge',
+    );
 
-      clearTimeout(timeoutId);
-
-      if (ridgeResponse.ok) {
+    if (ridgeResponse?.ok) {
+      try {
         ridgeData = await ridgeResponse.json();
         if (ridgeData.success) {
           console.log('[TerrainFlow] Got ridge data:', {
@@ -218,10 +249,9 @@ export async function POST(request: NextRequest) {
         } else {
           ridgeData = null;
         }
+      } catch (parseErr) {
+        console.warn('[TerrainFlow] Ridge response parse failed:', parseErr);
       }
-    } catch (ridgeErr) {
-      console.warn('[TerrainFlow] Ridge fetch failed (non-critical):', 
-        ridgeErr instanceof Error ? ridgeErr.message : String(ridgeErr));
     }
 
     // Generate terrain-driven flow
@@ -239,12 +269,16 @@ export async function POST(request: NextRequest) {
     flowData.metadata.processing_time_seconds = processingTime;
     flowData.metadata.buffer_m = effectiveBuffer;
     
+    // Determine flow mode — 'real_dem' when Modal succeeded, 'synthetic' on fallback
+    const flowMode = usedRealDEM ? 'real_dem' : 'synthetic';
+
     if (usedRealDEM) {
       flowData.metadata.mode = 'terrain_driven';
       flowData.metadata.dem_source = corridorData?.metadata?.dem_source || 'USGS_3DEP_1m';
     }
 
     console.log('[TerrainFlow] Complete:', {
+      flowMode,
       mode: flowData.metadata.mode,
       primary: flowData.flow_primary.features.length,
       secondary: flowData.flow_secondary.features.length,
@@ -256,6 +290,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ...flowData,
+      flowMode,
       version: API_VERSION,
       request_id: `flow_terrain_${Date.now().toString(36)}`,
     }, {
