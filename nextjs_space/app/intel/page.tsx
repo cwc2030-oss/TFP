@@ -7395,6 +7395,9 @@ function DeerIntelContent() {
 
         // ========== ADJACENT PARCELS CLICK + HOVER HANDLERS ==========
         map.on('click', 'tfp-adjacent-parcels-fill', (e) => {
+          // TERRITORY FIREWALL: During territory mode, adjacent parcel clicks are
+          // handled by the pick handler — don't dispatch the adjacent event.
+          if (territoryModeRef.current) return;
           if (!e.features || !e.features[0]) return;
           const props = e.features[0].properties || {};
           const detail = {
@@ -7412,12 +7415,14 @@ function DeerIntelContent() {
           window.dispatchEvent(new CustomEvent('tfp-adjacent-parcel-click', { detail }));
         });
         map.on('mouseenter', 'tfp-adjacent-parcels-fill', () => {
+          if (territoryModeRef.current) return; // TERRITORY FIREWALL
           map.getCanvas().style.cursor = 'pointer';
           if (map.getLayer('tfp-adjacent-parcels-hover')) {
             map.setLayoutProperty('tfp-adjacent-parcels-hover', 'visibility', 'visible');
           }
         });
         map.on('mouseleave', 'tfp-adjacent-parcels-fill', () => {
+          if (territoryModeRef.current) return; // TERRITORY FIREWALL
           map.getCanvas().style.cursor = '';
           if (map.getLayer('tfp-adjacent-parcels-hover')) {
             map.setLayoutProperty('tfp-adjacent-parcels-hover', 'visibility', 'none');
@@ -8357,6 +8362,67 @@ function DeerIntelContent() {
       console.log('[PICK] Click handler removed');
     };
   }, [mapReady, parcelPickMode, handleParcelPick, territoryMode, territoryParcels.length]);
+
+  // ========== TERRITORY MODE: CROSSHAIR CURSOR LOCK ==========
+  // When territory mode is active, force crosshair on the map canvas using CSS !important
+  // so that mouseenter/mouseleave handlers on terrain layers cannot override it to 'pointer'.
+  // Also disable pointer events on fill layers that intercept clicks before the pick handler.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    if (!territoryMode) return; // Only active during territory mode
+
+    const canvas = map.getCanvas();
+
+    // Inject a <style> tag with !important to override all inline cursor changes
+    const styleId = 'tfp-territory-cursor-lock';
+    let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `
+      .mapboxgl-canvas-container.mapboxgl-interactive,
+      .mapboxgl-canvas-container.mapboxgl-interactive canvas {
+        cursor: crosshair !important;
+      }
+    `;
+
+    // Also force inline as immediate feedback
+    canvas.style.cursor = 'crosshair';
+
+    // Disable pointer events on fill layers that intercept territory picks.
+    // Hide them so Mapbox won't fire mouseenter/click events on them.
+    const interactiveFillLayers = [
+      'tfp-adjacent-parcels-fill',
+      'tfp-adjacent-parcels-hover',
+      'tfp-territory-fill',
+    ];
+    interactiveFillLayers.forEach(layerId => {
+      if (map.getLayer(layerId)) {
+        try {
+          map.setLayoutProperty(layerId, 'visibility', 'none');
+        } catch { /* layer may not exist */ }
+      }
+    });
+
+    console.error('[TERRITORY-DIAG] Cursor lock + layer visibility block APPLIED');
+
+    return () => {
+      // Remove cursor lock
+      const el = document.getElementById(styleId);
+      if (el) el.remove();
+      canvas.style.cursor = '';
+
+      // Restore visibility on fill layers — adjacent parcels stay hidden
+      // (managed by territory mode toggle), territory-fill is only shown during analysis
+      // So we don't blindly restore to 'visible' — leave them as territory mode manages them.
+
+      console.error('[TERRITORY-DIAG] Cursor lock + layer visibility block REMOVED');
+    };
+  }, [mapReady, territoryMode]);
 
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
