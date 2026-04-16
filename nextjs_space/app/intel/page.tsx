@@ -9466,15 +9466,9 @@ function DeerIntelContent() {
                   // instead of snapping them to full opacity.
                   territoryFadeInPending.current = true;
                   setTimeout(() => runAnalysis(), 100);
-                  setTimeout(() => {
-                    setTerritoryMode(false);
-                    setParcelPickMode(false);
-                    territoryModeRef.current = false;
-                    // NOTE: Do NOT hide territory outline/glow here.
-                    // The territory sync useEffect manages layer visibility
-                    // based on territoryParcels — hiding here causes parcels
-                    // to vanish while analysis results are rendering.
-                  }, 2000);
+                  // Disable further parcel picks while analysis runs,
+                  // but keep territoryMode=true so the Builder panel stays visible.
+                  setParcelPickMode(false);
                 }}
                 style={{
                   width: '100%',
@@ -9681,12 +9675,12 @@ function DeerIntelContent() {
               }`}
               onClick={() => {
                 if (territoryMode) {
-                  // Exiting territory mode — deactivate both
+                  // If parcels have been added, don't allow toggle-off — user must use Clear button
+                  if (territoryParcelsRef.current.length > 0) return;
+                  // Exiting territory mode (no parcels) — deactivate both
                   setTerritoryMode(false);
                   setParcelPickMode(false);
-                  // Only hide territory layers if no parcels were added.
-                  // If parcels exist, keep boundaries visible during/after analysis.
-                  if (territoryParcelsRef.current.length === 0 && mapRef.current) {
+                  if (mapRef.current) {
                     try {
                       mapRef.current.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
                       mapRef.current.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
@@ -11843,7 +11837,7 @@ function DeerIntelContent() {
           TERRITORY FIREWALL: In territory mode, suppress the scary error modal
           and auto-clear it — the user should just see a gentle toast instead. */}
       {error && !territoryMode && (() => {
-        const isColdStart = error.includes('warming up') || error.includes('502') || error.includes('<!DOCTYPE') || error.includes('<html');
+        const isColdStart = error.includes('warming up');
         return (
         <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-30 ${isColdStart ? 'bg-amber-900/95 border border-amber-500/50' : 'bg-red-900/95 border border-red-500/50'} rounded-lg px-6 py-4 shadow-xl max-w-lg`}>
           <div className="flex items-start gap-4">
