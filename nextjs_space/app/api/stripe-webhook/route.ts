@@ -29,28 +29,70 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
-  // ── Checkout session completed (one-time purchases) ──
+  // ── Checkout session completed ──
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
     const orderId = session.metadata?.orderId;
 
-    if (!orderId) {
-      console.error('[webhook] No orderId in session metadata');
-      return NextResponse.json({ error: 'No orderId' }, { status: 400 });
-    }
+    if (session.mode === 'subscription' || session.subscription) {
+      // ── Subscription checkout — activate Pro on the user ──
+      const stripeCustomerId = session.customer as string | null;
+      const customerEmail = session.customer_email || session.customer_details?.email || null;
+      const subscriptionId = (session.subscription as string) || null;
 
-    try {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: 'paid',
-          stripeSessionId: session.id,
-        },
+      console.log('[webhook] checkout.session.completed (subscription)', {
+        stripeCustomerId, customerEmail, subscriptionId, sessionId: session.id,
       });
-      console.log('[webhook] Order', orderId, 'marked as paid');
-    } catch (err: any) {
-      console.error('[webhook] Failed to update order:', err.message);
-      return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+
+      try {
+        let user = stripeCustomerId
+          ? await prisma.user.findUnique({ where: { stripeCustomerId } })
+          : null;
+
+        if (!user && customerEmail) {
+          user = await prisma.user.findUnique({ where: { email: customerEmail } });
+        }
+
+        if (!user && session.metadata?.userId) {
+          user = await prisma.user.findUnique({ where: { id: session.metadata.userId } });
+        }
+
+        if (!user) {
+          console.warn('[webhook] No user found for subscription checkout, customer:', stripeCustomerId, 'email:', customerEmail);
+          return NextResponse.json({ received: true });
+        }
+
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            stripeCustomerId: stripeCustomerId || user.stripeCustomerId,
+            stripeSubscriptionId: subscriptionId || user.stripeSubscriptionId,
+            subscriptionStatus: 'pro',
+          },
+        });
+        console.log('[webhook] User', user.email, '→ pro (via checkout.session.completed)');
+      } catch (err: any) {
+        console.error('[webhook] Subscription checkout handler failed:', err.message);
+        return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+      }
+    } else if (orderId) {
+      // ── One-time payment checkout — mark order as paid ──
+      try {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: {
+            status: 'paid',
+            stripeSessionId: session.id,
+          },
+        });
+        console.log('[webhook] Order', orderId, 'marked as paid');
+      } catch (err: any) {
+        console.error('[webhook] Failed to update order:', err.message);
+        return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+      }
+    } else {
+      // Neither subscription nor orderId — log but don't fail
+      console.warn('[webhook] checkout.session.completed with no subscription and no orderId, session:', session.id);
     }
   }
 
