@@ -17,14 +17,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
     }
 
-    const { plan } = await req.json();
-    const annualId = process.env.STRIPE_PRO_ANNUAL_PRICE_ID;
-    const monthlyId = process.env.STRIPE_PRO_MONTHLY_PRICE_ID;
+    const { plan, tier = 'pro' } = await req.json();
 
-    const priceId = plan === "annual" ? annualId : plan === "monthly" ? monthlyId : null;
+    // Resolve price ID based on tier + plan
+    const PRICE_MAP: Record<string, Record<string, string | undefined>> = {
+      pro: {
+        annual: process.env.STRIPE_PRO_ANNUAL_PRICE_ID,
+        monthly: process.env.STRIPE_PRO_MONTHLY_PRICE_ID,
+      },
+      promax: {
+        annual: process.env.STRIPE_PROMAX_ANNUAL_PRICE_ID,
+        monthly: process.env.STRIPE_PROMAX_MONTHLY_PRICE_ID,
+      },
+    };
+
+    const priceId = PRICE_MAP[tier]?.[plan] || null;
 
     if (!priceId) {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid plan or tier" }, { status: 400 });
     }
 
     const user = await prisma.user.findUnique({ where: { email: session.user.email } });
@@ -46,9 +56,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // If already subscribed, return portal instead
-    if (user.subscriptionStatus === "pro" && user.stripeSubscriptionId) {
-      return NextResponse.json({ alreadyPro: true }, { status: 200 });
+    // If already subscribed at or above requested tier, return info
+    const currentStatus = user.subscriptionStatus || 'free';
+    if ((currentStatus === 'pro' || currentStatus === 'promax') && user.stripeSubscriptionId) {
+      // Allow upgrade from pro → promax via Stripe portal
+      if (currentStatus === 'pro' && tier === 'promax') {
+        // Let them proceed to checkout for the upgrade
+      } else {
+        return NextResponse.json({ alreadySubscribed: true, currentTier: currentStatus }, { status: 200 });
+      }
     }
 
     const origin = req.headers.get("origin") || process.env.NEXTAUTH_URL || "";

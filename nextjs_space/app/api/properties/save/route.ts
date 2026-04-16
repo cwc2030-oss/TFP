@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     where: { id: session.user.id },
     select: { subscriptionStatus: true },
   });
-  if (user?.subscriptionStatus !== 'pro') {
+  if (user?.subscriptionStatus !== 'pro' && user?.subscriptionStatus !== 'promax') {
     return NextResponse.json({ error: 'Pro subscription required' }, { status: 403 });
   }
 

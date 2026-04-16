@@ -6,6 +6,16 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-02-25.clover' as any,
 });
 
+// Determine subscription tier from Stripe price ID
+function getTierFromPriceId(priceId: string | null): 'pro' | 'promax' {
+  const promaxAnnual = process.env.STRIPE_PROMAX_ANNUAL_PRICE_ID;
+  const promaxMonthly = process.env.STRIPE_PROMAX_MONTHLY_PRICE_ID;
+  if (priceId && (priceId === promaxAnnual || priceId === promaxMonthly)) {
+    return 'promax';
+  }
+  return 'pro';
+}
+
 // Health-check GET so we can verify the route is reachable
 export async function GET() {
   return NextResponse.json({ status: 'ok', route: '/api/stripe-webhook', ts: Date.now() });
@@ -35,7 +45,7 @@ export async function POST(req: NextRequest) {
     const orderId = session.metadata?.orderId;
 
     if (session.mode === 'subscription' || session.subscription) {
-      // ── Subscription checkout — activate Pro on the user ──
+      // ── Subscription checkout — activate Pro/ProMax on the user ──
       const stripeCustomerId = session.customer as string | null;
       const customerEmail = session.customer_email || session.customer_details?.email || null;
       const subscriptionId = (session.subscription as string) || null;
@@ -62,15 +72,25 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ received: true });
         }
 
+        // Resolve the price from the subscription to determine tier
+        let resolvedTier: 'pro' | 'promax' = 'pro';
+        if (subscriptionId) {
+          try {
+            const sub = await stripe.subscriptions.retrieve(subscriptionId);
+            const priceId = sub.items.data[0]?.price?.id || null;
+            resolvedTier = getTierFromPriceId(priceId);
+          } catch { /* fallback to pro */ }
+        }
+
         await prisma.user.update({
           where: { id: user.id },
           data: {
             stripeCustomerId: stripeCustomerId || user.stripeCustomerId,
             stripeSubscriptionId: subscriptionId || user.stripeSubscriptionId,
-            subscriptionStatus: 'pro',
+            subscriptionStatus: resolvedTier,
           },
         });
-        console.log('[webhook] User', user.email, '→ pro (via checkout.session.completed)');
+        console.log('[webhook] User', user.email, '→', resolvedTier, '(via checkout.session.completed)');
       } catch (err: any) {
         console.error('[webhook] Subscription checkout handler failed:', err.message);
         return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
@@ -131,18 +151,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ received: true });
       }
 
-      const isPro = status === 'active' || status === 'trialing';
+      const isActive = status === 'active' || status === 'trialing';
+      const tier = getTierFromPriceId(priceId);
       await prisma.user.update({
         where: { id: user.id },
         data: {
           stripeCustomerId: customerId,
           stripeSubscriptionId: subscription.id,
           stripePriceId: priceId,
-          subscriptionStatus: isPro ? 'pro' : status,
+          subscriptionStatus: isActive ? tier : status,
           subscriptionEnds: currentPeriodEnd,
         },
       });
-      console.log('[webhook] User', user.email, '→ subscriptionStatus:', isPro ? 'pro' : status);
+      console.log('[webhook] User', user.email, '→ subscriptionStatus:', isActive ? tier : status);
     } catch (err: any) {
       console.error('[webhook] Subscription update failed:', err.message);
       return NextResponse.json({ error: 'DB update failed' }, { status: 500 });

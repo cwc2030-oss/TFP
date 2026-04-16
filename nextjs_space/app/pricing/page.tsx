@@ -134,6 +134,129 @@ export default function PricingPage() {
           </div>
         </div>
 
+        {/* ──── Subscription Tiers ──── */}
+        <div className="mt-20 text-center mb-10">
+          <h2 className="text-3xl font-bold text-stone-900 mb-3">Terrain Analyzer Subscriptions</h2>
+          <p className="text-lg text-stone-600 max-w-2xl mx-auto">
+            Unlock Territory Mode to analyze multiple parcels as one hunting property
+          </p>
+        </div>
+
+        <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-6 mb-16">
+          {/* Free */}
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-stone-200">
+            <div className="bg-stone-100 text-stone-700 text-center py-2 px-4 font-semibold text-sm">
+              FREE
+            </div>
+            <div className="p-6 text-center border-b border-stone-200">
+              <div className="mt-2">
+                <span className="text-4xl font-bold text-stone-700">$0</span>
+              </div>
+              <p className="text-stone-500 mt-2 text-sm">Single parcel analysis</p>
+            </div>
+            <div className="p-6">
+              <ul className="space-y-2.5">
+                {[
+                  "1 parcel terrain analysis",
+                  "Deer flow & corridor mapping",
+                  "Top 3 intercept placements",
+                  "Hunt File (onX export)",
+                  "Wind & season strategy",
+                ].map((f, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <Check className="h-4 w-4 text-stone-400 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-600 text-sm">{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-6">
+                <Link href="/intel" className="block">
+                  <Button className="w-full bg-stone-600 hover:bg-stone-700 text-white py-3 text-sm font-semibold">
+                    Try Free
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Pro */}
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-emerald-500 relative">
+            <div className="bg-emerald-600 text-white text-center py-2 px-4 font-semibold text-sm">
+              🏆 PRO
+            </div>
+            <div className="p-6 text-center border-b border-stone-200">
+              <div className="mt-2">
+                <span className="text-4xl font-bold text-emerald-600">$99</span>
+                <span className="text-stone-500 text-sm ml-1">/year</span>
+              </div>
+              <p className="text-stone-500 mt-1 text-sm">or $12/month</p>
+            </div>
+            <div className="p-6">
+              <ul className="space-y-2.5">
+                {[
+                  "Everything in Free",
+                  "Territory Mode — 5 parcels",
+                  "Save & share properties",
+                  "Shareable territory links",
+                  "Unlimited property saves",
+                ].map((f, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <Check className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-700 text-sm">{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-6">
+                <Link href="/intel" className="block">
+                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 text-sm font-semibold">
+                    Upgrade to Pro
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Pro Max */}
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-amber-500 relative transform md:scale-105">
+            <div className="absolute top-0 right-0 bg-amber-500 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
+              BEST VALUE
+            </div>
+            <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-center py-2 px-4 font-semibold text-sm">
+              ⚡ PRO MAX
+            </div>
+            <div className="p-6 text-center border-b border-stone-200">
+              <div className="mt-2">
+                <span className="text-4xl font-bold text-amber-600">$199</span>
+                <span className="text-stone-500 text-sm ml-1">/year</span>
+              </div>
+              <p className="text-stone-500 mt-1 text-sm">or $24/month</p>
+            </div>
+            <div className="p-6">
+              <ul className="space-y-2.5">
+                {[
+                  "Everything in Pro",
+                  "Territory Mode — 10 parcels",
+                  "Priority terrain analysis",
+                  "Extended territory coverage",
+                  "Large ranch / lease support",
+                ].map((f, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <Check className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-700 text-sm">{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-6">
+                <Link href="/intel" className="block">
+                  <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 text-sm font-semibold">
+                    Upgrade to Pro Max
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Trust Indicators */}
         <div className="mt-12 max-w-2xl mx-auto grid grid-cols-3 gap-6 text-center">
           <div className="flex flex-col items-center">

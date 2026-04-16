@@ -1847,7 +1847,10 @@ function DeerIntelContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { data: session, update: updateSession } = useSession() || {};
-  const isPro = session?.user?.subscriptionStatus === 'pro';
+  const subStatus = session?.user?.subscriptionStatus || 'free';
+  const isPro = subStatus === 'pro' || subStatus === 'promax';
+  const isProMax = subStatus === 'promax';
+  const TERRITORY_PARCEL_CAP = isProMax ? 10 : isPro ? 5 : 1;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const [showScoreCard, setShowScoreCard] = useState(false);
@@ -2658,8 +2661,8 @@ function DeerIntelContent() {
           const updated = await updateSession?.();
           const status = (updated as any)?.user?.subscriptionStatus;
           console.log(`[UPGRADE] Poll ${attempts}/${MAX_ATTEMPTS} → status: ${status}`);
-          if (status === 'pro') {
-            if (!cancelled) toast.success('Welcome to TerraFirma Pro! 🎉');
+          if (status === 'pro' || status === 'promax') {
+            if (!cancelled) toast.success(status === 'promax' ? 'Welcome to TerraFirma Pro Max! 🎉' : 'Welcome to TerraFirma Pro! 🎉');
             break;
           }
         } catch (err) {
@@ -2687,21 +2690,21 @@ function DeerIntelContent() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleUpgrade(plan: 'monthly' | 'annual') {
+  async function handleUpgrade(plan: 'monthly' | 'annual', tier: 'pro' | 'promax' = 'pro') {
     if (!session?.user) {
       router.push('/signin');
       return;
     }
-    setUpgradeLoading(plan);
+    setUpgradeLoading(`${tier}_${plan}`);
     try {
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, tier }),
       });
       const data = await res.json();
-      if (data.alreadyPro) {
-        toast.success('You already have Pro!');
+      if (data.alreadySubscribed) {
+        toast.success(`You already have ${data.currentTier === 'promax' ? 'Pro Max' : 'Pro'}!`);
         setShowUpgradeModal(false);
         updateSession?.();
         return;
@@ -3097,7 +3100,16 @@ function DeerIntelContent() {
         return prev;
       }
 
-      // No hard cap — allow unlimited parcels in territory
+      // Tier-based parcel cap: free=1, pro=5, promax=10
+      const cap = isProMax ? 10 : isPro ? 5 : 1;
+      if (prev.length >= cap) {
+        console.error('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
+        toast.error(
+          `Territory limit reached (${cap} parcel max on ${isProMax ? 'Pro Max' : isPro ? 'Pro' : 'Free'})`,
+          { duration: 4000 }
+        );
+        return prev;
+      }
 
       const updated = [...prev, parcel];
       territoryParcelsRef.current = updated;
@@ -8409,8 +8421,12 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map || !mapReady || !parcelPickMode) return;
     
-    // Change cursor — crosshair in pick mode
-    map.getCanvas().style.cursor = 'crosshair';
+    // Change cursor — crosshair when under cap, default when full
+    if (territoryMode && territoryParcels.length >= TERRITORY_PARCEL_CAP) {
+      map.getCanvas().style.cursor = 'default';
+    } else {
+      map.getCanvas().style.cursor = 'crosshair';
+    }
     
     const handlePickClick = (e: mapboxgl.MapMouseEvent) => {
       // Don't intercept clicks on existing stand markers or terrain features
@@ -9501,10 +9517,14 @@ function DeerIntelContent() {
                 paddingTop:8,
                 borderTop:'1px solid #1a3a2a',
               }}>
-                <span>{territoryParcels.length} {territoryParcels.length === 1 ? 'parcel' : 'parcels'} selected</span>
-                <span style={{color:'#52b788',fontWeight:'bold'}}>
-                  {Math.round(totalTerritoryAcreage)} total acres
-                </span>
+                <span>{territoryParcels.length} of {TERRITORY_PARCEL_CAP} parcels selected</span>
+                {territoryParcels.length >= TERRITORY_PARCEL_CAP ? (
+                  <span style={{color:'#f59e0b',fontWeight:600,fontSize:12}}>✓ Territory full</span>
+                ) : (
+                  <span style={{color:'#52b788',fontWeight:'bold'}}>
+                    {Math.round(totalTerritoryAcreage)} total acres
+                  </span>
+                )}
               </div>
 
               <button
@@ -9789,13 +9809,13 @@ function DeerIntelContent() {
                   }
                 }
               }}
-              title={isPro ? "Territory Builder — select multiple parcels for combined analysis" : "Upgrade to Pro for Territory Builder"}
+              title={isPro ? `Territory Builder — up to ${TERRITORY_PARCEL_CAP} parcels` : "Upgrade to Pro for Territory Builder"}
             >
               <Layers className="h-4 w-4 mr-1" />
               {territoryMode
                 ? (parcelPickLoading
                     ? 'Loading…'
-                    : `Territory (${territoryParcels.length})`)
+                    : `Territory (${territoryParcels.length}/${TERRITORY_PARCEL_CAP})`)
                 : 'Territory'}
               {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded">PRO</span>}
             </Button>
@@ -11685,69 +11705,100 @@ function DeerIntelContent() {
         />
       )}
 
-      {/* ========== UPGRADE TO PRO MODAL ========== */}
+      {/* ========== UPGRADE MODAL (Pro / Pro Max) ========== */}
       {showUpgradeModal && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
           onClick={(e) => { if (e.target === e.currentTarget) setShowUpgradeModal(false); }}
         >
-          <div className="bg-[#0d1f17] border border-[#c9a84c]/40 rounded-2xl p-6 max-w-md w-[90vw] shadow-2xl">
+          <div className="bg-[#0d1f17] border border-[#c9a84c]/40 rounded-2xl p-6 max-w-2xl w-[95vw] shadow-2xl">
             <div className="text-center mb-5">
               <div className="text-2xl mb-1">🦌</div>
-              <h3 className="text-xl font-bold text-white">Upgrade to TerraFirma Pro</h3>
+              <h3 className="text-xl font-bold text-white">Upgrade TerraFirma</h3>
               <p className="text-sm text-stone-400 mt-2">
                 Unlock Territory Builder, Save Properties, and Share Territories
               </p>
             </div>
 
-            <div className="space-y-3 mb-5">
-              <div className="flex items-center gap-2 text-sm text-stone-300">
-                <span className="text-green-400">✓</span> Territory Builder — combine multiple parcels
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* ── PRO ── */}
+              <div className={`border rounded-xl p-4 ${isPro && !isProMax ? 'border-emerald-500/60 bg-emerald-900/10' : 'border-[#c9a84c]/30'}`}>
+                <div className="text-center mb-3">
+                  <div className="text-sm font-bold text-[#c9a84c]">PRO</div>
+                  {isPro && !isProMax && <span className="text-[10px] text-emerald-400 font-semibold">CURRENT PLAN</span>}
+                </div>
+                <div className="space-y-2 mb-4">
+                  <div className="flex items-center gap-2 text-xs text-stone-300">
+                    <span className="text-green-400">✓</span> Territory Builder — up to 5 parcels
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-stone-300">
+                    <span className="text-green-400">✓</span> Save & share properties
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-stone-300">
+                    <span className="text-green-400">✓</span> Unlimited analysis, PDFs, onX
+                  </div>
+                </div>
+                {isPro && !isProMax ? (
+                  <div className="text-center text-xs text-emerald-400 py-2">✓ Active</div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleUpgrade('annual', 'pro')}
+                      disabled={!!upgradeLoading}
+                      className="flex-1 py-2 rounded-lg font-bold text-xs bg-[#c9a84c] text-[#0d1f17] hover:bg-[#d4b85d] disabled:opacity-50 transition-colors"
+                    >
+                      {upgradeLoading === 'pro_annual' ? <span className="animate-pulse">…</span> : <>${'$99/yr'}<span className="block text-[9px] font-normal opacity-80">Save 31%</span></>}
+                    </button>
+                    <button
+                      onClick={() => handleUpgrade('monthly', 'pro')}
+                      disabled={!!upgradeLoading}
+                      className="flex-1 py-2 rounded-lg font-bold text-xs border border-[#c9a84c]/40 text-[#c9a84c] hover:bg-[#c9a84c]/10 disabled:opacity-50 transition-colors"
+                    >
+                      {upgradeLoading === 'pro_monthly' ? <span className="animate-pulse">…</span> : '$12/mo'}
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2 text-sm text-stone-300">
-                <span className="text-green-400">✓</span> Save unlimited properties to your account
-              </div>
-              <div className="flex items-center gap-2 text-sm text-stone-300">
-                <span className="text-green-400">✓</span> Share territories with shareable links
-              </div>
-              <div className="flex items-center gap-2 text-sm text-stone-300">
-                <span className="text-green-400">✓</span> Everything in Free — unlimited analysis, PDFs, onX
-              </div>
-            </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleUpgrade('annual')}
-                disabled={!!upgradeLoading}
-                className="flex-1 py-3 rounded-xl font-bold text-sm
-                           bg-[#c9a84c] text-[#0d1f17] hover:bg-[#d4b85d]
-                           disabled:opacity-50 transition-colors relative"
-              >
-                {upgradeLoading === 'annual' ? (
-                  <span className="animate-pulse">Processing…</span>
+              {/* ── PRO MAX ── */}
+              <div className={`border rounded-xl p-4 relative ${isProMax ? 'border-amber-500/60 bg-amber-900/10' : 'border-amber-500/40 bg-amber-900/5'}`}>
+                <div className="absolute -top-2 right-3 bg-amber-500 text-[#0d1f17] text-[9px] font-bold px-2 py-0.5 rounded-full">BEST VALUE</div>
+                <div className="text-center mb-3">
+                  <div className="text-sm font-bold text-amber-400">PRO MAX</div>
+                  {isProMax && <span className="text-[10px] text-amber-400 font-semibold">CURRENT PLAN</span>}
+                </div>
+                <div className="space-y-2 mb-4">
+                  <div className="flex items-center gap-2 text-xs text-stone-300">
+                    <span className="text-amber-400">✓</span> Territory Builder — up to <strong className="text-amber-300">10 parcels</strong>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-stone-300">
+                    <span className="text-amber-400">✓</span> Everything in Pro
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-stone-300">
+                    <span className="text-amber-400">✓</span> Priority terrain analysis
+                  </div>
+                </div>
+                {isProMax ? (
+                  <div className="text-center text-xs text-amber-400 py-2">✓ Active</div>
                 ) : (
-                  <>
-                    $99/year
-                    <span className="block text-[10px] font-normal opacity-80 mt-0.5">Save 31%</span>
-                  </>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleUpgrade('annual', 'promax')}
+                      disabled={!!upgradeLoading}
+                      className="flex-1 py-2 rounded-lg font-bold text-xs bg-amber-500 text-[#0d1f17] hover:bg-amber-400 disabled:opacity-50 transition-colors"
+                    >
+                      {upgradeLoading === 'promax_annual' ? <span className="animate-pulse">…</span> : <>${'$199/yr'}<span className="block text-[9px] font-normal opacity-80">Save 31%</span></>}
+                    </button>
+                    <button
+                      onClick={() => handleUpgrade('monthly', 'promax')}
+                      disabled={!!upgradeLoading}
+                      className="flex-1 py-2 rounded-lg font-bold text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50 transition-colors"
+                    >
+                      {upgradeLoading === 'promax_monthly' ? <span className="animate-pulse">…</span> : '$24/mo'}
+                    </button>
+                  </div>
                 )}
-              </button>
-              <button
-                onClick={() => handleUpgrade('monthly')}
-                disabled={!!upgradeLoading}
-                className="flex-1 py-3 rounded-xl font-bold text-sm
-                           border border-[#c9a84c]/40 text-[#c9a84c] hover:bg-[#c9a84c]/10
-                           disabled:opacity-50 transition-colors"
-              >
-                {upgradeLoading === 'monthly' ? (
-                  <span className="animate-pulse">Processing…</span>
-                ) : (
-                  <>
-                    $12/month
-                    <span className="block text-[10px] font-normal opacity-60 mt-0.5">Billed monthly</span>
-                  </>
-                )}
-              </button>
+              </div>
             </div>
 
             {/* Manual session refresh for users whose webhook already landed */}
@@ -11756,8 +11807,8 @@ function DeerIntelContent() {
                 try {
                   const updated = await updateSession?.();
                   const status = (updated as any)?.user?.subscriptionStatus;
-                  if (status === 'pro') {
-                    toast.success('Pro activated! 🎉');
+                  if (status === 'pro' || status === 'promax') {
+                    toast.success(status === 'promax' ? 'Pro Max activated! 🎉' : 'Pro activated! 🎉');
                     setShowUpgradeModal(false);
                   } else {
                     toast.error('Subscription not found yet — please wait a moment and try again.');
@@ -11766,7 +11817,7 @@ function DeerIntelContent() {
                   toast.error('Could not refresh session.');
                 }
               }}
-              className="w-full mt-3 py-2 text-xs text-stone-400 hover:text-emerald-400 transition-colors underline underline-offset-2"
+              className="w-full mt-2 py-2 text-xs text-stone-400 hover:text-emerald-400 transition-colors underline underline-offset-2"
             >
               Already subscribed? Click to activate
             </button>
