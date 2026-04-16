@@ -80,6 +80,10 @@ import {
 } from '@/lib/geometry-validation';
 
 // ========== ERROR BOUNDARY ==========
+// Module-level ref: lets the ErrorBoundary (class component) read territory state
+// without prop-drilling through Suspense. Updated by a useEffect inside DeerIntelContent.
+const _territoryModeGlobal = { current: false };
+
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
@@ -93,17 +97,36 @@ class IntelErrorBoundary extends Component<{ children: React.ReactNode }, ErrorB
   }
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    // TERRITORY MASTER GUARD: If territory mode is active, swallow the error
+    // instead of showing the full-screen "Analyzer paused" modal.
+    if (_territoryModeGlobal.current) {
+      console.error('[ERROR-BOUNDARY] TERRITORY GUARD — swallowing render crash during territory mode:', error?.message);
+      return { hasError: false, error: null, errorInfo: null };
+    }
+    console.error('[ERROR-BOUNDARY] getDerivedStateFromError — showing modal. territoryMode:', _territoryModeGlobal.current, 'error:', error?.message);
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[INTEL ERROR BOUNDARY] Caught error:', error);
-    console.error('[INTEL ERROR BOUNDARY] Component stack:', errorInfo.componentStack);
+    console.error('[ERROR-BOUNDARY] componentDidCatch — territoryMode:', _territoryModeGlobal.current, 'error:', error);
+    console.error('[ERROR-BOUNDARY] Component stack:', errorInfo.componentStack);
+    // TERRITORY MASTER GUARD: auto-recover if territory mode active
+    if (_territoryModeGlobal.current) {
+      console.error('[ERROR-BOUNDARY] TERRITORY GUARD — auto-recovering from render crash');
+      this.setState({ hasError: false, error: null, errorInfo: null });
+      return;
+    }
     this.setState({ errorInfo });
   }
 
   render() {
     if (this.state.hasError) {
+      // Double-check territory mode at render time — belt-and-suspenders
+      if (_territoryModeGlobal.current) {
+        console.error('[ERROR-BOUNDARY] TERRITORY GUARD (render) — suppressing modal, resetting state');
+        setTimeout(() => this.setState({ hasError: false, error: null, errorInfo: null }), 0);
+        return this.props.children;
+      }
       return (
         <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
           <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
@@ -2003,7 +2026,11 @@ function DeerIntelContent() {
   const [territoryName, setTerritoryName] = useState<string>('My Territory');
   const territoryParcelsRef = useRef<TerritoryParcel[]>([]);
   const territoryModeRef = useRef(false);
-  useEffect(() => { territoryModeRef.current = territoryMode; }, [territoryMode]);
+  useEffect(() => {
+    territoryModeRef.current = territoryMode;
+    // Sync module-level ref so ErrorBoundary (class component) can read it
+    _territoryModeGlobal.current = territoryMode;
+  }, [territoryMode]);
 
   // TERRITORY FIREWALL: Auto-clear any analysis error that fires while
   // territory mode is active — the user shouldn't see "Analysis Failed"
@@ -3006,11 +3033,20 @@ function DeerIntelContent() {
     if (parcels.length === 0) return null;
     if (parcels.length === 1) return parcels[0].polygon;
 
-    const allCoordinates = parcels.map(p => {
+    // Collect ALL polygon coordinate sets from all parcels (handling both Polygon and MultiPolygon)
+    const allCoordinates: number[][][][] = [];
+    for (const p of parcels) {
       const geom = p.polygon.geometry;
-      if (geom.type === 'Polygon') return geom.coordinates;
-      return geom.coordinates[0]; // first polygon ring set from MultiPolygon
-    });
+      if (geom.type === 'MultiPolygon') {
+        // MultiPolygon has coordinates: number[][][][] — each element is a polygon's ring set
+        for (const polyCoords of geom.coordinates) {
+          allCoordinates.push(polyCoords);
+        }
+      } else {
+        // Polygon has coordinates: number[][][] — the ring set itself
+        allCoordinates.push(geom.coordinates);
+      }
+    }
 
     return {
       type: 'Feature',
@@ -3031,12 +3067,20 @@ function DeerIntelContent() {
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     for (const parcel of parcels) {
       const geom = parcel.polygon.geometry;
-      const coords = geom.type === 'Polygon' ? geom.coordinates[0] : geom.coordinates[0][0];
-      for (const [lng, lat] of coords) {
-        minLng = Math.min(minLng, lng);
-        minLat = Math.min(minLat, lat);
-        maxLng = Math.max(maxLng, lng);
-        maxLat = Math.max(maxLat, lat);
+      // Collect all outer rings from both Polygon and MultiPolygon
+      const outerRings: number[][][] = geom.type === 'MultiPolygon'
+        ? geom.coordinates.map(poly => poly[0]) // outer ring of each sub-polygon
+        : [geom.coordinates[0]]; // single outer ring
+      for (const ring of outerRings) {
+        if (!ring) continue;
+        for (const coord of ring) {
+          if (!Array.isArray(coord) || coord.length < 2) continue;
+          const [lng, lat] = coord;
+          minLng = Math.min(minLng, lng);
+          minLat = Math.min(minLat, lat);
+          maxLng = Math.max(maxLng, lng);
+          maxLat = Math.max(maxLat, lat);
+        }
       }
     }
     return [minLng, minLat, maxLng, maxLat];
@@ -3194,11 +3238,18 @@ function DeerIntelContent() {
   // Fetch terrain analysis using shared client
   const analysisInFlightRef = useRef(false);
   const runAnalysis = useCallback(async () => {
+    // ── DIAGNOSTIC: Log every runAnalysis entry with full context ──
+    console.error('[TRIGGER-DIAG] runAnalysis() ENTERED — territoryMode:', territoryModeRef.current,
+      'parcels:', territoryParcelsRef.current.length,
+      'inFlight:', analysisInFlightRef.current,
+      'prefetched:', !!prefetchedParcelRef.current,
+      'caller:', new Error().stack?.split('\n')[2]?.trim());
+
     // v2.3: Prevent overlapping analysis runs — a second click while the first
     // is still in flight would reset the seeded PRNG mid-generation, corrupting
     // both runs' stand candidate sequences.
     if (analysisInFlightRef.current) {
-      console.error('[INTEL-DIAG] runAnalysis SKIPPED — analysis already in flight');
+      console.error('[TRIGGER-DIAG] runAnalysis SKIPPED — analysis already in flight');
       return;
     }
 
@@ -3208,7 +3259,7 @@ function DeerIntelContent() {
     // Stale mount calls, setTimeout leftovers, and demo fallbacks must be blocked.
     const isTerritoryRun = territoryParcelsRef.current.length > 1;
     if (territoryModeRef.current && !prefetchedParcelRef.current && !isTerritoryRun) {
-      console.error('[INTEL-DIAG] runAnalysis BLOCKED — territory mode active, no prefetched parcel, not a territory run');
+      console.error('[TRIGGER-DIAG] runAnalysis BLOCKED — territory mode active, no prefetched parcel, not a territory run');
       return;
     }
 
@@ -3411,7 +3462,8 @@ function DeerIntelContent() {
 
       // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch.
       // Never fire demo fallback for territory runs — user chose specific parcels.
-      if (!demoFallbackAttempted.current && !isTerritoryRun) {
+      // TERRITORY FIREWALL: Also block if territory mode is active (even if only 1 parcel so far)
+      if (!demoFallbackAttempted.current && !isTerritoryRun && !territoryModeRef.current) {
         console.error('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to verified demo parcel');
         demoFallbackAttempted.current = true;
         const df = DEMO_FALLBACK.current;
@@ -4578,33 +4630,38 @@ function DeerIntelContent() {
       return;
     }
 
-    const fc: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: territoryParcels.map(p => p.polygon),
-    };
-    console.log('[TERRITORY] Syncing territory source:', fc.features.length, 'features from', territoryParcels.length, 'parcels');
-    source.setData(fc);
-
-    // Only show territory fill/outline/glow when we have parcels.
-    // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
-    // so force them back here when parcels are present.
     try {
-      // Show outline + glow only — fill stays at opacity 0 to prevent salmon wash
-      map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-      map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.95);
-      map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
-      map.setPaintProperty('tfp-territory-glow', 'line-opacity', 0.35);
-      // Hide adjacent parcel layers to prevent grey film overlay on territory parcels
-      map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
-      map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
-    } catch { /* layers may not exist yet */ }
+      const fc: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: territoryParcels.map(p => p.polygon),
+      };
+      console.log('[TERRITORY] Syncing territory source:', fc.features.length, 'features from', territoryParcels.length, 'parcels');
+      source.setData(fc);
 
-    if (territoryParcels.length >= 2) {
-      const bounds = getTerritoryBounds(territoryParcels);
-      map.fitBounds(
-        [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
-        { padding: 80, duration: 800 }
-      );
+      // Only show territory fill/outline/glow when we have parcels.
+      // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
+      // so force them back here when parcels are present.
+      try {
+        // Show outline + glow only — fill stays at opacity 0 to prevent salmon wash
+        map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+        map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.95);
+        map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
+        map.setPaintProperty('tfp-territory-glow', 'line-opacity', 0.35);
+        // Hide adjacent parcel layers to prevent grey film overlay on territory parcels
+        map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
+        map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
+      } catch { /* layers may not exist yet */ }
+
+      if (territoryParcels.length >= 2) {
+        const bounds = getTerritoryBounds(territoryParcels);
+        map.fitBounds(
+          [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
+          { padding: 80, duration: 800 }
+        );
+      }
+    } catch (err) {
+      console.error('[TERRITORY] Error syncing territory source:', err);
+      // Don't re-throw — territory useEffect errors should never crash the UI
     }
   }, [territoryParcels, mapReady, getTerritoryBounds]);
 
@@ -7581,6 +7638,8 @@ function DeerIntelContent() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stall watchdog: detect if progress hasn't advanced for 10s → auto-fallback to demo parcel
+  // TERRITORY FIREWALL: Completely disabled during territory mode — stall detection
+  // only matters for single-parcel analysis, not for territory building.
   useEffect(() => {
     if (!isLoading) {
       setAnalysisStalled(false);
@@ -7593,6 +7652,9 @@ function DeerIntelContent() {
       setAnalysisStalled(false);
     }
     const stallCheck = setInterval(() => {
+      // TERRITORY FIREWALL: never trigger stall/fallback while user is building territory
+      if (territoryModeRef.current) return;
+
       const elapsed = Date.now() - lastProgressRef.current.time;
       if (elapsed > 10_000 && isLoading && progress < 20) {
         console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
@@ -7622,7 +7684,10 @@ function DeerIntelContent() {
   }, [isLoading, progress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Final guard: if analysis "completed" but result is empty, auto-fallback to demo parcel
+  // TERRITORY FIREWALL: Disabled during territory mode — empty results are expected
+  // when user is building a territory (no analysis has run yet).
   useEffect(() => {
+    if (territoryModeRef.current) return; // TERRITORY FIREWALL
     if (isLoading || error) return; // Still running or already errored — skip
     if (progress < 100) return; // Not actually complete yet
 
@@ -8051,15 +8116,33 @@ function DeerIntelContent() {
           console.error('[TERRITORY-DIAG] Skipping tiny parcel under 5 acres:', parcel?.acreage);
           return;
         }
-        const coords = [...(parcel.coordinates || [])];
-        if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
-          coords.push(coords[0]);
+
+        // Build a proper GeoJSON Feature handling BOTH Polygon and MultiPolygon
+        const geoType = parcel.geometryType || 'Polygon';
+        let parcelFeature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+
+        if (geoType === 'MultiPolygon') {
+          // coordinates is number[][][][] — use as-is
+          parcelFeature = {
+            type: 'Feature',
+            properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
+            geometry: { type: 'MultiPolygon', coordinates: parcel.coordinates || [] },
+          };
+          console.error('[TERRITORY-DIAG] MultiPolygon parcel:', parcel.parcelId, 'rings:', (parcel.coordinates || []).length);
+        } else {
+          // coordinates is number[][][] — extract first ring and ensure closure
+          const rawCoords = parcel.coordinates || [];
+          const ring = Array.isArray(rawCoords[0]?.[0]) ? rawCoords[0] : rawCoords;
+          const coords = [...ring];
+          if (coords.length > 0 && (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1])) {
+            coords.push(coords[0]);
+          }
+          parcelFeature = {
+            type: 'Feature',
+            properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
+            geometry: { type: 'Polygon', coordinates: [coords] },
+          };
         }
-        const parcelFeature: GeoJSON.Feature<GeoJSON.Polygon> = {
-          type: 'Feature',
-          properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
-          geometry: { type: 'Polygon', coordinates: [coords] },
-        };
         addParcelToTerritory({
           id: parcel.parcelId || `p_${Date.now()}`,
           address: parcel.siteAddress || parcel.address || `Parcel at ${clickLat.toFixed(4)}, ${clickLng.toFixed(4)}`,
@@ -9242,6 +9325,7 @@ function DeerIntelContent() {
   // Instead, auto-clear the error and show a gentle toast so the builder stays usable.
   // NOTE: We can't call setState during render, so we schedule it for the next tick.
   if (globalError && territoryMode) {
+    console.error('[TRIGGER-DIAG] globalError SUPPRESSED in territory mode:', globalError?.message);
     setTimeout(() => {
       setGlobalError(null);
       setError(null);
