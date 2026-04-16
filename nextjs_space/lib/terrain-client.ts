@@ -76,99 +76,160 @@ export async function fetchTerrainAnalysis(
     }
   }, 1000); // Check every second
 
-  try {
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      console.error('[TerrainClient] Request timed out after', timeoutMs, 'ms');
-    }, timeoutMs);
+  // ── Retry-aware fetch with 502/HTML cold-start handling ──
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 10_000;
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Create abort controller for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.error('[TerrainClient] Request timed out after', timeoutMs, 'ms (attempt', attempt + ')');
+      }, timeoutMs);
 
-    clearInterval(progressInterval);
-    clearTimeout(timeoutId);
-    const fetchDuration = Date.now() - startTime;
-    
-    console.error('[TerrainClient] Response received in', fetchDuration, 'ms');
-    console.error('[TerrainClient] Status:', response.status, response.statusText);
-    
-    onProgress?.(`Processing response...`, 70);
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      let errorMsg = `HTTP ${response.status}`;
-      try {
-        const errorBody = await response.text();
-        console.error('[TerrainClient] Error body:', errorBody.slice(0, 500));
-        // Try to parse as JSON for structured error
-        try {
-          const parsed = JSON.parse(errorBody);
-          errorMsg = parsed.message || parsed.error || errorMsg;
-        } catch {
-          errorMsg = errorBody.slice(0, 200) || errorMsg;
+      clearTimeout(timeoutId);
+      const fetchDuration = Date.now() - startTime;
+
+      console.error('[TerrainClient] Response received in', fetchDuration, 'ms (attempt', attempt + ')');
+      console.error('[TerrainClient] Status:', response.status, response.statusText);
+
+      // ── 502 / HTML cold-start detection ──
+      // Modal returns an HTML error page instead of JSON during cold starts.
+      // Detect this and retry automatically instead of surfacing garbage to the user.
+      const contentType = response.headers.get('content-type') || '';
+      const is502 = response.status === 502;
+      const isHtmlError = !response.ok && contentType.includes('text/html');
+
+      if (is502 || isHtmlError) {
+        let errorBody = '';
+        try { errorBody = await response.text(); } catch { /* ignore */ }
+        console.error(`[TerrainClient] Cold-start error (attempt ${attempt}/${MAX_RETRIES}):`, response.status, errorBody.slice(0, 300));
+
+        if (attempt < MAX_RETRIES) {
+          onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
+          console.error(`[TerrainClient] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          continue; // retry
         }
-      } catch {
-        // Ignore read errors
+
+        // Final attempt exhausted
+        clearInterval(progressInterval);
+        return {
+          success: false,
+          error: 'Terrain server is warming up. Please wait 30 seconds and try again.',
+          status: response.status,
+          durationMs: fetchDuration,
+          coldStart: true,
+        } as TerrainFetchResult & { coldStart?: boolean };
       }
-      
+
+      onProgress?.(`Processing response...`, 70);
+
+      if (!response.ok) {
+        clearInterval(progressInterval);
+        let errorMsg = `HTTP ${response.status}`;
+        try {
+          const errorBody = await response.text();
+          console.error('[TerrainClient] Error body:', errorBody.slice(0, 500));
+          // Try to parse as JSON for structured error
+          try {
+            const parsed = JSON.parse(errorBody);
+            errorMsg = parsed.message || parsed.error || errorMsg;
+          } catch {
+            errorMsg = errorBody.slice(0, 200) || errorMsg;
+          }
+        } catch {
+          // Ignore read errors
+        }
+
+        return {
+          success: false,
+          error: errorMsg,
+          status: response.status,
+          durationMs: fetchDuration,
+        };
+      }
+
+      clearInterval(progressInterval);
+      onProgress?.('Parsing response...', 70);
+
+      const data = await response.json() as TerrainAnalysisResponse;
+      const totalDuration = Date.now() - startTime;
+
+      console.error('[TerrainClient] === FETCH COMPLETE ===' );
+      console.error('[TerrainClient] Total duration:', totalDuration, 'ms');
+      console.error('[TerrainClient] Mode:', data.mode);
+      console.error('[TerrainClient] Layers:', {
+        bedding: data.layers?.beddingPolygons?.features?.length || 0,
+        funnels: data.layers?.funnels?.features?.length || 0,
+        stands: data.layers?.standPoints?.features?.length || 0,
+      });
+
+      onProgress?.('Analysis complete', 100);
+
       return {
-        success: false,
-        error: errorMsg,
+        success: true,
+        data,
         status: response.status,
-        durationMs: fetchDuration,
+        durationMs: totalDuration,
       };
-    }
 
-    onProgress?.('Parsing response...', 70);
-    
-    const data = await response.json() as TerrainAnalysisResponse;
-    const totalDuration = Date.now() - startTime;
-    
-    console.error('[TerrainClient] === FETCH COMPLETE ===' );
-    console.error('[TerrainClient] Total duration:', totalDuration, 'ms');
-    console.error('[TerrainClient] Mode:', data.mode);
-    console.error('[TerrainClient] Layers:', {
-      bedding: data.layers?.beddingPolygons?.features?.length || 0,
-      funnels: data.layers?.funnels?.features?.length || 0,
-      stands: data.layers?.standPoints?.features?.length || 0,
-    });
+    } catch (err) {
+      const duration = Date.now() - startTime;
 
-    onProgress?.('Analysis complete', 100);
-    
-    return {
-      success: true,
-      data,
-      status: response.status,
-      durationMs: totalDuration,
-    };
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.error('[TerrainClient] Request aborted (timeout) attempt', attempt);
+        // Timeouts on earlier attempts get retried too
+        if (attempt < MAX_RETRIES) {
+          onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
+          console.error(`[TerrainClient] Retrying after timeout in ${RETRY_DELAY_MS / 1000}s...`);
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        clearInterval(progressInterval);
+        onProgress?.('Request timed out - server may be cold-starting', 0);
+        return {
+          success: false,
+          error: `Request timed out after ${Math.round(timeoutMs / 1000)}s. The terrain server may be cold-starting. Please try again in 30 seconds.`,
+          durationMs: duration,
+        };
+      }
 
-  } catch (err) {
-    clearInterval(progressInterval);
-    const duration = Date.now() - startTime;
-    
-    if (err instanceof Error && err.name === 'AbortError') {
-      console.error('[TerrainClient] Request aborted (timeout)');
-      onProgress?.('Request timed out - server may be cold-starting', 0);
+      // Network errors on earlier attempts get retried
+      if (attempt < MAX_RETRIES) {
+        console.error(`[TerrainClient] Network error (attempt ${attempt}), retrying in ${RETRY_DELAY_MS / 1000}s:`, err);
+        onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+
+      clearInterval(progressInterval);
+      console.error('[TerrainClient] Fetch error (final attempt):', err);
+      onProgress?.('Connection error', 0);
       return {
         success: false,
-        error: `Request timed out after ${Math.round(timeoutMs / 1000)}s. The terrain server may be cold-starting. Please try again in 30 seconds.`,
+        error: err instanceof Error ? err.message : 'Network error',
         durationMs: duration,
       };
     }
-    
-    console.error('[TerrainClient] Fetch error:', err);
-    onProgress?.('Connection error', 0);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Network error',
-      durationMs: duration,
-    };
   }
+
+  // Should never reach here, but safety net
+  clearInterval(progressInterval);
+  return {
+    success: false,
+    error: 'Analysis failed after retries',
+    durationMs: Date.now() - startTime,
+  };
 }
 
 /**

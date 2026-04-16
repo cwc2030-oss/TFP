@@ -3043,13 +3043,19 @@ function DeerIntelContent() {
   }, []);
 
   const addParcelToTerritory = useCallback((parcel: TerritoryParcel) => {
+    console.error('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id, 'address:', parcel.address, 'acreage:', parcel.acreage);
     setTerritoryParcels(prev => {
+      console.error('[TERRITORY-DIAG] setTerritoryParcels updater. prev.length:', prev.length, 'prev IDs:', prev.map(p => p.id));
       // Duplicate guard
       const exists = prev.find(p => p.id === parcel.id);
-      if (exists) return prev;
+      if (exists) {
+        console.error('[TERRITORY-DIAG] DUPLICATE — parcel already in territory, skipping:', parcel.id);
+        return prev;
+      }
 
       // Hard cap at 5 parcels
       if (prev.length >= 5) {
+        console.error('[TERRITORY-DIAG] CAP REACHED — 5 parcels max');
         toast.error(
           'Territory limit reached (5 parcel max on Pro)',
           { duration: 4000 }
@@ -3059,6 +3065,7 @@ function DeerIntelContent() {
 
       const updated = [...prev, parcel];
       territoryParcelsRef.current = updated;
+      console.error('[TERRITORY-DIAG] PARCEL ADDED. new count:', updated.length);
 
       // Safety catch: hide adjacent parcel layers on first territory parcel add
       if (prev.length === 0) {
@@ -8012,22 +8019,31 @@ function DeerIntelContent() {
   }, []);
 
   const handleParcelPick = useCallback(async (clickLng: number, clickLat: number) => {
-    if (parcelPickLoading || isLoading) return;
+    // In territory mode, only block on parcelPickLoading (not isLoading).
+    // The initial single-parcel analysis may still be running (isLoading=true),
+    // but that should NOT prevent adding parcels to the territory builder.
+    if (parcelPickLoading) return;
+    if (!territoryModeRef.current && isLoading) return;
 
     // ── TERRITORY MODE — add parcel only, no analysis ──
     if (territoryModeRef.current) {
+      console.error('[TERRITORY-DIAG] handleParcelPick TERRITORY path entered. parcels:', territoryParcelsRef.current.length, 'isLoading:', isLoading, 'parcelPickLoading:', parcelPickLoading);
       setParcelPickLoading(true);
 
       const attemptTerritoryLookup = async (attempt: number): Promise<void> => {
+        console.error('[TERRITORY-DIAG] attemptTerritoryLookup attempt', attempt, 'at', clickLat.toFixed(5), clickLng.toFixed(5));
         const resp = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
         }
         const data = await resp.json();
-        if (!data.found || !data.parcel) { return; }
+        if (!data.found || !data.parcel) {
+          console.error('[TERRITORY-DIAG] No parcel found at click location');
+          return;
+        }
         const parcel = data.parcel;
         if ((parcel?.acreage || 0) < 5) {
-          console.log('[Territory] Skipping tiny parcel under 5 acres:', parcel?.acreage);
+          console.error('[TERRITORY-DIAG] Skipping tiny parcel under 5 acres:', parcel?.acreage);
           return;
         }
         const coords = [...(parcel.coordinates || [])];
@@ -9170,6 +9186,20 @@ function DeerIntelContent() {
     // Don't return the full-screen error panel — fall through to normal render
   }
   if (globalError && !territoryMode) {
+    // 502 / cold-start errors should NEVER show the full-screen "Analyzer paused" modal.
+    // Instead, auto-dismiss and show a gentle retry toast.
+    const errMsg = globalError?.message || '';
+    const is502Error = errMsg.includes('502') || errMsg.includes('warming up') ||
+      errMsg.includes('<!DOCTYPE') || errMsg.includes('<html');
+    if (is502Error) {
+      setTimeout(() => {
+        setGlobalError(null);
+        setError(null);
+        setIsLoading(false);
+        setBackgroundAnalysis(false);
+        toast.info('Terrain servers warming up — retrying automatically...', { duration: 5000 });
+      }, 0);
+    } else {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-8">
         <div className="max-w-md w-full bg-stone-900/90 border border-stone-700/50 rounded-xl p-8 text-center">
@@ -9215,7 +9245,8 @@ function DeerIntelContent() {
         </div>
       </div>
     );
-  }
+  } // end else (non-502 globalError)
+  } // end if (globalError && !territoryMode)
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
@@ -11745,17 +11776,19 @@ function DeerIntelContent() {
       {/* Error Toast - shows actual error message.
           TERRITORY FIREWALL: In territory mode, suppress the scary error modal
           and auto-clear it — the user should just see a gentle toast instead. */}
-      {error && !territoryMode && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-red-900/95 border border-red-500/50 rounded-lg px-6 py-4 shadow-xl max-w-lg">
+      {error && !territoryMode && (() => {
+        const isColdStart = error.includes('warming up') || error.includes('502') || error.includes('<!DOCTYPE') || error.includes('<html');
+        return (
+        <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-30 ${isColdStart ? 'bg-amber-900/95 border border-amber-500/50' : 'bg-red-900/95 border border-red-500/50'} rounded-lg px-6 py-4 shadow-xl max-w-lg`}>
           <div className="flex items-start gap-4">
-            <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <AlertTriangle className={`h-5 w-5 ${isColdStart ? 'text-amber-400' : 'text-red-400'} flex-shrink-0 mt-0.5`} />
             <div className="flex-1 min-w-0">
-              <p className="text-red-200 font-medium">Analysis Failed</p>
-              <p className="text-red-300/80 text-sm mt-1 font-mono break-words">{error}</p>
+              <p className={`${isColdStart ? 'text-amber-200' : 'text-red-200'} font-medium`}>{isColdStart ? 'Terrain servers warming up' : 'Analysis Failed'}</p>
+              <p className={`${isColdStart ? 'text-amber-300/80' : 'text-red-300/80'} text-sm mt-1 ${isColdStart ? '' : 'font-mono'} break-words`}>{isColdStart ? 'The terrain engine is starting up. Please wait a moment and try again.' : error}</p>
               <div className="flex gap-3 mt-3">
                 <button 
                   onClick={() => { setError(null); runAnalysis(); }}
-                  className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs rounded font-medium flex items-center gap-1.5"
+                  className={`px-3 py-1.5 ${isColdStart ? 'bg-amber-600 hover:bg-amber-500' : 'bg-red-600 hover:bg-red-500'} text-white text-xs rounded font-medium flex items-center gap-1.5`}
                 >
                   <RefreshCw className="h-3 w-3" />
                   Retry
@@ -11768,12 +11801,13 @@ function DeerIntelContent() {
                 </button>
               </div>
             </div>
-            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 flex-shrink-0">
+            <button onClick={() => setError(null)} className={`${isColdStart ? 'text-amber-400 hover:text-amber-300' : 'text-red-400 hover:text-red-300'} flex-shrink-0`}>
               <X className="h-5 w-5" />
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Map Error Indicator — v4-fix: graceful with retry */}
       {mapError && (
