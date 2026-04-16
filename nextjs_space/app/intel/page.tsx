@@ -9557,17 +9557,17 @@ function DeerIntelContent() {
                 style={{
                   width: '100%',
                   padding: '12px 0',
-                  background: '#c9a84c',
-                  color: '#1a3a2a',
-                  border: 'none',
+                  background: summary ? 'transparent' : '#c9a84c',
+                  color: summary ? '#c9a84c' : '#1a3a2a',
+                  border: summary ? '1.5px solid #c9a84c' : 'none',
                   borderRadius: 8,
-                  fontSize: 14,
+                  fontSize: summary ? 13 : 14,
                   fontWeight: 'bold',
                   cursor: 'pointer',
                   letterSpacing: 1,
                 }}
               >
-                Analyze Territory
+                {summary ? '⟳ Re-Align Territory' : 'Analyze Territory'}
               </button>
 
               {/* Open Territory in onX Hunt */}
@@ -9754,7 +9754,9 @@ function DeerIntelContent() {
               size="sm"
               variant="ghost"
               className={`${territoryMode 
-                ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
+                ? (parcelPickLoading
+                    ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50'
+                    : 'bg-emerald-600/25 text-emerald-300 border border-emerald-500/40')
                 : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
               onClick={() => {
@@ -9806,7 +9808,11 @@ function DeerIntelContent() {
               title={isPro ? "Territory Builder — select multiple parcels for combined analysis" : "Upgrade to Pro for Territory Builder"}
             >
               <Layers className="h-4 w-4 mr-1" />
-              {territoryMode ? 'Building…' : 'Territory'}
+              {territoryMode
+                ? (parcelPickLoading
+                    ? 'Loading…'
+                    : `Territory (${territoryParcels.length})`)
+                : 'Territory'}
               {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded">PRO</span>}
             </Button>
             {/* Parcel Pick Mode — de-emphasized in demo, available for exploration */}
@@ -10478,7 +10484,8 @@ function DeerIntelContent() {
                 </div>
               )}
 
-              {/* ═══ CHAPTER 4 — REFINE ═══ */}
+              {/* ═══ CHAPTER 4 — REFINE (single-parcel only) ═══ */}
+              {!territoryMode && (
               <div className="p-3 border-t border-white/[0.06] mt-auto">
                 {/* Last analysis timestamp */}
                 {summary && !isLoading && (
@@ -10537,6 +10544,7 @@ function DeerIntelContent() {
                   </p>
                 )}
               </div>
+              )}
 
               {/* ═══ CTA — Analyze Your Property ═══ */}
               {summary && !isLoading && (
@@ -11799,7 +11807,8 @@ function DeerIntelContent() {
       )}
 
       {/* Loading Overlay — full-screen for fresh load, compact chip for background analysis */}
-      {isLoading && !backgroundAnalysis && (
+      {/* TERRITORY FIREWALL: Never show full-screen overlay in territory mode — it blocks map picks */}
+      {isLoading && !backgroundAnalysis && !territoryMode && (
         <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-md flex items-center justify-center">
           <div className="bg-gray-950/95 rounded-2xl p-8 text-center max-w-sm border border-white/[0.08] shadow-2xl shadow-black/50">
             {/* Animated radar rings */}
