@@ -2,166 +2,72 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Check, MapPin, FileText, Shield, Clock } from "lucide-react";
+import { Check, Shield, Zap, Target, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { trackPricingPageViewed } from "@/lib/gtag";
 
 export default function PricingPage() {
+  const [billing, setBilling] = useState<"annual" | "monthly">("annual");
+
   useEffect(() => {
     trackPricingPageViewed();
   }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-stone-50 to-emerald-50">
       <Navbar />
-      
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         {/* Header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-12">
           <h1 className="text-4xl md:text-5xl font-bold text-stone-900 mb-4">
             Simple, Transparent Pricing
           </h1>
           <p className="text-xl text-stone-600 max-w-2xl mx-auto">
-            Professional land analysis reports with comprehensive data layers – all included
+            From single-parcel scouting to multi-property territory planning — pick the tier that fits your hunt.
           </p>
         </div>
 
-        {/* Pricing Cards */}
-        <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
-          
-          {/* Land Intelligence Report */}
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-emerald-400">
-            <div className="bg-emerald-600 text-white text-center py-2 px-4 font-semibold text-sm">
-              🏡 For Buyers, Sellers &amp; Agents
-            </div>
-            
-            <div className="p-6 text-center border-b border-stone-200">
-              <h2 className="text-xl font-bold text-stone-800 mb-2">
-                Land Intelligence Report
-              </h2>
-              <div className="mt-3">
-                <span className="text-4xl font-bold text-emerald-600">$49</span>
-                <span className="text-stone-500 text-sm ml-1">per report</span>
-              </div>
-              <p className="text-stone-500 mt-2 text-sm">
-                Professional land analysis for buyers, sellers, and agents
-              </p>
-            </div>
-
-            <div className="p-6">
-              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
-                Includes:
-              </h3>
-              <ul className="space-y-2.5">
-                {[
-                  "Property overview & valuation",
-                  "Terrain & topography analysis",
-                  "Water, flood & access data",
-                  "Market context & insights",
-                  "Certificate of analysis",
-                ].map((feature, idx) => (
-                  <li key={idx} className="flex items-start gap-2.5">
-                    <Check className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-stone-700 text-sm">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-6">
-                <Link href="/map?product=land_report" className="block">
-                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 text-base font-semibold">
-                    Get Land Report
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          {/* Hunt Intelligence Report — FEATURED */}
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-red-500 relative transform md:scale-105">
-            <div className="absolute top-0 right-0 bg-red-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
-              🦌 MOST POPULAR
-            </div>
-            <div className="bg-gradient-to-r from-red-600 to-orange-600 text-white text-center py-2 px-4 font-semibold text-sm">
-              🎯 Complete Terrain Intelligence for Serious Hunters
-            </div>
-            
-            <div className="p-6 text-center border-b border-stone-200">
-              <h2 className="text-xl font-bold text-stone-800 mb-2">
-                Hunt Intelligence Report
-              </h2>
-              <div className="mt-3">
-                <span className="text-4xl font-bold text-red-600">$149</span>
-                <span className="text-stone-500 text-sm ml-1">per report</span>
-              </div>
-              <p className="text-stone-500 mt-2 text-sm">
-                Complete terrain intelligence + full land analysis. Two premium reports in one package — terrain analysis, intercept placement, wind strategy, satellite hunt map, soil data, flood risk, county hunting seasons, and market data. Indefinite parcel access included.
-              </p>
-            </div>
-
-            <div className="p-6">
-              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
-                Includes:
-              </h3>
-              <ul className="space-y-2.5">
-                {[
-                  "Everything in Land Report",
-                  "Deer movement corridor analysis",
-                  "Top 3 intercept placements with wind strategy",
-                  "Seasonal huntability scoring",
-                  "Satellite terrain hunt map",
-                  "12-page Land Intelligence Report included",
-                  "County hunting seasons & CWD status",
-                  "Soil, flood & market analysis",
-                  "Indefinite parcel access",
-                ].map((feature, idx) => (
-                  <li key={idx} className="flex items-start gap-2.5">
-                    <Check className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-stone-700 text-sm">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-6">
-                <Link href="/map?product=hunt_report" className="block">
-                  <Button className="w-full bg-red-600 hover:bg-red-700 text-white py-4 text-base font-semibold">
-                    Get Hunt Report
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          </div>
+        {/* Billing Toggle */}
+        <div className="flex items-center justify-center gap-3 mb-12">
+          <span className={`text-sm font-medium ${billing === "monthly" ? "text-stone-900" : "text-stone-400"}`}>Monthly</span>
+          <button
+            onClick={() => setBilling(billing === "annual" ? "monthly" : "annual")}
+            className={`relative w-14 h-7 rounded-full transition-colors ${billing === "annual" ? "bg-emerald-600" : "bg-stone-300"}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${billing === "annual" ? "translate-x-7" : ""}`} />
+          </button>
+          <span className={`text-sm font-medium ${billing === "annual" ? "text-stone-900" : "text-stone-400"}`}>
+            Annual <span className="text-emerald-600 font-semibold text-xs ml-1">Save 30%+</span>
+          </span>
         </div>
 
-        {/* ──── Subscription Tiers ──── */}
-        <div className="mt-20 text-center mb-10">
-          <h2 className="text-3xl font-bold text-stone-900 mb-3">Terrain Analyzer Subscriptions</h2>
-          <p className="text-lg text-stone-600 max-w-2xl mx-auto">
-            Unlock Territory Mode to analyze multiple parcels as one hunting property
-          </p>
-        </div>
+        {/* ──── 3-Tier Pricing Cards ──── */}
+        <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-6 items-start mb-16">
 
-        <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-6 mb-16">
-          {/* Free */}
+          {/* ── FREE ── */}
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-stone-200">
-            <div className="bg-stone-100 text-stone-700 text-center py-2 px-4 font-semibold text-sm">
+            <div className="bg-stone-100 text-stone-700 text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
               FREE
             </div>
             <div className="p-6 text-center border-b border-stone-200">
-              <div className="mt-2">
-                <span className="text-4xl font-bold text-stone-700">$0</span>
+              <div className="mt-1 mb-1">
+                <span className="text-5xl font-bold text-stone-700">$0</span>
               </div>
-              <p className="text-stone-500 mt-2 text-sm">Single parcel analysis</p>
+              <p className="text-stone-500 text-sm">Free forever</p>
             </div>
             <div className="p-6">
-              <ul className="space-y-2.5">
+              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
+                What&apos;s included:
+              </h3>
+              <ul className="space-y-3">
                 {[
-                  "1 parcel terrain analysis",
-                  "Deer flow & corridor mapping",
-                  "Top 3 intercept placements",
-                  "Hunt File (onX export)",
-                  "Wind & season strategy",
+                  "Single parcel terrain analysis",
+                  "Deer Flow, bedding zones, intercept points",
+                  "Hunt File download",
+                  "onX integration",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
                     <Check className="h-4 w-4 text-stone-400 flex-shrink-0 mt-0.5" />
@@ -169,46 +75,57 @@ export default function PricingPage() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-6">
+              <div className="mt-8">
                 <Link href="/intel" className="block">
-                  <Button className="w-full bg-stone-600 hover:bg-stone-700 text-white py-3 text-sm font-semibold">
-                    Try Free
+                  <Button className="w-full bg-stone-600 hover:bg-stone-700 text-white py-4 text-sm font-semibold">
+                    Get Started Free
                   </Button>
                 </Link>
               </div>
             </div>
           </div>
 
-          {/* Pro */}
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-emerald-500 relative">
-            <div className="bg-emerald-600 text-white text-center py-2 px-4 font-semibold text-sm">
+          {/* ── PRO — Most Popular ── */}
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-500 relative transform md:scale-105">
+            <div className="absolute top-0 right-0 bg-emerald-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
+              MOST POPULAR
+            </div>
+            <div className="bg-emerald-600 text-white text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
               🏆 PRO
             </div>
             <div className="p-6 text-center border-b border-stone-200">
-              <div className="mt-2">
-                <span className="text-4xl font-bold text-emerald-600">$99</span>
-                <span className="text-stone-500 text-sm ml-1">/year</span>
+              <div className="mt-1 mb-1">
+                <span className="text-5xl font-bold text-emerald-600">
+                  {billing === "annual" ? "$99" : "$12"}
+                </span>
+                <span className="text-stone-500 text-sm ml-1">
+                  /{billing === "annual" ? "year" : "month"}
+                </span>
               </div>
-              <p className="text-stone-500 mt-1 text-sm">or $12/month</p>
+              <p className="text-stone-500 text-sm">
+                {billing === "annual" ? "Just $8.25/mo — billed annually" : "$12/mo — or save with annual"}
+              </p>
             </div>
             <div className="p-6">
-              <ul className="space-y-2.5">
+              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
+                Everything in Free, plus:
+              </h3>
+              <ul className="space-y-3">
                 {[
-                  "Everything in Free",
-                  "Territory Mode — 5 parcels",
-                  "Save & share properties",
-                  "Shareable territory links",
-                  "Unlimited property saves",
+                  "5-parcel Territory Mode",
+                  "Unified Deer Flow across parcels",
+                  "Territory Hunt Certificate",
+                  "Save & share territories",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
                     <Check className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-stone-700 text-sm">{f}</span>
+                    <span className="text-stone-700 text-sm font-medium">{f}</span>
                   </li>
                 ))}
               </ul>
-              <div className="mt-6">
+              <div className="mt-8">
                 <Link href="/intel" className="block">
-                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 text-sm font-semibold">
+                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 text-base font-semibold">
                     Upgrade to Pro
                   </Button>
                 </Link>
@@ -216,39 +133,46 @@ export default function PricingPage() {
             </div>
           </div>
 
-          {/* Pro Max */}
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-amber-500 relative transform md:scale-105">
-            <div className="absolute top-0 right-0 bg-amber-500 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
+          {/* ── PRO MAX ── */}
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-red-500 relative">
+            <div className="absolute top-0 right-0 bg-red-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
               BEST VALUE
             </div>
-            <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-center py-2 px-4 font-semibold text-sm">
+            <div className="bg-gradient-to-r from-red-600 to-orange-600 text-white text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
               ⚡ PRO MAX
             </div>
             <div className="p-6 text-center border-b border-stone-200">
-              <div className="mt-2">
-                <span className="text-4xl font-bold text-amber-600">$199</span>
-                <span className="text-stone-500 text-sm ml-1">/year</span>
+              <div className="mt-1 mb-1">
+                <span className="text-5xl font-bold text-red-600">
+                  {billing === "annual" ? "$199" : "$24"}
+                </span>
+                <span className="text-stone-500 text-sm ml-1">
+                  /{billing === "annual" ? "year" : "month"}
+                </span>
               </div>
-              <p className="text-stone-500 mt-1 text-sm">or $24/month</p>
+              <p className="text-stone-500 text-sm">
+                {billing === "annual" ? "Just $16.58/mo — billed annually" : "$24/mo — or save with annual"}
+              </p>
             </div>
             <div className="p-6">
-              <ul className="space-y-2.5">
+              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
+                Everything in Pro, plus:
+              </h3>
+              <ul className="space-y-3">
                 {[
-                  "Everything in Pro",
-                  "Territory Mode — 10 parcels",
-                  "Priority terrain analysis",
-                  "Extended territory coverage",
-                  "Large ranch / lease support",
+                  "10-parcel Territory Mode",
+                  "Priority terrain processing",
+                  "Best for outfitters & multi-property hunters",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <Check className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-stone-700 text-sm">{f}</span>
+                    <Check className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-700 text-sm font-medium">{f}</span>
                   </li>
                 ))}
               </ul>
-              <div className="mt-6">
+              <div className="mt-8">
                 <Link href="/intel" className="block">
-                  <Button className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 text-sm font-semibold">
+                  <Button className="w-full bg-red-600 hover:bg-red-700 text-white py-4 text-base font-semibold">
                     Upgrade to Pro Max
                   </Button>
                 </Link>
@@ -258,57 +182,57 @@ export default function PricingPage() {
         </div>
 
         {/* Trust Indicators */}
-        <div className="mt-12 max-w-2xl mx-auto grid grid-cols-3 gap-6 text-center">
+        <div className="max-w-2xl mx-auto grid grid-cols-3 gap-6 text-center mb-20">
           <div className="flex flex-col items-center">
-            <Clock className="h-8 w-8 text-emerald-600 mb-2" />
-            <p className="text-sm text-stone-600 font-medium">Instant Delivery</p>
+            <Target className="h-8 w-8 text-emerald-600 mb-2" />
+            <p className="text-sm text-stone-600 font-medium">AI-Powered Analysis</p>
           </div>
           <div className="flex flex-col items-center">
             <Shield className="h-8 w-8 text-emerald-600 mb-2" />
             <p className="text-sm text-stone-600 font-medium">Secure Payment</p>
           </div>
           <div className="flex flex-col items-center">
-            <FileText className="h-8 w-8 text-emerald-600 mb-2" />
-            <p className="text-sm text-stone-600 font-medium">Professional PDF</p>
+            <Zap className="h-8 w-8 text-emerald-600 mb-2" />
+            <p className="text-sm text-stone-600 font-medium">Instant Access</p>
           </div>
         </div>
 
         {/* FAQ Section */}
-        <div className="mt-20 max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto">
           <h2 className="text-3xl font-bold text-stone-900 text-center mb-10">
             Frequently Asked Questions
           </h2>
           <div className="space-y-6">
             <div className="bg-white rounded-lg p-6 shadow-sm">
               <h3 className="font-semibold text-stone-900 mb-2">
+                What do I get with the free tier?
+              </h3>
+              <p className="text-stone-600">
+                Analyze any single parcel with our full terrain engine — Deer Flow corridors, bedding zones, intercept points, wind strategy, and a downloadable Hunt File for onX. No credit card required.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow-sm">
+              <h3 className="font-semibold text-stone-900 mb-2">
+                What is Territory Mode?
+              </h3>
+              <p className="text-stone-600">
+                Territory Mode lets you combine multiple adjacent parcels into one unified hunting territory. Deer Flow, corridors, and intercept points are computed across all parcels together — not individually — giving you the full picture of deer movement on your property.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow-sm">
+              <h3 className="font-semibold text-stone-900 mb-2">
+                Can I switch between monthly and annual?
+              </h3>
+              <p className="text-stone-600">
+                Yes. You can switch billing cycles anytime from your account settings. If you switch from monthly to annual, you&apos;ll save over 30%.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow-sm">
+              <h3 className="font-semibold text-stone-900 mb-2">
                 What data sources do you use?
               </h3>
               <p className="text-stone-600">
-                We aggregate data from Regrid (156M+ parcel records), FEMA, USDA, USGS, and local government databases to provide the most comprehensive property intelligence available.
-              </p>
-            </div>
-            <div className="bg-white rounded-lg p-6 shadow-sm">
-              <h3 className="font-semibold text-stone-900 mb-2">
-                How quickly will I receive my report?
-              </h3>
-              <p className="text-stone-600">
-                Reports are generated instantly after payment. Download your professional PDF immediately from your dashboard.
-              </p>
-            </div>
-            <div className="bg-white rounded-lg p-6 shadow-sm">
-              <h3 className="font-semibold text-stone-900 mb-2">
-                Can I get reports for multiple properties?
-              </h3>
-              <p className="text-stone-600">
-                Yes! Each property requires a separate report purchase. Access all your reports anytime from your dashboard.
-              </p>
-            </div>
-            <div className="bg-white rounded-lg p-6 shadow-sm">
-              <h3 className="font-semibold text-stone-900 mb-2">
-                What if the property I&apos;m interested in isn&apos;t showing up?
-              </h3>
-              <p className="text-stone-600">
-                Our database covers 99%+ of US properties. Try searching by address, coordinates, or parcel ID. Contact support if you still have issues.
+                We aggregate data from Regrid (156M+ parcel records), USDA, USGS, FEMA, and high-resolution terrain models to deliver the most comprehensive hunting terrain intelligence available.
               </p>
             </div>
           </div>
