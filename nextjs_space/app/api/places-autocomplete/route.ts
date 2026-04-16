@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   if (googleKey) {
     try {
       const googleUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&types=geocode&components=country:us&key=${googleKey}`;
-      const gRes = await fetch(googleUrl);
+      const gRes = await fetch(googleUrl, { cache: 'no-store' });
       const gData = await gRes.json();
 
       if (gData.status === 'OK' && gData.predictions && gData.predictions.length > 0) {
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 async function geocodeWithGoogle(address: string, apiKey: string): Promise<{ lat: number; lng: number } | null> {
   try {
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:US&key=${apiKey}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: 'no-store' });
     const data = await res.json();
     if (data.status === 'OK' && data.results?.length > 0) {
       const loc = data.results[0].geometry.location;
