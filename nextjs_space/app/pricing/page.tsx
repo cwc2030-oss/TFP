@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Check, Shield, Zap, Target, Clock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { Check, Shield, Zap, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
@@ -10,10 +12,44 @@ import { trackPricingPageViewed } from "@/lib/gtag";
 
 export default function PricingPage() {
   const [billing, setBilling] = useState<"annual" | "monthly">("annual");
+  const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null);
+  const router = useRouter();
+  const { data: session } = useSession() || {};
 
   useEffect(() => {
     trackPricingPageViewed();
   }, []);
+
+  async function handleUpgrade(tier: "pro" | "promax") {
+    if (!session?.user) {
+      // Preserve intent so user can continue after signing in
+      router.push(`/login?callbackUrl=${encodeURIComponent("/pricing")}`);
+      return;
+    }
+    const plan = billing === "annual" ? "annual" : "monthly";
+    setUpgradeLoading(`${tier}_${plan}`);
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan, tier }),
+      });
+      const data = await res.json();
+      if (data.alreadySubscribed) {
+        router.push("/intel?upgrade=already");
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      console.error("[pricing] Checkout failed:", data?.error || "unknown");
+      setUpgradeLoading(null);
+    } catch (err) {
+      console.error("[pricing] Checkout error:", err);
+      setUpgradeLoading(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-stone-50 to-emerald-50">
@@ -124,26 +160,35 @@ export default function PricingPage() {
                 ))}
               </ul>
               <div className="mt-8">
-                <Link href="/intel" className="block">
-                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 text-base font-semibold">
-                    Upgrade to Pro
-                  </Button>
-                </Link>
+                <Button
+                  onClick={() => handleUpgrade("pro")}
+                  disabled={upgradeLoading?.startsWith("pro_") ?? false}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 text-base font-semibold disabled:opacity-60"
+                >
+                  {upgradeLoading === `pro_${billing}` ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-4 w-4 border-2 border-white/70 border-t-transparent rounded-full animate-spin" />
+                      Redirecting…
+                    </span>
+                  ) : (
+                    "Go Pro"
+                  )}
+                </Button>
               </div>
             </div>
           </div>
 
           {/* ── PRO MAX ── */}
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-red-500 relative">
-            <div className="absolute top-0 right-0 bg-red-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-[#8b6b1f] relative">
+            <div className="absolute top-0 right-0 bg-[#6b4f14] text-[#f5e6b8] px-3 py-1 text-xs font-bold rounded-bl-lg tracking-wide">
               BEST VALUE
             </div>
-            <div className="bg-gradient-to-r from-red-600 to-orange-600 text-white text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
+            <div className="bg-gradient-to-r from-[#8b6b1f] to-[#5a4211] text-[#f5e6b8] text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
               ⚡ PRO MAX
             </div>
             <div className="p-6 text-center border-b border-stone-200">
               <div className="mt-1 mb-1">
-                <span className="text-5xl font-bold text-red-600">
+                <span className="text-5xl font-bold text-[#8b6b1f]">
                   {billing === "annual" ? "$199" : "$24"}
                 </span>
                 <span className="text-stone-500 text-sm ml-1">
@@ -165,17 +210,26 @@ export default function PricingPage() {
                   "Best for outfitters & multi-property hunters",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <Check className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <Check className="h-4 w-4 text-[#8b6b1f] flex-shrink-0 mt-0.5" />
                     <span className="text-stone-700 text-sm font-medium">{f}</span>
                   </li>
                 ))}
               </ul>
               <div className="mt-8">
-                <Link href="/intel" className="block">
-                  <Button className="w-full bg-red-600 hover:bg-red-700 text-white py-4 text-base font-semibold">
-                    Upgrade to Pro Max
-                  </Button>
-                </Link>
+                <Button
+                  onClick={() => handleUpgrade("promax")}
+                  disabled={upgradeLoading?.startsWith("promax_") ?? false}
+                  className="w-full bg-[#8b6b1f] hover:bg-[#6b4f14] text-[#f5e6b8] py-4 text-base font-semibold disabled:opacity-60"
+                >
+                  {upgradeLoading === `promax_${billing}` ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-4 w-4 border-2 border-[#f5e6b8]/70 border-t-transparent rounded-full animate-spin" />
+                      Redirecting…
+                    </span>
+                  ) : (
+                    "Go Pro Max"
+                  )}
+                </Button>
               </div>
             </div>
           </div>
