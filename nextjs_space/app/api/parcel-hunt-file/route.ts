@@ -57,6 +57,19 @@ const css = `
   .corridor-fill { height: 100%; background: #1a3a2a; border-radius: 2px; }
   .footer { position: absolute; bottom: 24px; left: 48px; right: 48px; display: flex; justify-content: space-between; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; }
   .disclaimer { font-size: 9px; color: #999; line-height: 1.5; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
+  /* Page 1 density overrides — tightens vertical spacing so all content fits cleanly on one page. */
+  .page-1 .header { margin-bottom: 20px; }
+  .page-1 .gold-bar { margin-bottom: 14px; }
+  .page-1 .score-hero { padding: 20px; margin-bottom: 14px; }
+  .page-1 .big-score { font-size: 60px; }
+  .page-1 .score-sub { margin-top: 4px; }
+  .page-1 .grid-3 { margin-bottom: 14px; }
+  .page-1 .stat-box { padding: 10px; }
+  .page-1 .stat-value { font-size: 22px; }
+  .page-1 .stat-label { margin-top: 2px; }
+  .page-1 .section-title { margin-bottom: 10px; padding: 8px 16px; }
+  .page-1 .season-grid { margin-bottom: 14px; }
+  .page-1 .season-cell { padding: 14px; }
 `;
 
 export async function POST(req: NextRequest) {
@@ -105,49 +118,49 @@ export async function POST(req: NextRequest) {
     const standInventory = (stands ?? []).length;
 
     const leaseIntelHTML = `
-<div style="border:2px solid #c9a84c;padding:20px;margin-bottom:24px;background:#fdf9f0">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<div style="border:2px solid #c9a84c;padding:12px 14px;margin-bottom:14px;background:#fdf9f0">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <div style="font-size:13px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;color:#1a3a2a">Lease Intelligence</div>
     ${certifiedBadge}
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px">
-    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
-      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${leaseValuePerAcre}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Est. Lease / Acre / Yr</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:8px">
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
+      <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${leaseValuePerAcre}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Est. Lease / Acre / Yr</div>
     </div>
-    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
-      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${standInventory}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Prime Intercept Points</div>
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
+      <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${standInventory}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Prime Intercept Points</div>
     </div>
-    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
-      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${carryingCapacity}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Est. Hunters Supported</div>
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
+      <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${carryingCapacity}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Est. Hunters Supported</div>
     </div>
-    <div style="text-align:center;background:white;border:1px solid #ddd;padding:14px">
-      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${Math.round(corridors?.parcelCoverage || 0)}%</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">Corridor Coverage</div>
+    <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
+      <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${Math.round(corridors?.parcelCoverage || 0)}%</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Corridor Coverage</div>
     </div>
   </div>
-  <div style="background:#f0ede4;padding:10px 14px;border-left:3px solid #c9a84c;font-size:11px;color:#555;line-height:1.6">
+  <div style="background:#f0ede4;padding:7px 12px;border-left:3px solid #c9a84c;font-size:11px;color:#555;line-height:1.45">
     <strong>Note:</strong> Deer movement does not stop at property lines. Adjacent parcel analysis available 
     at terrafirma.partners to complete the full terrain picture for larger hunting operations.
   </div>
-  <div style="margin-top:8px;font-size:10px;color:#aaa;font-style:italic">
+  <div style="margin-top:6px;font-size:10px;color:#aaa;font-style:italic;line-height:1.3">
     Lease value estimates based on Missouri/Kansas regional averages and terrain huntability scoring. Actual rates vary by location, access, and amenities.
   </div>
 </div>`;
 
     const dualAudienceHTML = `
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:2px solid #1a3a2a;margin-bottom:24px">
-  <div style="padding:20px;border-right:1px solid #1a3a2a">
-    <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:8px">For the Landowner</div>
-    <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">Lease With Confidence</div>
-    <div style="font-size:11px;color:#444;line-height:1.7">This terrain assessment certifies the hunting quality of your property using satellite intelligence. Share this report with prospective lessees to justify premium lease rates and attract serious hunters who understand land quality.</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:2px solid #1a3a2a;margin-bottom:14px">
+  <div style="padding:12px 14px;border-right:1px solid #1a3a2a">
+    <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:4px">For the Landowner</div>
+    <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:4px">Lease With Confidence</div>
+    <div style="font-size:11px;color:#444;line-height:1.5">This terrain assessment certifies the hunting quality of your property using satellite intelligence. Share this report with prospective lessees to justify premium lease rates and attract serious hunters who understand land quality.</div>
   </div>
-  <div style="padding:20px;background:#f8f6f0">
-    <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:8px">For the Hunter</div>
-    <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">Hunt With Intelligence</div>
-    <div style="font-size:11px;color:#444;line-height:1.7">Your terrain analysis identifies exactly where deer move, bed, and converge on this property. Use the intercept points and wind strategy in this report to put yourself in the right position before opening day.</div>
+  <div style="padding:12px 14px;background:#f8f6f0">
+    <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:4px">For the Hunter</div>
+    <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:4px">Hunt With Intelligence</div>
+    <div style="font-size:11px;color:#444;line-height:1.5">Your terrain analysis identifies exactly where deer move, bed, and converge on this property. Use the intercept points and wind strategy in this report to put yourself in the right position before opening day.</div>
   </div>
 </div>`;
 
@@ -306,31 +319,31 @@ export async function POST(req: NextRequest) {
 </head>
 <body>
 
-<div class="page border">
+<div class="page page-1 border">
   <div class="header">
     <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
       <div>Report ID: ${reportId}</div><div>Generated: ${generated}</div>
     </div>
   </div>
-  <div style="text-align:center;margin-bottom:24px">
-    <div style="font-size:28px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">${isTerritory ? 'TERRITORY INTELLIGENCE REPORT' : 'HUNTING INTELLIGENCE REPORT'}</div>
-    <div style="font-size:13px;color:#666;margin-top:6px">${isTerritory ? `${territoryName} — ${territoryParcelCount} parcels — ${Math.round(acreage)} total acres` : address}</div>
-    <div style="font-size:12px;color:#999;margin-top:4px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
+  <div style="text-align:center;margin-bottom:14px">
+    <div style="font-size:26px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">${isTerritory ? 'TERRITORY INTELLIGENCE REPORT' : 'HUNTING INTELLIGENCE REPORT'}</div>
+    <div style="font-size:13px;color:#666;margin-top:4px">${isTerritory ? `${territoryName} — ${territoryParcelCount} parcels — ${Math.round(acreage)} total acres` : address}</div>
+    <div style="font-size:12px;color:#999;margin-top:2px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
   </div>
   <div class="gold-bar"></div>
   ${terrainNarrative ? `
-<div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:16px 20px;margin-bottom:24px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:12px 16px;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
     <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a">
       Terrain Character
     </div>
     ${terrainConfidence ? `<span style="background:#1a3a2a;color:white;padding:2px 8px;font-size:9px;letter-spacing:1px">${terrainConfidence.toUpperCase()} CONFIDENCE</span>` : ''}
   </div>
-  ${terrainHeadline ? `<div style="font-size:16px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">${terrainHeadline}</div>` : ''}
-  <div style="font-size:12px;color:#333;line-height:1.8;font-style:italic">"${terrainNarrative}"</div>
+  ${terrainHeadline ? `<div style="font-size:15px;font-weight:bold;color:#1a3a2a;margin-bottom:4px">${terrainHeadline}</div>` : ''}
+  <div style="font-size:12px;color:#333;line-height:1.55;font-style:italic">"${terrainNarrative}"</div>
   ${terrainDriver ? `
-  <div style="margin-top:10px">
+  <div style="margin-top:6px">
     <span style="background:#1a3a2a;color:white;padding:3px 10px;font-size:10px;letter-spacing:1px">PRIMARY DRIVER: ${terrainDriver}</span>
   </div>` : ''}
 </div>` : ''}
@@ -369,7 +382,7 @@ export async function POST(req: NextRequest) {
       }
     </div>`).join('')}
   </div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
     <div class="stat-box">
       <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'}</div>
       <div class="stat-label">Analysis Area (Acres)</div>
