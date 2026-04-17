@@ -20,26 +20,12 @@ import {
   TreePine,
   Droplets,
   MapPin,
-  Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MAP_LAYERS } from "@/lib/map-layers";
 import { trackAddressSearch } from "@/lib/gtag";
 
-// Seasonal greeting based on current month
-function getSeasonalGreeting(): { greeting: string; subtext: string; emoji: string } {
-  const month = new Date().getMonth();
-  if (month >= 2 && month <= 4) {
-    return { greeting: "Turkey season's coming up!", subtext: "Time to scout that perfect strut zone", emoji: "🦃" };
-  } else if (month >= 5 && month <= 7) {
-    return { greeting: "Summer scouting season", subtext: "Best time to walk new ground", emoji: "☀️" };
-  } else if (month >= 8 && month <= 10) {
-    return { greeting: "Deer season is here!", subtext: "Know your land before opening day", emoji: "🦌" };
-  } else {
-    return { greeting: "Off-season planning time", subtext: "Smart buyers do homework in winter", emoji: "❄️" };
-  }
-}
 
 export default function HomePage() {
   return (
@@ -69,7 +55,6 @@ export default function HomePage() {
 }
 
 function HeroSection() {
-  const seasonal = getSeasonalGreeting();
   const [address, setAddress] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -205,12 +190,6 @@ function HeroSection() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8 }}
           >
-            {/* Seasonal badge */}
-            <div className="inline-flex items-center gap-2 bg-amber-500/20 text-amber-200 px-4 py-2 rounded-full text-sm mb-6 border border-amber-500/30">
-              <span className="text-lg">{seasonal.emoji}</span>
-              <span>{seasonal.greeting}</span>
-            </div>
-            
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
               See your land
               <span className="block text-emerald-400 mt-2">in 3D. Free.</span>
