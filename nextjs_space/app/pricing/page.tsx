@@ -183,7 +183,7 @@ export default function PricingPage() {
             <div className="absolute top-0 right-0 bg-[#6b4f14] text-[#f5e6b8] px-3 py-1 text-xs font-bold rounded-bl-lg tracking-wide">
               BEST VALUE
             </div>
-            <div className="bg-gradient-to-r from-[#8b6b1f] to-[#5a4211] text-[#f5e6b8] text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
+            <div className="bg-[#8b6b1f] text-[#f5e6b8] text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
               ⚡ PRO MAX
             </div>
             <div className="p-6 text-center border-b border-stone-200">
