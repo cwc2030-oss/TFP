@@ -8106,13 +8106,70 @@ function DeerIntelContent() {
 
       const attemptTerritoryLookup = async (attempt: number): Promise<void> => {
         console.error('[TERRITORY-DIAG] attemptTerritoryLookup attempt', attempt, 'at', clickLat.toFixed(5), clickLng.toFixed(5));
-        const resp = await fetch(`/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}`);
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
+        const lookupUrl = `/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}&debug=true`;
+        const resp = await fetch(lookupUrl);
+        // ── REGRID DIAGNOSTICS ──────────────────────────────────────────────
+        // Always capture response body as text first so we can log it even on
+        // non-JSON / error responses. Then attempt JSON parse.
+        const responseText = await resp.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseErr) {
+          console.error('[TERRITORY-REGRID-DIAG] Non-JSON response body', {
+            attempt,
+            clickLat,
+            clickLng,
+            httpStatus: resp.status,
+            httpStatusText: resp.statusText,
+            rawBody: responseText.slice(0, 2000),
+            parseError: (parseErr as Error).message,
+          });
+          throw new Error(`Regrid lookup returned non-JSON (HTTP ${resp.status})`);
         }
-        const data = await resp.json();
+
+        if (!resp.ok) {
+          console.error('[TERRITORY-REGRID-DIAG] HTTP error from lookup endpoint', {
+            attempt,
+            clickLat,
+            clickLng,
+            httpStatus: resp.status,
+            httpStatusText: resp.statusText,
+            responseBody: data,
+            errorMessage: data?.error,
+          });
+          throw new Error(`HTTP ${resp.status}${data?.error ? ' — ' + data.error : ''}`);
+        }
+
         if (!data.found || !data.parcel) {
-          console.error('[TERRITORY-DIAG] No parcel found at click location');
+          // Full diagnostic dump — covers OK coverage gap, outside-region gate,
+          // Regrid "No parcel found", invalid geometry, rate-limit, etc.
+          console.error('[TERRITORY-REGRID-DIAG] Lookup returned no parcel', {
+            attempt,
+            clickLat,
+            clickLng,
+            url: lookupUrl,
+            httpStatus: resp.status,
+            found: data?.found,
+            errorCode: data?.error,
+            cached: data?.cached,
+            fullResponseBody: data,
+            debugInfo: data?.debug ?? null,
+          });
+
+          // ── USER-FACING TOAST ──
+          // Distinguish the three common failure modes so the user knows what
+          // to try next. All three appear silently today in Territory Mode.
+          const errMsg: string = data?.error || '';
+          if (/outside KS\/MO/i.test(errMsg) || /outside.*region/i.test(errMsg)) {
+            // App-side region gate (current cause of OK silent failure)
+            toast.error('That location is outside our current parcel coverage area. Please click within Kansas, Missouri, or an adjacent supported state.', { duration: 6000 });
+          } else if (/rate limit/i.test(errMsg)) {
+            toast.error('Parcel lookup is temporarily rate-limited. Please wait a few seconds and try again.', { duration: 6000 });
+          } else {
+            // Generic "no parcel returned" — Regrid coverage gap, click on road/water, etc.
+            toast.error('No parcel boundary found here — Regrid coverage may be limited in this county. Try clicking further into the field interior.', { duration: 7000 });
+          }
           return;
         }
         const parcel = data.parcel;

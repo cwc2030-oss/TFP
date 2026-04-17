@@ -110,12 +110,29 @@ export async function GET(request: NextRequest) {
   // Quick bounds check for KS/MO region (rough box)
   // KS: lat 36.99-40.00, lng -102.05 to -94.59
   // MO: lat 35.99-40.61, lng -95.77 to -89.10
+  // OK (rough box, for diagnostic labeling only — still rejected by current gate):
+  // lat 33.62-37.00, lng -103.00 to -94.43
   const inKS = latNum >= 36.99 && latNum <= 40.00 && lngNum >= -102.05 && lngNum <= -94.59;
   const inMO = latNum >= 35.99 && latNum <= 40.61 && lngNum >= -95.77 && lngNum <= -89.10;
-  
+  const inOK = latNum >= 33.62 && latNum <= 37.00 && lngNum >= -103.00 && lngNum <= -94.43;
+
   if (!inKS && !inMO) {
+    // Tag likely state for server-log correlation
+    const likelyState = inOK ? 'OK' : 'OUT_OF_REGION';
+    console.warn('[PARCEL LOOKUP] Region gate blocked request', {
+      lat: latNum,
+      lng: lngNum,
+      likelyState,
+      inKS,
+      inMO,
+      inOK,
+    });
     return NextResponse.json(
-      { found: false, error: "Location outside KS/MO region. Click within Kansas or Missouri." },
+      {
+        found: false,
+        error: "Location outside KS/MO region. Click within Kansas or Missouri.",
+        likelyState,
+      },
       { status: 200 }
     );
   }
@@ -186,32 +203,67 @@ export async function GET(request: NextRequest) {
 
     // Fetch from Regrid
     const searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
-    
+
     const searchResponse = await fetch(searchUrl, {
       headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(15000),
     });
 
-    if (!searchResponse.ok) {
-      console.error("Regrid lookup error:", searchResponse.status);
+    // Read body once as text so we can log it on any failure path
+    const searchBodyText = await searchResponse.text();
+    let searchData: any = null;
+    try {
+      searchData = JSON.parse(searchBodyText);
+    } catch (parseErr) {
+      console.error("[PARCEL LOOKUP] Regrid returned non-JSON", {
+        lat: latNum,
+        lng: lngNum,
+        httpStatus: searchResponse.status,
+        httpStatusText: searchResponse.statusText,
+        rawBody: searchBodyText.slice(0, 2000),
+      });
       return NextResponse.json(
-        { found: false, error: `Regrid API error: ${searchResponse.status}` },
+        { found: false, error: `Regrid API returned non-JSON (${searchResponse.status})` },
         { status: 200 }
       );
     }
 
-    const searchData = await searchResponse.json();
-    
-    if (searchData.status === "error") {
+    if (!searchResponse.ok) {
+      console.error("[PARCEL LOOKUP] Regrid HTTP error", {
+        lat: latNum,
+        lng: lngNum,
+        httpStatus: searchResponse.status,
+        httpStatusText: searchResponse.statusText,
+        regridBody: searchData,
+      });
       return NextResponse.json(
-        { found: false, error: searchData.message || "Regrid lookup failed" },
+        { found: false, error: `Regrid API error: ${searchResponse.status}`, regrid: searchData },
         { status: 200 }
       );
     }
-    
+
+    if (searchData.status === "error") {
+      console.error("[PARCEL LOOKUP] Regrid status=error", {
+        lat: latNum,
+        lng: lngNum,
+        regridStatus: searchData.status,
+        regridMessage: searchData.message,
+        regridBody: searchData,
+      });
+      return NextResponse.json(
+        { found: false, error: searchData.message || "Regrid lookup failed", regrid: searchData },
+        { status: 200 }
+      );
+    }
+
     const results = searchData.results || [];
-    
+
     if (results.length === 0) {
+      console.warn("[PARCEL LOOKUP] Regrid returned 0 results (likely coverage gap or click on non-parcel)", {
+        lat: latNum,
+        lng: lngNum,
+        regridBody: searchData,
+      });
       return NextResponse.json(
         { found: false, error: "No parcel found at this location" },
         { status: 200 }
