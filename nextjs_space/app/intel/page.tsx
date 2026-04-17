@@ -8161,9 +8161,9 @@ function DeerIntelContent() {
           // Distinguish the three common failure modes so the user knows what
           // to try next. All three appear silently today in Territory Mode.
           const errMsg: string = data?.error || '';
-          if (/outside KS\/MO/i.test(errMsg) || /outside.*region/i.test(errMsg)) {
-            // App-side region gate (current cause of OK silent failure)
-            toast.error('That location is outside our current parcel coverage area. Please click within Kansas, Missouri, or an adjacent supported state.', { duration: 6000 });
+          if (/outside.*coverage/i.test(errMsg) || /outside KS\/MO/i.test(errMsg) || /outside.*region/i.test(errMsg)) {
+            // App-side region gate — user clicked outside supported states.
+            toast.error('That location is outside our current parcel coverage area. Supported states: KS, MO, OK, AR, NE, IA, Texas panhandle, and eastern CO.', { duration: 7000 });
           } else if (/rate limit/i.test(errMsg)) {
             toast.error('Parcel lookup is temporarily rate-limited. Please wait a few seconds and try again.', { duration: 6000 });
           } else {

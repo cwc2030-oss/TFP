@@ -107,18 +107,38 @@ export async function GET(request: NextRequest) {
     );
   }
   
-  // Quick bounds check for KS/MO region (rough box)
+  // Quick bounds check for supported-region box (core + adjacent states).
+  // Each box is a generous outer envelope — Regrid handles fine-grained in/out on its side.
   // KS: lat 36.99-40.00, lng -102.05 to -94.59
   // MO: lat 35.99-40.61, lng -95.77 to -89.10
-  // OK (rough box, for diagnostic labeling only — still rejected by current gate):
-  // lat 33.62-37.00, lng -103.00 to -94.43
+  // OK: lat 33.62-37.00, lng -103.00 to -94.43
+  // AR: lat 33.00-36.50, lng -94.62 to -89.64
+  // NE: lat 39.99-43.00, lng -104.06 to -95.30
+  // IA: lat 40.37-43.51, lng -96.64 to -90.14
+  // TX panhandle: lat 34.30-36.51, lng -103.05 to -99.99
+  // CO east (plains): lat 37.00-41.01, lng -105.80 to -102.04
   const inKS = latNum >= 36.99 && latNum <= 40.00 && lngNum >= -102.05 && lngNum <= -94.59;
   const inMO = latNum >= 35.99 && latNum <= 40.61 && lngNum >= -95.77 && lngNum <= -89.10;
   const inOK = latNum >= 33.62 && latNum <= 37.00 && lngNum >= -103.00 && lngNum <= -94.43;
+  const inAR = latNum >= 33.00 && latNum <= 36.50 && lngNum >= -94.62 && lngNum <= -89.64;
+  const inNE = latNum >= 39.99 && latNum <= 43.00 && lngNum >= -104.06 && lngNum <= -95.30;
+  const inIA = latNum >= 40.37 && latNum <= 43.51 && lngNum >= -96.64 && lngNum <= -90.14;
+  const inTXPanhandle = latNum >= 34.30 && latNum <= 36.51 && lngNum >= -103.05 && lngNum <= -99.99;
+  const inCOEast = latNum >= 37.00 && latNum <= 41.01 && lngNum >= -105.80 && lngNum <= -102.04;
 
-  if (!inKS && !inMO) {
-    // Tag likely state for server-log correlation
-    const likelyState = inOK ? 'OK' : 'OUT_OF_REGION';
+  const inSupportedRegion =
+    inKS || inMO || inOK || inAR || inNE || inIA || inTXPanhandle || inCOEast;
+
+  if (!inSupportedRegion) {
+    // Tag best-guess state for server-log correlation (rough prox only)
+    let likelyState = 'OUT_OF_REGION';
+    if (latNum >= 33.0 && latNum <= 37.0 && lngNum >= -103.1 && lngNum <= -94.3) likelyState = 'OK_EDGE';
+    else if (latNum >= 32.5 && latNum <= 36.6 && lngNum >= -94.7 && lngNum <= -89.5) likelyState = 'AR_EDGE';
+    else if (latNum >= 39.5 && latNum <= 43.5 && lngNum >= -104.2 && lngNum <= -95.2) likelyState = 'NE_EDGE';
+    else if (latNum >= 40.0 && latNum <= 43.6 && lngNum >= -96.8 && lngNum <= -90.0) likelyState = 'IA_EDGE';
+    else if (latNum >= 34.0 && latNum <= 36.7 && lngNum >= -103.2 && lngNum <= -99.8) likelyState = 'TX_PANHANDLE_EDGE';
+    else if (latNum >= 36.8 && latNum <= 41.1 && lngNum >= -105.9 && lngNum <= -101.9) likelyState = 'CO_EAST_EDGE';
+
     console.warn('[PARCEL LOOKUP] Region gate blocked request', {
       lat: latNum,
       lng: lngNum,
@@ -126,11 +146,17 @@ export async function GET(request: NextRequest) {
       inKS,
       inMO,
       inOK,
+      inAR,
+      inNE,
+      inIA,
+      inTXPanhandle,
+      inCOEast,
     });
     return NextResponse.json(
       {
         found: false,
-        error: "Location outside KS/MO region. Click within Kansas or Missouri.",
+        error:
+          "Location outside current coverage area. Supported states: KS, MO, OK, AR, NE, IA, TX panhandle, eastern CO.",
         likelyState,
       },
       { status: 200 }
