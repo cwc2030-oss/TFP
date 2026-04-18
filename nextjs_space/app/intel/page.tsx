@@ -3180,6 +3180,14 @@ function DeerIntelContent() {
     const parcels = territoryParcelsRef.current.length >= 2
       ? territoryParcelsRef.current
       : territoryParcels;
+
+    // TEMPORARY DIAGNOSTIC — remove once Pineville-link bug is confirmed fixed
+    console.log('[TERRITORY-LINK] parcels source:',
+      territoryParcelsRef.current.length >= 2 ? 'REF' : 'STATE',
+      'count:', parcels.length,
+      'coords:', parcels.map(p => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`)
+    );
+
     if (parcels.length < 2) return;
     const params = new URLSearchParams({
       territory: 'true',
@@ -3190,6 +3198,8 @@ function DeerIntelContent() {
       params.set(`p${i + 1}lng`, p.lng.toFixed(6));
     });
     const url = `https://terrafirma.partners/intel?${params.toString()}`;
+    // TEMPORARY DIAGNOSTIC — remove once Pineville-link bug is confirmed fixed
+    console.log('[TERRITORY-LINK] generated URL:', url);
     try {
       navigator.clipboard.writeText(url);
       toast.success(`Territory link copied! Share it to show all ${parcels.length} parcels together.`);
