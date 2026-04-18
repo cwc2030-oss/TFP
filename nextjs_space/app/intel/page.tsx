@@ -1876,6 +1876,19 @@ function DeerIntelContent() {
   // Hero parcel: ?parcel=<slug> → load a curated demo parcel directly
   const heroSlug = searchParams.get('parcel');
   const heroParcel = heroSlug ? HERO_PARCELS.find(p => p.slug === heroSlug) : null;
+  // Territory share URL: ?territory=true&p1lat=...&p1lng=...&p2lat=...&p2lng=...&p3lat=...&p3lng=...&name=...
+  const urlTerritory = searchParams.get('territory') === 'true';
+  const urlP1Lat = parseFloat(searchParams.get('p1lat') || '0');
+  const urlP1Lng = parseFloat(searchParams.get('p1lng') || '0');
+  const urlP2Lat = parseFloat(searchParams.get('p2lat') || '0');
+  const urlP2Lng = parseFloat(searchParams.get('p2lng') || '0');
+  const urlP3Lat = parseFloat(searchParams.get('p3lat') || '0');
+  const urlP3Lng = parseFloat(searchParams.get('p3lng') || '0');
+  const urlP4Lat = parseFloat(searchParams.get('p4lat') || '0');
+  const urlP4Lng = parseFloat(searchParams.get('p4lng') || '0');
+  const urlP5Lat = parseFloat(searchParams.get('p5lat') || '0');
+  const urlP5Lng = parseFloat(searchParams.get('p5lng') || '0');
+  const urlTerritoryName = searchParams.get('name') || 'My Territory';
   // If hero parcel is specified, use its coords; if demo mode, use Pineville; else URL
   const resolvedInitial = heroParcel
     ? { lat: heroParcel.lat, lng: heroParcel.lng, address: heroParcel.address, acreage: heroParcel.acreage }
@@ -3158,6 +3171,29 @@ function DeerIntelContent() {
     territoryParcels.reduce((sum, p) => sum + p.acreage, 0),
     [territoryParcels]
   );
+
+  // Copy a shareable URL that encodes the current territory (parcels + name)
+  // so another user can open the exact same territory with one click.
+  const copyTerritoryLink = useCallback(() => {
+    if (territoryParcels.length < 2) return;
+    const params = new URLSearchParams({
+      territory: 'true',
+      name: territoryName,
+    });
+    territoryParcels.forEach((p, i) => {
+      params.set(`p${i + 1}lat`, p.lat.toFixed(6));
+      params.set(`p${i + 1}lng`, p.lng.toFixed(6));
+    });
+    const url = `https://terrafirma.partners/intel?${params.toString()}`;
+    try {
+      navigator.clipboard.writeText(url);
+      toast.success(`Territory link copied! Share it to show all ${territoryParcels.length} parcels together.`);
+    } catch (e) {
+      console.warn('[TERRITORY-URL] Clipboard write failed, falling back to prompt:', e);
+      // Fallback for older browsers / insecure contexts
+      window.prompt('Copy this territory link:', url);
+    }
+  }, [territoryParcels, territoryName]);
 
   const clearAllOverlaySources = useCallback(() => {
     const map = mapRef.current;
@@ -4668,6 +4704,118 @@ function DeerIntelContent() {
       // Don't re-throw — territory useEffect errors should never crash the UI
     }
   }, [territoryParcels, mapReady, getTerritoryBounds]);
+
+  // ========== AUTO-LOAD TERRITORY FROM URL PARAMS ==========
+  // When ?territory=true&p1lat=..&p1lng=..&p2lat=..&p2lng=..&name=.. is in the URL,
+  // fetch each parcel's geometry from Regrid, add them to the territory, and auto-run analysis.
+  // Fires exactly once per mount when the map is ready.
+  const territoryUrlLoadedRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!urlTerritory || !mapReady) return;
+    if (territoryUrlLoadedRef.current) return;
+    territoryUrlLoadedRef.current = true;
+
+    const loadTerritoryFromURL = async () => {
+      console.error('[TERRITORY-URL] Loading territory from URL:', urlTerritoryName);
+
+      // Switch into territory mode so the Builder panel is visible while loading
+      setTerritoryMode(true);
+      setTerritoryName(urlTerritoryName);
+
+      const parcelCoords = [
+        { lat: urlP1Lat, lng: urlP1Lng },
+        { lat: urlP2Lat, lng: urlP2Lng },
+        { lat: urlP3Lat, lng: urlP3Lng },
+        { lat: urlP4Lat, lng: urlP4Lng },
+        { lat: urlP5Lat, lng: urlP5Lng },
+      ].filter(p => p.lat !== 0 && p.lng !== 0);
+
+      for (const coords of parcelCoords) {
+        try {
+          const res = await fetch(`/api/parcels/lookup?lat=${coords.lat}&lng=${coords.lng}`);
+          const data = await res.json();
+          if (!data || !data.found || !data.parcel) {
+            console.warn('[TERRITORY-URL] No parcel found for:', coords);
+            continue;
+          }
+          const parcel = data.parcel;
+
+          // Build a GeoJSON Feature from the lookup (mirrors Territory Mode click handler logic)
+          const geoType = parcel.geometryType || 'Polygon';
+          let parcelFeature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+          if (geoType === 'MultiPolygon') {
+            parcelFeature = {
+              type: 'Feature',
+              properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
+              geometry: { type: 'MultiPolygon', coordinates: parcel.coordinates || [] },
+            };
+          } else {
+            const rawCoords = parcel.coordinates || [];
+            const ring = Array.isArray(rawCoords[0]?.[0]) ? rawCoords[0] : rawCoords;
+            const ringCoords = [...ring];
+            if (ringCoords.length > 0 && (ringCoords[0][0] !== ringCoords[ringCoords.length - 1][0] || ringCoords[0][1] !== ringCoords[ringCoords.length - 1][1])) {
+              ringCoords.push(ringCoords[0]);
+            }
+            parcelFeature = {
+              type: 'Feature',
+              properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
+              geometry: { type: 'Polygon', coordinates: [ringCoords] },
+            };
+          }
+
+          addParcelToTerritory({
+            id: parcel.parcelId || `p_${coords.lat}_${coords.lng}`,
+            address: parcel.address || `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`,
+            lat: coords.lat,
+            lng: coords.lng,
+            acreage: parcel.acreage || 0,
+            polygon: parcelFeature,
+            owner: parcel.owner,
+            county: parcel.county,
+          });
+          // Small delay between adds so React state settles between loops
+          await new Promise(r => setTimeout(r, 150));
+        } catch (e) {
+          console.warn('[TERRITORY-URL] Failed to load parcel:', coords, e);
+        }
+      }
+
+      // Give React one more tick to flush all setState calls from addParcelToTerritory
+      setTimeout(() => {
+        const loaded = territoryParcelsRef.current;
+        if (loaded.length < 2) {
+          console.warn('[TERRITORY-URL] Not enough parcels loaded to build territory:', loaded.length);
+          return;
+        }
+        const merged = mergeParcelPolygons(loaded);
+        if (!merged) {
+          console.warn('[TERRITORY-URL] mergeParcelPolygons returned null');
+          return;
+        }
+        const bounds = getTerritoryBounds(loaded);
+        const centerLat = (bounds[1] + bounds[3]) / 2;
+        const centerLng = (bounds[0] + bounds[2]) / 2;
+        const totalAcres = String(loaded.reduce((s, p) => s + p.acreage, 0));
+
+        setParcelPolygon(merged);
+        setActiveLat(centerLat);
+        setActiveLng(centerLng);
+        setActiveAcreage(totalAcres);
+        setActiveAddress(urlTerritoryName);
+        activeLatRef.current = centerLat;
+        activeLngRef.current = centerLng;
+        activeAcreageRef.current = totalAcres;
+        prefetchedParcelRef.current = merged;
+        territoryFadeInPending.current = true;
+        console.error('[TERRITORY-URL] Auto-analyzing territory with', loaded.length, 'parcels');
+        // Small additional delay so map camera has time to fit the territory bounds
+        setTimeout(() => runAnalysis(), 200);
+      }, 2000);
+    };
+
+    loadTerritoryFromURL();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, urlTerritory]);
 
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
   // v3.8.4 — debounce 300ms so rapid season/wind clicks coalesce into one setData pass
@@ -9630,6 +9778,27 @@ function DeerIntelContent() {
               >
                 {summary ? '⟳ Re-Align Territory' : 'Analyze Territory'}
               </button>
+
+              {/* Copy Territory Link — shareable URL that rebuilds this territory with one click */}
+              {territoryParcels.length >= 2 && (
+                <button
+                  onClick={copyTerritoryLink}
+                  style={{
+                    width: '100%',
+                    padding: '10px 0',
+                    background: '#1a3a2a',
+                    color: '#52b788',
+                    border: '1px solid #2d6a4f',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    marginTop: 8,
+                    letterSpacing: 1,
+                  }}
+                >
+                  Copy Territory Link
+                </button>
+              )}
 
               {/* Open Territory in onX Hunt */}
               <button
