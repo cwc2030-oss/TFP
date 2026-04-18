@@ -150,6 +150,20 @@ function HeroSection() {
     setSearchError('');
     setShowSuggestions(false);
     
+    // Coordinate shortcut: if input matches "lat, lng" (e.g. "38.88311, -95.03943"),
+    // skip geocoding and jump straight to the terrain analyzer.
+    const coordPattern = /^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/;
+    const coordMatch = address.trim().match(coordPattern);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lng = parseFloat(coordMatch[2]);
+      if (!Number.isNaN(lat) && !Number.isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        trackAddressSearch(`${lat}, ${lng}`);
+        router.push(`/intel?lat=${lat}&lng=${lng}`);
+        return;
+      }
+    }
+    
     try {
       // Geocode the address using Mapbox Geocoding API
       const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
