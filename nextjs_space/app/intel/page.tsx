@@ -4718,6 +4718,21 @@ function DeerIntelContent() {
   useEffect(() => {
     if (!urlTerritory || !mapReady) return;
     if (territoryUrlLoadedRef.current) return;
+    // Require at least 2 valid (non-zero, non-NaN) parcel coord pairs before firing.
+    // This prevents a stray ?territory=true with missing/zero p* params from
+    // triggering a territory load that would otherwise contaminate the normal
+    // single-parcel flow with demo/fallback coordinates.
+    const validParcelCount = [
+      { lat: urlP1Lat, lng: urlP1Lng },
+      { lat: urlP2Lat, lng: urlP2Lng },
+      { lat: urlP3Lat, lng: urlP3Lng },
+      { lat: urlP4Lat, lng: urlP4Lng },
+      { lat: urlP5Lat, lng: urlP5Lng },
+    ].filter(p => p.lat !== 0 && p.lng !== 0 && !isNaN(p.lat) && !isNaN(p.lng)).length;
+    if (validParcelCount < 2) {
+      console.warn('[TERRITORY-URL] Skipping auto-load — need at least 2 valid parcels, got', validParcelCount);
+      return;
+    }
     territoryUrlLoadedRef.current = true;
 
     const loadTerritoryFromURL = async () => {
@@ -7791,6 +7806,13 @@ function DeerIntelContent() {
 
   // Run analysis once on mount — season/wind changes are handled by local alignment rescore
   useEffect(() => {
+    // Territory cleanup: if territoryParcelsRef survived from a prior SPA navigation
+    // but this load is a normal single-parcel flow (territoryMode false), wipe the
+    // ref+state before runAnalysis so stale parcels can't contaminate the link.
+    if (territoryParcelsRef.current.length > 0 && !territoryMode) {
+      console.warn('[TERRITORY-URL] Mount: clearing stale territory parcels from ref (count:', territoryParcelsRef.current.length, ')');
+      clearTerritory();
+    }
     runAnalysis();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
