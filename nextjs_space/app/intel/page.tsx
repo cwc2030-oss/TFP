@@ -2093,6 +2093,13 @@ function DeerIntelContent() {
   // Export/Screenshot Mode state (clean map for broker demos)
   const [exportMode, setExportMode] = useState(false);
 
+  // SHARED-TERRITORY FIX: when a territory is loaded from a shared URL
+  // (?territory=true&p1lat=... etc.), we bypass the tier-based parcel cap so
+  // recipients on a lower tier (e.g. Free = 1 parcel) can still view all
+  // parcels the sender included. Also flips UI labels from "Territory full" /
+  // "N of CAP parcels" to a shared-viewing treatment.
+  const [isViewingSharedTerritory, setIsViewingSharedTerritory] = useState(false);
+
   // ========== EXPLORATION MODE STATE (unified parcel lookup) ==========
   const [explorationMode, setExplorationMode] = useState(false); // Enable click-to-lookup
   const [qaParcelLoading, setQaParcelLoading] = useState(false);
@@ -3115,10 +3122,11 @@ function DeerIntelContent() {
     return [minLng, minLat, maxLng, maxLat];
   }, []);
 
-  const addParcelToTerritory = useCallback((parcel: TerritoryParcel) => {
+  const addParcelToTerritory = useCallback((parcel: TerritoryParcel, opts?: { bypassCap?: boolean }) => {
     console.error('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id,
       'address:', parcel.address, 'acreage:', parcel.acreage,
-      'lat:', parcel.lat?.toFixed(6), 'lng:', parcel.lng?.toFixed(6));
+      'lat:', parcel.lat?.toFixed(6), 'lng:', parcel.lng?.toFixed(6),
+      'bypassCap:', !!opts?.bypassCap);
     setTerritoryParcels(prev => {
       console.error('[TERRITORY-DIAG] setTerritoryParcels updater. prev.length:', prev.length, 'prev IDs:', prev.map(p => p.id));
       // Duplicate guard
@@ -3128,15 +3136,20 @@ function DeerIntelContent() {
         return prev;
       }
 
-      // Tier-based parcel cap: free=1, pro=5, promax=10
-      const cap = isProMax ? 10 : isPro ? 5 : 1;
-      if (prev.length >= cap) {
-        console.error('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
-        toast.error(
-          `Territory limit reached (${cap} parcel max on ${isProMax ? 'Pro Max' : isPro ? 'Pro' : 'Free'})`,
-          { duration: 4000 }
-        );
-        return prev;
+      // SHARED-TERRITORY FIX: bypass the tier cap when loading a territory
+      // shared via URL (?territory=true&...). Otherwise a free-tier recipient
+      // would only see parcel #1 because their cap=1 silently drops 2-5.
+      if (!opts?.bypassCap) {
+        // Tier-based parcel cap: free=1, pro=5, promax=10
+        const cap = isProMax ? 10 : isPro ? 5 : 1;
+        if (prev.length >= cap) {
+          console.error('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
+          toast.error(
+            `Territory limit reached (${cap} parcel max on ${isProMax ? 'Pro Max' : isPro ? 'Pro' : 'Free'})`,
+            { duration: 4000 }
+          );
+          return prev;
+        }
       }
 
       const updated = [...prev, parcel];
@@ -3171,6 +3184,8 @@ function DeerIntelContent() {
     territoryParcelsRef.current = [];
     setTerritoryMode(false);
     setTerritoryName('My Territory');
+    // SHARED-TERRITORY FIX: reset the shared-view flag when territory is cleared
+    setIsViewingSharedTerritory(false);
 
     // Restore adjacent parcel layers hidden during territory mode
     const map = mapRef.current;
@@ -4766,6 +4781,10 @@ function DeerIntelContent() {
       // Switch into territory mode so the Builder panel is visible while loading
       setTerritoryMode(true);
       setTerritoryName(urlTerritoryName);
+      // SHARED-TERRITORY FIX: flag this as a shared-view load so
+      // addParcelToTerritory bypasses the tier cap and the UI labels switch
+      // from "Territory full" to shared-viewing treatment.
+      setIsViewingSharedTerritory(true);
 
       const parcelCoords = [
         { lat: urlP1Lat, lng: urlP1Lng },
@@ -4817,7 +4836,7 @@ function DeerIntelContent() {
             polygon: parcelFeature,
             owner: parcel.owner,
             county: parcel.county,
-          });
+          }, { bypassCap: true });  // SHARED-TERRITORY FIX: bypass tier cap for URL-loaded shares
           // Small delay between adds so React state settles between loops
           await new Promise(r => setTimeout(r, 150));
         } catch (e) {
@@ -9778,8 +9797,18 @@ function DeerIntelContent() {
                 paddingTop:8,
                 borderTop:'1px solid #1a3a2a',
               }}>
-                <span>{territoryParcels.length} of {TERRITORY_PARCEL_CAP} parcels selected</span>
-                {territoryParcels.length >= TERRITORY_PARCEL_CAP ? (
+                <span>
+                  {isViewingSharedTerritory
+                    ? `Viewing shared territory — ${territoryParcels.length} parcels`
+                    : `${territoryParcels.length} of ${TERRITORY_PARCEL_CAP} parcels selected`}
+                </span>
+                {/* SHARED-TERRITORY FIX: don't show "Territory full" for shared views —
+                    the cap was bypassed, so the message would be misleading. */}
+                {isViewingSharedTerritory ? (
+                  <span style={{color:'#52b788',fontWeight:'bold'}}>
+                    {Math.round(totalTerritoryAcreage)} total acres
+                  </span>
+                ) : territoryParcels.length >= TERRITORY_PARCEL_CAP ? (
                   <span style={{color:'#f59e0b',fontWeight:600,fontSize:12}}>✓ Territory full</span>
                 ) : (
                   <span style={{color:'#52b788',fontWeight:'bold'}}>
@@ -10109,7 +10138,11 @@ function DeerIntelContent() {
               {territoryMode
                 ? (parcelPickLoading
                     ? 'Loading…'
-                    : `Territory (${territoryParcels.length}/${TERRITORY_PARCEL_CAP})`)
+                    /* SHARED-TERRITORY FIX: show plain count for shared views since
+                       the cap was bypassed and "N/1" would misrepresent the state. */
+                    : isViewingSharedTerritory
+                      ? `Territory (${territoryParcels.length})`
+                      : `Territory (${territoryParcels.length}/${TERRITORY_PARCEL_CAP})`)
                 : 'Territory'}
               {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded">PRO</span>}
             </Button>
