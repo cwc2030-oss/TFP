@@ -3174,26 +3174,31 @@ function DeerIntelContent() {
 
   // Copy a shareable URL that encodes the current territory (parcels + name)
   // so another user can open the exact same territory with one click.
+  // Reads from territoryParcelsRef.current as primary source so the link still
+  // works after territoryMode has been toggled off (ref survives state clears).
   const copyTerritoryLink = useCallback(() => {
-    if (territoryParcels.length < 2) return;
+    const parcels = territoryParcelsRef.current.length >= 2
+      ? territoryParcelsRef.current
+      : territoryParcels;
+    if (parcels.length < 2) return;
     const params = new URLSearchParams({
       territory: 'true',
       name: territoryName,
     });
-    territoryParcels.forEach((p, i) => {
+    parcels.forEach((p, i) => {
       params.set(`p${i + 1}lat`, p.lat.toFixed(6));
       params.set(`p${i + 1}lng`, p.lng.toFixed(6));
     });
     const url = `https://terrafirma.partners/intel?${params.toString()}`;
     try {
       navigator.clipboard.writeText(url);
-      toast.success(`Territory link copied! Share it to show all ${territoryParcels.length} parcels together.`);
+      toast.success(`Territory link copied! Share it to show all ${parcels.length} parcels together.`);
     } catch (e) {
       console.warn('[TERRITORY-URL] Clipboard write failed, falling back to prompt:', e);
       // Fallback for older browsers / insecure contexts
       window.prompt('Copy this territory link:', url);
     }
-  }, [territoryParcels, territoryName]);
+  }, [territoryParcels, territoryParcelsRef, territoryName]);
 
   const clearAllOverlaySources = useCallback(() => {
     const map = mapRef.current;
@@ -9779,8 +9784,9 @@ function DeerIntelContent() {
                 {summary ? '⟳ Re-Align Territory' : 'Analyze Territory'}
               </button>
 
-              {/* Copy Territory Link — shareable URL that rebuilds this territory with one click */}
-              {territoryParcels.length >= 2 && (
+              {/* Copy Territory Link — shareable URL that rebuilds this territory with one click.
+                  Checks both state AND ref so the button stays visible after territoryMode toggles off. */}
+              {(territoryParcels.length >= 2 || territoryParcelsRef.current.length >= 2) && (
                 <button
                   onClick={copyTerritoryLink}
                   style={{
