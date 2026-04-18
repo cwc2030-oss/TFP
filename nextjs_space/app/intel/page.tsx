@@ -2048,6 +2048,17 @@ function DeerIntelContent() {
     _territoryModeGlobal.current = territoryMode;
   }, [territoryMode]);
 
+  // ── PINEVILLE-LINK FIX ─────────────────────────────────────────────────────
+  // Tracks whether the currently-active parcel was explicitly chosen by the
+  // user (URL lat/lng, hero slug, demo mode, Pick Parcel click, or a territory
+  // share link). When FALSE, activeLat/activeLng still hold the Pineville
+  // default fallback from the top of the file and must NOT be auto-seeded into
+  // the territory — otherwise the "Copy Territory Link" URL encodes Pineville
+  // as parcel #1, regardless of which parcels the user actually clicked.
+  const userHasExplicitParcelRef = useRef<boolean>(
+    Boolean(demoMode || heroSlug || searchParams.get('lat') || urlTerritory)
+  );
+
   // TERRITORY FIREWALL: Auto-clear any analysis error that fires while
   // territory mode is active — the user shouldn't see "Analysis Failed"
   // when they're just adding parcels to the builder.
@@ -3103,7 +3114,9 @@ function DeerIntelContent() {
   }, []);
 
   const addParcelToTerritory = useCallback((parcel: TerritoryParcel) => {
-    console.error('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id, 'address:', parcel.address, 'acreage:', parcel.acreage);
+    console.error('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id,
+      'address:', parcel.address, 'acreage:', parcel.acreage,
+      'lat:', parcel.lat?.toFixed(6), 'lng:', parcel.lng?.toFixed(6));
     setTerritoryParcels(prev => {
       console.error('[TERRITORY-DIAG] setTerritoryParcels updater. prev.length:', prev.length, 'prev IDs:', prev.map(p => p.id));
       // Duplicate guard
@@ -8566,6 +8579,8 @@ function DeerIntelContent() {
       activeLatRef.current = newLat;
       activeLngRef.current = newLng;
       activeAcreageRef.current = newAcreage;
+      // PINEVILLE-LINK FIX: user just clicked a real parcel — future Territory seed is safe
+      userHasExplicitParcelRef.current = true;
       
       // ── 5. Exit pick mode (single-parcel only — territory keeps picking) ──
       if (!territoryMode) {
@@ -8608,7 +8623,9 @@ function DeerIntelContent() {
 
     heroLoadingRef.current = true;
     setActiveHeroSlug(hero.slug);
-    
+    // PINEVILLE-LINK FIX: user explicitly picked a curated parcel — safe to seed later
+    userHasExplicitParcelRef.current = true;
+
     // Clear previous state
     clearAllOverlaySources();
     setParcelPolygon(null);
@@ -10053,8 +10070,14 @@ function DeerIntelContent() {
 
                   // Auto-add the currently analyzed parcel as the first territory member
                   // so the user doesn't have to re-click it.
+                  // PINEVILLE-LINK FIX: only seed when the user has explicitly chosen a
+                  // parcel (URL lat/lng, hero slug, demo, Pick Parcel). When the user
+                  // arrives at /intel with no params, activeLat/activeLng still equals
+                  // the Pineville fallback default (36.638590, -94.345581) — seeding
+                  // that contaminates the share URL with Pineville as parcel #1.
                   const currentPoly = parcelPolygon;
-                  if (currentPoly && activeLat && activeLng) {
+                  const canSeed = userHasExplicitParcelRef.current;
+                  if (canSeed && currentPoly && activeLat && activeLng) {
                     const seedParcel: TerritoryParcel = {
                       id: currentPoly.properties?.parcelId || `p_${Date.now()}`,
                       address: activeAddress || `Parcel at ${activeLat.toFixed(4)}, ${activeLng.toFixed(4)}`,
@@ -10065,11 +10088,16 @@ function DeerIntelContent() {
                       owner: currentPoly.properties?.owner,
                       county: currentPoly.properties?.county,
                     };
+                    console.log('[TERRITORY-SEED] Seeding with explicit parcel:',
+                      activeLat.toFixed(6), activeLng.toFixed(6), activeAddress);
                     setTerritoryParcels([seedParcel]);
                     territoryParcelsRef.current = [seedParcel];
                   } else {
+                    console.log('[TERRITORY-SEED] Skipping auto-seed — no explicit parcel loaded. canSeed:',
+                      canSeed, 'hasPoly:', !!currentPoly, 'activeLat:', activeLat, 'activeLng:', activeLng);
                     setTerritoryParcels([]);
                     territoryParcelsRef.current = [];
+                    toast.info('Click any parcel on the map to add it to your territory.', { duration: 5000 });
                   }
                 }
               }}
