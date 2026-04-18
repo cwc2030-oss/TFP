@@ -1864,8 +1864,8 @@ function DeerIntelContent() {
   const flowAnimationPhase = useRef<number>(0);
 
   // URL params (initial values)
-  const urlLat = parseFloat(searchParams.get('lat') || '36.638590');
-  const urlLng = parseFloat(searchParams.get('lng') || '-94.345581');
+  const urlLat = parseFloat(searchParams.get('lat') || '0');
+  const urlLng = parseFloat(searchParams.get('lng') || '0');
   const urlAddress = searchParams.get('address') || 'Sample Property';
   const urlAcreage = searchParams.get('acreage');
   // Part 3: orderId from URL param (checkout success link) takes priority over localStorage
@@ -1894,7 +1894,9 @@ function DeerIntelContent() {
     ? { lat: heroParcel.lat, lng: heroParcel.lng, address: heroParcel.address, acreage: heroParcel.acreage }
     : demoMode
     ? { lat: 36.638590, lng: -94.345581, address: '761 Schlessman Rd, Pineville, MO 64831', acreage: '118' }
-    : { lat: urlLat, lng: urlLng, address: urlAddress, acreage: urlAcreage };
+    : (urlLat !== 0 && urlLng !== 0)
+    ? { lat: urlLat, lng: urlLng, address: urlAddress, acreage: urlAcreage }
+    : { lat: 0, lng: 0, address: '', acreage: '0' };
 
   // Active coordinates — start from URL, updated by Exploration Mode clicks
   const [activeLat, setActiveLat] = useState(resolvedInitial.lat);
