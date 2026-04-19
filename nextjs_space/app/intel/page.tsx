@@ -3255,6 +3255,10 @@ function DeerIntelContent() {
 
   // Dim existing overlay layers to reduced opacity without clearing source data.
   // Used during Re-Align so the user still sees their land instead of a black screen.
+  // Layers that must NEVER have their opacity raised above 0.
+  // tfp-pressure-fill was replaced by the heatmap visual and is kept in code only.
+  const PERMANENTLY_HIDDEN_LAYERS = useRef(new Set(['tfp-pressure-fill']));
+
   const dimOverlayLayers = useCallback((targetOpacity: number = 0.4) => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -3268,6 +3272,7 @@ function DeerIntelContent() {
       if (!layer.id.startsWith('tfp-')) continue;
       if (layer.id.startsWith('tfp-parcel-') || layer.id.startsWith('tfp-territory-')) continue;
       if (layer.layout?.visibility === 'none') continue;
+      if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
       const prop = propMap[(layer as any).type] || 'line-opacity';
       try { animatePaint(map, layer.id, prop, targetOpacity, 400); } catch { /* noop */ }
     }
@@ -3733,6 +3738,7 @@ function DeerIntelContent() {
             for (const layer of currentStyle.layers) {
               if (!layer.id.startsWith('tfp-')) continue;
               if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
+              if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
               const prop = propMapFade[(layer as any).type] || 'line-opacity';
               // Start at 0, animate up to reconciled target
               try {
@@ -3747,6 +3753,7 @@ function DeerIntelContent() {
               for (const layer of postStyle.layers) {
                 if (!layer.id.startsWith('tfp-')) continue;
                 if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
+                if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
                 const prop = propMapFade[(layer as any).type] || 'line-opacity';
                 fadeLayerIn(map, layer.id, 0.8, prop, 1000);
               }
@@ -3770,6 +3777,7 @@ function DeerIntelContent() {
             for (const layer of curStyle.layers) {
               if (!layer.id.startsWith('tfp-')) continue;
               if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
+              if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
               if (layer.layout?.visibility === 'none') continue;
               const prop = fadeProps[(layer as any).type] || 'line-opacity';
               try {
@@ -3784,6 +3792,7 @@ function DeerIntelContent() {
                 for (const layer of postStyle.layers) {
                   if (!layer.id.startsWith('tfp-')) continue;
                   if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
+                  if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
                   if (layer.layout?.visibility === 'none') continue;
                   const prop = fadeProps[(layer as any).type] || 'line-opacity';
                   fadeLayerIn(map, layer.id, 0.85, prop, 800);
