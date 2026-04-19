@@ -66,6 +66,7 @@ import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrai
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
 import TerrainStoryPanel, { TerrainStoryExportLegend, StructuralDriversGrid } from '@/components/terrain/terrain-story-panel';
+import TerrainLoadingBar from '@/components/terrain/terrain-loading-bar';
 import { generateTerrainStory, computeStructuralDrivers, type TerrainStorySummary } from '@/lib/terrain-story';
 import HuntingPotentialCard, { computeHuntingPotential, type HuntingPotentialScore } from '@/components/terrain/hunting-potential-card';
 import { computeBrokerScore, type BrokerScoreResult, type BrokerScoreInput } from '@/lib/broker-scoring';
@@ -10920,6 +10921,8 @@ function DeerIntelContent() {
             </div>
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
+              {/* ─── ANALYSIS LOADING BAR ─── */}
+              <TerrainLoadingBar visible={terrainFlowLoading || qaParcelAnalyzing} />
               {/* ─── TERRAIN FLOW ─── */}
               <div className="px-3 pt-3 pb-1">
                 <div className="flex items-center gap-2">
