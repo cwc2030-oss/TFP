@@ -2076,6 +2076,8 @@ function DeerIntelContent() {
   // instead of snapping them to full opacity. Set before territory analysis,
   // consumed once after new data arrives.
   const territoryFadeInPending = useRef(false);
+  // RE-ALIGN FIX: Flag to fade new terrain data in smoothly after re-analysis.
+  const reAlignFadeInPending = useRef(false);
 
   // Raster grid state — persisted so the compare card can sample nearby cells
   const [rasterGrid, setRasterGrid] = useState<RasterGrid | null>(null);
@@ -3251,6 +3253,27 @@ function DeerIntelContent() {
     });
   }, []);
 
+  // Dim existing overlay layers to reduced opacity without clearing source data.
+  // Used during Re-Align so the user still sees their land instead of a black screen.
+  const dimOverlayLayers = useCallback((targetOpacity: number = 0.4) => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const style = map.getStyle();
+    if (!style?.layers) return;
+    const propMap: Record<string, string> = {
+      line: 'line-opacity', fill: 'fill-opacity', circle: 'circle-opacity',
+      heatmap: 'heatmap-opacity', symbol: 'icon-opacity',
+    };
+    for (const layer of style.layers) {
+      if (!layer.id.startsWith('tfp-')) continue;
+      if (layer.id.startsWith('tfp-parcel-') || layer.id.startsWith('tfp-territory-')) continue;
+      if (layer.layout?.visibility === 'none') continue;
+      const prop = propMap[(layer as any).type] || 'line-opacity';
+      try { animatePaint(map, layer.id, prop, targetOpacity, 400); } catch { /* noop */ }
+    }
+    needsVisibilityRestore.current = true;
+  }, []);
+
   // ── Parcel-view hold: hide / reveal terrain layers ──
   // During the 1.5 s clean-parcel-view hold we set all terrain overlay layers
   // to visibility:'none' (except the parcel boundary itself).  When the hold
@@ -3350,25 +3373,34 @@ function DeerIntelContent() {
 
     // Only wipe overlay sources when we DON'T already have the boundary painted.
     // Territory re-aligns also skip the wipe — the merged boundary is still valid.
+    // RE-ALIGN FIX: When overlay sources already exist (re-align), dim layers to
+    // 0.4 opacity instead of clearing them — keeps terrain visible, no blackout.
+    const isReAlign = !prefetchedParcel && !isTerritoryRun && overlaySourcesCreated.current;
     if (!prefetchedParcel && !isTerritoryRun) {
-      clearAllOverlaySources();
+      if (isReAlign) {
+        dimOverlayLayers(0.4);
+        reAlignFadeInPending.current = true;
+      } else {
+        clearAllOverlaySources();
+      }
     }
 
     setIsLoading(true);
-    setBackgroundAnalysis(!!prefetchedParcel);
+    // RE-ALIGN FIX: treat re-aligns as background analysis (no fullscreen overlay)
+    setBackgroundAnalysis(!!prefetchedParcel || isReAlign);
     setError(null);
     setAnalysisStalled(false);
 
     // When we already have a parcel boundary visible, start progress from 20 %
     // (parcel phase done) with a terrain-focused message.
-    if (prefetchedParcel) {
+    if (prefetchedParcel || isReAlign) {
       setProgress(20);
       setProgressStep('Running terrain analysis...');
     } else {
       setProgress(10);
       setProgressStep((demoMode || heroParcel) ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
     }
-    lastProgressRef.current = { value: prefetchedParcel ? 20 : 10, time: Date.now() };
+    lastProgressRef.current = { value: (prefetchedParcel || isReAlign) ? 20 : 10, time: Date.now() };
     
     // Read current season/wind AND coordinates from refs so we always get
     // the latest values even when called via stale setTimeout closures.
@@ -3721,6 +3753,44 @@ function DeerIntelContent() {
               console.log('[TERRITORY] Fade-in started: 1000ms');
             }
           }, 400);
+        }
+
+        // RE-ALIGN FIX: Smooth crossfade — new data was just painted into the
+        // still-dimmed (0.4) sources. Animate layers back to full opacity.
+        if (reAlignFadeInPending.current) {
+          reAlignFadeInPending.current = false;
+          const fadeProps: Record<string, string> = {
+            line: 'line-opacity', fill: 'fill-opacity',
+            circle: 'circle-opacity', heatmap: 'heatmap-opacity',
+            symbol: 'icon-opacity',
+          };
+          const skipPrefixes = ['tfp-parcel-', 'tfp-territory-'];
+          const curStyle = map.getStyle();
+          if (curStyle?.layers) {
+            for (const layer of curStyle.layers) {
+              if (!layer.id.startsWith('tfp-')) continue;
+              if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
+              if (layer.layout?.visibility === 'none') continue;
+              const prop = fadeProps[(layer as any).type] || 'line-opacity';
+              try {
+                // Set to 0 first so reconcileVisibility's snap doesn't flash,
+                // then animate up to full target opacity
+                map.setPaintProperty(layer.id, prop, 0);
+              } catch { /* noop */ }
+            }
+            setTimeout(() => {
+              const postStyle = map.getStyle();
+              if (postStyle?.layers) {
+                for (const layer of postStyle.layers) {
+                  if (!layer.id.startsWith('tfp-')) continue;
+                  if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
+                  if (layer.layout?.visibility === 'none') continue;
+                  const prop = fadeProps[(layer as any).type] || 'line-opacity';
+                  fadeLayerIn(map, layer.id, 0.85, prop, 800);
+                }
+              }
+            }, 200);
+          }
         }
 
         // Bump epoch to trigger specialized effects for 'complex' layers
@@ -10922,7 +10992,7 @@ function DeerIntelContent() {
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
               {/* ─── ANALYSIS LOADING BAR ─── */}
-              <TerrainLoadingBar visible={terrainFlowLoading || qaParcelAnalyzing} />
+              <TerrainLoadingBar visible={terrainFlowLoading || qaParcelAnalyzing || (isLoading && backgroundAnalysis)} />
               {/* ─── TERRAIN FLOW ─── */}
               <div className="px-3 pt-3 pb-1">
                 <div className="flex items-center gap-2">
