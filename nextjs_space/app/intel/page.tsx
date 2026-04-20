@@ -2730,7 +2730,7 @@ function DeerIntelContent() {
 
   async function handleUpgrade(plan: 'monthly' | 'annual', tier: 'pro' | 'promax' = 'pro') {
     if (!session?.user) {
-      router.push('/signin');
+      router.push('/login?callbackUrl=%2Fintel');
       return;
     }
     setUpgradeLoading(`${tier}_${plan}`);
@@ -10088,7 +10088,7 @@ function DeerIntelContent() {
                 </button>
               ) : (
                 <button
-                  onClick={() => router.push('/signin')}
+                  onClick={() => router.push('/login?callbackUrl=%2Fintel')}
                   className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
                              bg-green-900 hover:bg-green-800 text-white font-semibold
                              transition-colors duration-200 mt-2"
@@ -12135,7 +12135,7 @@ function DeerIntelContent() {
                 </button>
               ) : (
                 <button
-                  onClick={() => router.push('/signin')}
+                  onClick={() => router.push('/login?callbackUrl=%2Fintel')}
                   className="flex items-center gap-2 w-full px-4 py-2 rounded-lg
                              bg-green-900 hover:bg-green-800 text-white font-semibold
                              transition-colors duration-200 mt-2"
