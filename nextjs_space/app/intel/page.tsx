@@ -12168,135 +12168,65 @@ function DeerIntelContent() {
       {/* ========== UPGRADE MODAL (Pro / Pro Max) ========== */}
       {showUpgradeModal && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowUpgradeModal(false); }}
         >
-          <div className="bg-[#0d1f17] border border-[#c9a84c]/40 rounded-2xl p-6 max-w-2xl w-[95vw] shadow-2xl">
-            <div className="text-center mb-5">
-              <div className="text-2xl mb-1">🦌</div>
-              <h3 className="text-xl font-bold text-white">Upgrade TerraFirma</h3>
-              <p className="text-sm text-stone-400 mt-2">
-                Unlock Territory Builder, Save Properties, and Share Territories
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              {/* ── PRO ── */}
-              <div className={`border rounded-xl p-4 ${isPro && !isProMax ? 'border-emerald-500/60 bg-emerald-900/10' : 'border-[#c9a84c]/30'}`}>
-                <div className="text-center mb-3">
-                  <div className="text-sm font-bold text-[#c9a84c]">PRO</div>
-                  {isPro && !isProMax && <span className="text-[10px] text-emerald-400 font-semibold">CURRENT PLAN</span>}
-                </div>
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center gap-2 text-xs text-stone-300">
-                    <span className="text-green-400">✓</span> Territory Builder — up to 5 parcels
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-stone-300">
-                    <span className="text-green-400">✓</span> Save & share properties
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-stone-300">
-                    <span className="text-green-400">✓</span> Unlimited analysis, PDFs, onX
-                  </div>
-                </div>
-                {isPro && !isProMax ? (
-                  <div className="text-center text-xs text-emerald-400 py-2">✓ Active</div>
-                ) : (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleUpgrade('annual', 'pro')}
-                      disabled={!!upgradeLoading}
-                      className="flex-1 py-2 rounded-lg font-bold text-xs bg-[#c9a84c] text-[#0d1f17] hover:bg-[#d4b85d] disabled:opacity-50 transition-colors"
-                    >
-                      {upgradeLoading === 'pro_annual' ? <span className="animate-pulse">…</span> : <>${'$99/yr'}<span className="block text-[9px] font-normal opacity-80">Save 31%</span></>}
-                    </button>
-                    <button
-                      onClick={() => handleUpgrade('monthly', 'pro')}
-                      disabled={!!upgradeLoading}
-                      className="flex-1 py-2 rounded-lg font-bold text-xs border border-[#c9a84c]/40 text-[#c9a84c] hover:bg-[#c9a84c]/10 disabled:opacity-50 transition-colors"
-                    >
-                      {upgradeLoading === 'pro_monthly' ? <span className="animate-pulse">…</span> : '$12/mo'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* ── PRO MAX ── */}
-              <div className={`border rounded-xl p-4 relative ${isProMax ? 'border-amber-500/60 bg-amber-900/10' : 'border-amber-500/40 bg-amber-900/5'}`}>
-                <div className="absolute -top-2 right-3 bg-amber-500 text-[#0d1f17] text-[9px] font-bold px-2 py-0.5 rounded-full">BEST VALUE</div>
-                <div className="text-center mb-3">
-                  <div className="text-sm font-bold text-amber-400">PRO MAX</div>
-                  {isProMax && <span className="text-[10px] text-amber-400 font-semibold">CURRENT PLAN</span>}
-                </div>
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center gap-2 text-xs text-stone-300">
-                    <span className="text-amber-400">✓</span> Territory Builder — up to <strong className="text-amber-300">10 parcels</strong>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-stone-300">
-                    <span className="text-amber-400">✓</span> Everything in Pro
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-stone-300">
-                    <span className="text-amber-400">✓</span> Priority terrain analysis
-                  </div>
-                </div>
-                {isProMax ? (
-                  <div className="text-center text-xs text-amber-400 py-2">✓ Active</div>
-                ) : (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleUpgrade('annual', 'promax')}
-                      disabled={!!upgradeLoading}
-                      className="flex-1 py-2 rounded-lg font-bold text-xs bg-amber-500 text-[#0d1f17] hover:bg-amber-400 disabled:opacity-50 transition-colors"
-                    >
-                      {upgradeLoading === 'promax_annual' ? <span className="animate-pulse">…</span> : <>${'$199/yr'}<span className="block text-[9px] font-normal opacity-80">Save 31%</span></>}
-                    </button>
-                    <button
-                      onClick={() => handleUpgrade('monthly', 'promax')}
-                      disabled={!!upgradeLoading}
-                      className="flex-1 py-2 rounded-lg font-bold text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50 transition-colors"
-                    >
-                      {upgradeLoading === 'promax_monthly' ? <span className="animate-pulse">…</span> : '$24/mo'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Manual session refresh for users whose webhook already landed */}
+          <div style={{
+            background: '#1a1a2e',
+            border: '1px solid #4a5568',
+            borderRadius: '12px',
+            padding: '36px 40px',
+            maxWidth: '440px',
+            width: '90%',
+            textAlign: 'center' as const,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ fontSize: '36px', marginBottom: '12px' }}>🦌</div>
+            <h2 style={{ color: '#f0c040', fontSize: '22px', margin: '0 0 12px' }}>
+              Unlock Your Hunt Report
+            </h2>
+            <p style={{ color: '#a0aec0', fontSize: '14px', lineHeight: 1.6, margin: '0 0 24px' }}>
+              You&apos;re seeing a free preview. Upgrade to <strong style={{ color: '#f0c040' }}>Terra Firma Pro</strong> to download your full, print-ready Hunt Report — plus unlimited territory analysis.
+            </p>
             <button
-              onClick={async () => {
-                try {
-                  const updated = await updateSession?.();
-                  const status = (updated as any)?.user?.subscriptionStatus;
-                  if (status === 'pro' || status === 'promax') {
-                    toast.success(status === 'promax' ? 'Pro Max activated! 🎉' : 'Pro activated! 🎉');
-                    setShowUpgradeModal(false);
-                  } else {
-                    toast.error('Subscription not found yet — please wait a moment and try again.');
-                  }
-                } catch {
-                  toast.error('Could not refresh session.');
-                }
+              onClick={() => handleUpgrade('annual', 'pro')}
+              disabled={!!upgradeLoading}
+              style={{
+                background: '#c0a020',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '12px 28px',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                width: '100%',
+                marginBottom: '12px',
+                opacity: upgradeLoading ? 0.6 : 1,
               }}
-              className="w-full mt-2 py-2 text-xs text-stone-400 hover:text-emerald-400 transition-colors underline underline-offset-2"
             >
-              Already subscribed? Click to activate
+              {upgradeLoading === 'pro_annual' ? '…' : 'Upgrade to Pro — $99/yr'}
             </button>
-
             <button
               onClick={() => setShowUpgradeModal(false)}
-              className="w-full mt-1 py-2 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+              style={{
+                background: 'transparent',
+                color: '#718096',
+                border: 'none',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
             >
               Maybe later
             </button>
-
-            {isPro && (
-              <button
-                onClick={handleManageSubscription}
-                className="w-full mt-1 py-2 text-xs text-amber-400/70 hover:text-amber-300 transition-colors"
-              >
-                Manage subscription →
-              </button>
-            )}
           </div>
         </div>
       )}
@@ -12304,38 +12234,65 @@ function DeerIntelContent() {
       {/* ========== DOWNLOAD WALL MODAL (Free → Pro) ========== */}
       {showDownloadWall && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowDownloadWall(false); }}
         >
-          <div className="bg-[#0d1f17] border border-[#c9a84c]/40 rounded-2xl p-6 max-w-md w-[90vw] shadow-2xl">
-            <div className="text-center mb-5">
-              <div className="text-3xl mb-2">🦌</div>
-              <h3 className="text-xl font-bold text-white">Share Your Territory Score</h3>
-              <p className="text-sm text-stone-400 mt-3 leading-relaxed">
-                Upgrade to Pro to download and share your Territory Hunt Certificate — your 
-                A+ score, lease value estimate, and intercept points in one shareable PDF.
-              </p>
-            </div>
-
-            <div className="space-y-3 mt-5">
-              <button
-                onClick={() => { setShowDownloadWall(false); handleUpgrade('annual', 'pro'); }}
-                disabled={!!upgradeLoading}
-                className="w-full py-3 rounded-lg font-bold text-sm bg-[#c9a84c] text-[#0d1f17] hover:bg-[#d4b85d] disabled:opacity-50 transition-colors"
-              >
-                {upgradeLoading === 'pro_annual' ? (
-                  <span className="animate-pulse">Redirecting…</span>
-                ) : (
-                  'Go Pro — $99/yr'
-                )}
-              </button>
-              <button
-                onClick={() => setShowDownloadWall(false)}
-                className="w-full py-2.5 rounded-lg text-sm text-stone-400 hover:text-stone-200 transition-colors"
-              >
-                Maybe Later
-              </button>
-            </div>
+          <div style={{
+            background: '#1a1a2e',
+            border: '1px solid #4a5568',
+            borderRadius: '12px',
+            padding: '36px 40px',
+            maxWidth: '440px',
+            width: '90%',
+            textAlign: 'center' as const,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ fontSize: '36px', marginBottom: '12px' }}>🦌</div>
+            <h2 style={{ color: '#f0c040', fontSize: '22px', margin: '0 0 12px' }}>
+              Share Your Territory Score
+            </h2>
+            <p style={{ color: '#a0aec0', fontSize: '14px', lineHeight: 1.6, margin: '0 0 24px' }}>
+              Upgrade to <strong style={{ color: '#f0c040' }}>Terra Firma Pro</strong> to download and share your Territory Hunt Certificate — your A+ score, lease value estimate, and intercept points in one shareable PDF.
+            </p>
+            <button
+              onClick={() => { setShowDownloadWall(false); handleUpgrade('annual', 'pro'); }}
+              disabled={!!upgradeLoading}
+              style={{
+                background: '#c0a020',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '12px 28px',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                width: '100%',
+                marginBottom: '12px',
+                opacity: upgradeLoading ? 0.6 : 1,
+              }}
+            >
+              {upgradeLoading === 'pro_annual' ? '…' : 'Go Pro — $99/yr'}
+            </button>
+            <button
+              onClick={() => setShowDownloadWall(false)}
+              style={{
+                background: 'transparent',
+                color: '#718096',
+                border: 'none',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Maybe Later
+            </button>
           </div>
         </div>
       )}
