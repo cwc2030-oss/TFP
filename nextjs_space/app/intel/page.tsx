@@ -10878,6 +10878,7 @@ function DeerIntelContent() {
                         {summary.topStandScore}
                       </p>
                       <p className="text-[8px] text-stone-500/70 uppercase">Top Score</p>
+                      <p className="text-[8px] text-stone-500/50 italic mt-0.5">Wind &amp; season adjusted</p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-white font-bold">{alignedStands.length || '—'}</p>
@@ -12351,7 +12352,7 @@ function DeerIntelContent() {
                 <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px', color: '#666', marginBottom: '8px' }}>Overall Huntability Score</div>
                 <div style={{ fontSize: '64px', fontWeight: 'bold', lineHeight: 1, color: _scoreColor }}>{topScore}</div>
                 <div style={{ fontSize: '16px', letterSpacing: '3px', marginTop: '8px', color: _scoreColor }}>{_scoreLabel}</div>
-                <div style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>Based on terrain analysis, corridor strength, bedding proximity, and wind alignment</div>
+                <div style={{ fontSize: '11px', color: '#999', fontStyle: 'italic', marginTop: '8px' }}>Score reflects current wind and season conditions</div>
               </div>
 
               {/* Key stats */}
