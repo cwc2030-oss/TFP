@@ -12403,6 +12403,7 @@ function DeerIntelContent() {
               {/* Parcel Intelligence */}
               {(() => {
                 const ac = Number(displayAcreage) || 40;
+                const showHunterCapacity = ac >= 40;
                 const recHunters = Math.max(2, Math.floor(ac / 40));
                 const elevMinM = summary?.demMetrics?.elevMin ?? 0;
                 const elevMaxM = summary?.demMetrics?.elevMax ?? 0;
@@ -12410,12 +12411,14 @@ function DeerIntelContent() {
                 const leaseLow = Math.round(ac < 80 ? 12 : ac < 200 ? 10 : 8);
                 const leaseHigh = Math.round(ac < 80 ? 18 : ac < 200 ? 14 : 12);
                 return (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
-                    <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{recHunters}</div>
-                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Hunter Capacity</div>
-                      <div style={{ fontSize: '9px', color: '#999', marginTop: '2px' }}>Terrain-based estimate</div>
-                    </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: showHunterCapacity ? '1fr 1fr 1fr' : '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                    {showHunterCapacity && (
+                      <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{recHunters}</div>
+                        <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Hunter Capacity</div>
+                        <div style={{ fontSize: '9px', color: '#999', marginTop: '2px' }}>Terrain-based estimate</div>
+                      </div>
+                    )}
                     <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
                       <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{elevRangeFt}ft</div>
                       <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Elevation Range</div>
