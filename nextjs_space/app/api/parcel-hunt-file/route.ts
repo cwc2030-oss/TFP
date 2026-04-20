@@ -70,6 +70,22 @@ const css = `
   .page-1 .section-title { margin-bottom: 10px; padding: 8px 16px; }
   .page-1 .season-grid { margin-bottom: 14px; }
   .page-1 .season-cell { padding: 14px; }
+  /* Free-tier PREVIEW watermark — injected conditionally */
+  .preview-watermark::after {
+    content: 'PREVIEW';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-35deg);
+    font-size: 120px;
+    font-weight: bold;
+    color: rgba(0, 0, 0, 0.06);
+    letter-spacing: 16px;
+    pointer-events: none;
+    z-index: 9999;
+    white-space: nowrap;
+    font-family: Arial, Helvetica, sans-serif;
+  }
 `;
 
 export async function POST(req: NextRequest) {
@@ -83,7 +99,9 @@ export async function POST(req: NextRequest) {
       territoryName = 'My Territory',
       territoryParcelCount = 1,
       territoryParcels: territoryParcelList = null,
+      tier = 'free',
     } = data;
+    const isFreePreview = tier === 'free';
 
     // Derive elevation range from stand elevations if demMetrics unavailable
     const standElevations = (stands ?? [])
@@ -101,6 +119,7 @@ export async function POST(req: NextRequest) {
 
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const wm = isFreePreview ? ' preview-watermark' : '';
 
     // Lease Intelligence computed variables
     const leaseValuePerAcre = (summary?.topStandScore ?? 0) >= 80 ? '$18-25' 
@@ -197,7 +216,7 @@ export async function POST(req: NextRequest) {
 </div>` : '';
 
     const certificatePage = `
-<div class="page border">
+<div class="page border${wm}">
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:900px;text-align:center;padding:48px">
     <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
     <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
@@ -319,7 +338,7 @@ export async function POST(req: NextRequest) {
 </head>
 <body>
 
-<div class="page page-1 border">
+<div class="page page-1 border${wm}">
   <div class="header">
     <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
@@ -407,7 +426,7 @@ export async function POST(req: NextRequest) {
   </div>
 </div>
 
-<div class="page border">
+<div class="page border${wm}">
   <div class="header">
     <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
@@ -509,7 +528,7 @@ export async function POST(req: NextRequest) {
 </div>
 
 ${mapImageBase64 ? `
-<div class="page border">
+<div class="page border${wm}">
   <div class="header">
     <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">

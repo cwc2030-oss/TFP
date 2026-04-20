@@ -2084,6 +2084,7 @@ function DeerIntelContent() {
 
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showDownloadWall, setShowDownloadWall] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [saveConfirmed, setSaveConfirmed] = useState(false);
   const [lastSavedPropertyId, setLastSavedPropertyId] = useState<string | null>(null);
@@ -2981,6 +2982,7 @@ function DeerIntelContent() {
           owner: p.owner,
           county: p.county,
         })) : undefined,
+        tier: subStatus,
       };
 
       // Save terrain results to order for report generation
@@ -9935,23 +9937,43 @@ function DeerIntelContent() {
               {/* Copy Territory Link — shareable URL that rebuilds this territory with one click.
                   Checks both state AND ref so the button stays visible after territoryMode toggles off. */}
               {(territoryParcels.length >= 2 || territoryParcelsRef.current.length >= 2) && (
-                <button
-                  onClick={copyTerritoryLink}
-                  style={{
-                    width: '100%',
-                    padding: '10px 0',
-                    background: '#1a3a2a',
-                    color: '#52b788',
-                    border: '1px solid #2d6a4f',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                    marginTop: 8,
-                    letterSpacing: 1,
-                  }}
-                >
-                  Copy Territory Link
-                </button>
+                isPro ? (
+                  <button
+                    onClick={copyTerritoryLink}
+                    style={{
+                      width: '100%',
+                      padding: '10px 0',
+                      background: '#1a3a2a',
+                      color: '#52b788',
+                      border: '1px solid #2d6a4f',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      marginTop: 8,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    Copy Territory Link
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowDownloadWall(true)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 0',
+                      background: '#1a3a2a',
+                      color: '#666',
+                      border: '1px solid #2d6a4f',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      marginTop: 8,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    🔒 Copy Territory Link
+                  </button>
+                )
               )}
 
               {/* Open Territory in onX Hunt */}
@@ -9996,6 +10018,17 @@ function DeerIntelContent() {
                              text-white transition-colors duration-200"
                 >
                   📤 Share Territory Score
+                </button>
+              )}
+              {territoryMode && summary && !isPro && (
+                <button
+                  onClick={() => setShowDownloadWall(true)}
+                  className="flex items-center gap-2 w-full px-4 py-2
+                             rounded-lg mt-2 font-semibold text-sm
+                             bg-stone-700 hover:bg-stone-600
+                             text-stone-400 transition-colors duration-200"
+                >
+                  🔒 Share Territory Score
                 </button>
               )}
 
@@ -11962,31 +11995,45 @@ function DeerIntelContent() {
 
               {/* ========== PARCEL-HUNT FILE DOWNLOAD ========== */}
               <div className="p-3 border-t border-white/[0.06]">
-                <button
-                  onClick={handleDownloadParcelHuntFile}
-                  disabled={isDownloading || isLoading}
-                  className={`
-                    w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-                    transition-all text-sm font-medium
-                    ${isDownloading || isLoading
-                      ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
-                      : 'bg-stone-800 hover:bg-stone-700 text-white border border-stone-600 hover:border-stone-500'}
-                  `}
-                >
-                  {isDownloading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Generating...</span>
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="h-4 w-4" />
-                      <span>Download Parcel-Hunt File</span>
-                    </>
-                  )}
-                </button>
+                {isPro ? (
+                  <button
+                    onClick={handleDownloadParcelHuntFile}
+                    disabled={isDownloading || isLoading}
+                    className={`
+                      w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                      transition-all text-sm font-medium
+                      ${isDownloading || isLoading
+                        ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
+                        : 'bg-stone-800 hover:bg-stone-700 text-white border border-stone-600 hover:border-stone-500'}
+                    `}
+                  >
+                    {isDownloading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Generating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="h-4 w-4" />
+                        <span>Download Hunt Report</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowDownloadWall(true)}
+                    disabled={isLoading}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                      transition-all text-sm font-medium
+                      bg-stone-800 hover:bg-stone-700 text-stone-400 border border-stone-600 hover:border-stone-500"
+                  >
+                    <span>🔒</span>
+                    <FileText className="h-4 w-4" />
+                    <span>Download Hunt Report</span>
+                  </button>
+                )}
                 <p className="text-[10px] text-stone-500 text-center mt-1.5">
-                  5-page terrain & alignment report
+                  {isPro ? '5-page terrain & alignment report' : 'Upgrade to Pro to download PDF'}
                 </p>
               </div>
 
@@ -12230,6 +12277,45 @@ function DeerIntelContent() {
                 Manage subscription →
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ========== DOWNLOAD WALL MODAL (Free → Pro) ========== */}
+      {showDownloadWall && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDownloadWall(false); }}
+        >
+          <div className="bg-[#0d1f17] border border-[#c9a84c]/40 rounded-2xl p-6 max-w-md w-[90vw] shadow-2xl">
+            <div className="text-center mb-5">
+              <div className="text-3xl mb-2">🦌</div>
+              <h3 className="text-xl font-bold text-white">Share Your Territory Score</h3>
+              <p className="text-sm text-stone-400 mt-3 leading-relaxed">
+                Upgrade to Pro to download and share your Territory Hunt Certificate — your 
+                A+ score, lease value estimate, and intercept points in one shareable PDF.
+              </p>
+            </div>
+
+            <div className="space-y-3 mt-5">
+              <button
+                onClick={() => { setShowDownloadWall(false); handleUpgrade('annual', 'pro'); }}
+                disabled={!!upgradeLoading}
+                className="w-full py-3 rounded-lg font-bold text-sm bg-[#c9a84c] text-[#0d1f17] hover:bg-[#d4b85d] disabled:opacity-50 transition-colors"
+              >
+                {upgradeLoading === 'pro_annual' ? (
+                  <span className="animate-pulse">Redirecting…</span>
+                ) : (
+                  'Go Pro — $99/yr'
+                )}
+              </button>
+              <button
+                onClick={() => setShowDownloadWall(false)}
+                className="w-full py-2.5 rounded-lg text-sm text-stone-400 hover:text-stone-200 transition-colors"
+              >
+                Maybe Later
+              </button>
+            </div>
           </div>
         </div>
       )}
