@@ -461,7 +461,7 @@ const LAYER_COLORS = {
   edgeDrawExtension: '#3b82f6',    // Blue dashed for draw extensions
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
-  edgeBoundaryHighlight: '#8b5cf6', // Purple highlight for adjacent parcel boundaries
+  edgeBoundaryHighlight: '#f59e0b', // Amber — matches parcel boundary for consistent edge styling
   // Travel Corridor colors (structure-first, BOLD earth tones for skeleton feel)
   ridgePrimary: '#4E342E',        // Dark coffee brown - major spines (bold, visible)
   ridgeSecondary: '#6D4C41',      // Medium brown - secondary spines (distinct from primary)
@@ -7375,7 +7375,9 @@ function DeerIntelContent() {
         // Move layers to ensure proper ordering
         const layerOrder = [
           // Base terrain reference (lowest)
+          'tfp-edge-boundary-fill',        // Invisible fill for click/hover detection
           'tfp-edge-boundary-context',     // Adjacent parcel context lines
+          'tfp-edge-boundary-highlight',   // Hover highlight for adjacent parcels
           'tfp-parcel-glow',               // Selected parcel glow (below main line)
           'tfp-parcel-outline',            // Selected parcel boundary
           // Terrain structure
@@ -12563,10 +12565,10 @@ function DeerIntelContent() {
             }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a202c' }}>
-                  Want the full PDF?
+                  You&apos;re seeing 50% of your Hunt Report
                 </div>
                 <div style={{ fontSize: '13px', color: '#718096' }}>
-                  Upgrade to Pro to download &amp; share your Hunt Report
+                  The full PDF includes your complete stand rotation calendar, approach routes, wind strategy by season, and printable Terrain Hunt Certificate.
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -12580,7 +12582,7 @@ function DeerIntelContent() {
                   onClick={() => { setShowReportPreview(false); setShowUpgradeModal(true); }}
                   style={{ background: '#c0a020', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '14px' }}
                 >
-                  🔒 Upgrade to Download
+                  🔒 Unlock Full Report — Go Pro
                 </button>
               </div>
             </div>
