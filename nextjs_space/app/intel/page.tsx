@@ -2085,6 +2085,9 @@ function DeerIntelContent() {
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
   const [showDownloadWall, setShowDownloadWall] = useState(false);
+  const [showReportPreview, setShowReportPreview] = useState(false);
+  const [reportPreviewHtml, setReportPreviewHtml] = useState<string | null>(null);
+  const [reportPreviewLoading, setReportPreviewLoading] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [saveConfirmed, setSaveConfirmed] = useState(false);
   const [lastSavedPropertyId, setLastSavedPropertyId] = useState<string | null>(null);
@@ -3033,6 +3036,113 @@ function DeerIntelContent() {
       setIsDownloading(false);
     }
   }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, urlOrderId, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ========== REPORT PREVIEW (free-tier on-screen view) ==========
+  const handleViewReportPreview = useCallback(async () => {
+    if (reportPreviewLoading) return;
+    setReportPreviewLoading(true);
+    setShowReportPreview(true);
+    try {
+      const top3 = alignedStands.slice(0, 3);
+      const isTerritory = territoryParcelsRef.current.length > 1;
+      const territoryAcreageSum = territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0);
+      const payload = {
+        address: isTerritory
+          ? `${territoryName} (${territoryParcels.length} parcels)`
+          : address,
+        lat,
+        lng,
+        acreage: isTerritory
+          ? territoryAcreageSum
+          : (acreageParam ?? 40),
+        county: parcelPolygon?.properties?.county ?? 
+          address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
+        state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
+        prevailingWind: windDirection,
+        terrainHeadline: terrainStory?.headline ?? null,
+        terrainNarrative: terrainStory?.narrative ?? null,
+        terrainDriver: terrainStory?.primaryDriver?.label ?? null,
+        terrainConfidence: terrainStory?.confidence ?? null,
+        elevRange: Math.round((summary?.demMetrics?.elevRange ?? 0) * 3.281),
+        stands: top3.map((s, i) => ({
+          rank: i + 1,
+          name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
+          score: s.alignment?.score ?? 0,
+          tier: s.alignment?.label ?? 'Field Stone',
+          reasoning: s.props?.reasoning ?? '',
+          approachRisk: s.props?.approachRisk ?? 'medium',
+          windOk: s.props?.windOk ?? [],
+          windBad: s.props?.windBad ?? [],
+          distToCorridorM: s.props?.distToCorridorMeters ?? 0,
+          distToBeddingM: s.props?.distToBeddingMeters ?? 0,
+          elevation: s.props?.elevation ?? 0,
+          resilience: s.resilience?.label ?? 'Unknown',
+          resilienceScore: s.resilience?.score ?? 0,
+          coords: s.coords,
+        })),
+        summary: {
+          totalBeddingAcres: summary?.totalBeddingAcres ?? 0,
+          funnelCount: summary?.funnelCount ?? 0,
+          topStandScore: summary?.topStandScore ?? 0,
+          analysisAreaAcres: summary?.analysisAreaAcres ?? 0,
+          recommendedSeason: summary?.recommendedSeason ?? 'rut',
+          elevRange: (summary?.demMetrics?.elevMax ?? 0) - (summary?.demMetrics?.elevMin ?? 0),
+          elevMin: summary?.demMetrics?.elevMin ?? 0,
+          elevMax: summary?.demMetrics?.elevMax ?? 0,
+          slopeStd: summary?.demMetrics?.slopeStd ?? 0,
+          roughness: summary?.demMetrics?.roughness ?? 0,
+        },
+        corridors: {
+          primaryCount: tieredCorridorData?.corridors_primary?.features?.length ?? 0,
+          possibleCount: tieredCorridorData?.corridors_possible?.features?.length ?? 0,
+          hardFunnelCount: tieredCorridorData?.funnels_hard?.features?.length ?? 0,
+          slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
+          parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
+        },
+        seasonScores: {
+          recommended: summary?.recommendedSeason ?? 'rut',
+          topScore: summary?.topStandScore ?? 0,
+        },
+        parcelCoords: parcelPolygon?.geometry?.type === 'Polygon'
+          ? (parcelPolygon.geometry as any).coordinates[0]
+              .filter((_: any, i: number) => i % 3 === 0)
+              .slice(0, 15)
+          : null,
+        isTerritory,
+        territoryName: isTerritory ? territoryName : undefined,
+        territoryParcelCount: isTerritory ? territoryParcels.length : undefined,
+        territoryParcels: isTerritory ? territoryParcelsRef.current.map(p => ({
+          address: p.address,
+          acreage: Math.round(p.acreage),
+          owner: p.owner,
+          county: p.county,
+        })) : undefined,
+      };
+
+      const response = await fetch('/api/parcel-hunt-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.status === 401) {
+        toast.error('Please sign in to view report preview');
+        setShowReportPreview(false);
+        return;
+      }
+      if (!response.ok) throw new Error('Report generation failed');
+
+      const buf = await response.arrayBuffer();
+      const html = new TextDecoder().decode(buf);
+      setReportPreviewHtml(html);
+    } catch (err) {
+      console.error('[ReportPreview] Error:', err);
+      toast.error('Failed to generate report preview');
+      setShowReportPreview(false);
+    } finally {
+      setReportPreviewLoading(false);
+    }
+  }, [reportPreviewLoading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
@@ -12013,19 +12123,28 @@ function DeerIntelContent() {
                )}
                {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
 
-              {/* ========== PARCEL-HUNT FILE DOWNLOAD ========== */}
+              {/* ========== PARCEL-HUNT FILE DOWNLOAD / PREVIEW ========== */}
               <div className="p-3 border-t border-white/[0.06]">
                 {isPro ? (
+                  /* Pro/ProMax: direct download */
                   <button
                     onClick={handleDownloadParcelHuntFile}
                     disabled={isDownloading || isLoading}
-                    className={`
-                      w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-                      transition-all text-sm font-medium
-                      ${isDownloading || isLoading
-                        ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
-                        : 'bg-stone-800 hover:bg-stone-700 text-white border border-stone-600 hover:border-stone-500'}
-                    `}
+                    style={{
+                      background: isDownloading || isLoading ? '#1c1917' : '#c0a020',
+                      color: isDownloading || isLoading ? '#78716c' : '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      cursor: isDownloading || isLoading ? 'not-allowed' : 'pointer',
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                    }}
                   >
                     {isDownloading ? (
                       <>
@@ -12033,27 +12152,43 @@ function DeerIntelContent() {
                         <span>Generating...</span>
                       </>
                     ) : (
-                      <>
-                        <FileText className="h-4 w-4" />
-                        <span>Download Hunt Report</span>
-                      </>
+                      <span>⬇ Download Hunt Report</span>
                     )}
                   </button>
                 ) : (
+                  /* Free/logged-out: VIEW button opens on-screen preview */
                   <button
-                    onClick={() => setShowDownloadWall(true)}
-                    disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-                      transition-all text-sm font-medium
-                      bg-stone-800 hover:bg-stone-700 text-stone-400 border border-stone-600 hover:border-stone-500"
+                    onClick={handleViewReportPreview}
+                    disabled={reportPreviewLoading || isLoading}
+                    style={{
+                      background: reportPreviewLoading || isLoading ? '#1c1917' : '#2d3748',
+                      color: reportPreviewLoading || isLoading ? '#78716c' : '#f0c040',
+                      border: '1px solid #f0c040',
+                      borderRadius: '8px',
+                      padding: '10px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      cursor: reportPreviewLoading || isLoading ? 'not-allowed' : 'pointer',
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      opacity: reportPreviewLoading || isLoading ? 0.5 : 1,
+                    }}
                   >
-                    <span>🔒</span>
-                    <FileText className="h-4 w-4" />
-                    <span>Download Hunt Report</span>
+                    {reportPreviewLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Generating Preview...</span>
+                      </>
+                    ) : (
+                      <span>📄 View Hunt Report Preview</span>
+                    )}
                   </button>
                 )}
                 <p className="text-[10px] text-stone-500 text-center mt-1.5">
-                  {isPro ? '5-page terrain & alignment report' : 'Upgrade to Pro to download PDF'}
+                  {isPro ? '5-page terrain & alignment report' : 'Free preview — upgrade to download PDF'}
                 </p>
               </div>
 
@@ -12227,6 +12362,96 @@ function DeerIntelContent() {
             >
               Maybe later
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========== REPORT PREVIEW MODAL (free-tier on-screen view) ========== */}
+      {showReportPreview && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.80)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            overflowY: 'auto',
+            padding: '40px 20px',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowReportPreview(false); setReportPreviewHtml(null); } }}
+        >
+          <div style={{
+            background: '#fff',
+            borderRadius: '12px',
+            maxWidth: '780px',
+            width: '100%',
+            position: 'relative',
+            boxShadow: '0 30px 80px rgba(0,0,0,0.6)',
+            overflow: 'hidden',
+          }}>
+
+            {/* Loading state */}
+            {reportPreviewLoading && !reportPreviewHtml && (
+              <div style={{ padding: '80px 40px', textAlign: 'center' }}>
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" style={{ color: '#c0a020' }} />
+                <p style={{ color: '#718096', fontSize: '14px' }}>Generating your Hunt Report preview...</p>
+              </div>
+            )}
+
+            {/* Report HTML rendered in sandboxed iframe */}
+            {reportPreviewHtml && (
+              <iframe
+                srcDoc={reportPreviewHtml}
+                style={{
+                  width: '100%',
+                  minHeight: '800px',
+                  height: '80vh',
+                  border: 'none',
+                  display: 'block',
+                }}
+                sandbox="allow-same-origin"
+                title="Hunt Report Preview"
+              />
+            )}
+
+            {/* Bottom CTA bar */}
+            <div style={{
+              borderTop: '1px solid #e2e8f0',
+              padding: '20px 32px',
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#f7f8fa',
+              borderRadius: '0 0 12px 12px',
+              flexWrap: 'wrap',
+            }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a202c' }}>
+                  Want the full PDF?
+                </div>
+                <div style={{ fontSize: '13px', color: '#718096' }}>
+                  Upgrade to Pro to download &amp; share your Hunt Report
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => { setShowReportPreview(false); setReportPreviewHtml(null); }}
+                  style={{ background: 'transparent', border: '1px solid #cbd5e0', borderRadius: '6px', padding: '8px 16px', cursor: 'pointer', color: '#718096', fontSize: '13px' }}
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => { setShowReportPreview(false); setReportPreviewHtml(null); setShowUpgradeModal(true); }}
+                  style={{ background: '#c0a020', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '14px' }}
+                >
+                  🔒 Upgrade to Download
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
