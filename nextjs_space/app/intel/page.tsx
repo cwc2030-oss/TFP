@@ -3125,11 +3125,6 @@ function DeerIntelContent() {
         body: JSON.stringify(payload),
       });
 
-      if (response.status === 401) {
-        toast.error('Please sign in to view report preview');
-        setShowReportPreview(false);
-        return;
-      }
       if (!response.ok) throw new Error('Report generation failed');
 
       const buf = await response.arrayBuffer();

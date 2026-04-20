@@ -92,12 +92,11 @@ const css = `
 
 export async function POST(req: NextRequest) {
   try {
-    // ── AUTH GATE ── No session → 401. Tier derived from DB, not client.
+    // ── SOFT AUTH ── No session → free tier (PREVIEW watermark). Tier derived from DB when logged in.
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-    const serverTier = (session.user as any).subscriptionStatus || 'free';
+    const serverTier = session?.user
+      ? ((session.user as any).subscriptionStatus || 'free')
+      : 'free';
     const isFreePreview = serverTier === 'free';
 
     const data = await req.json();
