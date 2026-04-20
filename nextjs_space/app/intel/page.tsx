@@ -3576,6 +3576,15 @@ function DeerIntelContent() {
       const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
       console.error('[INTEL] Analysis error:', errorMsg);
 
+      // DIM OVERLAY SAFETY NET: If we dimmed layers for a re-align and analysis
+      // failed, the data-painting useEffect will never fire (layers state didn't
+      // update), so restore opacity here to avoid a stuck brownish overlay.
+      if (reAlignFadeInPending.current) {
+        reAlignFadeInPending.current = false;
+        dimOverlayLayers(1.0);
+        console.log('[INTEL] Restored dimmed layers after analysis error');
+      }
+
       // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch.
       // Never fire demo fallback for territory runs — user chose specific parcels.
       // TERRITORY FIREWALL: Also block if territory mode is active (even if only 1 parcel so far)
@@ -3615,6 +3624,14 @@ function DeerIntelContent() {
       analysisInFlightRef.current = false;
       setIsLoading(false);
       setBackgroundAnalysis(false);
+      // Belt-and-suspenders: if reAlignFadeInPending is STILL set here
+      // (e.g. demo fallback path returned early before clearing it),
+      // restore overlay layers to prevent a stuck dim.
+      if (reAlignFadeInPending.current) {
+        reAlignFadeInPending.current = false;
+        dimOverlayLayers(1.0);
+        console.log('[INTEL] Finally-block restored dimmed layers (safety net)');
+      }
     }
   // NOTE: season and windDirection intentionally excluded from deps.
   // Season/wind changes only affect the heatmap repaint (handled by the terrain flow painting effect),
