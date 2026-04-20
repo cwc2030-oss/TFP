@@ -12368,6 +12368,66 @@ function DeerIntelContent() {
                 </div>
               </div>
 
+              {/* Seasonal Huntability */}
+              {(() => {
+                const recSeason = summary?.recommendedSeason ?? 'rut';
+                const base = topScore;
+                // Derive per-season grades: recommended season gets the base score, others get reduced
+                const seasonScoreMap: Record<string, number> = {
+                  early: recSeason === 'early' ? base : recSeason === 'rut' ? Math.max(0, base - 12) : Math.max(0, base - 8),
+                  rut:   recSeason === 'rut'   ? base : recSeason === 'early' ? Math.max(0, base - 8) : Math.max(0, base - 10),
+                  late:  recSeason === 'late'  ? base : recSeason === 'rut' ? Math.max(0, base - 15) : Math.max(0, base - 10),
+                };
+                const toGrade = (s: number) => s >= 93 ? 'A+' : s >= 85 ? 'A' : s >= 78 ? 'B+' : s >= 70 ? 'B' : s >= 60 ? 'C+' : s >= 50 ? 'C' : 'D';
+                const gradeColor = (s: number) => s >= 78 ? '#2d6a4f' : s >= 60 ? '#8b6f47' : '#c0392b';
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                    {[
+                      { label: 'Early Season', key: 'early' },
+                      { label: 'Rut', key: 'rut' },
+                      { label: 'Late Season', key: 'late' },
+                    ].map(({ label, key }) => {
+                      const sc = seasonScoreMap[key];
+                      const g = toGrade(sc);
+                      return (
+                        <div key={key} style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: gradeColor(sc) }}>{g}</div>
+                          <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>{label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* Parcel Intelligence */}
+              {(() => {
+                const ac = Number(displayAcreage) || 40;
+                const maxHunters = Math.max(1, Math.floor(ac / 80));
+                const recHunters = Math.max(1, maxHunters - 1) || 1;
+                const elevMinM = summary?.demMetrics?.elevMin ?? 0;
+                const elevMaxM = summary?.demMetrics?.elevMax ?? 0;
+                const elevRangeFt = Math.round((elevMaxM - elevMinM) * 3.281);
+                const leaseLow = Math.round(ac < 80 ? 12 : ac < 200 ? 10 : 8);
+                const leaseHigh = Math.round(ac < 80 ? 18 : ac < 200 ? 14 : 12);
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                    <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{recHunters}</div>
+                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Recommended Hunters</div>
+                    </div>
+                    <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{elevRangeFt}ft</div>
+                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Elevation Range</div>
+                    </div>
+                    <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>${leaseLow}-{leaseHigh}</div>
+                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Est. Lease $/Acre</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Divider */}
               <div style={{ background: '#1a3a2a', color: 'white', padding: '10px 16px', fontSize: '13px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '16px' }}>
                 Intercept Point Analysis
