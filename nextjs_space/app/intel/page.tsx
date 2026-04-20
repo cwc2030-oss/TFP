@@ -2086,8 +2086,6 @@ function DeerIntelContent() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [showDownloadWall, setShowDownloadWall] = useState(false);
   const [showReportPreview, setShowReportPreview] = useState(false);
-  const [reportPreviewHtml, setReportPreviewHtml] = useState<string | null>(null);
-  const [reportPreviewLoading, setReportPreviewLoading] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [saveConfirmed, setSaveConfirmed] = useState(false);
   const [lastSavedPropertyId, setLastSavedPropertyId] = useState<string | null>(null);
@@ -3036,108 +3034,6 @@ function DeerIntelContent() {
       setIsDownloading(false);
     }
   }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, urlOrderId, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ========== REPORT PREVIEW (free-tier on-screen view) ==========
-  const handleViewReportPreview = useCallback(async () => {
-    if (reportPreviewLoading) return;
-    setReportPreviewLoading(true);
-    setShowReportPreview(true);
-    try {
-      const top3 = alignedStands.slice(0, 3);
-      const isTerritory = territoryParcelsRef.current.length > 1;
-      const territoryAcreageSum = territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0);
-      const payload = {
-        address: isTerritory
-          ? `${territoryName} (${territoryParcels.length} parcels)`
-          : address,
-        lat,
-        lng,
-        acreage: isTerritory
-          ? territoryAcreageSum
-          : (acreageParam ?? 40),
-        county: parcelPolygon?.properties?.county ?? 
-          address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
-        state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
-        prevailingWind: windDirection,
-        terrainHeadline: terrainStory?.headline ?? null,
-        terrainNarrative: terrainStory?.narrative ?? null,
-        terrainDriver: terrainStory?.primaryDriver?.label ?? null,
-        terrainConfidence: terrainStory?.confidence ?? null,
-        elevRange: Math.round((summary?.demMetrics?.elevRange ?? 0) * 3.281),
-        stands: top3.map((s, i) => ({
-          rank: i + 1,
-          name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
-          score: s.alignment?.score ?? 0,
-          tier: s.alignment?.label ?? 'Field Stone',
-          reasoning: s.props?.reasoning ?? '',
-          approachRisk: s.props?.approachRisk ?? 'medium',
-          windOk: s.props?.windOk ?? [],
-          windBad: s.props?.windBad ?? [],
-          distToCorridorM: s.props?.distToCorridorMeters ?? 0,
-          distToBeddingM: s.props?.distToBeddingMeters ?? 0,
-          elevation: s.props?.elevation ?? 0,
-          resilience: s.resilience?.label ?? 'Unknown',
-          resilienceScore: s.resilience?.score ?? 0,
-          coords: s.coords,
-        })),
-        summary: {
-          totalBeddingAcres: summary?.totalBeddingAcres ?? 0,
-          funnelCount: summary?.funnelCount ?? 0,
-          topStandScore: summary?.topStandScore ?? 0,
-          analysisAreaAcres: summary?.analysisAreaAcres ?? 0,
-          recommendedSeason: summary?.recommendedSeason ?? 'rut',
-          elevRange: (summary?.demMetrics?.elevMax ?? 0) - (summary?.demMetrics?.elevMin ?? 0),
-          elevMin: summary?.demMetrics?.elevMin ?? 0,
-          elevMax: summary?.demMetrics?.elevMax ?? 0,
-          slopeStd: summary?.demMetrics?.slopeStd ?? 0,
-          roughness: summary?.demMetrics?.roughness ?? 0,
-        },
-        corridors: {
-          primaryCount: tieredCorridorData?.corridors_primary?.features?.length ?? 0,
-          possibleCount: tieredCorridorData?.corridors_possible?.features?.length ?? 0,
-          hardFunnelCount: tieredCorridorData?.funnels_hard?.features?.length ?? 0,
-          slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
-          parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
-        },
-        seasonScores: {
-          recommended: summary?.recommendedSeason ?? 'rut',
-          topScore: summary?.topStandScore ?? 0,
-        },
-        parcelCoords: parcelPolygon?.geometry?.type === 'Polygon'
-          ? (parcelPolygon.geometry as any).coordinates[0]
-              .filter((_: any, i: number) => i % 3 === 0)
-              .slice(0, 15)
-          : null,
-        isTerritory,
-        territoryName: isTerritory ? territoryName : undefined,
-        territoryParcelCount: isTerritory ? territoryParcels.length : undefined,
-        territoryParcels: isTerritory ? territoryParcelsRef.current.map(p => ({
-          address: p.address,
-          acreage: Math.round(p.acreage),
-          owner: p.owner,
-          county: p.county,
-        })) : undefined,
-      };
-
-      const response = await fetch('/api/parcel-hunt-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) throw new Error('Report generation failed');
-
-      const buf = await response.arrayBuffer();
-      const html = new TextDecoder().decode(buf);
-      setReportPreviewHtml(html);
-    } catch (err) {
-      console.error('[ReportPreview] Error:', err);
-      toast.error('Failed to generate report preview');
-      setShowReportPreview(false);
-    } finally {
-      setReportPreviewLoading(false);
-    }
-  }, [reportPreviewLoading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
@@ -12153,33 +12049,26 @@ function DeerIntelContent() {
                 ) : (
                   /* Free/logged-out: VIEW button opens on-screen preview */
                   <button
-                    onClick={handleViewReportPreview}
-                    disabled={reportPreviewLoading || isLoading}
+                    onClick={() => setShowReportPreview(true)}
+                    disabled={isLoading}
                     style={{
-                      background: reportPreviewLoading || isLoading ? '#1c1917' : '#2d3748',
-                      color: reportPreviewLoading || isLoading ? '#78716c' : '#f0c040',
+                      background: isLoading ? '#1c1917' : '#2d3748',
+                      color: isLoading ? '#78716c' : '#f0c040',
                       border: '1px solid #f0c040',
                       borderRadius: '8px',
                       padding: '10px 20px',
                       fontSize: '14px',
                       fontWeight: 600,
-                      cursor: reportPreviewLoading || isLoading ? 'not-allowed' : 'pointer',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
                       width: '100%',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '8px',
-                      opacity: reportPreviewLoading || isLoading ? 0.5 : 1,
+                      opacity: isLoading ? 0.5 : 1,
                     }}
                   >
-                    {reportPreviewLoading ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Generating Preview...</span>
-                      </>
-                    ) : (
-                      <span>📄 View Hunt Report Preview</span>
-                    )}
+                    <span>📄 View Hunt Report Preview</span>
                   </button>
                 )}
                 <p className="text-[10px] text-stone-500 text-center mt-1.5">
@@ -12361,8 +12250,20 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* ========== REPORT PREVIEW MODAL (free-tier on-screen view) ========== */}
-      {showReportPreview && (
+      {/* ========== REPORT PREVIEW MODAL (inline JSX — no API fetch) ========== */}
+      {showReportPreview && (() => {
+        const top3 = alignedStands.slice(0, 3);
+        const topScore = summary?.topStandScore ?? 0;
+        const _scoreColor = topScore >= 70 ? '#2d6a4f' : topScore >= 40 ? '#d4a017' : '#c0392b';
+        const _scoreLabel = topScore >= 70 ? 'PRIME' : topScore >= 40 ? 'HUNTABLE' : 'MARGINAL';
+        const _grade = topScore >= 90 ? 'A+' : topScore >= 80 ? 'A' : topScore >= 70 ? 'B' : topScore >= 60 ? 'C' : 'D';
+        const _gradeColor = topScore >= 70 ? '#1a3a2a' : topScore >= 50 ? '#8b6f47' : '#8b0000';
+        const _riskColor = (r: string) => r === 'low' ? '#2d6a4f' : r === 'medium' ? '#d4a017' : '#c0392b';
+        const isTerritory = territoryParcelsRef.current.length > 1;
+        const displayAcreage = isTerritory
+          ? territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0)
+          : (acreageParam ?? 40);
+        return (
         <div
           style={{
             position: 'fixed',
@@ -12375,7 +12276,7 @@ function DeerIntelContent() {
             overflowY: 'auto',
             padding: '40px 20px',
           }}
-          onClick={(e) => { if (e.target === e.currentTarget) { setShowReportPreview(false); setReportPreviewHtml(null); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowReportPreview(false); }}
         >
           <div style={{
             background: '#fff',
@@ -12387,29 +12288,203 @@ function DeerIntelContent() {
             overflow: 'hidden',
           }}>
 
-            {/* Loading state */}
-            {reportPreviewLoading && !reportPreviewHtml && (
-              <div style={{ padding: '80px 40px', textAlign: 'center' }}>
-                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" style={{ color: '#c0a020' }} />
-                <p style={{ color: '#718096', fontSize: '14px' }}>Generating your Hunt Report preview...</p>
-              </div>
-            )}
+            {/* PREVIEW watermark */}
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 20,
+              transform: 'rotate(-35deg)',
+            }}>
+              <span style={{
+                fontSize: '96px',
+                fontWeight: 900,
+                color: 'rgba(180, 30, 30, 0.08)',
+                letterSpacing: '0.1em',
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+              }}>PREVIEW</span>
+            </div>
 
-            {/* Report HTML rendered in sandboxed iframe */}
-            {reportPreviewHtml && (
-              <iframe
-                srcDoc={reportPreviewHtml}
-                style={{
-                  width: '100%',
-                  minHeight: '800px',
-                  height: '80vh',
-                  border: 'none',
-                  display: 'block',
-                }}
-                sandbox="allow-same-origin"
-                title="Hunt Report Preview"
-              />
-            )}
+            {/* ── Report Content ── */}
+            <div style={{ padding: '40px 36px', color: '#1a1a1a', fontFamily: 'Georgia, serif', position: 'relative', zIndex: 10 }}>
+
+              {/* Header */}
+              <div style={{ background: '#1a3a2a', color: 'white', padding: '20px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                <div>
+                  <div style={{ fontSize: '20px', letterSpacing: '2px', fontWeight: 'bold' }}>TERRA FIRMA PARTNERS</div>
+                  <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '4px' }}>Terrain Intelligence for Landowners</div>
+                </div>
+                <div style={{ textAlign: 'right', fontSize: '11px', opacity: 0.8 }}>HUNT REPORT PREVIEW</div>
+              </div>
+
+              {/* Title */}
+              <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+                <div style={{ fontSize: '22px', fontWeight: 'bold', letterSpacing: '2px', color: '#1a3a2a' }}>
+                  {isTerritory ? 'TERRITORY INTELLIGENCE REPORT' : 'HUNTING INTELLIGENCE REPORT'}
+                </div>
+                <div style={{ fontSize: '13px', color: '#666', marginTop: '6px' }}>
+                  {isTerritory ? `${territoryName} — ${territoryParcelsRef.current.length} parcels` : address}
+                </div>
+                <div style={{ fontSize: '12px', color: '#999', marginTop: '2px' }}>{Math.round(Number(displayAcreage))} Acres</div>
+              </div>
+
+              {/* Gold bar */}
+              <div style={{ height: '3px', background: 'linear-gradient(90deg, #c9a84c, #f0d080, #c9a84c)', marginBottom: '24px' }} />
+
+              {/* Terrain narrative */}
+              {terrainStory?.narrative && (
+                <div style={{ background: '#f8f6f0', borderLeft: '4px solid #c9a84c', padding: '14px 18px', marginBottom: '20px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', color: '#1a3a2a', marginBottom: '4px' }}>Terrain Character</div>
+                  {terrainStory.headline && <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#1a3a2a', marginBottom: '6px' }}>{terrainStory.headline}</div>}
+                  <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.6, fontStyle: 'italic' }}>&ldquo;{terrainStory.narrative}&rdquo;</div>
+                </div>
+              )}
+
+              {/* Score hero */}
+              <div style={{ textAlign: 'center', padding: '24px', background: '#f8f6f0', border: '2px solid #1a3a2a', marginBottom: '24px' }}>
+                <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px', color: '#666', marginBottom: '8px' }}>Overall Huntability Score</div>
+                <div style={{ fontSize: '64px', fontWeight: 'bold', lineHeight: 1, color: _scoreColor }}>{topScore}</div>
+                <div style={{ fontSize: '16px', letterSpacing: '3px', marginTop: '8px', color: _scoreColor }}>{_scoreLabel}</div>
+                <div style={{ fontSize: '11px', color: '#999', marginTop: '8px' }}>Based on terrain analysis, corridor strength, bedding proximity, and wind alignment</div>
+              </div>
+
+              {/* Key stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{summary?.totalBeddingAcres?.toFixed(1) ?? '0'}</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Bedding Acres</div>
+                </div>
+                <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{tieredCorridorData?.corridors_primary?.features?.length ?? 0}</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Primary Corridors</div>
+                </div>
+                <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{summary?.funnelCount ?? 0}</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Funnel Zones</div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ background: '#1a3a2a', color: 'white', padding: '10px 16px', fontSize: '13px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '16px' }}>
+                Intercept Point Analysis
+              </div>
+
+              {/* Stand cards */}
+              {top3.map((stand, i) => {
+                const s = stand.alignment?.score ?? 0;
+                const sColor = s >= 70 ? '#2d6a4f' : s >= 40 ? '#d4a017' : '#c0392b';
+                const risk = stand.props?.approachRisk ?? 'medium';
+                return (
+                  <div key={i} style={{ border: '2px solid #1a3a2a', marginBottom: '16px' }}>
+                    <div style={{
+                      padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      background: i === 0 ? '#1a3a2a' : '#f8f6f0', color: i === 0 ? 'white' : '#1a1a1a'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={{ textAlign: 'center', marginRight: '12px' }}>
+                          <div style={{ fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', color: '#c9a84c' }}>INTERCEPT</div>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#c9a84c' }}>#{i + 1}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{stand.name ?? stand.props?.name ?? `Stand ${i + 1}`}</div>
+                          <div style={{ fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase', opacity: 0.8 }}>
+                            {stand.alignment?.label ?? 'Field Stone'} · {stand.resilience?.label ?? 'Unknown'}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ padding: '8px 16px', fontSize: '20px', fontWeight: 'bold', color: 'white', background: sColor, minWidth: '70px', textAlign: 'center' }}>{s}</div>
+                    </div>
+                    <div style={{ padding: '16px', borderTop: '1px solid #ddd', background: '#f8f6f0' }}>
+                      {stand.props?.reasoning && (
+                        <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#333', fontStyle: 'italic', marginBottom: '12px' }}>
+                          &ldquo;{stand.props.reasoning}&rdquo;
+                        </div>
+                      )}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: _riskColor(risk) }}>{risk.toUpperCase()}</div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Approach Risk</div>
+                        </div>
+                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                            {stand.props?.distToCorridorMeters ? Math.round(stand.props.distToCorridorMeters * 1.0936) : '—'} yds
+                          </div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>To Corridor</div>
+                        </div>
+                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                            {stand.props?.distToBeddingMeters ? Math.round(stand.props.distToBeddingMeters * 1.0936) : '—'} yds
+                          </div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>To Bedding</div>
+                        </div>
+                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                            {stand.props?.elevation ? Math.round(stand.props.elevation * 3.281) : '—'}ft
+                          </div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Elevation</div>
+                        </div>
+                      </div>
+                      {/* Wind alignment */}
+                      {((stand.props?.windOk?.length ?? 0) > 0 || (stand.props?.windBad?.length ?? 0) > 0) && (
+                        <div style={{ marginTop: '12px' }}>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#666', marginBottom: '4px' }}>Wind Alignment</div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {(stand.props?.windOk ?? []).map((w: string, wi: number) => (
+                              <span key={`ok-${wi}`} style={{ padding: '3px 8px', fontSize: '10px', borderRadius: '2px', fontWeight: 'bold', background: '#d4edda', color: '#155724' }}>✓ {w}</span>
+                            ))}
+                            {(stand.props?.windBad ?? []).map((w: string, wi: number) => (
+                              <span key={`bad-${wi}`} style={{ padding: '3px 8px', fontSize: '10px', borderRadius: '2px', fontWeight: 'bold', background: '#f8d7da', color: '#721c24' }}>✗ {w}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Hunt Certificate section */}
+              <div style={{ border: '3px solid #c9a84c', padding: '36px 48px', textAlign: 'center', marginTop: '32px' }}>
+                <div style={{ fontSize: '11px', letterSpacing: '4px', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Terra Firma Partners — Official Terrain Assessment
+                </div>
+                <div style={{ fontSize: '13px', letterSpacing: '3px', color: '#666', marginBottom: '8px' }}>
+                  {isTerritory ? 'TERRITORY HUNT CERTIFICATE' : 'TERRAIN HUNT CERTIFICATE'}
+                </div>
+                <div style={{ height: '2px', background: 'linear-gradient(90deg, #c9a84c, #f0d080, #c9a84c)', marginBottom: '24px' }} />
+                <div style={{ fontSize: '80px', fontWeight: 'bold', color: _gradeColor, lineHeight: 1, marginBottom: '8px' }}>{_grade}</div>
+                <div style={{ fontSize: '13px', letterSpacing: '2px', color: '#666', marginBottom: '24px' }}>HUNTABILITY GRADE</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                  <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{topScore}</div>
+                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>HUNTABILITY SCORE</div>
+                  </div>
+                  <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{top3.length}</div>
+                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>INTERCEPT POINTS</div>
+                  </div>
+                  <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{tieredCorridorData?.corridors_primary?.features?.length ?? 0}</div>
+                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>CORRIDORS</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '10px', color: '#999', lineHeight: 1.6 }}>
+                  This certificate confirms that the above property has been analyzed using satellite terrain intelligence,
+                  elevation modeling, and deer movement prediction.
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#999', borderTop: '1px solid #ddd', paddingTop: '12px', marginTop: '24px' }}>
+                <span>TERRA FIRMA PARTNERS</span>
+                <span>terrafirma.partners</span>
+                <span>Hunt Report Preview</span>
+              </div>
+            </div>
 
             {/* Bottom CTA bar */}
             <div style={{
@@ -12433,13 +12508,13 @@ function DeerIntelContent() {
               </div>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
-                  onClick={() => { setShowReportPreview(false); setReportPreviewHtml(null); }}
+                  onClick={() => setShowReportPreview(false)}
                   style={{ background: 'transparent', border: '1px solid #cbd5e0', borderRadius: '6px', padding: '8px 16px', cursor: 'pointer', color: '#718096', fontSize: '13px' }}
                 >
                   Close
                 </button>
                 <button
-                  onClick={() => { setShowReportPreview(false); setReportPreviewHtml(null); setShowUpgradeModal(true); }}
+                  onClick={() => { setShowReportPreview(false); setShowUpgradeModal(true); }}
                   style={{ background: '#c0a020', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '14px' }}
                 >
                   🔒 Upgrade to Download
@@ -12449,7 +12524,8 @@ function DeerIntelContent() {
 
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ========== DOWNLOAD WALL MODAL (Free → Pro) ========== */}
       {showDownloadWall && (
