@@ -12403,8 +12403,7 @@ function DeerIntelContent() {
               {/* Parcel Intelligence */}
               {(() => {
                 const ac = Number(displayAcreage) || 40;
-                const maxHunters = Math.max(1, Math.floor(ac / 80));
-                const recHunters = Math.max(1, maxHunters - 1) || 1;
+                const recHunters = Math.max(2, Math.floor(ac / 40));
                 const elevMinM = summary?.demMetrics?.elevMin ?? 0;
                 const elevMaxM = summary?.demMetrics?.elevMax ?? 0;
                 const elevRangeFt = Math.round((elevMaxM - elevMinM) * 3.281);
@@ -12414,7 +12413,8 @@ function DeerIntelContent() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
                     <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
                       <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{recHunters}</div>
-                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Recommended Hunters</div>
+                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Hunter Capacity</div>
+                      <div style={{ fontSize: '9px', color: '#999', marginTop: '2px' }}>Terrain-based estimate</div>
                     </div>
                     <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
                       <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{elevRangeFt}ft</div>
