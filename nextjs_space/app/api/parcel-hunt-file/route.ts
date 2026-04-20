@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 
 export const maxDuration = 60;
 
@@ -17,7 +19,7 @@ const riskColor = (r: string) =>
 const css = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Georgia, serif; color: #1a1a1a; background: white; }
-  .page { width: 816px; min-height: 1056px; padding: 48px; position: relative; page-break-after: always; }
+  .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; page-break-after: always; }
   .border { border: 3px solid #1a3a2a; }
   .header { background: #1a3a2a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
   .header h1 { font-size: 22px; letter-spacing: 2px; }
@@ -55,7 +57,7 @@ const css = `
   .season-name { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
   .corridor-bar { height: 12px; background: #e0e0e0; border-radius: 2px; margin-top: 4px; }
   .corridor-fill { height: 100%; background: #1a3a2a; border-radius: 2px; }
-  .footer { position: absolute; bottom: 24px; left: 48px; right: 48px; display: flex; justify-content: space-between; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; }
+  .footer { display: flex; justify-content: space-between; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 24px; }
   .disclaimer { font-size: 9px; color: #999; line-height: 1.5; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
   /* Page 1 density overrides — tightens vertical spacing so all content fits cleanly on one page. */
   .page-1 .header { margin-bottom: 20px; }
@@ -90,6 +92,14 @@ const css = `
 
 export async function POST(req: NextRequest) {
   try {
+    // ── AUTH GATE ── No session → 401. Tier derived from DB, not client.
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+    const serverTier = (session.user as any).subscriptionStatus || 'free';
+    const isFreePreview = serverTier === 'free';
+
     const data = await req.json();
     const {
       address, lat, lng, acreage, county, state,
@@ -99,9 +109,7 @@ export async function POST(req: NextRequest) {
       territoryName = 'My Territory',
       territoryParcelCount = 1,
       territoryParcels: territoryParcelList = null,
-      tier = 'free',
     } = data;
-    const isFreePreview = tier === 'free';
 
     // Derive elevation range from stand elevations if demMetrics unavailable
     const standElevations = (stands ?? [])
@@ -217,7 +225,7 @@ export async function POST(req: NextRequest) {
 
     const certificatePage = `
 <div class="page border${wm}">
-  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:900px;text-align:center;padding:48px">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px">
     <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
     <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
       <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">${certificateTitle}</div>

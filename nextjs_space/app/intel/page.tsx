@@ -2982,7 +2982,6 @@ function DeerIntelContent() {
           owner: p.owner,
           county: p.county,
         })) : undefined,
-        tier: subStatus,
       };
 
       // Save terrain results to order for report generation
@@ -3009,6 +3008,10 @@ function DeerIntelContent() {
         body: JSON.stringify(payload),
       });
 
+      if (response.status === 401) {
+        toast.error('Please sign in to download reports');
+        return;
+      }
       if (!response.ok) throw new Error('Report generation failed');
 
       const ct = response.headers.get('content-type') || '';
