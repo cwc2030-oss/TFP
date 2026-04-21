@@ -2108,6 +2108,9 @@ function DeerIntelContent() {
   // Stand stability: remember previous top-3 stands to prevent jarring jumps on re-analysis
   const previousStandsRef = useRef<AlignedStand[]>([]);
 
+  // Bedding stability: remember previous bedding polygons to prevent shape-shifting on re-analysis
+  const previousBeddingRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
+
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
   
@@ -3856,13 +3859,62 @@ function DeerIntelContent() {
       }
 
       // Update bedding polygons — filter out zones near buildings/maintained areas
+      // ═══ BEDDING STABILITY — prefer previous geometry when zones overlap ═══
       const beddingSource = map.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
       if (beddingSource) {
         let beddingFC = layers?.beddingPolygons ? validateGeoJSON(layers.beddingPolygons) : EMPTY_FC;
         beddingFC = filterBeddingNearBuildings(beddingFC, map, 120);
         const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
-        beddingSource.setData(polygonsOnly);
+
+        const prevBedding = previousBeddingRef.current;
+        const BEDDING_NEIGHBORHOOD_M = 80; // metres — if new centroid is within this of prev, snap to prev geometry
+
+        if (prevBedding.features.length > 0 && polygonsOnly.features.length > 0) {
+          // Compute centroids for new and previous bedding features
+          const centroid = (f: GeoJSON.Feature): [number, number] | null => {
+            const coords: number[][] = [];
+            if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+            else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+            if (!coords.length) return null;
+            return [coords.reduce((s, c) => s + c[0], 0) / coords.length, coords.reduce((s, c) => s + c[1], 0) / coords.length];
+          };
+
+          const usedPrevIdxs = new Set<number>();
+          const stabilizedFeatures = polygonsOnly.features.map((newFeat, ni) => {
+            const newC = centroid(newFeat);
+            if (!newC) return newFeat;
+
+            // Find closest previous bedding zone
+            let bestDist = Infinity;
+            let bestIdx = -1;
+            for (let pi = 0; pi < prevBedding.features.length; pi++) {
+              if (usedPrevIdxs.has(pi)) continue;
+              const prevC = centroid(prevBedding.features[pi]);
+              if (!prevC) continue;
+              const d = distanceMeters(newC, prevC);
+              if (d < bestDist) { bestDist = d; bestIdx = pi; }
+            }
+
+            if (bestIdx >= 0 && bestDist < BEDDING_NEIGHBORHOOD_M) {
+              usedPrevIdxs.add(bestIdx);
+              // Snap to previous geometry — keeps shapes visually stable
+              console.error(`[BEDDING-STABILITY] zone=${ni} SNAPPED: dist=${bestDist.toFixed(0)}m — keeping previous geometry`);
+              return { ...prevBedding.features[bestIdx], properties: { ...prevBedding.features[bestIdx].properties, ...newFeat.properties } };
+            }
+            console.error(`[BEDDING-STABILITY] zone=${ni} NEW: no prev match within ${BEDDING_NEIGHBORHOOD_M}m (closest=${bestDist.toFixed(0)}m)`);
+            return newFeat;
+          });
+
+          const stableFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: stabilizedFeatures };
+          previousBeddingRef.current = stableFC;
+          beddingSource.setData(stableFC);
+        } else {
+          // First analysis or no previous data — use new data as-is
+          previousBeddingRef.current = polygonsOnly;
+          beddingSource.setData(polygonsOnly);
+        }
       }
+      // ═══ END BEDDING STABILITY ═══
 
       // Update funnel lines (draws, corridors)
       const funnelLinesSource = map.getSource('tfp-funnels-lines') as mapboxgl.GeoJSONSource;
@@ -8731,6 +8783,7 @@ function DeerIntelContent() {
       setEdgeIntelData(null);
       setAlignedStands([]);
       previousStandsRef.current = []; // Reset stand stability anchor on parcel change
+      previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
       setParcelUnlocked(false);
       setLastSavedPropertyId(null);
       setSelectedStand(null);
@@ -8925,6 +8978,7 @@ function DeerIntelContent() {
     setEdgeIntelData(null);
     setAlignedStands([]);
     previousStandsRef.current = []; // Reset stand stability anchor on parcel change
+    previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
     setParcelUnlocked(false);
     setLastSavedPropertyId(null);
     setSelectedStand(null);
@@ -9531,13 +9585,14 @@ function DeerIntelContent() {
         }
       });
 
-      // Ensure direction wedge + hunt pocket layers are visible and at correct opacity
+      // Ensure direction wedge + emphasis layers are visible and at correct opacity
       // after gracefulClear may have faded them to 0.
+      // NOTE: Hunt pocket layers are NOT in this list — their fill-opacity uses a
+      // data-driven expression (resilienceFactor × opacityScale × corridorBias × ringNorm).
+      // Setting a scalar value here would clobber that expression and cause opacity jitter.
       const supportLayers: { id: string; prop: string; opacity: number }[] = [
         { id: 'tfp-stand-direction-main', prop: 'fill-opacity', opacity: 0.16 },
         { id: 'tfp-stand-direction-flank', prop: 'line-opacity', opacity: 0.3 },
-        { id: 'tfp-hunt-pockets-fill', prop: 'fill-opacity', opacity: 0.2 },
-        { id: 'tfp-hunt-pockets-stroke', prop: 'line-opacity', opacity: 0.6 },
         { id: 'tfp-stand-emphasis-glow', prop: 'circle-opacity', opacity: 0.45 },
       ];
       supportLayers.forEach(({ id, prop, opacity }) => {
@@ -9548,6 +9603,40 @@ function DeerIntelContent() {
           } catch {}
         }
       });
+      // Hunt pockets: restore visibility + re-apply data-driven paint expressions
+      // (gracefulClear may have faded opacity to 0 via scalar setPaintProperty)
+      if (map.getLayer('tfp-hunt-pockets-fill')) {
+        try {
+          map.setLayoutProperty('tfp-hunt-pockets-fill', 'visibility', 'visible');
+          map.setPaintProperty('tfp-hunt-pockets-fill', 'fill-opacity', [
+            '*',
+            ['get', 'resilienceFactor'],
+            [
+              '*',
+              ['*', ['get', 'opacityScale'], ['get', 'corridorBias']],
+              [
+                'interpolate', ['exponential', 2.2], ['get', 'ringNorm'],
+                0.25, 0.11,
+                0.50, 0.05,
+                0.75, 0.015,
+                1.0,  0.004,
+              ],
+            ],
+          ]);
+        } catch {}
+      }
+      if (map.getLayer('tfp-hunt-pockets-stroke')) {
+        try {
+          map.setLayoutProperty('tfp-hunt-pockets-stroke', 'visibility', 'visible');
+          // Stroke opacity uses a simple case expression, restore it
+          map.setPaintProperty('tfp-hunt-pockets-stroke', 'line-opacity', [
+            'case',
+            ['==', ['get', 'isTopStand'], true],
+            0.10,
+            0.18,
+          ]);
+        } catch {}
+      }
     }, 400);
 
     return () => clearTimeout(timer);
@@ -9555,63 +9644,83 @@ function DeerIntelContent() {
 
   // vNext: Stand visibility toggle — uses map layer visibility instead of HTML opacity.
   // Solo mode uses a GeoJSON filter expression instead of per-marker DOM manipulation.
+  // PHASE 2 FIX: Single source of truth for stand visibility. If style isn't loaded yet,
+  // schedule a retry via style.load listener so the toggle is never silently dropped.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded?.()) return;
+    if (!map) return;
+
     // PAYWALL GATE: force stands hidden when parcel not purchased
     const canShowStands = parcelUnlockedRef.current || isProRef.current;
     const globalShow = canShowStands && visibility.stands;
 
-    // Toggle stand GeoJSON layers
-    const vis = globalShow ? 'visible' : 'none';
-    STAND_LAYER_IDS.forEach(id => {
-      if (map.getLayer(id)) {
-        try { map.setLayoutProperty(id, 'visibility', vis); } catch {}
-      }
-    });
+    const applyVisibility = () => {
+      // Toggle stand GeoJSON layers — deterministic, immediate
+      const vis = globalShow ? 'visible' : 'none';
+      STAND_LAYER_IDS.forEach(id => {
+        if (map.getLayer(id)) {
+          try { map.setLayoutProperty(id, 'visibility', vis); } catch {}
+        }
+      });
 
-    // Solo mode: apply per-stand filter on the disc/label/rank layers
-    // When solo mode is active and a stand is selected, filter to only that stand.
-    if (globalShow && soloStandMode && selectedStand !== null) {
-      // Find the standIdx that matches the selectedStand rank
-      const matchIdx = alignedStands.findIndex(s => s.rank === selectedStand);
-      if (matchIdx >= 0) {
-        const soloFilter: any = ['==', ['get', 'standIdx'], matchIdx];
+      // Solo mode: apply per-stand filter on the disc/label/rank layers
+      if (globalShow && soloStandMode && selectedStand !== null) {
+        const matchIdx = alignedStands.findIndex(s => s.rank === selectedStand);
+        if (matchIdx >= 0) {
+          const soloFilter: any = ['==', ['get', 'standIdx'], matchIdx];
+          STAND_LAYER_IDS.forEach(id => {
+            if (map.getLayer(id)) {
+              try { map.setFilter(id, soloFilter); } catch {}
+            }
+          });
+        }
+      } else {
         STAND_LAYER_IDS.forEach(id => {
           if (map.getLayer(id)) {
-            try { map.setFilter(id, soloFilter); } catch {}
+            try { map.setFilter(id, null); } catch {}
           }
         });
       }
-    } else {
-      // Clear any solo filter
-      STAND_LAYER_IDS.forEach(id => {
+
+      // Staggered supporting layer reveal: glow → wedges → dots
+      // When solo mode is active, hide supporting layers (they cover all stands)
+      const showLayers = globalShow && !soloStandMode;
+      staggeredFadeToggle(map, showLayers, [
+        { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
+        { id: 'tfp-stand-direction-main', targetOpacity: 0.16, opacityProp: 'fill-opacity' },
+        { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'line-opacity' },
+        { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
+      ], 400, 60);
+
+      // PHASE 3 FIX: Hunt pocket layers use layout visibility toggle instead of
+      // opacity animation. This preserves the data-driven fill-opacity expression
+      // which uses resilienceFactor, opacityScale, corridorBias, and ringNorm.
+      // Animating opacity would overwrite the expression with a scalar value.
+      const pocketVis = showLayers ? 'visible' : 'none';
+      ['tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke'].forEach(id => {
         if (map.getLayer(id)) {
-          try { map.setFilter(id, null); } catch {}
+          try { map.setLayoutProperty(id, 'visibility', pocketVis); } catch {}
         }
       });
-    }
 
-    // Staggered supporting layer reveal: glow → pockets → wedges → dots
-    // When solo mode is active, hide supporting layers (they cover all stands)
-    const showLayers = globalShow && !soloStandMode;
-    staggeredFadeToggle(map, showLayers, [
-      { id: 'tfp-stand-emphasis-glow', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
-      { id: 'tfp-hunt-pockets-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
-      { id: 'tfp-hunt-pockets-stroke', targetOpacity: 0.6 },
-      { id: 'tfp-stand-direction-main', targetOpacity: 0.16, opacityProp: 'fill-opacity' },
-      { id: 'tfp-stand-direction-flank', targetOpacity: 0.3, opacityProp: 'line-opacity' },
-      { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
-    ], 400, 60);
+      // Nearest corridor highlight follows stand visibility + selection
+      const showHighlight = globalShow && selectedStand !== null;
+      if (showHighlight) {
+        fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.75, 'line-opacity', 450);
+      } else {
+        fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', 300);
+      }
+    };
 
-    // Nearest corridor highlight follows stand visibility + selection
-    const showHighlight = globalShow && selectedStand !== null;
-    if (showHighlight) {
-      fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.75, 'line-opacity', 450);
+    // If style is loaded, apply immediately; otherwise queue for style.load
+    if (map.isStyleLoaded?.()) {
+      applyVisibility();
     } else {
-      fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', 300);
+      const onStyleLoad = () => { applyVisibility(); };
+      map.once('style.load', onStyleLoad);
+      return () => { map.off('style.load', onStyleLoad); };
     }
-  }, [visibility.stands, selectedStand, soloStandMode, alignedStands]);
+  }, [visibility.stands, selectedStand, soloStandMode, alignedStands, mapReady, parcelUnlocked, isPro]);
 
   // vNext: Cleanup — clear GeoJSON source + popup (no HTML markers to remove)
   const cleanupMarkers = () => {
