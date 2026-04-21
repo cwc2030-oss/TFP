@@ -2099,6 +2099,15 @@ function DeerIntelContent() {
   const [showParcelPaywall, setShowParcelPaywall] = useState(false);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
 
+  // Refs for parcel access in closures (map event handlers, etc.)
+  const parcelUnlockedRef = useRef(false);
+  useEffect(() => { parcelUnlockedRef.current = parcelUnlocked; }, [parcelUnlocked]);
+  const isProRef = useRef(false);
+  useEffect(() => { isProRef.current = isPro; }, [isPro]);
+
+  // Stand stability: remember previous top-3 stands to prevent jarring jumps on re-analysis
+  const previousStandsRef = useRef<AlignedStand[]>([]);
+
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
   
@@ -2587,6 +2596,83 @@ function DeerIntelContent() {
     // dropdowns) expect at most 3 stands. This is the single enforcement point.
     aligned = aligned.slice(0, 3);
 
+    // ═══ STAND STABILITY — prevent jarring jumps on re-analysis ═══
+    // Compare new candidates against previously-shown stands.
+    // Only replace a previous stand if:
+    //   (a) new score exceeds previous by STABILITY_REPLACEMENT_THRESHOLD, OR
+    //   (b) previous stand became invalid (not in current aligned set candidate pool)
+    // If a new stand is within STABILITY_NEIGHBORHOOD_M of a previous stand,
+    // prefer the previous coordinates (neighborhood snapping).
+    const STABILITY_REPLACEMENT_THRESHOLD = 5; // points (0-100 scale)
+    const STABILITY_NEIGHBORHOOD_M = 50; // meters
+    const prev = previousStandsRef.current;
+
+    if (prev.length > 0 && aligned.length > 0) {
+      const stabilized: AlignedStand[] = [];
+      const usedPrevIndices = new Set<number>();
+
+      for (let slot = 0; slot < aligned.length; slot++) {
+        const newStand = aligned[slot];
+        // Find the closest previous stand to this new one (within neighborhood)
+        let bestPrevIdx = -1;
+        let bestPrevDist = Infinity;
+        for (let pi = 0; pi < prev.length; pi++) {
+          if (usedPrevIndices.has(pi)) continue;
+          const d = distanceMeters(newStand.coords, prev[pi].coords);
+          if (d < bestPrevDist) {
+            bestPrevDist = d;
+            bestPrevIdx = pi;
+          }
+        }
+
+        if (bestPrevIdx >= 0 && bestPrevDist < STABILITY_NEIGHBORHOOD_M) {
+          // New candidate is in the same neighborhood as a previous stand
+          const prevStand = prev[bestPrevIdx];
+          const scoreDelta = newStand.alignment.score - prevStand.alignment.score;
+          usedPrevIndices.add(bestPrevIdx);
+
+          if (scoreDelta > STABILITY_REPLACEMENT_THRESHOLD) {
+            // Significant improvement — use new stand but log the shift
+            console.error(`[STAND-STABILITY] slot=${slot} REPLACED: prev="${prevStand.name}" (score=${prevStand.alignment.score.toFixed(1)}) → new="${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) delta=+${scoreDelta.toFixed(1)} dist=${bestPrevDist.toFixed(0)}m`);
+            stabilized.push(newStand);
+          } else {
+            // Score difference not significant enough — snap to previous coords for visual stability
+            console.error(`[STAND-STABILITY] slot=${slot} SNAPPED: keeping prev coords for "${prevStand.name}" (prevScore=${prevStand.alignment.score.toFixed(1)}, newScore=${newStand.alignment.score.toFixed(1)}, delta=${scoreDelta.toFixed(1)}, dist=${bestPrevDist.toFixed(0)}m)`);
+            // Use new scoring data but snap coords to previous position
+            stabilized.push({ ...newStand, coords: prevStand.coords });
+          }
+        } else if (bestPrevIdx >= 0) {
+          // No neighborhood match — check if this is a genuinely better stand replacing a distant previous
+          const prevStand = prev[bestPrevIdx];
+          const scoreDelta = newStand.alignment.score - prevStand.alignment.score;
+
+          if (scoreDelta > STABILITY_REPLACEMENT_THRESHOLD) {
+            usedPrevIndices.add(bestPrevIdx);
+            console.error(`[STAND-STABILITY] slot=${slot} NEW_STAND: "${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) replaces distant "${prevStand.name}" (score=${prevStand.alignment.score.toFixed(1)}) delta=+${scoreDelta.toFixed(1)} dist=${bestPrevDist.toFixed(0)}m`);
+            stabilized.push(newStand);
+          } else {
+            // Previous stand was better or close enough — keep previous in this slot
+            usedPrevIndices.add(bestPrevIdx);
+            console.error(`[STAND-STABILITY] slot=${slot} RETAINED: keeping prev "${prevStand.name}" (prevScore=${prevStand.alignment.score.toFixed(1)}) over new "${newStand.name}" (newScore=${newStand.alignment.score.toFixed(1)}, delta=${scoreDelta.toFixed(1)}, dist=${bestPrevDist.toFixed(0)}m)`);
+            // Retain previous stand with updated scoring data
+            stabilized.push({ ...prevStand, alignment: newStand.alignment, inputs: newStand.inputs, resilience: newStand.resilience });
+          }
+        } else {
+          // No previous stand to compare — accept as-is (first analysis or extra slot)
+          console.error(`[STAND-STABILITY] slot=${slot} INITIAL: "${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) — no previous anchor`);
+          stabilized.push(newStand);
+        }
+      }
+
+      aligned = stabilized;
+    } else if (aligned.length > 0) {
+      // First computation — log for diagnostics
+      aligned.forEach((s, i) => {
+        console.error(`[STAND-STABILITY] slot=${i} INITIAL: "${s.name}" (score=${s.alignment.score.toFixed(1)}) coords=[${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}]`);
+      });
+    }
+    // ═══ END STAND STABILITY ═══
+
     // Log stand resilience values for verification
     if (aligned.length > 0) {
       console.log('[StandResilience] Sample values:', aligned.slice(0, 3).map(s => ({
@@ -2597,6 +2683,9 @@ function DeerIntelContent() {
         fieldBearing: s.props?.fieldBearing ?? null,
       })));
     }
+
+    // Update stability anchor for next re-analysis
+    previousStandsRef.current = aligned;
 
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
@@ -8641,6 +8730,7 @@ function DeerIntelContent() {
       setRidgeSpineData(null);
       setEdgeIntelData(null);
       setAlignedStands([]);
+      previousStandsRef.current = []; // Reset stand stability anchor on parcel change
       setParcelUnlocked(false);
       setLastSavedPropertyId(null);
       setSelectedStand(null);
@@ -8834,6 +8924,7 @@ function DeerIntelContent() {
     setRidgeSpineData(null);
     setEdgeIntelData(null);
     setAlignedStands([]);
+    previousStandsRef.current = []; // Reset stand stability anchor on parcel change
     setParcelUnlocked(false);
     setLastSavedPropertyId(null);
     setSelectedStand(null);
@@ -9359,6 +9450,26 @@ function DeerIntelContent() {
       const map = mapRef.current;
       if (!map) return;
 
+      // ── PAYWALL GATE: hide all stand / pocket / direction layers for non-purchased users ──
+      const canShowStands = parcelUnlockedRef.current || isProRef.current;
+      if (!canShowStands) {
+        // Clear all stand-related GeoJSON sources so nothing renders on the map
+        const clearSources = ['tfp-stands', 'tfp-stand-emphasis', 'tfp-hunt-pockets', 'tfp-stand-direction', 'tfp-stand-tertiary'];
+        clearSources.forEach(src => {
+          if (map.getSource(src)) {
+            try { (map.getSource(src) as mapboxgl.GeoJSONSource).setData(EMPTY_FC); } catch {}
+          }
+        });
+        // Hide all stand layers + support layers
+        const allStandLayers = [...STAND_LAYER_IDS, 'tfp-stand-emphasis-glow', 'tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke', 'tfp-stand-direction-main', 'tfp-stand-direction-flank'];
+        allStandLayers.forEach(id => {
+          if (map.getLayer(id)) {
+            try { map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
+          }
+        });
+        return;
+      }
+
       // ── Populate tfp-stands GeoJSON source ──
       const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
       const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
@@ -9440,14 +9551,16 @@ function DeerIntelContent() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData]); // eslint-disable-line
+  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData, parcelUnlocked, isPro]); // eslint-disable-line
 
   // vNext: Stand visibility toggle — uses map layer visibility instead of HTML opacity.
   // Solo mode uses a GeoJSON filter expression instead of per-marker DOM manipulation.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    const globalShow = visibility.stands;
+    if (!map || !map.isStyleLoaded?.()) return;
+    // PAYWALL GATE: force stands hidden when parcel not purchased
+    const canShowStands = parcelUnlockedRef.current || isProRef.current;
+    const globalShow = canShowStands && visibility.stands;
 
     // Toggle stand GeoJSON layers
     const vis = globalShow ? 'visible' : 'none';
@@ -9518,6 +9631,11 @@ function DeerIntelContent() {
     if (!map || !mapReady) return;
 
     const onClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      // PAYWALL GATE: if parcel not purchased, show paywall modal instead
+      if (!parcelUnlockedRef.current && !isProRef.current) {
+        setShowParcelPaywall(true);
+        return;
+      }
       const feat = e.features?.[0];
       if (!feat?.properties) return;
       const idx = feat.properties.standIdx as number;
@@ -9882,7 +10000,9 @@ function DeerIntelContent() {
           className="absolute z-40 flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm px-5 py-3 rounded-full shadow-xl shadow-amber-900/40 transition-all hover:scale-105"
           style={{ bottom: '24px', left: '50%', transform: 'translateX(-50%)' }}
         >
-          🎯 Get My Hunt Plan — $19
+          {alignedStands.length > 0
+            ? `🎯 ${alignedStands.length} Stands Found — Unlock $19`
+            : '🎯 Get My Hunt Plan — $19'}
         </button>
       )}
 
@@ -12196,9 +12316,12 @@ function DeerIntelContent() {
                 {/* PAYWALL BLUR OVERLAY — covers stand details for non-unlocked free users */}
                 {!parcelUnlocked && !isPro && alignedStands.length > 0 && (
                   <div className="absolute inset-0 z-10 backdrop-blur-[6px] bg-black/40 rounded-lg flex flex-col items-center justify-center gap-3 p-4">
-                    <div className="text-amber-400 text-xl">🔒</div>
+                    <div className="text-amber-400 text-xl">🎯</div>
+                    <p className="text-amber-300/90 text-xs font-bold tracking-wide uppercase text-center">
+                      {alignedStands.length} Stand Location{alignedStands.length !== 1 ? 's' : ''} Identified
+                    </p>
                     <p className="text-white text-sm font-semibold text-center">Unlock Your Hunt Plan</p>
-                    <p className="text-white/50 text-xs text-center max-w-[200px]">Stand locations, approach routes & full intelligence locked</p>
+                    <p className="text-white/50 text-xs text-center max-w-[200px]">Stand pins, approach routes & full intelligence hidden until unlocked</p>
                     <button
                       onClick={() => setShowParcelPaywall(true)}
                       className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-5 py-2 rounded-lg transition mt-1"
