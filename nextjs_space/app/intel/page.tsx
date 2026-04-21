@@ -2111,6 +2111,10 @@ function DeerIntelContent() {
   // Bedding stability: remember previous bedding polygons to prevent shape-shifting on re-analysis
   const previousBeddingRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
 
+  // Saddle stability: remember previous saddle polygons and nodes to prevent jumps on re-analysis
+  const previousSaddlePolysRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
+  const previousSaddleNodesRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
+
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
   
@@ -3929,12 +3933,57 @@ function DeerIntelContent() {
       }
 
       // Update funnel polygons (saddles)
+      // ═══ SADDLE POLYGON STABILITY — prefer previous geometry when zones overlap ═══
       const funnelPolysSource = map.getSource('tfp-funnels-polys') as mapboxgl.GeoJSONSource;
       if (funnelPolysSource) {
         const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
         const polys = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
-        funnelPolysSource.setData(polys);
+
+        const prevSaddlePolys = previousSaddlePolysRef.current;
+        const SADDLE_POLY_NEIGHBORHOOD_M = 30; // metres — snap to prev if centroid within this
+
+        if (prevSaddlePolys.features.length > 0 && polys.features.length > 0) {
+          const polyCentroid = (f: GeoJSON.Feature): [number, number] | null => {
+            const coords: number[][] = [];
+            if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+            else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+            if (!coords.length) return null;
+            return [coords.reduce((s, c) => s + c[0], 0) / coords.length, coords.reduce((s, c) => s + c[1], 0) / coords.length];
+          };
+
+          const usedPrevIdxs = new Set<number>();
+          const stabilizedFeatures = polys.features.map((newFeat, ni) => {
+            const newC = polyCentroid(newFeat);
+            if (!newC) return newFeat;
+
+            let bestDist = Infinity;
+            let bestIdx = -1;
+            for (let pi = 0; pi < prevSaddlePolys.features.length; pi++) {
+              if (usedPrevIdxs.has(pi)) continue;
+              const prevC = polyCentroid(prevSaddlePolys.features[pi]);
+              if (!prevC) continue;
+              const d = distanceMeters(newC, prevC);
+              if (d < bestDist) { bestDist = d; bestIdx = pi; }
+            }
+
+            if (bestIdx >= 0 && bestDist < SADDLE_POLY_NEIGHBORHOOD_M) {
+              usedPrevIdxs.add(bestIdx);
+              console.error(`[SADDLE-STABILITY] poly=${ni} SNAPPED: dist=${bestDist.toFixed(0)}m — keeping previous geometry`);
+              return { ...prevSaddlePolys.features[bestIdx], properties: { ...prevSaddlePolys.features[bestIdx].properties, ...newFeat.properties } };
+            }
+            console.error(`[SADDLE-STABILITY] poly=${ni} NEW: no prev match within ${SADDLE_POLY_NEIGHBORHOOD_M}m (closest=${bestDist.toFixed(0)}m)`);
+            return newFeat;
+          });
+
+          const stableSaddlePolysFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: stabilizedFeatures };
+          previousSaddlePolysRef.current = stableSaddlePolysFC;
+          funnelPolysSource.setData(stableSaddlePolysFC);
+        } else {
+          previousSaddlePolysRef.current = polys;
+          funnelPolysSource.setData(polys);
+        }
       }
+      // ═══ END SADDLE POLYGON STABILITY ═══
 
       console.log('[MAP] Updated native Mapbox sources with terrain data');
 
@@ -4542,10 +4591,53 @@ function DeerIntelContent() {
       }
 
       // Update saddle nodes source
+      // ═══ SADDLE NODE STABILITY — snap new nodes to previous positions within tolerance ═══
       const saddleSource = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
       if (saddleSource) {
-        saddleSource.setData(ridgeSpineData.saddle_nodes);
+        const newNodes = ridgeSpineData.saddle_nodes;
+        const prevNodes = previousSaddleNodesRef.current;
+        const SADDLE_NODE_NEIGHBORHOOD_M = 25; // metres — snap to prev if within this
+
+        if (prevNodes.features.length > 0 && newNodes.features.length > 0) {
+          const pointCoord = (f: GeoJSON.Feature): [number, number] | null => {
+            if (f.geometry?.type === 'Point') return (f.geometry as GeoJSON.Point).coordinates as [number, number];
+            return null;
+          };
+
+          const usedPrevIdxs = new Set<number>();
+          const stabilizedFeatures = newNodes.features.map((newFeat, ni) => {
+            const newC = pointCoord(newFeat);
+            if (!newC) return newFeat;
+
+            let bestDist = Infinity;
+            let bestIdx = -1;
+            for (let pi = 0; pi < prevNodes.features.length; pi++) {
+              if (usedPrevIdxs.has(pi)) continue;
+              const prevC = pointCoord(prevNodes.features[pi]);
+              if (!prevC) continue;
+              const d = distanceMeters(newC, prevC);
+              if (d < bestDist) { bestDist = d; bestIdx = pi; }
+            }
+
+            if (bestIdx >= 0 && bestDist < SADDLE_NODE_NEIGHBORHOOD_M) {
+              usedPrevIdxs.add(bestIdx);
+              // Keep previous coordinates, merge properties from new analysis
+              console.error(`[SADDLE-STABILITY] node=${ni} SNAPPED: dist=${bestDist.toFixed(0)}m — keeping previous position`);
+              return { ...prevNodes.features[bestIdx], properties: { ...prevNodes.features[bestIdx].properties, ...newFeat.properties } };
+            }
+            console.error(`[SADDLE-STABILITY] node=${ni} NEW: no prev match within ${SADDLE_NODE_NEIGHBORHOOD_M}m (closest=${bestDist.toFixed(0)}m)`);
+            return newFeat;
+          });
+
+          const stableNodesFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: stabilizedFeatures };
+          previousSaddleNodesRef.current = stableNodesFC;
+          saddleSource.setData(stableNodesFC);
+        } else {
+          previousSaddleNodesRef.current = newNodes;
+          saddleSource.setData(newNodes);
+        }
       }
+      // ═══ END SADDLE NODE STABILITY ═══
 
       console.log('[Backbone] Updated map sources');
     } catch (err) {
@@ -8784,6 +8876,8 @@ function DeerIntelContent() {
       setAlignedStands([]);
       previousStandsRef.current = []; // Reset stand stability anchor on parcel change
       previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
+      previousSaddlePolysRef.current = EMPTY_FC; // Reset saddle polygon stability anchor on parcel change
+      previousSaddleNodesRef.current = EMPTY_FC; // Reset saddle node stability anchor on parcel change
       setParcelUnlocked(false);
       setLastSavedPropertyId(null);
       setSelectedStand(null);
@@ -8979,6 +9073,8 @@ function DeerIntelContent() {
     setAlignedStands([]);
     previousStandsRef.current = []; // Reset stand stability anchor on parcel change
     previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
+    previousSaddlePolysRef.current = EMPTY_FC; // Reset saddle polygon stability anchor on parcel change
+    previousSaddleNodesRef.current = EMPTY_FC; // Reset saddle node stability anchor on parcel change
     setParcelUnlocked(false);
     setLastSavedPropertyId(null);
     setSelectedStand(null);
