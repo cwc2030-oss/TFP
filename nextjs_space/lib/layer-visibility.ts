@@ -151,6 +151,8 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   // ── Stand support layers (toggle: stands) ──
   { id: 'tfp-stand-direction-main',  group: 'stands', opacityProp: 'fill-opacity',   targetOpacity: 0.16,  source: { kind: 'toggle', key: 'stands' } },
   { id: 'tfp-stand-direction-flank', group: 'stands', opacityProp: 'line-opacity',   targetOpacity: 0.3,  source: { kind: 'toggle', key: 'stands' } },
+  { id: 'tfp-killzone-fill',         group: 'stands', opacityProp: 'fill-opacity',   targetOpacity: 0.22, source: { kind: 'toggle', key: 'stands' } },
+  { id: 'tfp-killzone-stroke',       group: 'stands', opacityProp: 'line-opacity',   targetOpacity: 0.35, source: { kind: 'toggle', key: 'stands' } },
   { id: 'tfp-stand-tertiary-dot',    group: 'stands', opacityProp: 'circle-opacity', targetOpacity: 0.6,  source: { kind: 'toggle', key: 'stands' } },
   { id: 'tfp-stand-emphasis-glow',   group: 'stands', opacityProp: 'circle-opacity', targetOpacity: 0.45, source: { kind: 'toggle', key: 'stands' } },
 

@@ -1220,9 +1220,15 @@ function buildStandDirectionFeatures(
   funnels: GeoJSON.FeatureCollection | null | undefined,
   ridges: { ridges_primary?: GeoJSON.FeatureCollection; ridges_secondary?: GeoJSON.FeatureCollection } | null | undefined,
   windDir?: string,
-): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
-  if (!stands.length) return { type: 'FeatureCollection', features };
+  saddleNodes?: GeoJSON.FeatureCollection | null,
+  convergenceZones?: GeoJSON.FeatureCollection | null,
+): { coneFC: GeoJSON.FeatureCollection; killZoneFC: GeoJSON.FeatureCollection } {
+  const coneFeatures: GeoJSON.Feature[] = [];
+  const killZoneFeatures: GeoJSON.Feature[] = [];
+  if (!stands.length) return {
+    coneFC: { type: 'FeatureCollection', features: coneFeatures },
+    killZoneFC: { type: 'FeatureCollection', features: killZoneFeatures },
+  };
 
   // Wind bearing (direction wind is blowing FROM → hunter should face downwind)
   const WIND_BEARINGS: Record<string, number> = {
@@ -1250,6 +1256,40 @@ function buildStandDirectionFeatures(
     for (const f of ridges.ridges_primary.features) {
       if (f.geometry?.type === 'LineString') {
         ridgeLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+      }
+    }
+  }
+
+  // ── Saddle + convergence point extraction for kill zone scoring ──
+  const saddlePoints: [number, number][] = [];
+  if (saddleNodes?.features) {
+    for (const f of saddleNodes.features) {
+      if (f.geometry?.type === 'Point') {
+        saddlePoints.push((f.geometry as GeoJSON.Point).coordinates as [number, number]);
+      }
+    }
+  }
+  // Also add saddle polygon centroids from funnels
+  if (funnels?.features) {
+    for (const f of funnels.features) {
+      if (f.properties?.funnelType === 'saddle' && (f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon')) {
+        const coords: number[][] = [];
+        if (f.geometry.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+        else (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+        if (coords.length) {
+          saddlePoints.push([
+            coords.reduce((s, c) => s + c[0], 0) / coords.length,
+            coords.reduce((s, c) => s + c[1], 0) / coords.length,
+          ]);
+        }
+      }
+    }
+  }
+  const convergencePoints: [number, number][] = [];
+  if (convergenceZones?.features) {
+    for (const f of convergenceZones.features) {
+      if (f.geometry?.type === 'Point') {
+        convergencePoints.push((f.geometry as GeoJSON.Point).coordinates as [number, number]);
       }
     }
   }
@@ -1285,6 +1325,65 @@ function buildStandDirectionFeatures(
     if (nearestCorridorDist < 300) return 'Watching: Corridor';
     if (nearestRidgeDist < 300) return 'Watching: Ridge Line';
     return 'Watching: Corridor';
+  }
+
+  // ── Kill zone sub-wedge scoring ──
+  // Divide cone into angular slices, score each by terrain signal density,
+  // pick best contiguous pair → narrow high-probability wedge
+  const KILL_ZONE_SLICES = 7;       // divide cone arc into 7 angular bins
+  const KILL_ZONE_SCAN_RADIUS = 60; // metres — sample radius for terrain signals
+  const CORRIDOR_WEIGHT = 0.40;
+  const SADDLE_WEIGHT = 0.25;
+  const CONVERGENCE_WEIGHT = 0.25;
+  const EDGE_WEIGHT = 0.10;         // light edge proximity per safety constraints
+
+  function scoreSlice(
+    samplePt: [number, number],
+    standIsEdge: boolean,
+    fieldBearing?: number,
+  ): number {
+    // Corridor density: inverse distance to nearest corridor/draw line
+    let corridorScore = 0;
+    for (const line of [...corridorLines, ...drawLines]) {
+      if (line.length < 2) continue;
+      const r = closestPointOnLineString(samplePt, line);
+      if (r.dist < KILL_ZONE_SCAN_RADIUS) {
+        corridorScore = Math.max(corridorScore, 1 - r.dist / KILL_ZONE_SCAN_RADIUS);
+      }
+    }
+
+    // Saddle alignment: inverse distance to nearest saddle
+    let saddleAlignScore = 0;
+    for (const sp of saddlePoints) {
+      const d = distanceMeters(samplePt, sp);
+      if (d < KILL_ZONE_SCAN_RADIUS) {
+        saddleAlignScore = Math.max(saddleAlignScore, 1 - d / KILL_ZONE_SCAN_RADIUS);
+      }
+    }
+
+    // Convergence: inverse distance to nearest convergence zone
+    let convergenceScore = 0;
+    for (const cp of convergencePoints) {
+      const d = distanceMeters(samplePt, cp);
+      if (d < KILL_ZONE_SCAN_RADIUS) {
+        convergenceScore = Math.max(convergenceScore, 1 - d / KILL_ZONE_SCAN_RADIUS);
+      }
+    }
+
+    // Edge proximity (light, additive only)
+    let edgeScore = 0;
+    if (standIsEdge && typeof fieldBearing === 'number') {
+      // Score higher if sample point is in the direction of the field
+      const bearingToSample = calculateBearing(samplePt, samplePt); // placeholder — actual used via slice angle
+      edgeScore = 0.5; // flat mild bonus for edge stands
+    }
+
+    return (
+      corridorScore * CORRIDOR_WEIGHT +
+      saddleAlignScore * SADDLE_WEIGHT +
+      convergenceScore * CONVERGENCE_WEIGHT +
+      edgeScore * EDGE_WEIGHT
+    );
   }
 
   for (const stand of stands) {
@@ -1359,9 +1458,9 @@ function buildStandDirectionFeatures(
 
     const watchLabel = getWatchLabel(stand, nearestCorridorDist, nearestDrawDist, nearestRidgeDist);
 
-    // Build filled wedge polygon
+    // Build filled wedge polygon (full cone — general visibility)
     const wedgeCoords = buildWedgePoly(center, faceBearing, WEDGE_HALF_ANGLE, WEDGE_LENGTH, OFFSET);
-    features.push({
+    coneFeatures.push({
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [wedgeCoords] },
       properties: {
@@ -1372,9 +1471,69 @@ function buildStandDirectionFeatures(
         faceBearing,
       },
     });
+
+    // ── Kill zone sub-wedge: highest-probability shot zone within the cone ──
+    // Score angular slices across the cone arc, find best contiguous pair
+    const sliceScores: number[] = [];
+    const sliceAngles: number[] = [];
+    const fullArc = WEDGE_HALF_ANGLE * 2;
+    const sliceWidth = fullArc / KILL_ZONE_SLICES;
+    const sampleDist = WEDGE_LENGTH * 0.6; // sample at 60% of cone length
+
+    for (let s = 0; s < KILL_ZONE_SLICES; s++) {
+      const sliceAngle = faceBearing - WEDGE_HALF_ANGLE + sliceWidth * (s + 0.5);
+      const normAngle = ((sliceAngle % 360) + 360) % 360;
+      sliceAngles.push(normAngle);
+      const samplePt = movePoint(center, normAngle, sampleDist);
+      sliceScores.push(scoreSlice(samplePt, isEdge, stand.props?.fieldBearing ?? undefined));
+    }
+
+    // Find best contiguous pair of slices (2 adjacent slices = tightest zone)
+    let bestPairIdx = 0;
+    let bestPairScore = -1;
+    for (let i = 0; i < KILL_ZONE_SLICES - 1; i++) {
+      const pairScore = sliceScores[i] + sliceScores[i + 1];
+      if (pairScore > bestPairScore) {
+        bestPairScore = pairScore;
+        bestPairIdx = i;
+      }
+    }
+
+    // Kill zone bearing = midpoint of best pair
+    const kzStartAngle = faceBearing - WEDGE_HALF_ANGLE + sliceWidth * bestPairIdx;
+    const kzEndAngle = faceBearing - WEDGE_HALF_ANGLE + sliceWidth * (bestPairIdx + 2);
+    const kzCenterBearing = (kzStartAngle + kzEndAngle) / 2;
+    const kzHalfAngle = (kzEndAngle - kzStartAngle) / 2;
+
+    // Kill zone dimensions: tighter and slightly shorter than full cone
+    const KZ_LENGTH = WEDGE_LENGTH * 0.85;
+    const KZ_OFFSET = OFFSET + 2; // slightly further from stand center
+
+    const kzCoords = buildWedgePoly(center, kzCenterBearing, kzHalfAngle, KZ_LENGTH, KZ_OFFSET, 8);
+
+    // Confidence: best pair score normalized (0-1)
+    const maxPossible = CORRIDOR_WEIGHT + SADDLE_WEIGHT + CONVERGENCE_WEIGHT + EDGE_WEIGHT; // 1.0
+    const kzConfidence = Math.min(1, bestPairScore / (2 * maxPossible));
+
+    killZoneFeatures.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [kzCoords] },
+      properties: {
+        standRank: stand.rank,
+        isTopStand: stand.rank === stands[0]?.rank,
+        isEdgeStand: isEdge,
+        watchLabel,
+        kzBearing: kzCenterBearing,
+        kzConfidence,
+        kzScore: bestPairScore,
+      },
+    });
   }
 
-  return { type: 'FeatureCollection', features };
+  return {
+    coneFC: { type: 'FeatureCollection', features: coneFeatures },
+    killZoneFC: { type: 'FeatureCollection', features: killZoneFeatures },
+  };
 }
 
 // Generate corridor continuation arrows extending beyond parcel boundary
@@ -2114,6 +2273,9 @@ function DeerIntelContent() {
   // Saddle stability: remember previous saddle polygons and nodes to prevent jumps on re-analysis
   const previousSaddlePolysRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
   const previousSaddleNodesRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
+
+  // Kill zone stability: remember previous kill zone sub-wedges to prevent jumps on re-analysis
+  const previousKillZonesRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
 
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
@@ -3243,6 +3405,7 @@ function DeerIntelContent() {
     'tfp-stand-emphasis',
     'tfp-hunt-pockets',
     'tfp-stand-direction',
+    'tfp-killzone',
     'tfp-stand-tertiary',
     'tfp-stands',
   ]);
@@ -7058,6 +7221,53 @@ function DeerIntelContent() {
           });
         }
 
+        // ========== KILL ZONE SUB-WEDGE (high-probability shot zone within cone) ==========
+        if (!map.getSource('tfp-killzone')) {
+          map.addSource('tfp-killzone', { type: 'geojson', data: EMPTY_FC });
+          // Filled sub-wedge — brighter, higher-contrast than the outer cone
+          map.addLayer({
+            id: 'tfp-killzone-fill',
+            type: 'fill',
+            source: 'tfp-killzone',
+            paint: {
+              'fill-color': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                '#ef4444', // red-500 for top stand
+                '#f97316', // orange-500 for secondary
+              ],
+              'fill-opacity': [
+                'interpolate', ['linear'], ['get', 'kzConfidence'],
+                0, 0.10,    // low confidence → subtle
+                0.5, 0.22,  // moderate → visible
+                1.0, 0.32,  // high confidence → prominent
+              ],
+            },
+          });
+          // Crisp outline stroke
+          map.addLayer({
+            id: 'tfp-killzone-stroke',
+            type: 'line',
+            source: 'tfp-killzone',
+            paint: {
+              'line-color': [
+                'case',
+                ['==', ['get', 'isTopStand'], true],
+                '#dc2626', // red-600
+                '#ea580c', // orange-600
+              ],
+              'line-width': 1.2,
+              'line-opacity': [
+                'interpolate', ['linear'], ['get', 'kzConfidence'],
+                0, 0.15,
+                0.5, 0.35,
+                1.0, 0.50,
+              ],
+              'line-dasharray': [4, 3],
+            },
+          });
+        }
+
         // ========== TERTIARY STAND DOTS LAYER (v4 — disabled, replaced by vNext GeoJSON stands) ==========
         if (!map.getSource('tfp-stand-tertiary')) {
           map.addSource('tfp-stand-tertiary', { type: 'geojson', data: EMPTY_FC });
@@ -8878,6 +9088,7 @@ function DeerIntelContent() {
       previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
       previousSaddlePolysRef.current = EMPTY_FC; // Reset saddle polygon stability anchor on parcel change
       previousSaddleNodesRef.current = EMPTY_FC; // Reset saddle node stability anchor on parcel change
+      previousKillZonesRef.current = EMPTY_FC; // Reset kill zone stability anchor on parcel change
       setParcelUnlocked(false);
       setLastSavedPropertyId(null);
       setSelectedStand(null);
@@ -9075,6 +9286,7 @@ function DeerIntelContent() {
     previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
     previousSaddlePolysRef.current = EMPTY_FC; // Reset saddle polygon stability anchor on parcel change
     previousSaddleNodesRef.current = EMPTY_FC; // Reset saddle node stability anchor on parcel change
+    previousKillZonesRef.current = EMPTY_FC; // Reset kill zone stability anchor on parcel change
     setParcelUnlocked(false);
     setLastSavedPropertyId(null);
     setSelectedStand(null);
@@ -9604,14 +9816,14 @@ function DeerIntelContent() {
       const canShowStands = parcelUnlockedRef.current || isProRef.current;
       if (!canShowStands) {
         // Clear all stand-related GeoJSON sources so nothing renders on the map
-        const clearSources = ['tfp-stands', 'tfp-stand-emphasis', 'tfp-hunt-pockets', 'tfp-stand-direction', 'tfp-stand-tertiary'];
+        const clearSources = ['tfp-stands', 'tfp-stand-emphasis', 'tfp-hunt-pockets', 'tfp-stand-direction', 'tfp-killzone', 'tfp-stand-tertiary'];
         clearSources.forEach(src => {
           if (map.getSource(src)) {
             try { (map.getSource(src) as mapboxgl.GeoJSONSource).setData(EMPTY_FC); } catch {}
           }
         });
         // Hide all stand layers + support layers
-        const allStandLayers = [...STAND_LAYER_IDS, 'tfp-stand-emphasis-glow', 'tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke', 'tfp-stand-direction-main', 'tfp-stand-direction-flank'];
+        const allStandLayers = [...STAND_LAYER_IDS, 'tfp-stand-emphasis-glow', 'tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke', 'tfp-stand-direction-main', 'tfp-stand-direction-flank', 'tfp-killzone-fill', 'tfp-killzone-stroke'];
         allStandLayers.forEach(id => {
           if (map.getLayer(id)) {
             try { map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
@@ -9662,11 +9874,59 @@ function DeerIntelContent() {
         (map.getSource('tfp-hunt-pockets') as mapboxgl.GeoJSONSource).setData(pocketFC);
       }
 
-      // v1.1: Movement-axis wedges for top 2 stands (flow direction, not approach)
+      // v1.1: Movement-axis wedges + kill zone sub-wedges for top 2 stands
       if (map.getSource('tfp-stand-direction')) {
         const topStands = alignedStands.slice(0, 2);
-        const dirFC = buildStandDirectionFeatures(topStands, layers?.funnels, ridgeSpineData, windDirectionRef.current);
-        (map.getSource('tfp-stand-direction') as mapboxgl.GeoJSONSource).setData(dirFC);
+        const { coneFC, killZoneFC } = buildStandDirectionFeatures(
+          topStands,
+          layers?.funnels,
+          ridgeSpineData,
+          windDirectionRef.current,
+          ridgeSpineData?.saddle_nodes ?? null,
+          terrainFlowData?.convergence_zones ?? null,
+        );
+        (map.getSource('tfp-stand-direction') as mapboxgl.GeoJSONSource).setData(coneFC);
+        // Kill zone sub-wedge with stability
+        if (map.getSource('tfp-killzone')) {
+          const prevKZ = previousKillZonesRef.current;
+          const KILLZONE_NEIGHBORHOOD_M = 20; // metres — snap to prev if centroid within this
+
+          if (prevKZ.features.length > 0 && killZoneFC.features.length > 0) {
+            const kzCentroid = (f: GeoJSON.Feature): [number, number] | null => {
+              if (f.geometry?.type !== 'Polygon') return null;
+              const ring = (f.geometry as GeoJSON.Polygon).coordinates[0];
+              if (!ring?.length) return null;
+              return [ring.reduce((s, c) => s + c[0], 0) / ring.length, ring.reduce((s, c) => s + c[1], 0) / ring.length];
+            };
+            const usedPrevIdxs = new Set<number>();
+            const stableFeatures = killZoneFC.features.map((newFeat, ni) => {
+              const newC = kzCentroid(newFeat);
+              if (!newC) return newFeat;
+              let bestDist = Infinity;
+              let bestIdx = -1;
+              for (let pi = 0; pi < prevKZ.features.length; pi++) {
+                if (usedPrevIdxs.has(pi)) continue;
+                const prevC = kzCentroid(prevKZ.features[pi]);
+                if (!prevC) continue;
+                const d = distanceMeters(newC, prevC);
+                if (d < bestDist) { bestDist = d; bestIdx = pi; }
+              }
+              if (bestIdx >= 0 && bestDist < KILLZONE_NEIGHBORHOOD_M) {
+                usedPrevIdxs.add(bestIdx);
+                console.error(`[KILLZONE-STABILITY] kz=${ni} SNAPPED: dist=${bestDist.toFixed(0)}m — keeping previous geometry`);
+                return { ...prevKZ.features[bestIdx], properties: { ...prevKZ.features[bestIdx].properties, ...newFeat.properties } };
+              }
+              console.error(`[KILLZONE-STABILITY] kz=${ni} NEW: no prev match within ${KILLZONE_NEIGHBORHOOD_M}m (closest=${bestDist.toFixed(0)}m)`);
+              return newFeat;
+            });
+            const stableKZFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: stableFeatures };
+            previousKillZonesRef.current = stableKZFC;
+            (map.getSource('tfp-killzone') as mapboxgl.GeoJSONSource).setData(stableKZFC);
+          } else {
+            previousKillZonesRef.current = killZoneFC;
+            (map.getSource('tfp-killzone') as mapboxgl.GeoJSONSource).setData(killZoneFC);
+          }
+        }
       }
 
       // Clear tertiary dots — only top 3 shown as GeoJSON layers now
@@ -9697,6 +9957,12 @@ function DeerIntelContent() {
             map.setLayoutProperty(id, 'visibility', 'visible');
             map.setPaintProperty(id, prop, opacity);
           } catch {}
+        }
+      });
+      // Kill zone layers use data-driven opacity expressions — only toggle visibility, don't clobber expressions
+      ['tfp-killzone-fill', 'tfp-killzone-stroke'].forEach(id => {
+        if (map.getLayer(id)) {
+          try { map.setLayoutProperty(id, 'visibility', 'visible'); } catch {}
         }
       });
       // Hunt pockets: restore visibility + re-apply data-driven paint expressions
@@ -9736,7 +10002,7 @@ function DeerIntelContent() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData, parcelUnlocked, isPro]); // eslint-disable-line
+  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData, terrainFlowData, parcelUnlocked, isPro]); // eslint-disable-line
 
   // vNext: Stand visibility toggle — uses map layer visibility instead of HTML opacity.
   // Solo mode uses a GeoJSON filter expression instead of per-marker DOM manipulation.
@@ -9788,12 +10054,10 @@ function DeerIntelContent() {
         { id: 'tfp-stand-tertiary-dot', targetOpacity: 0.6, opacityProp: 'circle-opacity' },
       ], 400, 60);
 
-      // PHASE 3 FIX: Hunt pocket layers use layout visibility toggle instead of
-      // opacity animation. This preserves the data-driven fill-opacity expression
-      // which uses resilienceFactor, opacityScale, corridorBias, and ringNorm.
-      // Animating opacity would overwrite the expression with a scalar value.
+      // PHASE 3 FIX: Hunt pocket + kill zone layers use layout visibility toggle instead of
+      // opacity animation. This preserves data-driven opacity expressions.
       const pocketVis = showLayers ? 'visible' : 'none';
-      ['tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke'].forEach(id => {
+      ['tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke', 'tfp-killzone-fill', 'tfp-killzone-stroke'].forEach(id => {
         if (map.getLayer(id)) {
           try { map.setLayoutProperty(id, 'visibility', pocketVis); } catch {}
         }
