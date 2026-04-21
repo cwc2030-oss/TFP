@@ -20,6 +20,7 @@ const css = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Georgia, serif; color: #1a1a1a; background: white; }
   .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; page-break-after: always; }
+  .page:last-child { page-break-after: avoid; }
   .border { border: 3px solid #1a3a2a; }
   .header { background: #1a3a2a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
   .header h1 { font-size: 22px; letter-spacing: 2px; }
@@ -34,7 +35,7 @@ const css = `
   .stat-box { background: #f8f6f0; border: 1px solid #ddd; padding: 16px; text-align: center; }
   .stat-value { font-size: 28px; font-weight: bold; color: #1a3a2a; }
   .stat-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-  .stand-card { border: 2px solid #1a3a2a; margin-bottom: 16px; }
+  .stand-card { border: 2px solid #1a3a2a; margin-bottom: 16px; page-break-inside: avoid; }
   .stand-header { padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
   .stand-rank { font-size: 24px; font-weight: bold; color: #c9a84c; margin-right: 12px; }
   .stand-name { font-size: 16px; font-weight: bold; }
@@ -59,6 +60,8 @@ const css = `
   .corridor-fill { height: 100%; background: #1a3a2a; border-radius: 2px; }
   .footer { display: flex; justify-content: space-between; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 24px; }
   .disclaimer { font-size: 9px; color: #999; line-height: 1.5; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
+  .section-title, .grid-2, .grid-3, .score-hero, .season-grid { page-break-inside: avoid; }
+  .stat-box { page-break-inside: avoid; }
   /* Page 1 density overrides — tightens vertical spacing so all content fits cleanly on one page. */
   .page-1 .header { margin-bottom: 20px; }
   .page-1 .gold-bar { margin-bottom: 14px; }
@@ -123,6 +126,21 @@ export async function POST(req: NextRequest) {
     const displayElevAvg = standElevations.length 
       ? Math.round(standElevations.reduce((a: number, b: number) => a + b, 0) / standElevations.length)
       : 0;
+
+    // Compute static season grades for PDF (replaces interactive UI buttons)
+    const baseScore = summary?.topStandScore ?? 0;
+    const recommended = seasonScores?.recommended ?? 'rut';
+    // If per-season scores provided from client, use them; otherwise derive from base score + season modifiers
+    const earlyRaw = seasonScores?.earlyScore ?? Math.round(baseScore * 0.82);
+    const rutRaw   = seasonScores?.rutScore   ?? baseScore;
+    const lateRaw  = seasonScores?.lateScore  ?? Math.round(baseScore * 0.75);
+    const seasonGrade = (s: number) => s >= 90 ? 'A+' : s >= 80 ? 'A' : s >= 70 ? 'B+' : s >= 60 ? 'B' : s >= 50 ? 'C+' : s >= 40 ? 'C' : 'D';
+    const seasonGradeColor = (s: number) => s >= 70 ? '#2d6a4f' : s >= 50 ? '#d4a017' : '#c0392b';
+    const seasonScoresComputed: Record<string, { score: number; grade: string; color: string }> = {
+      early: { score: earlyRaw, grade: seasonGrade(earlyRaw), color: seasonGradeColor(earlyRaw) },
+      rut:   { score: rutRaw,   grade: seasonGrade(rutRaw),   color: seasonGradeColor(rutRaw) },
+      late:  { score: lateRaw,  grade: seasonGrade(lateRaw),  color: seasonGradeColor(lateRaw) },
+    };
 
     const reportId = `TFP-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
     const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -222,54 +240,7 @@ export async function POST(req: NextRequest) {
   </div>
 </div>` : '';
 
-    const certificatePage = `
-<div class="page border${wm}">
-  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px">
-    <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
-    <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
-      <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">${certificateTitle}</div>
-      <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:32px"></div>
-      <div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
-      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:32px">HUNTABILITY GRADE</div>
-      <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
-        <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
-        <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
-        <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
-      </div>
-      ${territorySection}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
-        <div style="background:#1a3a2a;color:white;padding:12px">
-          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${summary?.topStandScore ?? 0}</div>
-          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">HUNTABILITY SCORE</div>
-        </div>
-        <div style="background:#1a3a2a;color:white;padding:12px">
-          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(stands ?? []).length}</div>
-          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">INTERCEPT POINTS</div>
-        </div>
-        <div style="background:#1a3a2a;color:white;padding:12px">
-          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${corridors?.primaryCount || 0}</div>
-          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS</div>
-        </div>
-      </div>
-      <div style="height:1px;background:#ddd;margin-bottom:16px"></div>
-      <div style="font-size:10px;color:#999;line-height:1.6;margin-bottom:16px">
-        This certificate confirms that the above property has been analyzed using satellite terrain 
-        intelligence, elevation modeling, and deer movement prediction. 
-        Assessment valid at time of generation. Adjacent parcel analysis available separately.
-      </div>
-      <div style="padding-top:16px;border-top:1px solid #ddd">
-        <div style="font-size:11px;font-weight:bold;color:#1a3a2a;letter-spacing:1px">TERRA FIRMA PARTNERS</div>
-        <div style="font-size:10px;color:#888">terrafirma.partners | Terrain Intelligence for Serious Hunters</div>
-      </div>
-    </div>
-    <div style="margin-top:24px;font-size:10px;color:#ccc;letter-spacing:2px">Report ID: ${reportId}</div>
-  </div>
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Certificate of Terrain Analysis</span>
-  </div>
-</div>`;
+    // Certificate page is built inline in the html template so it can access totalPages
 
     // Better county/state parsing from full address string
     // Google format: "425 SE 850th Rd, Leeton, MO 64761, USA"
@@ -337,6 +308,9 @@ export async function POST(req: NextRequest) {
       console.error('[hunt-report] Static map fetch error:', e);
     }
 
+    // Dynamic page count: Page 1 (overview) + Page 2 (intercepts) + optional map page + certificate
+    const totalPages = mapImageBase64 ? 4 : 3;
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -397,16 +371,17 @@ export async function POST(req: NextRequest) {
   ${dualAudienceHTML}
   <div class="section-title">Seasonal Huntability</div>
   <div class="season-grid">
-    ${['early','rut','late'].map((s: string) => `
-    <div class="season-cell ${s === seasonScores?.recommended ? 'season-recommended' : ''}">
+    ${['early','rut','late'].map((s: string) => {
+      const sc = seasonScoresComputed[s];
+      const isRec = s === recommended;
+      return `
+    <div class="season-cell ${isRec ? 'season-recommended' : ''}">
       <div class="season-name">${seasonLabel(s)}</div>
-      ${s === seasonScores?.recommended
-        ? `<div style="font-size:24px;font-weight:bold;margin:8px 0">${seasonScores?.topScore ?? 0}</div>
-           <div style="display:inline-block;padding:4px 12px;font-size:11px;background:#c9a84c;color:#1a3a2a">★ RECOMMENDED</div>`
-        : `<div style="font-size:13px;margin:8px 0;color:#666">Run season analysis</div>
-           <div style="display:inline-block;padding:4px 12px;font-size:11px;background:#e0e0e0;color:#666">SELECT SEASON</div>`
-      }
-    </div>`).join('')}
+      <div style="font-size:32px;font-weight:bold;margin:8px 0;color:${isRec ? '#c9a84c' : sc.color}">${sc.grade}</div>
+      <div style="font-size:12px;color:${isRec ? 'rgba(255,255,255,0.7)' : '#666'};margin-bottom:6px">${sc.score} / 100</div>
+      ${isRec ? `<div style="display:inline-block;padding:4px 12px;font-size:11px;background:#c9a84c;color:#1a3a2a">★ RECOMMENDED</div>` : ''}
+    </div>`;
+    }).join('')}
   </div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
     <div class="stat-box">
@@ -429,7 +404,7 @@ export async function POST(req: NextRequest) {
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 1 of ${mapImageBase64 ? '4' : '3'}</span>
+    <span>Page 1 of ${totalPages}</span>
   </div>
 </div>
 
@@ -530,7 +505,7 @@ export async function POST(req: NextRequest) {
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 2 of ${mapImageBase64 ? '4' : '3'}</span>
+    <span>Page 2 of ${totalPages}</span>
   </div>
 </div>
 
@@ -600,12 +575,58 @@ ${mapImageBase64 ? `
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 3 of 4</span>
+    <span>Page 3 of ${totalPages}</span>
   </div>
 </div>
 ` : ''}
 
-${certificatePage}
+<div class="page border${wm}">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px">
+    <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
+    <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
+      <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">${certificateTitle}</div>
+      <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:32px"></div>
+      <div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
+      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:32px">HUNTABILITY GRADE</div>
+      <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
+        <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
+        <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
+        <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
+      </div>
+      ${territorySection}
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
+        <div style="background:#1a3a2a;color:white;padding:12px">
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${summary?.topStandScore ?? 0}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">HUNTABILITY SCORE</div>
+        </div>
+        <div style="background:#1a3a2a;color:white;padding:12px">
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(stands ?? []).length}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">INTERCEPT POINTS</div>
+        </div>
+        <div style="background:#1a3a2a;color:white;padding:12px">
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(corridors?.primaryCount ?? 0) + (corridors?.possibleCount ?? 0)}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS</div>
+        </div>
+      </div>
+      <div style="height:1px;background:#ddd;margin-bottom:16px"></div>
+      <div style="font-size:10px;color:#999;line-height:1.6;margin-bottom:16px">
+        This certificate confirms that the above property has been analyzed using satellite terrain 
+        intelligence, elevation modeling, and deer movement prediction. 
+        Assessment valid at time of generation. Adjacent parcel analysis available separately.
+      </div>
+      <div style="padding-top:16px;border-top:1px solid #ddd">
+        <div style="font-size:11px;font-weight:bold;color:#1a3a2a;letter-spacing:1px">TERRA FIRMA PARTNERS</div>
+        <div style="font-size:10px;color:#888">terrafirma.partners | Terrain Intelligence for Serious Hunters</div>
+      </div>
+    </div>
+    <div style="margin-top:24px;font-size:10px;color:#ccc;letter-spacing:2px">Report ID: ${reportId}</div>
+  </div>
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page ${totalPages} of ${totalPages}</span>
+  </div>
+</div>
 
 </body>
 </html>`;
