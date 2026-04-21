@@ -18,8 +18,9 @@ model User {
   role         String   @default("user")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  orders          Order[]
-  savedProperties SavedProperty[]
+  orders           Order[]
+  savedProperties  SavedProperty[]
+  parcelPurchases  ParcelPurchase[]
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
@@ -95,6 +96,23 @@ model ParcelCache {
   
   @@unique([lat, lng])
   @@index([lat, lng])
+}
+
+model ParcelPurchase {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  parcelLat       Float
+  parcelLng       Float
+  parcelAddress   String?
+  parcelAcreage   Float?
+  stripeSessionId String?
+  purchaseType    String   @default("hunt_plan")
+  amount          Int      @default(1900)
+  purchasedAt     DateTime @default(now())
+
+  @@unique([userId, parcelLat, parcelLng])
+  @@index([userId])
 }
 
 model SavedProperty {

@@ -9,15 +9,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Pro gate — only Pro subscribers can save properties
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { subscriptionStatus: true },
-  });
-  if (user?.subscriptionStatus !== 'pro' && user?.subscriptionStatus !== 'promax') {
-    return NextResponse.json({ error: 'Pro subscription required' }, { status: 403 });
-  }
-
   const body = await req.json();
   const {
     name, type, parcels, totalAcres,

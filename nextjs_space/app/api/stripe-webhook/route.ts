@@ -102,6 +102,10 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     });
     console.log('[webhook] User', user.email, '→', resolvedTier, '(via checkout.session.completed)');
 
+  } else if (session.metadata?.purchaseType === 'hunt_plan') {
+    // ── $19 one-time parcel hunt plan purchase ──
+    await handleHuntPlanPurchase(session);
+
   } else if (orderId) {
     // ── One-time payment checkout — mark order as paid ──
     await prisma.order.update({
@@ -116,6 +120,45 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   } else {
     console.warn('[webhook] checkout.session.completed with no subscription and no orderId, session:', session.id);
   }
+}
+
+async function handleHuntPlanPurchase(session: Stripe.Checkout.Session) {
+  const userId = session.metadata?.userId;
+  const parcelLat = parseFloat(session.metadata?.parcelLat || '');
+  const parcelLng = parseFloat(session.metadata?.parcelLng || '');
+  const parcelAddress = session.metadata?.parcelAddress || null;
+  const parcelAcreage = parseFloat(session.metadata?.parcelAcreage || '') || null;
+
+  if (!userId || isNaN(parcelLat) || isNaN(parcelLng)) {
+    console.error('[webhook] hunt_plan purchase missing required metadata:', session.metadata);
+    return;
+  }
+
+  // Upsert to avoid duplicates
+  await prisma.parcelPurchase.upsert({
+    where: {
+      userId_parcelLat_parcelLng: {
+        userId,
+        parcelLat,
+        parcelLng,
+      },
+    },
+    create: {
+      userId,
+      parcelLat,
+      parcelLng,
+      parcelAddress,
+      parcelAcreage,
+      stripeSessionId: session.id,
+      purchaseType: 'hunt_plan',
+      amount: 1900,
+    },
+    update: {
+      stripeSessionId: session.id,
+    },
+  });
+
+  console.log('[webhook] Hunt plan purchased for user', userId, 'parcel:', parcelAddress || `${parcelLat},${parcelLng}`);
 }
 
 async function handleSubscriptionChange(eventType: string, subscription: Stripe.Subscription) {

@@ -2092,6 +2092,13 @@ function DeerIntelContent() {
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
 
+  // $19 per-parcel unlock state
+  const [parcelUnlocked, setParcelUnlocked] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(false);
+  const [showSavePrompt, setShowSavePrompt] = useState(false);
+  const [showParcelPaywall, setShowParcelPaywall] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+
   // Inspect Mode state (visual indicator that flow segments are clickable)
   const [inspectModeEnabled, setInspectModeEnabled] = useState(false);
   
@@ -2643,6 +2650,28 @@ function DeerIntelContent() {
     computeAlignmentScores();
   }, [layers?.standPoints, windDirection, season, parcelPolygon, computeAlignmentScores]);
 
+  // ── Check parcel access when analysis completes ──
+  useEffect(() => {
+    if (summary && activeLat && activeLng) {
+      checkParcelAccess(activeLat, activeLng);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, activeLat, activeLng]);
+
+  // ── Handle parcel_unlocked return from Stripe checkout ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('parcel_unlocked') === 'true') {
+      setParcelUnlocked(true);
+      setShowParcelPaywall(false);
+      toast.success('Hunt plan unlocked!');
+      // Clean up URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete('parcel_unlocked');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
+
   // v3.8.4 — Keep "X min ago" out of render body; update via interval only
   useEffect(() => {
     setWindLastUpdated(new Date()); // hydration-safe: set real time client-side
@@ -2771,6 +2800,60 @@ function DeerIntelContent() {
       }
     } catch {
       toast.error('Could not open billing portal');
+    }
+  }
+
+  // ── $19 parcel unlock: check access for current parcel ──
+  async function checkParcelAccess(lat?: number, lng?: number) {
+    const checkLat = lat ?? activeLat;
+    const checkLng = lng ?? activeLng;
+    if (!checkLat || !checkLng) return;
+    // Pro users always have access
+    if (isPro) { setParcelUnlocked(true); return; }
+    setCheckingAccess(true);
+    try {
+      const res = await fetch(`/api/parcels/check-access?lat=${checkLat}&lng=${checkLng}`);
+      const data = await res.json();
+      setParcelUnlocked(data.hasAccess === true);
+    } catch {
+      setParcelUnlocked(false);
+    } finally {
+      setCheckingAccess(false);
+    }
+  }
+
+  // ── $19 parcel purchase flow ──
+  async function handlePurchaseParcel() {
+    if (!session?.user) {
+      router.push('/login?callbackUrl=%2Fintel');
+      return;
+    }
+    setPurchaseLoading(true);
+    try {
+      const res = await fetch('/api/parcels/purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat: activeLat,
+          lng: activeLng,
+          address: activeAddress,
+          acreage: activeAcres,
+        }),
+      });
+      const data = await res.json();
+      if (data.alreadyPurchased) {
+        setParcelUnlocked(true);
+        setShowParcelPaywall(false);
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (e) {
+      console.error('Purchase error:', e);
+      toast.error('Could not start checkout');
+    } finally {
+      setPurchaseLoading(false);
     }
   }
 
@@ -8558,6 +8641,8 @@ function DeerIntelContent() {
       setRidgeSpineData(null);
       setEdgeIntelData(null);
       setAlignedStands([]);
+      setParcelUnlocked(false);
+      setLastSavedPropertyId(null);
       setSelectedStand(null);
       setHuntabilityData(null);
       // vNext: Clear stand GeoJSON + popup
@@ -8749,6 +8834,8 @@ function DeerIntelContent() {
     setRidgeSpineData(null);
     setEdgeIntelData(null);
     setAlignedStands([]);
+    setParcelUnlocked(false);
+    setLastSavedPropertyId(null);
     setSelectedStand(null);
     setHuntabilityData(null);
     // vNext: Clear stand GeoJSON + popup
@@ -9778,6 +9865,27 @@ function DeerIntelContent() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
       <Toaster position="top-center" richColors />
+
+      {/* ═══ BETA BANNER — top of viewport ═══ */}
+      {!isPro && summary && !isLoading && (
+        <div className="absolute top-0 left-0 right-0 z-40 flex items-center justify-center py-1.5 bg-gradient-to-r from-amber-600/90 to-orange-600/90 backdrop-blur-sm pointer-events-auto" style={{ paddingLeft: '60px', paddingRight: '60px' }}>
+          <p className="text-white text-[11px] font-medium tracking-wide">
+            ⚡ Beta Access — Intro Pricing <strong>$19</strong> per parcel
+          </p>
+        </div>
+      )}
+
+      {/* ═══ FLOATING CTA — bottom-right over map ═══ */}
+      {!isPro && !parcelUnlocked && summary && !isLoading && !showParcelPaywall && !territoryMode && (
+        <button
+          onClick={() => setShowParcelPaywall(true)}
+          className="absolute z-40 flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm px-5 py-3 rounded-full shadow-xl shadow-amber-900/40 transition-all hover:scale-105"
+          style={{ bottom: '24px', left: '50%', transform: 'translateX(-50%)' }}
+        >
+          🎯 Get My Hunt Plan — $19
+        </button>
+      )}
+
       {/* Map Container — double-div pattern: outer div owns layout (absolute inset-0),
            inner div is the Mapbox target. Mapbox overrides position to 'relative' on its
            container, which breaks inset-0 sizing. By giving the inner div explicit 100%
@@ -10108,6 +10216,11 @@ function DeerIntelContent() {
             <Link href="/" className="text-white/80 hover:text-white transition-colors">
               <Home className="h-5 w-5" />
             </Link>
+            {session?.user && (
+              <Link href="/properties" className="text-white/50 hover:text-white text-[10px] font-medium transition-colors px-2 py-1 rounded border border-white/10 hover:border-white/20">
+                My Parcels
+              </Link>
+            )}
             <div className="h-6 w-px bg-white/30" />
             <div className="flex items-center gap-2">
               <Target className="h-5 w-5 text-red-500" />
@@ -10998,31 +11111,92 @@ function DeerIntelContent() {
               </div>
               )}
 
-              {/* ═══ CTA — Analyze Your Property ═══ */}
+              {/* ═══ SAVE PROMPT + CTA ═══ */}
               {summary && !isLoading && (
-                <div className="px-3 pb-3">
-                  <div className="bg-gradient-to-br from-red-500/[0.10] to-orange-500/[0.06] border border-red-500/20 rounded-xl p-3">
-                    <p className="text-[11px] text-white/90 font-semibold">Ready to scout your own land?</p>
-                    <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
-                      Get the same terrain intelligence for any property — stand placements, corridors, bedding zones, and a downloadable hunt map.
-                    </p>
-                    <div className="flex gap-2 mt-2.5">
-                      <Link
-                        href="/map?product=hunt_report"
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-[11px] font-semibold rounded-lg transition-colors shadow-lg shadow-red-900/30"
+                <div className="px-3 pb-3 space-y-2">
+                  {/* Save to Library prompt — non-Pro, logged-in, not yet saved */}
+                  {session?.user && !saveConfirmed && !lastSavedPropertyId && !territoryMode && (
+                    <div className="bg-emerald-500/[0.08] border border-emerald-500/20 rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm">📌</span>
+                        <p className="text-[11px] text-emerald-300 font-semibold">Save to your library</p>
+                      </div>
+                      <p className="text-[10px] text-stone-400 leading-relaxed mb-2">
+                        Keep this parcel in your Terrain Intelligence Library for quick access anytime.
+                      </p>
+                      <button
+                        onClick={handleSaveProperty}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold rounded-lg transition-colors"
                       >
-                        <Target className="h-3.5 w-3.5" />
-                        Analyze My Property
-                      </Link>
-                      <Link
-                        href="/pricing"
-                        className="flex items-center justify-center gap-1 px-3 py-2 bg-white/[0.06] hover:bg-white/[0.10] text-stone-300 text-[10px] font-medium rounded-lg transition-colors border border-white/[0.08]"
-                      >
-                        Pricing
-                        <ArrowUpRight className="h-3 w-3" />
+                        Save Parcel
+                      </button>
+                    </div>
+                  )}
+                  {/* Saved confirmation */}
+                  {saveConfirmed && (
+                    <div className="bg-emerald-500/[0.08] border border-emerald-500/20 rounded-xl p-3 text-center">
+                      <p className="text-[11px] text-emerald-300 font-semibold">✓ Saved to your library</p>
+                      <Link href="/properties" className="text-[10px] text-emerald-400/70 hover:text-emerald-300 underline mt-1 inline-block">
+                        View all saved parcels →
                       </Link>
                     </div>
-                  </div>
+                  )}
+                  {/* Sign up prompt for non-logged-in users */}
+                  {!session?.user && (
+                    <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-xl p-3">
+                      <p className="text-[11px] text-amber-300 font-semibold">Create an account to save this hunt plan</p>
+                      <p className="text-[10px] text-stone-400 leading-relaxed mt-1 mb-2">
+                        Save parcels, unlock full intelligence, and build your terrain library.
+                      </p>
+                      <Link
+                        href="/login?callbackUrl=%2Fintel"
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold rounded-lg transition-colors"
+                      >
+                        Sign Up / Log In
+                      </Link>
+                    </div>
+                  )}
+                  {/* Unlock CTA for locked parcels */}
+                  {!parcelUnlocked && !isPro && !territoryMode && (
+                    <div className="bg-gradient-to-br from-amber-500/[0.10] to-orange-500/[0.06] border border-amber-500/20 rounded-xl p-3">
+                      <p className="text-[11px] text-white/90 font-semibold">🔒 Full hunt plan locked</p>
+                      <p className="text-[10px] text-stone-400 leading-relaxed mt-1 mb-2">
+                        Unlock stand locations, approach routes, and your complete Hunt Report for just $19.
+                      </p>
+                      <button
+                        onClick={() => setShowParcelPaywall(true)}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold rounded-lg transition-colors shadow-lg shadow-amber-900/30"
+                      >
+                        <Target className="h-3.5 w-3.5" />
+                        Unlock — $19
+                      </button>
+                    </div>
+                  )}
+                  {/* Existing CTA for demo visitors */}
+                  {demoMode && (
+                    <div className="bg-gradient-to-br from-red-500/[0.10] to-orange-500/[0.06] border border-red-500/20 rounded-xl p-3">
+                      <p className="text-[11px] text-white/90 font-semibold">Ready to scout your own land?</p>
+                      <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
+                        Get the same terrain intelligence for any property.
+                      </p>
+                      <div className="flex gap-2 mt-2.5">
+                        <Link
+                          href="/map?product=hunt_report"
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-[11px] font-semibold rounded-lg transition-colors shadow-lg shadow-red-900/30"
+                        >
+                          <Target className="h-3.5 w-3.5" />
+                          Analyze My Property
+                        </Link>
+                        <Link
+                          href="/pricing"
+                          className="flex items-center justify-center gap-1 px-3 py-2 bg-white/[0.06] hover:bg-white/[0.10] text-stone-300 text-[10px] font-medium rounded-lg transition-colors border border-white/[0.08]"
+                        >
+                          Pricing
+                          <ArrowUpRight className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -11987,33 +12161,53 @@ function DeerIntelContent() {
               })()}
               {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
               {!TERRAIN_WORK_MODE && (
-               <StandAlignmentPanel
-                 alignedStands={alignedStands}
-                 highlightedStandRank={highlightedStandRank}
-                 selectedStand={selectedStand}
-                 expanded={alignmentPanelExpanded}
-                 onToggleExpanded={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
-                 onStandClick={(stand) => {
-                   handleUserInteraction();
-                   setHighlightedStandRank(stand.rank);
-                   const deselecting = selectedStand === stand.rank;
-                   setSelectedStand(deselecting ? null : stand.rank);
-                   // Deselecting in solo mode → exit solo so all stands reappear
-                   if (deselecting && soloStandMode) {
-                     setSoloStandMode(false);
-                   }
-                   // V4 Step 11b: Cinematic flyTo from panel
-                   if (!deselecting && mapRef.current) {
-                     mapRef.current.flyTo({
-                       center: stand.coords,
-                       zoom: Math.max(mapRef.current.getZoom(), 15.5),
-                       duration: 1200,
-                       essential: true,
-                       padding: { top: 80, bottom: 40, left: 40, right: 40 },
-                     });
-                   }
-                 }}
-               />
+               <div className="relative">
+                <StandAlignmentPanel
+                  alignedStands={alignedStands}
+                  highlightedStandRank={highlightedStandRank}
+                  selectedStand={selectedStand}
+                  expanded={alignmentPanelExpanded}
+                  onToggleExpanded={() => setAlignmentPanelExpanded(!alignmentPanelExpanded)}
+                  onStandClick={(stand) => {
+                    if (!parcelUnlocked && !isPro) {
+                      setShowParcelPaywall(true);
+                      return;
+                    }
+                    handleUserInteraction();
+                    setHighlightedStandRank(stand.rank);
+                    const deselecting = selectedStand === stand.rank;
+                    setSelectedStand(deselecting ? null : stand.rank);
+                    // Deselecting in solo mode → exit solo so all stands reappear
+                    if (deselecting && soloStandMode) {
+                      setSoloStandMode(false);
+                    }
+                    // V4 Step 11b: Cinematic flyTo from panel
+                    if (!deselecting && mapRef.current) {
+                      mapRef.current.flyTo({
+                        center: stand.coords,
+                        zoom: Math.max(mapRef.current.getZoom(), 15.5),
+                        duration: 1200,
+                        essential: true,
+                        padding: { top: 80, bottom: 40, left: 40, right: 40 },
+                      });
+                    }
+                  }}
+                />
+                {/* PAYWALL BLUR OVERLAY — covers stand details for non-unlocked free users */}
+                {!parcelUnlocked && !isPro && alignedStands.length > 0 && (
+                  <div className="absolute inset-0 z-10 backdrop-blur-[6px] bg-black/40 rounded-lg flex flex-col items-center justify-center gap-3 p-4">
+                    <div className="text-amber-400 text-xl">🔒</div>
+                    <p className="text-white text-sm font-semibold text-center">Unlock Your Hunt Plan</p>
+                    <p className="text-white/50 text-xs text-center max-w-[200px]">Stand locations, approach routes & full intelligence locked</p>
+                    <button
+                      onClick={() => setShowParcelPaywall(true)}
+                      className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-5 py-2 rounded-lg transition mt-1"
+                    >
+                      Unlock — $19
+                    </button>
+                  </div>
+                )}
+               </div>
                )}
                {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
 
@@ -12652,6 +12846,94 @@ function DeerIntelContent() {
                 fontSize: '13px',
                 cursor: 'pointer',
               }}
+            >
+              Maybe Later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========== $19 PARCEL PAYWALL MODAL ========== */}
+      {showParcelPaywall && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.70)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowParcelPaywall(false); }}
+        >
+          <div style={{
+            background: 'linear-gradient(180deg, #1a2332 0%, #111822 100%)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '16px',
+            padding: '32px 36px',
+            maxWidth: '420px',
+            width: '92%',
+            textAlign: 'center' as const,
+            boxShadow: '0 24px 80px rgba(0,0,0,0.6), 0 0 40px rgba(245,158,11,0.08)',
+          }}>
+            <div style={{ fontSize: '40px', marginBottom: '8px' }}>🎯</div>
+            <h2 style={{ color: '#f59e0b', fontSize: '22px', fontWeight: 700, margin: '0 0 8px' }}>
+              Unlock Your Hunt Plan
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '13px', lineHeight: 1.6, margin: '0 0 6px' }}>
+              {activeAddress || 'This parcel'} · {activeAcres?.toFixed(0) || '—'} acres
+            </p>
+            <div style={{ background: 'rgba(245,158,11,0.08)', borderRadius: '10px', padding: '14px 16px', margin: '16px 0' }}>
+              <p style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: 1.6, margin: 0 }}>
+                <strong>Full access includes:</strong>
+              </p>
+              <ul style={{ color: '#94a3b8', fontSize: '12px', lineHeight: 1.8, margin: '8px 0 0', paddingLeft: '16px', textAlign: 'left' as const }}>
+                <li>Top 3 stand locations with approach routes</li>
+                <li>Today&apos;s Sit recommendation</li>
+                <li>Full terrain & corridor intelligence</li>
+                <li>Downloadable Hunt Report PDF</li>
+                <li>Permanent access — never re-locked</li>
+              </ul>
+            </div>
+            <button
+              onClick={handlePurchaseParcel}
+              disabled={purchaseLoading}
+              style={{
+                background: 'linear-gradient(135deg, #d97706, #b45309)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '14px 28px',
+                fontSize: '16px',
+                fontWeight: 700,
+                cursor: purchaseLoading ? 'wait' : 'pointer',
+                width: '100%',
+                marginBottom: '10px',
+                opacity: purchaseLoading ? 0.7 : 1,
+                boxShadow: '0 4px 20px rgba(217,119,6,0.3)',
+              }}
+            >
+              {purchaseLoading ? 'Opening checkout…' : 'Unlock This Parcel — $19'}
+            </button>
+            <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 12px' }}>
+              One-time purchase · Instant access · No subscription
+            </p>
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px', marginTop: '4px' }}>
+              <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 8px' }}>
+                Want unlimited access to all parcels?
+              </p>
+              <button
+                onClick={() => { setShowParcelPaywall(false); handleUpgrade('annual', 'pro'); }}
+                style={{
+                  background: 'transparent',
+                  color: '#f59e0b',
+                  border: '1px solid rgba(245,158,11,0.3)',
+                  borderRadius: '8px',
+                  padding: '8px 20px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Go Pro — $99/yr (all parcels unlocked)
+              </button>
+            </div>
+            <button
+              onClick={() => setShowParcelPaywall(false)}
+              style={{ background: 'transparent', color: '#475569', border: 'none', fontSize: '12px', cursor: 'pointer', marginTop: '12px' }}
             >
               Maybe Later
             </button>
