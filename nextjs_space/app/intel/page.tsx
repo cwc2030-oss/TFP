@@ -3182,7 +3182,12 @@ function DeerIntelContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan, tier }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        console.error('[Upgrade] API error:', res.status, data);
+        toast.error(data.error || `Checkout failed (${res.status})`);
+        return;
+      }
       if (data.alreadySubscribed) {
         toast.success(`You already have ${data.currentTier === 'promax' ? 'Pro Max' : 'Pro'}!`);
         setShowUpgradeModal(false);
@@ -3192,10 +3197,12 @@ function DeerIntelContent() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        toast.error(data.error || 'Checkout failed');
+        console.error('[Upgrade] Missing checkout URL:', data);
+        toast.error('Checkout URL missing — please try again');
       }
-    } catch {
-      toast.error('Something went wrong');
+    } catch (e) {
+      console.error('[Upgrade] Network error:', e);
+      toast.error('Network error — please try again');
     } finally {
       setUpgradeLoading(null);
     }
@@ -3255,7 +3262,12 @@ function DeerIntelContent() {
           acreage: activeAcres,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        console.error('[Purchase] API error:', res.status, data);
+        toast.error(data.error || `Could not start checkout (${res.status})`);
+        return;
+      }
       if (data.alreadyPurchased) {
         setParcelUnlocked(true);
         setShowParcelPaywall(false);
@@ -3263,10 +3275,13 @@ function DeerIntelContent() {
       }
       if (data.url) {
         window.location.href = data.url;
+      } else {
+        console.error('[Purchase] Missing checkout URL:', data);
+        toast.error('Checkout URL missing — please try again');
       }
     } catch (e) {
-      console.error('Purchase error:', e);
-      toast.error('Could not start checkout');
+      console.error('[Purchase] Network error:', e);
+      toast.error('Network error — please try again');
     } finally {
       setPurchaseLoading(false);
     }
