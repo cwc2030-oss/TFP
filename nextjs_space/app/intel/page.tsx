@@ -2343,6 +2343,37 @@ function DeerIntelContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sitPinModal, sitPinName, currentParcelKey]);
 
+  // v3.9.0 — Keep the map's sit-pin source in sync with React state
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const src = map.getSource('tfp-user-sit-pins') as mapboxgl.GeoJSONSource | undefined;
+    if (!src || typeof src.setData !== 'function') return;
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: sitPins.map((p) => ({
+        type: 'Feature',
+        id: p.id,
+        geometry: {
+          type: 'Point',
+          coordinates: [p.lng, p.lat],
+        },
+        properties: {
+          id: p.id,
+          name: p.name,
+          parcelId: p.parcel_id,
+          createdAt: p.created_at,
+          kind: 'user_sit_pin', // disambiguates from AI stand points on click hit-testing
+        },
+      })),
+    };
+    try {
+      src.setData(fc);
+    } catch (err) {
+      console.warn('[SitPin] setData failed:', err);
+    }
+  }, [sitPins, mapReady]);
+
   // v3.9.0 — Load user sit pins whenever the current parcel changes (Pro-only)
   useEffect(() => {
     if (!isPro || !currentParcelKey) {
@@ -8514,6 +8545,167 @@ function DeerIntelContent() {
           console.error('[INTEL-DIAG] getStyle skipped — style not loaded yet');
         }
       } catch (_) { /* ignore */ }
+
+      // ========== v3.9.0 — Custom Sit Pins: green pin source + layers ==========
+      try {
+        // Draw a teardrop pin onto an off-screen canvas, register it as a map image.
+        // Green theme: emerald fill, white stroke, subtle drop-shadow via blur.
+        if (!map.hasImage('tfp-sit-pin')) {
+          const size = 64;
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            // Shadow (soft)
+            ctx.shadowColor = 'rgba(0,0,0,0.45)';
+            ctx.shadowBlur = 6;
+            ctx.shadowOffsetY = 2;
+
+            // Teardrop body (classic pin outline)
+            ctx.beginPath();
+            const cx = size / 2;
+            const topY = 6;
+            const tipY = size - 3;
+            const bodyR = 14;
+            const bodyCY = topY + bodyR;
+            ctx.moveTo(cx, tipY);
+            // right curve to top
+            ctx.bezierCurveTo(cx + bodyR + 4, bodyCY + 6, cx + bodyR, topY, cx, topY);
+            // left curve down to tip
+            ctx.bezierCurveTo(cx - bodyR, topY, cx - bodyR - 4, bodyCY + 6, cx, tipY);
+            ctx.closePath();
+
+            // Green fill (emerald gradient)
+            const grad = ctx.createLinearGradient(cx, topY, cx, tipY);
+            grad.addColorStop(0, '#34d399');   // emerald-400
+            grad.addColorStop(1, '#047857');   // emerald-700
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // White outline
+            ctx.shadowColor = 'transparent';
+            ctx.lineWidth = 2.2;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            // Inner dot (white)
+            ctx.beginPath();
+            ctx.arc(cx, bodyCY, 4.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            // Register with map (pixelRatio 2 so it stays crisp on retina at ~32px rendered)
+            const imgData = ctx.getImageData(0, 0, size, size);
+            map.addImage('tfp-sit-pin', imgData as unknown as ImageData, { pixelRatio: 2 });
+            console.log('[SitPin] Registered tfp-sit-pin image');
+          }
+        }
+
+        if (!map.getSource('tfp-user-sit-pins')) {
+          map.addSource('tfp-user-sit-pins', { type: 'geojson', data: EMPTY_FC });
+
+          // Subtle green glow underneath the pin
+          map.addLayer({
+            id: 'tfp-user-sit-pins-glow',
+            type: 'circle',
+            source: 'tfp-user-sit-pins',
+            paint: {
+              'circle-radius': 16,
+              'circle-color': '#34d399',
+              'circle-opacity': 0.18,
+              'circle-blur': 0.8,
+            },
+          });
+
+          // Pin icon itself (centered so the tip sits on the coordinate)
+          map.addLayer({
+            id: 'tfp-user-sit-pins-icon',
+            type: 'symbol',
+            source: 'tfp-user-sit-pins',
+            layout: {
+              'icon-image': 'tfp-sit-pin',
+              'icon-size': 0.75,
+              'icon-anchor': 'bottom',
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true,
+            },
+          });
+
+          // Static name label (shown always, small) — hover shows a richer popup.
+          // Sized smaller than AI stand labels so it reads as "user content".
+          map.addLayer({
+            id: 'tfp-user-sit-pins-label',
+            type: 'symbol',
+            source: 'tfp-user-sit-pins',
+            layout: {
+              'text-field': ['get', 'name'],
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+              'text-size': 10,
+              'text-offset': [0, 0.6],
+              'text-anchor': 'top',
+              'text-allow-overlap': false,
+              'text-optional': true,
+              'text-letter-spacing': 0.02,
+            },
+            paint: {
+              'text-color': '#ecfdf5',       // emerald-50
+              'text-halo-color': '#064e3b',  // emerald-900
+              'text-halo-width': 1.2,
+              'text-halo-blur': 0.3,
+              'text-opacity': 0.85,
+            },
+          });
+        }
+
+        // Hover → richer popup with the pin's name
+        const sitPinHoverPopup = new mapboxgl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          offset: [0, -32],
+          className: 'tfp-sit-pin-popup',
+        });
+
+        const onSitPinEnter = (e: mapboxgl.MapLayerMouseEvent) => {
+          map.getCanvas().style.cursor = 'pointer';
+          const f = e.features && e.features[0];
+          const name = String((f?.properties as any)?.name || '');
+          if (!name) return;
+          const geom = f?.geometry as GeoJSON.Point | undefined;
+          const coords = geom?.coordinates as [number, number] | undefined;
+          if (!coords) return;
+          const safeName = name.replace(/[<>&"']/g, (c) =>
+            ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] || c)
+          );
+          const html = `
+            <div style="
+              font-family: system-ui, -apple-system, sans-serif;
+              background: #064e3b;
+              color: #ecfdf5;
+              border: 1px solid #059669;
+              border-radius: 6px;
+              padding: 5px 10px;
+              font-size: 12px;
+              font-weight: 600;
+              white-space: nowrap;
+              box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+            ">📍 ${safeName}</div>`;
+          sitPinHoverPopup
+            .setLngLat(coords as [number, number])
+            .setHTML(html)
+            .addTo(map);
+        };
+
+        const onSitPinLeave = () => {
+          map.getCanvas().style.cursor = '';
+          sitPinHoverPopup.remove();
+        };
+
+        map.on('mouseenter', 'tfp-user-sit-pins-icon', onSitPinEnter);
+        map.on('mouseleave', 'tfp-user-sit-pins-icon', onSitPinLeave);
+      } catch (sitPinLayerErr) {
+        console.warn('[SitPin] layer setup failed:', sitPinLayerErr);
+      }
 
       // ========== v3.9.0 — Custom Sit Pins: right-click (desktop) + long-press (mobile) ==========
       try {
