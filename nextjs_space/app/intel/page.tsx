@@ -2014,6 +2014,13 @@ function DeerIntelContent() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const [showScoreCard, setShowScoreCard] = useState(false);
+
+  // ========== v3.9.0 — Custom Sit Pins (Pro feature) ==========
+  // Context menu anchored in viewport coordinates (position: fixed)
+  const [sitPinMenu, setSitPinMenu] = useState<
+    | { x: number; y: number; lng: number; lat: number; gated: boolean }
+    | null
+  >(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -8406,6 +8413,90 @@ function DeerIntelContent() {
         }
       } catch (_) { /* ignore */ }
 
+      // ========== v3.9.0 — Custom Sit Pins: right-click (desktop) + long-press (mobile) ==========
+      try {
+        const openSitPinMenu = (viewportX: number, viewportY: number, lng: number, lat: number) => {
+          setSitPinMenu({
+            x: viewportX,
+            y: viewportY,
+            lng,
+            lat,
+            gated: !isProRef.current,
+          });
+        };
+
+        // Desktop: right-click
+        map.on('contextmenu', (e: mapboxgl.MapMouseEvent) => {
+          const canvasRect = map.getCanvas().getBoundingClientRect();
+          const vx = canvasRect.left + e.point.x;
+          const vy = canvasRect.top + e.point.y;
+          openSitPinMenu(vx, vy, e.lngLat.lng, e.lngLat.lat);
+        });
+
+        // Mobile: long-press (500ms) on the map canvas
+        const canvasEl = map.getCanvas();
+        let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+        let touchAnchor: { vx: number; vy: number; lng: number; lat: number } | null = null;
+        const LONG_PRESS_MS = 500;
+        const MOVE_THRESHOLD_PX = 10;
+
+        const clearLongPress = () => {
+          if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+          touchAnchor = null;
+        };
+
+        const handleTouchStart = (evt: TouchEvent) => {
+          if (evt.touches.length !== 1) {
+            clearLongPress();
+            return;
+          }
+          const touch = evt.touches[0];
+          const rect = canvasEl.getBoundingClientRect();
+          const cx = touch.clientX - rect.left;
+          const cy = touch.clientY - rect.top;
+          const lngLat = map.unproject([cx, cy] as [number, number]);
+          touchAnchor = {
+            vx: touch.clientX,
+            vy: touch.clientY,
+            lng: lngLat.lng,
+            lat: lngLat.lat,
+          };
+          longPressTimer = setTimeout(() => {
+            if (touchAnchor) {
+              openSitPinMenu(touchAnchor.vx, touchAnchor.vy, touchAnchor.lng, touchAnchor.lat);
+            }
+            longPressTimer = null;
+          }, LONG_PRESS_MS);
+        };
+
+        const handleTouchMove = (evt: TouchEvent) => {
+          if (!touchAnchor || evt.touches.length !== 1) return;
+          const touch = evt.touches[0];
+          const dx = touch.clientX - touchAnchor.vx;
+          const dy = touch.clientY - touchAnchor.vy;
+          if (Math.hypot(dx, dy) > MOVE_THRESHOLD_PX) {
+            clearLongPress();
+          }
+        };
+
+        canvasEl.addEventListener('touchstart', handleTouchStart, { passive: true });
+        canvasEl.addEventListener('touchmove', handleTouchMove, { passive: true });
+        canvasEl.addEventListener('touchend', clearLongPress, { passive: true });
+        canvasEl.addEventListener('touchcancel', clearLongPress, { passive: true });
+
+        // Dismiss the menu on map interactions
+        map.on('movestart', () => setSitPinMenu(null));
+        map.on('zoomstart', () => setSitPinMenu(null));
+        map.on('click', () => setSitPinMenu(null));
+
+        console.log('[SitPin] Context-menu handlers registered (right-click + long-press)');
+      } catch (sitPinErr) {
+        console.warn('[SitPin] Failed to register context-menu handlers:', sitPinErr);
+      }
+
       // ALWAYS set map ready - even if source setup failed
       setMapReady(true);
       setMapError(null); // v4-fix2: clear any transient map errors on successful load
@@ -13994,6 +14085,115 @@ function DeerIntelContent() {
               </button>
             </div>
           </div>
+
+      {/* ========== v3.9.0 — Custom Sit Pin context menu (Pro feature) ========== */}
+      {sitPinMenu && (() => {
+        // Keep the menu inside the viewport (flip if near right/bottom edge)
+        const MENU_W = sitPinMenu.gated ? 260 : 200;
+        const MENU_H = sitPinMenu.gated ? 120 : 52;
+        const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
+        const left = Math.min(sitPinMenu.x + 4, vw - MENU_W - 8);
+        const top  = Math.min(sitPinMenu.y + 4, vh - MENU_H - 8);
+        return (
+          <div
+            role="menu"
+            aria-label="Sit Pin menu"
+            style={{
+              position: 'fixed',
+              left,
+              top,
+              zIndex: 9500,
+              background: '#1a1a2e',
+              border: '1px solid #4a5568',
+              borderRadius: '8px',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.55)',
+              minWidth: MENU_W,
+              padding: sitPinMenu.gated ? '12px 14px' : '6px 0',
+              color: '#e2e8f0',
+              fontSize: '13px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {sitPinMenu.gated ? (
+              <>
+                <div style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: 10 }}>
+                  Custom Sit Pins are a{' '}
+                  <span style={{ color: '#f0c040', fontWeight: 700 }}>Pro</span> feature 🔒
+                  <br />
+                  <span style={{ color: '#a0aec0', fontSize: '12px' }}>
+                    Upgrade to drop your own stands.
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => {
+                      setSitPinMenu(null);
+                      setShowUpgradeModal(true);
+                    }}
+                    style={{
+                      flex: 1,
+                      background: '#c0a020',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '7px 10px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Upgrade
+                  </button>
+                  <button
+                    onClick={() => setSitPinMenu(null)}
+                    style={{
+                      background: 'transparent',
+                      color: '#718096',
+                      border: '1px solid #4a5568',
+                      borderRadius: 6,
+                      padding: '7px 10px',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                onClick={() => {
+                  // Task 2 will open the naming modal here.
+                  console.log('[SitPin] Drop at', sitPinMenu.lng.toFixed(6), sitPinMenu.lat.toFixed(6));
+                  setSitPinMenu(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  padding: '10px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#e2e8f0',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#2d3748')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <span style={{ fontSize: 16 }}>📍</span>
+                <span>Drop Sit Pin here</span>
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
         </div>
       )}
     </div>

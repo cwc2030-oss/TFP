@@ -78,6 +78,8 @@ declare module 'mapbox-gl' {
     moveLayer(layerId: string, beforeId?: string): void;
     removeSource(id: string): void;
     getSource(id: string): GeoJSONSource | any;
+    unproject(point: [number, number] | Point): LngLatLike;
+    project(lngLat: LngLatLike | [number, number]): Point;
     getLayer(id: string): StyleLayer | undefined;
     getStyle(): Style | undefined;
     setLayoutProperty(layerId: string, name: string, value: any): void;
