@@ -10851,11 +10851,11 @@ function DeerIntelContent() {
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
       <Toaster position="top-center" richColors />
 
-      {/* ═══ BETA BANNER — top of viewport ═══ */}
+      {/* ═══ HUNT PLAN BANNER — top of viewport ═══ */}
       {!isPro && summary && !isLoading && (
         <div className="absolute top-0 left-0 right-0 z-40 flex items-center justify-center py-1.5 bg-gradient-to-r from-amber-600/90 to-orange-600/90 backdrop-blur-sm pointer-events-auto" style={{ paddingLeft: '60px', paddingRight: '60px' }}>
           <p className="text-white text-[11px] font-medium tracking-wide">
-            ⚡ Beta Access — Intro Pricing <strong>$19</strong> per parcel
+            ⚡ Unlock Your Full Hunt Plan — <strong>$19</strong> per parcel · No subscription required
           </p>
         </div>
       )}
