@@ -2021,6 +2021,13 @@ function DeerIntelContent() {
     | { x: number; y: number; lng: number; lat: number; gated: boolean }
     | null
   >(null);
+  // Pin naming modal — open with the chosen map coordinates
+  const [sitPinModal, setSitPinModal] = useState<
+    | { lng: number; lat: number }
+    | null
+  >(null);
+  const [sitPinName, setSitPinName] = useState<string>('');
+  const [sitPinSaving, setSitPinSaving] = useState<boolean>(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -14165,8 +14172,9 @@ function DeerIntelContent() {
             ) : (
               <button
                 onClick={() => {
-                  // Task 2 will open the naming modal here.
                   console.log('[SitPin] Drop at', sitPinMenu.lng.toFixed(6), sitPinMenu.lat.toFixed(6));
+                  setSitPinModal({ lng: sitPinMenu.lng, lat: sitPinMenu.lat });
+                  setSitPinName('');
                   setSitPinMenu(null);
                 }}
                 style={{
@@ -14193,6 +14201,212 @@ function DeerIntelContent() {
           </div>
         );
       })()}
+
+      {/* ========== v3.9.0 — Sit Pin naming modal ========== */}
+      {sitPinModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 9600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !sitPinSaving) {
+              setSitPinModal(null);
+              setSitPinName('');
+            }
+          }}
+        >
+          <div
+            style={{
+              background: '#1a1a2e',
+              border: '1px solid #4a5568',
+              borderRadius: '12px',
+              padding: '28px 28px 22px',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+              color: '#e2e8f0',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: 22 }}>📍</span>
+              <h2 style={{ color: '#f0c040', fontSize: '18px', margin: 0, fontWeight: 700 }}>
+                Drop a Sit Pin
+              </h2>
+            </div>
+            <p style={{ color: '#a0aec0', fontSize: '12px', margin: '0 0 18px', lineHeight: 1.5 }}>
+              Mark a permanent stand location on your parcel.
+            </p>
+
+            {/* Input */}
+            <label
+              htmlFor="sit-pin-name"
+              style={{
+                display: 'block',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: '#cbd5e0',
+                marginBottom: 6,
+              }}
+            >
+              Name this stand
+            </label>
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input
+                id="sit-pin-name"
+                type="text"
+                autoFocus
+                maxLength={20}
+                value={sitPinName}
+                onChange={(e) => setSitPinName(e.target.value.slice(0, 20))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && sitPinName.trim() && !sitPinSaving) {
+                    // Task 3 will persist to Supabase. For now, just close.
+                    console.log('[SitPin] Confirm name:', sitPinName.trim(), 'at', sitPinModal.lng, sitPinModal.lat);
+                    setSitPinModal(null);
+                    setSitPinName('');
+                  } else if (e.key === 'Escape' && !sitPinSaving) {
+                    setSitPinModal(null);
+                    setSitPinName('');
+                  }
+                }}
+                placeholder="e.g. North Ridge Blind"
+                style={{
+                  width: '100%',
+                  background: '#0f1420',
+                  border: '1px solid #4a5568',
+                  borderRadius: 8,
+                  padding: '10px 56px 10px 12px',
+                  color: '#fff',
+                  fontSize: 14,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 11,
+                  color: sitPinName.length >= 18 ? '#f0c040' : '#718096',
+                  fontVariantNumeric: 'tabular-nums',
+                  pointerEvents: 'none',
+                }}
+              >
+                {sitPinName.length}/20
+              </span>
+            </div>
+
+            {/* Quick suggestions */}
+            <div style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: '#cbd5e0',
+                  marginBottom: 8,
+                }}
+              >
+                Quick suggestions
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {['Stand A', 'Ridge Blind', 'Food Plot', 'Creek Crossing', 'Field Edge'].map((suggestion) => {
+                  const active = sitPinName === suggestion;
+                  return (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => setSitPinName(suggestion)}
+                      style={{
+                        background: active ? '#2d6a4f' : '#0f1420',
+                        color: active ? '#fff' : '#cbd5e0',
+                        border: `1px solid ${active ? '#2d6a4f' : '#4a5568'}`,
+                        borderRadius: 999,
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'background 120ms, color 120ms, border-color 120ms',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!active) e.currentTarget.style.background = '#1f2937';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!active) e.currentTarget.style.background = '#0f1420';
+                      }}
+                    >
+                      {suggestion}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                disabled={sitPinSaving}
+                onClick={() => {
+                  setSitPinModal(null);
+                  setSitPinName('');
+                }}
+                style={{
+                  background: 'transparent',
+                  color: '#a0aec0',
+                  border: '1px solid #4a5568',
+                  borderRadius: 8,
+                  padding: '9px 18px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: sitPinSaving ? 'not-allowed' : 'pointer',
+                  opacity: sitPinSaving ? 0.6 : 1,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!sitPinName.trim() || sitPinSaving}
+                onClick={() => {
+                  // Task 3 will persist to Supabase. For now, just log + close.
+                  console.log('[SitPin] Confirm name:', sitPinName.trim(), 'at', sitPinModal.lng, sitPinModal.lat);
+                  setSitPinModal(null);
+                  setSitPinName('');
+                }}
+                style={{
+                  background: !sitPinName.trim() ? '#4a5568' : '#c0a020',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '9px 22px',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: !sitPinName.trim() || sitPinSaving ? 'not-allowed' : 'pointer',
+                  opacity: sitPinSaving ? 0.7 : 1,
+                }}
+              >
+                {sitPinSaving ? 'Saving…' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
         </div>
       )}
