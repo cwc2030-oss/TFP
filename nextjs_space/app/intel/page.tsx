@@ -10012,6 +10012,11 @@ function DeerIntelContent() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // v3.9.0 — Esc closes the sit pin context menu first (highest priority UI)
+        if (sitPinMenu) {
+          setSitPinMenu(null);
+          return;
+        }
         if (parcelPickMode) {
           // In territory mode, Esc exits both territory + pick mode
           if (territoryMode) {
@@ -10035,7 +10040,7 @@ function DeerIntelContent() {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [qaParcel, handleQaParcelClear, parcelPickMode, territoryMode]);
+  }, [qaParcel, handleQaParcelClear, parcelPickMode, territoryMode, sitPinMenu]);
 
   // ========== TERRAIN FLOW CLICK EVENT LISTENERS ==========
   useEffect(() => {
@@ -14383,12 +14388,12 @@ function DeerIntelContent() {
       {/* ========== v3.9.0 — Custom Sit Pin context menu (Pro feature) ========== */}
       {sitPinMenu && (() => {
         // Keep the menu inside the viewport (flip if near right/bottom edge)
-        const MENU_W = sitPinMenu.gated ? 260 : 200;
-        const MENU_H = sitPinMenu.gated ? 120 : 52;
+        const MENU_W = sitPinMenu.gated ? 296 : 200;
+        const MENU_H = sitPinMenu.gated ? 232 : 52;
         const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
         const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
-        const left = Math.min(sitPinMenu.x + 4, vw - MENU_W - 8);
-        const top  = Math.min(sitPinMenu.y + 4, vh - MENU_H - 8);
+        const left = Math.max(8, Math.min(sitPinMenu.x + 4, vw - MENU_W - 8));
+        const top  = Math.max(8, Math.min(sitPinMenu.y + 4, vh - MENU_H - 8));
         return (
           <div
             role="menu"
@@ -14399,62 +14404,128 @@ function DeerIntelContent() {
               top,
               zIndex: 9500,
               background: '#1a1a2e',
-              border: '1px solid #4a5568',
-              borderRadius: '8px',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.55)',
+              border: sitPinMenu.gated ? '1px solid #c0a020' : '1px solid #4a5568',
+              borderRadius: '10px',
+              boxShadow: sitPinMenu.gated
+                ? '0 14px 38px rgba(0,0,0,0.6), 0 0 0 1px rgba(192,160,32,0.15) inset'
+                : '0 10px 30px rgba(0,0,0,0.55)',
               minWidth: MENU_W,
-              padding: sitPinMenu.gated ? '12px 14px' : '6px 0',
+              padding: sitPinMenu.gated ? '16px 18px 14px' : '6px 0',
               color: '#e2e8f0',
               fontSize: '13px',
+              // Smooth entrance
+              animation: 'tfpSitPinMenuIn 160ms cubic-bezier(.2,.9,.3,1)',
+              transformOrigin: 'top left',
             }}
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >
+            {/* Shared keyframes — injected once inline (cheap, scoped by name) */}
+            <style>{`
+              @keyframes tfpSitPinMenuIn {
+                from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+                to   { opacity: 1; transform: translateY(0)    scale(1); }
+              }
+            `}</style>
+
             {sitPinMenu.gated ? (
               <>
-                <div style={{ fontSize: '13px', lineHeight: 1.5, marginBottom: 10 }}>
-                  Custom Sit Pins are a{' '}
-                  <span style={{ color: '#f0c040', fontWeight: 700 }}>Pro</span> feature 🔒
-                  <br />
-                  <span style={{ color: '#a0aec0', fontSize: '12px' }}>
-                    Upgrade to drop your own stands.
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={() => {
-                      setSitPinMenu(null);
-                      setShowUpgradeModal(true);
-                    }}
+                {/* Header with lock + title */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <div
+                    aria-hidden
                     style={{
-                      flex: 1,
-                      background: '#c0a020',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 6,
-                      padding: '7px 10px',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      background: 'linear-gradient(135deg, #c0a020 0%, #8b6b1f 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 16,
+                      flexShrink: 0,
+                      boxShadow: '0 2px 8px rgba(192,160,32,0.3)',
                     }}
                   >
-                    Upgrade
-                  </button>
-                  <button
-                    onClick={() => setSitPinMenu(null)}
-                    style={{
-                      background: 'transparent',
-                      color: '#718096',
-                      border: '1px solid #4a5568',
-                      borderRadius: 6,
-                      padding: '7px 10px',
-                      fontSize: 12,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Dismiss
-                  </button>
+                    🔒
+                  </div>
+                  <div style={{ lineHeight: 1.25 }}>
+                    <div style={{ color: '#f0c040', fontSize: 14, fontWeight: 700, letterSpacing: 0.2 }}>
+                      Custom Sit Pins
+                    </div>
+                    <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 2, letterSpacing: 0.3, textTransform: 'uppercase' }}>
+                      Pro feature
+                    </div>
+                  </div>
                 </div>
+
+                {/* Benefit bullets */}
+                <ul style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: '0 0 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  fontSize: 12,
+                  color: '#cbd5e0',
+                  lineHeight: 1.4,
+                }}>
+                  {[
+                    'Drop your own named stands anywhere',
+                    'Pins persist across visits & parcels',
+                    'Hover to see pin names on the map',
+                  ].map((b) => (
+                    <li key={b} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <span style={{ color: '#34d399', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>✓</span>
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* CTA row */}
+                <button
+                  onClick={() => {
+                    setSitPinMenu(null);
+                    setShowUpgradeModal(true);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: '#c0a020',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 7,
+                    padding: '10px 12px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    letterSpacing: 0.2,
+                    boxShadow: '0 2px 8px rgba(192,160,32,0.25)',
+                    transition: 'background 120ms, transform 120ms',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#d4b030'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = '#c0a020'; }}
+                >
+                  Upgrade to Pro — $99/yr
+                </button>
+                <button
+                  onClick={() => setSitPinMenu(null)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    background: 'transparent',
+                    color: '#718096',
+                    border: 'none',
+                    marginTop: 6,
+                    padding: '6px 8px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#a0aec0'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#718096'; }}
+                >
+                  Maybe later
+                </button>
               </>
             ) : (
               <button
