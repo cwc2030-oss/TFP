@@ -19,7 +19,7 @@ const riskColor = (r: string) =>
 const css = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Georgia, serif; color: #1a1a1a; background: white; }
-  .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; page-break-after: always; }
+  .page { width: 816px; padding: 48px 48px 24px; position: relative; page-break-after: always; }
   .page:last-child { page-break-after: avoid; }
   .border { border: 3px solid #1a3a2a; }
   .header { background: #1a3a2a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
@@ -60,8 +60,8 @@ const css = `
   .corridor-fill { height: 100%; background: #1a3a2a; border-radius: 2px; }
   .footer { display: flex; justify-content: space-between; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 24px; }
   .disclaimer { font-size: 9px; color: #999; line-height: 1.5; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
-  .section-title, .grid-2, .grid-3, .score-hero, .season-grid { page-break-inside: avoid; }
-  .stat-box { page-break-inside: avoid; }
+  /* Keep only truly atomic blocks together. Let grids/sections flow to avoid orphan whitespace. */
+  .score-hero, .season-grid { page-break-inside: avoid; }
   /* Page 1 density overrides — tightens vertical spacing so all content fits cleanly on one page. */
   .page-1 .header { margin-bottom: 20px; }
   .page-1 .gold-bar { margin-bottom: 14px; }
@@ -127,14 +127,29 @@ export async function POST(req: NextRequest) {
       ? Math.round(standElevations.reduce((a: number, b: number) => a + b, 0) / standElevations.length)
       : 0;
 
-    // Compute static season grades for PDF (replaces interactive UI buttons)
-    const baseScore = summary?.topStandScore ?? 0;
+    // ── Corridor totals (coerced + inclusive). Used across Page 1, Page 2 and the Certificate.
+    // Previously the certificate only counted primary + possible, so parcels with funnels-only terrain
+    // read as "0 CORRIDORS". Funnels are legitimate movement features and are included here.
+    const corridorPrimary  = Number(corridors?.primaryCount      ?? 0) || 0;
+    const corridorPossible = Number(corridors?.possibleCount     ?? 0) || 0;
+    const funnelHard       = Number(corridors?.hardFunnelCount   ?? 0) || 0;
+    const funnelSlight     = Number(corridors?.slightFunnelCount ?? 0) || 0;
+    const corridorTotal    = corridorPrimary + corridorPossible;
+    const movementFeatureTotal = corridorTotal + funnelHard + funnelSlight;
+
+    // Compute static season grades for PDF (replaces interactive UI buttons).
+    // Read base score from either seasonScores.topScore or summary.topStandScore (whichever is populated).
+    const baseScore = Number(seasonScores?.topScore ?? summary?.topStandScore ?? 0) || 0;
     const recommended = seasonScores?.recommended ?? 'rut';
-    // If per-season scores provided from client, use them; otherwise derive from base score + season modifiers
-    const earlyRaw = seasonScores?.earlyScore ?? Math.round(baseScore * 0.82);
-    const rutRaw   = seasonScores?.rutScore   ?? baseScore;
-    const lateRaw  = seasonScores?.lateScore  ?? Math.round(baseScore * 0.75);
-    const seasonGrade = (s: number) => s >= 90 ? 'A+' : s >= 80 ? 'A' : s >= 70 ? 'B+' : s >= 60 ? 'B' : s >= 50 ? 'C+' : s >= 40 ? 'C' : 'D';
+    // If per-season scores provided from client, use them; otherwise derive from base score + season modifiers.
+    // Rut peaks at base (100%), early at 82% (bachelor groups, food focus), late at 75% (wary survivors, scarce food).
+    const earlyRaw = Number(seasonScores?.earlyScore ?? Math.round(baseScore * 0.82)) || Math.round(baseScore * 0.82);
+    const rutRaw   = Number(seasonScores?.rutScore   ?? baseScore) || baseScore;
+    const lateRaw  = Number(seasonScores?.lateScore  ?? Math.round(baseScore * 0.75)) || Math.round(baseScore * 0.75);
+    const seasonGrade = (s: number) => {
+      if (s <= 0 || !isFinite(s)) return '—';
+      return s >= 90 ? 'A+' : s >= 80 ? 'A' : s >= 70 ? 'B+' : s >= 60 ? 'B' : s >= 50 ? 'C+' : s >= 40 ? 'C' : 'D';
+    };
     const seasonGradeColor = (s: number) => s >= 70 ? '#2d6a4f' : s >= 50 ? '#d4a017' : '#c0392b';
     const seasonScoresComputed: Record<string, { score: number; grade: string; color: string }> = {
       early: { score: earlyRaw, grade: seasonGrade(earlyRaw), color: seasonGradeColor(earlyRaw) },
@@ -240,7 +255,7 @@ export async function POST(req: NextRequest) {
   </div>
 </div>` : '';
 
-    // Certificate page is built inline in the html template so it can access totalPages
+    // Certificate page is built inline in the html template
 
     // Better county/state parsing from full address string
     // Google format: "425 SE 850th Rd, Leeton, MO 64761, USA"
@@ -308,8 +323,8 @@ export async function POST(req: NextRequest) {
       console.error('[hunt-report] Static map fetch error:', e);
     }
 
-    // Dynamic page count: Page 1 (overview) + Page 2 (intercepts) + optional map page + certificate
-    const totalPages = mapImageBase64 ? 4 : 3;
+    // Page count is handled dynamically by Playwright's <span class="pageNumber"></span> / <span class="totalPages"></span>
+    // in the footer_template below — no manual counting needed.
 
     const html = `<!DOCTYPE html>
 <html>
@@ -360,7 +375,7 @@ export async function POST(req: NextRequest) {
       <div class="stat-label">Bedding Acres</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${corridors?.primaryCount ?? 0}</div>
+      <div class="stat-value">${corridorPrimary}</div>
       <div class="stat-label">Primary Corridors</div>
     </div>
     <div class="stat-box">
@@ -377,8 +392,9 @@ export async function POST(req: NextRequest) {
       return `
     <div class="season-cell ${isRec ? 'season-recommended' : ''}">
       <div class="season-name">${seasonLabel(s)}</div>
-      <div style="font-size:32px;font-weight:bold;margin:8px 0;color:${isRec ? '#c9a84c' : sc.color}">${sc.grade}</div>
-      <div style="font-size:12px;color:${isRec ? 'rgba(255,255,255,0.7)' : '#666'};margin-bottom:6px">${sc.score} / 100</div>
+      <div style="font-size:40px;font-weight:bold;line-height:1;margin:10px 0 4px;color:${isRec ? '#c9a84c' : sc.color}">${sc.grade}</div>
+      <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:${isRec ? 'rgba(255,255,255,0.6)' : '#999'};margin-bottom:6px">Huntability Grade</div>
+      <div style="font-size:12px;color:${isRec ? 'rgba(255,255,255,0.75)' : '#666'};margin-bottom:8px">${sc.score} / 100</div>
       ${isRec ? `<div style="display:inline-block;padding:4px 12px;font-size:11px;background:#c9a84c;color:#1a3a2a">★ RECOMMENDED</div>` : ''}
     </div>`;
     }).join('')}
@@ -400,11 +416,6 @@ export async function POST(req: NextRequest) {
       <div class="stat-value">${displayElevAvg} ft</div>
       <div class="stat-label">Avg Elevation</div>
     </div>
-  </div>
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 1 of ${totalPages}</span>
   </div>
 </div>
 
@@ -468,7 +479,7 @@ export async function POST(req: NextRequest) {
   <div class="section-title" style="margin-top:16px">Corridor Intelligence</div>
   <div class="grid-2">
     <div class="stat-box">
-      <div class="stat-value">${corridors?.primaryCount ?? 0} primary · ${corridors?.possibleCount ?? 0} possible</div>
+      <div class="stat-value">${corridorPrimary} primary · ${corridorPossible} possible</div>
       <div class="stat-label">Movement Corridors Detected</div>
       <div class="corridor-bar">
         <div class="corridor-fill" style="width:${Math.min(100, Math.round((corridors?.parcelCoverage ?? 0) * 100))}%"></div>
@@ -476,10 +487,10 @@ export async function POST(req: NextRequest) {
       <div style="font-size:10px;color:#666;margin-top:4px">${Math.min(100, Math.round((corridors?.parcelCoverage ?? 0) * 100))}% parcel corridor coverage</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${corridors?.hardFunnelCount ?? 0} hard · ${corridors?.slightFunnelCount ?? 0} slight</div>
+      <div class="stat-value">${funnelHard} hard · ${funnelSlight} slight</div>
       <div class="stat-label">Funnel Zones Detected</div>
       <div style="font-size:11px;color:#1a3a2a;margin-top:8px;font-weight:bold">
-        ${(corridors?.hardFunnelCount ?? 0) > 0 ? '★ Hard funnels present — high value intercept locations' : 'Soft funnels only — terrain dependent movement'}
+        ${funnelHard > 0 ? '★ Hard funnels present — high value intercept locations' : 'Soft funnels only — terrain dependent movement'}
       </div>
     </div>
   </div>
@@ -492,8 +503,8 @@ export async function POST(req: NextRequest) {
       force deer through a narrow zone. Positions near hard funnels intercept nearly all deer movement in that area.<br><br>
       <strong>Slight Funnels</strong> are softer compressions — benches, field edges, gentle draws — where deer prefer 
       to travel but aren't forced. These are excellent intercept locations but require more precise wind management.<br><br>
-      <strong>Pro Tip:</strong> ${(corridors?.hardFunnelCount ?? 0) > 0 
-        ? `This property has ${corridors.hardFunnelCount} hard funnel${corridors.hardFunnelCount > 1 ? 's' : ''} — prioritize intercept placement within 50 yards of these natural pinch points for maximum encounter rates.`
+      <strong>Pro Tip:</strong> ${funnelHard > 0 
+        ? `This property has ${funnelHard} hard funnel${funnelHard > 1 ? 's' : ''} — prioritize intercept placement within 50 yards of these natural pinch points for maximum encounter rates.`
         : 'Focus intercept points on slight funnels with favorable wind — approach from downwind for best results.'}
     </div>
   </div>
@@ -501,11 +512,6 @@ export async function POST(req: NextRequest) {
     This report is generated from satellite terrain analysis and predictive modeling. Intercept point recommendations are based on terrain geometry,
     historical deer movement patterns, and wind modeling. Always scout properties in person before committing to intercept positions.
     Terra Firma Partners is not responsible for hunting outcomes. Data sources: Regrid, USGS DEM, USDA. Report ID: ${reportId}
-  </div>
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 2 of ${totalPages}</span>
   </div>
 </div>
 
@@ -572,11 +578,6 @@ ${mapImageBase64 ? `
     Deer will smell you from 300+ yards — your entry route matters as much as your intercept position.
   </div>
 
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 3 of ${totalPages}</span>
-  </div>
 </div>
 ` : ''}
 
@@ -604,8 +605,8 @@ ${mapImageBase64 ? `
           <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">INTERCEPT POINTS</div>
         </div>
         <div style="background:#1a3a2a;color:white;padding:12px">
-          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(corridors?.primaryCount ?? 0) + (corridors?.possibleCount ?? 0)}</div>
-          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS</div>
+          <div style="font-size:20px;font-weight:bold;color:#c9a84c">${movementFeatureTotal}</div>
+          <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS${funnelHard + funnelSlight > 0 ? ' + FUNNELS' : ''}</div>
         </div>
       </div>
       <div style="height:1px;background:#ddd;margin-bottom:16px"></div>
@@ -621,11 +622,6 @@ ${mapImageBase64 ? `
     </div>
     <div style="margin-top:24px;font-size:10px;color:#ccc;letter-spacing:2px">Report ID: ${reportId}</div>
   </div>
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page ${totalPages} of ${totalPages}</span>
-  </div>
 </div>
 
 </body>
@@ -635,6 +631,15 @@ ${mapImageBase64 ? `
     console.log(`[parcel-hunt-file] Converting HTML to PDF for report ${reportId}...`);
 
     try {
+      // Playwright-native footer with DYNAMIC page numbers — matches actual rendered pages.
+      // Chrome substitutes <span class="pageNumber"></span> → current page, <span class="totalPages"></span> → total.
+      const footerTemplate = `
+<div style="font-size:9px;color:#999;width:100%;padding:0 48px;display:flex;justify-content:space-between;font-family:Georgia,serif;-webkit-print-color-adjust:exact">
+  <span>Report ID: ${reportId}</span>
+  <span>TERRA FIRMA PARTNERS</span>
+  <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+</div>`;
+
       const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -644,7 +649,11 @@ ${mapImageBase64 ? `
           pdf_options: {
             format: 'Letter',
             print_background: true,
-            margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' },
+            // Reserve ~32px at bottom for the browser-rendered footer band.
+            margin: { top: '0px', right: '0px', bottom: '32px', left: '0px' },
+            display_header_footer: true,
+            header_template: '<span></span>',
+            footer_template: footerTemplate,
           },
           base_url: process.env.NEXTAUTH_URL || '',
         }),
