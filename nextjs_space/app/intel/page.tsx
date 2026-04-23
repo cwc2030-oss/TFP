@@ -2028,6 +2028,10 @@ function DeerIntelContent() {
   >(null);
   const [sitPinName, setSitPinName] = useState<string>('');
   const [sitPinSaving, setSitPinSaving] = useState<boolean>(false);
+  const [sitPinError, setSitPinError] = useState<string | null>(null);
+  // Loaded user pins for the *current* parcel
+  interface SitPin { id: string; parcel_id: string; name: string; lng: number; lat: number; created_at: string; }
+  const [sitPins, setSitPins] = useState<SitPin[]>([]);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -2212,6 +2216,17 @@ function DeerIntelContent() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
 
+  // v3.9.0 — Stable parcel key used to group sit pins per parcel.
+  // Prefers Regrid-style parcelId; falls back to rounded lat/lng (~0.1 m precision).
+  const currentParcelKey = useMemo(() => {
+    const pid = (parcelPolygon?.properties as any)?.parcelId;
+    if (pid && typeof pid === 'string' && pid.length > 0) return String(pid);
+    if (Number.isFinite(activeLat) && Number.isFinite(activeLng) && (activeLat !== 0 || activeLng !== 0)) {
+      return `ll:${activeLat.toFixed(6)},${activeLng.toFixed(6)}`;
+    }
+    return '';
+  }, [parcelPolygon, activeLat, activeLng]);
+
   // ========== TERRITORY (MULTI-PARCEL) STATE ==========
   const [territoryParcels, setTerritoryParcels] = useState<TerritoryParcel[]>([]);
   const [territoryMode, setTerritoryMode] = useState<boolean>(false);
@@ -2277,6 +2292,86 @@ function DeerIntelContent() {
   useEffect(() => { parcelUnlockedRef.current = parcelUnlocked; }, [parcelUnlocked]);
   const isProRef = useRef(false);
   useEffect(() => { isProRef.current = isPro; }, [isPro]);
+
+  // v3.9.0 — Persist a sit pin for the current parcel (Pro-only)
+  const saveSitPin = useCallback(async () => {
+    if (!sitPinModal) return;
+    const name = sitPinName.trim().slice(0, 20);
+    if (!name) return;
+    if (!currentParcelKey) {
+      setSitPinError('No parcel loaded yet — please wait for analysis.');
+      return;
+    }
+    setSitPinSaving(true);
+    setSitPinError(null);
+    try {
+      const res = await fetch('/api/sit-pins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcelId: currentParcelKey,
+          name,
+          lng: sitPinModal.lng,
+          lat: sitPinModal.lat,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401) {
+          setSitPinError('Please sign in to save sit pins.');
+        } else if (res.status === 403) {
+          setSitPinError('Pro subscription required.');
+        } else {
+          setSitPinError(data?.error || 'Could not save pin. Please try again.');
+        }
+        console.warn('[SitPin] save failed:', res.status, data);
+        return;
+      }
+      const pin = data?.pin as SitPin | undefined;
+      if (pin) {
+        setSitPins((prev) => [...prev, pin]);
+        console.log('[SitPin] Saved:', pin.id, pin.name);
+      }
+      setSitPinModal(null);
+      setSitPinName('');
+    } catch (err) {
+      console.error('[SitPin] save error:', err);
+      setSitPinError('Network error. Please try again.');
+    } finally {
+      setSitPinSaving(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sitPinModal, sitPinName, currentParcelKey]);
+
+  // v3.9.0 — Load user sit pins whenever the current parcel changes (Pro-only)
+  useEffect(() => {
+    if (!isPro || !currentParcelKey) {
+      setSitPins([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/sit-pins?parcelId=${encodeURIComponent(currentParcelKey)}`,
+          { cache: 'no-store' }
+        );
+        if (!res.ok) {
+          if (!cancelled) setSitPins([]);
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data?.pins)) {
+          setSitPins(data.pins as SitPin[]);
+          console.log(`[SitPin] Loaded ${data.pins.length} pin(s) for parcel ${currentParcelKey}`);
+        }
+      } catch (err) {
+        if (!cancelled) setSitPins([]);
+        console.warn('[SitPin] load failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isPro, currentParcelKey]);
 
   // Stand stability: remember previous top-3 stands to prevent jarring jumps on re-analysis
   const previousStandsRef = useRef<AlignedStand[]>([]);
@@ -14175,6 +14270,7 @@ function DeerIntelContent() {
                   console.log('[SitPin] Drop at', sitPinMenu.lng.toFixed(6), sitPinMenu.lat.toFixed(6));
                   setSitPinModal({ lng: sitPinMenu.lng, lat: sitPinMenu.lat });
                   setSitPinName('');
+                  setSitPinError(null);
                   setSitPinMenu(null);
                 }}
                 style={{
@@ -14219,6 +14315,7 @@ function DeerIntelContent() {
             if (e.target === e.currentTarget && !sitPinSaving) {
               setSitPinModal(null);
               setSitPinName('');
+              setSitPinError(null);
             }
           }}
         >
@@ -14271,13 +14368,11 @@ function DeerIntelContent() {
                 onChange={(e) => setSitPinName(e.target.value.slice(0, 20))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && sitPinName.trim() && !sitPinSaving) {
-                    // Task 3 will persist to Supabase. For now, just close.
-                    console.log('[SitPin] Confirm name:', sitPinName.trim(), 'at', sitPinModal.lng, sitPinModal.lat);
-                    setSitPinModal(null);
-                    setSitPinName('');
+                    saveSitPin();
                   } else if (e.key === 'Escape' && !sitPinSaving) {
                     setSitPinModal(null);
                     setSitPinName('');
+                    setSitPinError(null);
                   }
                 }}
                 placeholder="e.g. North Ridge Blind"
@@ -14356,6 +14451,25 @@ function DeerIntelContent() {
               </div>
             </div>
 
+            {/* Inline error (auth / network / validation) */}
+            {sitPinError && (
+              <div
+                role="alert"
+                style={{
+                  background: '#3a1414',
+                  border: '1px solid #b45454',
+                  color: '#fca5a5',
+                  borderRadius: 8,
+                  padding: '8px 12px',
+                  fontSize: 12,
+                  marginBottom: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                {sitPinError}
+              </div>
+            )}
+
             {/* Actions */}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
@@ -14364,6 +14478,7 @@ function DeerIntelContent() {
                 onClick={() => {
                   setSitPinModal(null);
                   setSitPinName('');
+                  setSitPinError(null);
                 }}
                 style={{
                   background: 'transparent',
@@ -14382,12 +14497,7 @@ function DeerIntelContent() {
               <button
                 type="button"
                 disabled={!sitPinName.trim() || sitPinSaving}
-                onClick={() => {
-                  // Task 3 will persist to Supabase. For now, just log + close.
-                  console.log('[SitPin] Confirm name:', sitPinName.trim(), 'at', sitPinModal.lng, sitPinModal.lat);
-                  setSitPinModal(null);
-                  setSitPinName('');
-                }}
+                onClick={() => saveSitPin()}
                 style={{
                   background: !sitPinName.trim() ? '#4a5568' : '#c0a020',
                   color: '#fff',
