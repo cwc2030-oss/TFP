@@ -19,7 +19,7 @@ const riskColor = (r: string) =>
 const css = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Georgia, serif; color: #1a1a1a; background: white; }
-  .page { width: 816px; padding: 48px 48px 24px; position: relative; page-break-after: always; }
+  .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; page-break-after: always; }
   .page:last-child { page-break-after: avoid; }
   .border { border: 3px solid #1a3a2a; }
   .header { background: #1a3a2a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
@@ -323,8 +323,9 @@ export async function POST(req: NextRequest) {
       console.error('[hunt-report] Static map fetch error:', e);
     }
 
-    // Page count is handled dynamically by Playwright's <span class="pageNumber"></span> / <span class="totalPages"></span>
-    // in the footer_template below — no manual counting needed.
+    // Estimated total pages — matches the count of .page divs rendered below.
+    // Certificate lost its footer (FIX 1) so we count: Page 1 + Page 2 + optional map + certificate.
+    const totalPages = mapImageBase64 ? 4 : 3;
 
     const html = `<!DOCTYPE html>
 <html>
@@ -416,6 +417,11 @@ export async function POST(req: NextRequest) {
       <div class="stat-value">${displayElevAvg} ft</div>
       <div class="stat-label">Avg Elevation</div>
     </div>
+  </div>
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page 1 of ${totalPages}</span>
   </div>
 </div>
 
@@ -513,6 +519,11 @@ export async function POST(req: NextRequest) {
     historical deer movement patterns, and wind modeling. Always scout properties in person before committing to intercept positions.
     Terra Firma Partners is not responsible for hunting outcomes. Data sources: Regrid, USGS DEM, USDA. Report ID: ${reportId}
   </div>
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page 2 of ${totalPages}</span>
+  </div>
 </div>
 
 ${mapImageBase64 ? `
@@ -578,6 +589,11 @@ ${mapImageBase64 ? `
     Deer will smell you from 300+ yards — your entry route matters as much as your intercept position.
   </div>
 
+  <div class="footer">
+    <span>Report ID: ${reportId}</span>
+    <span>TERRA FIRMA PARTNERS</span>
+    <span>Page 3 of ${totalPages}</span>
+  </div>
 </div>
 ` : ''}
 
@@ -631,15 +647,6 @@ ${mapImageBase64 ? `
     console.log(`[parcel-hunt-file] Converting HTML to PDF for report ${reportId}...`);
 
     try {
-      // Playwright-native footer with DYNAMIC page numbers — matches actual rendered pages.
-      // Chrome substitutes <span class="pageNumber"></span> → current page, <span class="totalPages"></span> → total.
-      const footerTemplate = `
-<div style="font-size:9px;color:#999;width:100%;padding:0 48px;display:flex;justify-content:space-between;font-family:Georgia,serif;-webkit-print-color-adjust:exact">
-  <span>Report ID: ${reportId}</span>
-  <span>TERRA FIRMA PARTNERS</span>
-  <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
-</div>`;
-
       const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -649,11 +656,7 @@ ${mapImageBase64 ? `
           pdf_options: {
             format: 'Letter',
             print_background: true,
-            // Reserve ~32px at bottom for the browser-rendered footer band.
-            margin: { top: '0px', right: '0px', bottom: '32px', left: '0px' },
-            display_header_footer: true,
-            header_template: '<span></span>',
-            footer_template: footerTemplate,
+            margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' },
           },
           base_url: process.env.NEXTAUTH_URL || '',
         }),
