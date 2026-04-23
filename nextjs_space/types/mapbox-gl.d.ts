@@ -24,6 +24,7 @@ declare module 'mapbox-gl' {
   export interface MapLayerMouseEvent {
     lngLat: LngLatLike;
     point: Point;
+    originalEvent?: MouseEvent;
     features?: Array<{
       properties: Record<string, any>;
       geometry: any;

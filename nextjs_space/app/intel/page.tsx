@@ -8721,6 +8721,14 @@ function DeerIntelContent() {
 
         // Desktop: right-click
         map.on('contextmenu', (e: mapboxgl.MapMouseEvent) => {
+          // Suppress the browser's native right-click menu so our custom
+          // Sit Pin menu is the only thing the user sees.
+          try { e.originalEvent?.preventDefault?.(); } catch (_) {}
+          console.log('[SitPin] contextmenu fired', {
+            isPro: isProRef.current,
+            lng: e.lngLat.lng,
+            lat: e.lngLat.lat,
+          });
           const canvasRect = map.getCanvas().getBoundingClientRect();
           const vx = canvasRect.left + e.point.x;
           const vy = canvasRect.top + e.point.y;
