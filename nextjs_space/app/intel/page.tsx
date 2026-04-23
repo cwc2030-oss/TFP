@@ -3155,9 +3155,24 @@ function DeerIntelContent() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Helper: build a login callback URL that preserves current query params
+  //          + an optional intent flag, so purchase/upgrade intent survives the
+  //          auth redirect and can be auto-resumed after sign-in. ──
+  function buildAuthRedirect(intentKey: string, intentValue: string) {
+    const url = new URL(window.location.href);
+    // Drop any stale intent flags so we don't double-up
+    url.searchParams.delete('autoUnlock');
+    url.searchParams.delete('autoUpgrade');
+    url.searchParams.set(intentKey, intentValue);
+    // Only the pathname + search needs to be passed as the callback
+    const callback = encodeURIComponent(url.pathname + url.search);
+    return `/login?callbackUrl=${callback}`;
+  }
+
   async function handleUpgrade(plan: 'monthly' | 'annual', tier: 'pro' | 'promax' = 'pro') {
     if (!session?.user) {
-      router.push('/login?callbackUrl=%2Fintel');
+      // Preserve tier + plan intent so Stripe checkout fires automatically on return
+      router.push(buildAuthRedirect('autoUpgrade', `${tier}_${plan}`));
       return;
     }
     setUpgradeLoading(`${tier}_${plan}`);
@@ -3223,7 +3238,9 @@ function DeerIntelContent() {
   // ── $19 parcel purchase flow ──
   async function handlePurchaseParcel() {
     if (!session?.user) {
-      router.push('/login?callbackUrl=%2Fintel');
+      // Preserve parcel context (lat/lng/address) + autoUnlock intent so
+      // Stripe checkout fires automatically once the user signs back in.
+      router.push(buildAuthRedirect('autoUnlock', '1'));
       return;
     }
     setPurchaseLoading(true);
@@ -3254,6 +3271,59 @@ function DeerIntelContent() {
       setPurchaseLoading(false);
     }
   }
+
+  // ── Auto-resume $19 Hunt Plan checkout after sign-in ──
+  // When a logged-out user clicks "Unlock $19", we redirect to /login with
+  //   callbackUrl=/intel?lat=…&lng=…&address=…&autoUnlock=1
+  // After sign-in they come back here. Once the session + terrain summary
+  // are ready, auto-trigger the Stripe checkout so they don't have to click
+  // "Unlock" a second time.
+  const autoUnlockFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoUnlockFiredRef.current) return;
+    if (searchParams.get('autoUnlock') !== '1') return;
+    if (!session?.user) return;
+    if (!summary) return;                 // wait for terrain analysis to hydrate
+    if (!activeLat || !activeLng) return; // need parcel context
+    if (parcelUnlocked) return;           // already unlocked — nothing to do
+    if (purchaseLoading) return;          // already in flight
+
+    autoUnlockFiredRef.current = true;
+    // Clean the flag from the URL so a refresh won't re-trigger
+    const url = new URL(window.location.href);
+    url.searchParams.delete('autoUnlock');
+    window.history.replaceState({}, '', url.toString());
+
+    console.log('[AutoUnlock] Resuming $19 checkout after sign-in');
+    toast.info('Opening checkout…');
+    handlePurchaseParcel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, summary, activeLat, activeLng, parcelUnlocked, purchaseLoading]);
+
+  // ── Auto-resume Pro / Pro Max upgrade checkout after sign-in ──
+  // Mirrors the autoUnlock flow. The intent flag carries the tier+plan.
+  // Value format: "pro_annual" | "pro_monthly" | "promax_annual" | "promax_monthly".
+  const autoUpgradeFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoUpgradeFiredRef.current) return;
+    const raw = searchParams.get('autoUpgrade');
+    if (!raw) return;
+    if (!session?.user) return;
+    if (isPro) return; // already Pro — nothing to do
+
+    const [tier, plan] = raw.split('_') as ['pro' | 'promax', 'monthly' | 'annual'];
+    if ((tier !== 'pro' && tier !== 'promax') || (plan !== 'monthly' && plan !== 'annual')) return;
+
+    autoUpgradeFiredRef.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('autoUpgrade');
+    window.history.replaceState({}, '', url.toString());
+
+    console.log('[AutoUpgrade] Resuming', tier, plan, 'checkout after sign-in');
+    toast.info('Opening checkout…');
+    handleUpgrade(plan, tier);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, isPro]);
 
   async function handleSaveProperty() {
     const payload = territoryMode ? {
