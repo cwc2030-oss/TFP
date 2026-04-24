@@ -79,9 +79,12 @@ export default function PricingPage() {
             Annual <span className="text-emerald-600 font-semibold text-xs ml-1">Save 30%+</span>
           </span>
         </div>
+        <p className="text-center text-xs text-stone-500 -mt-8 mb-12">
+          Billing toggle applies to Pro &amp; Pro Max subscriptions. The Single Parcel unlock is always one-time $19.
+        </p>
 
-        {/* ──── 3-Tier Pricing Cards ──── */}
-        <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-6 items-start mb-16">
+        {/* ──── 4-Tier Pricing Cards ──── */}
+        <div className="max-w-7xl mx-auto grid md:grid-cols-2 lg:grid-cols-4 gap-6 items-start mb-16">
 
           {/* ── FREE ── */}
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-stone-200">
@@ -100,9 +103,9 @@ export default function PricingPage() {
               </h3>
               <ul className="space-y-3">
                 {[
-                  "Single parcel terrain analysis",
+                  "Terrain Brain preview",
+                  "Hunt Report preview (watermarked)",
                   "Deer Flow, bedding zones, intercept points",
-                  "Hunt File download",
                   "onX integration",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
@@ -121,8 +124,51 @@ export default function PricingPage() {
             </div>
           </div>
 
+          {/* ── SINGLE PARCEL — $19 one-time ── */}
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-amber-600/70 relative">
+            <div className="absolute top-0 right-0 bg-amber-700 text-amber-50 px-3 py-1 text-xs font-bold rounded-bl-lg tracking-wide">
+              NO SUBSCRIPTION
+            </div>
+            <div className="bg-amber-700 text-amber-50 text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
+              🎯 SINGLE PARCEL
+            </div>
+            <div className="p-6 text-center border-b border-stone-200">
+              <div className="mt-1 mb-1">
+                <span className="text-5xl font-bold text-amber-800">$19</span>
+                <span className="text-stone-500 text-sm ml-1">/ one parcel</span>
+              </div>
+              <p className="text-stone-500 text-sm">one-time · no subscription required</p>
+            </div>
+            <div className="p-6">
+              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
+                What&apos;s included:
+              </h3>
+              <ul className="space-y-3">
+                {[
+                  "Full terrain analysis",
+                  "Deer Flow, bedding zones, intercept points",
+                  "Custom Sit Pins",
+                  "Hunt Report download (full, unwatermarked)",
+                  "Never expires",
+                ].map((f, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <Check className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                    <span className="text-stone-700 text-sm font-medium">{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-8">
+                <Link href="/intel" className="block">
+                  <Button className="w-full bg-amber-700 hover:bg-amber-800 text-amber-50 py-4 text-base font-semibold">
+                    Unlock a Parcel
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+
           {/* ── PRO — Most Popular ── */}
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-500 relative transform md:scale-105">
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-500 relative">
             <div className="absolute top-0 right-0 bg-emerald-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
               MOST POPULAR
             </div>
@@ -144,12 +190,14 @@ export default function PricingPage() {
             </div>
             <div className="p-6">
               <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
-                Everything in Free, plus:
+                Everything in Single Parcel, plus:
               </h3>
               <ul className="space-y-3">
                 {[
+                  "Unlimited parcels (full intel)",
                   "5-parcel Territory Mode",
                   "Unified Deer Flow across parcels",
+                  "Custom Sit Pins",
                   "Territory Hunt Certificate",
                   "Save & share territories",
                 ].map((f, i) => (
@@ -262,7 +310,15 @@ export default function PricingPage() {
                 What do I get with the free tier?
               </h3>
               <p className="text-stone-600">
-                Analyze any single parcel with our full terrain engine — Deer Flow corridors, bedding zones, intercept points, wind strategy, and a downloadable Hunt File for onX. No credit card required.
+                Preview any parcel with Terrain Brain — Deer Flow corridors, bedding zones, and intercept points — plus a watermarked Hunt Report preview. No credit card required. When you&apos;re ready for the full unwatermarked report, unlock a parcel for $19 or go Pro.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow-sm">
+              <h3 className="font-semibold text-stone-900 mb-2">
+                What&apos;s the difference between Single Parcel and Pro?
+              </h3>
+              <p className="text-stone-600">
+                Single Parcel ($19) is a one-time purchase that unlocks full, unwatermarked intel — including Custom Sit Pins and the full Hunt Report download — for one specific parcel, forever. Pro ($99/yr) unlocks unlimited parcels plus 5-parcel Territory Mode for multi-property hunters.
               </p>
             </div>
             <div className="bg-white rounded-lg p-6 shadow-sm">
