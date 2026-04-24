@@ -9030,6 +9030,7 @@ function DeerIntelContent() {
 
       // ========== v3.9.0 — Custom Sit Pins: right-click (desktop) + long-press (mobile) ==========
       try {
+        console.log('[SitPin] REACHED');
         const openSitPinMenu = (viewportX: number, viewportY: number, lng: number, lat: number) => {
           setSitPinMenu({
             x: viewportX,
@@ -9117,6 +9118,7 @@ function DeerIntelContent() {
 
         console.log('[SitPin] Context-menu handlers registered (right-click + long-press)');
       } catch (sitPinErr) {
+        console.log('[SitPin] CATCH', sitPinErr);
         console.warn('[SitPin] Failed to register context-menu handlers:', sitPinErr);
       }
 
