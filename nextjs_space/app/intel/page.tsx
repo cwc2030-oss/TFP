@@ -7389,12 +7389,11 @@ function DeerIntelContent() {
             source: 'tfp-flow-primary',
             layout: {
               'symbol-placement': 'line',
-              'symbol-spacing': [
-                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 160,    // Weak corridors: sparse chevrons
-                0.55, 110,   // Moderate: tighter
-                0.75, 75,    // Strong: dense
-              ],
+              // NOTE: Mapbox GL does NOT allow data expressions on `symbol-spacing`
+              // (only zoom-based expressions). Using data-driven values here throws
+              // a style error that crashes the entire map useEffect before it
+              // reaches the sit-pin contextmenu registration block. Keep it static.
+              'symbol-spacing': 110,
               'text-field': '›',
               'text-size': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
