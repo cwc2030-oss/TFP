@@ -20,6 +20,34 @@ type MapWithGetPaint = mapboxgl.Map & {
 // Active animation cancellation tokens
 const activeAnimations = new Map<string, number>();
 
+// Paint properties whose values must be clamped to [0, 1] per Mapbox style spec.
+// Passing a value outside this range (even by a tiny floating-point epsilon) makes
+// Mapbox emit a style-validation warning AND leaves the internal property state
+// partially undefined, which later causes `TypeError: Cannot read properties of
+// undefined (reading 'value')` when subsequent getPaintProperty / setPaintProperty
+// calls try to read or update that property. Clamping prevents the whole crash.
+const OPACITY_PROPS = new Set<string>([
+  'line-opacity',
+  'fill-opacity',
+  'circle-opacity',
+  'circle-stroke-opacity',
+  'heatmap-opacity',
+  'icon-opacity',
+  'text-opacity',
+  'fill-extrusion-opacity',
+  'raster-opacity',
+  'background-opacity',
+]);
+
+function clampForProperty(property: string, value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (OPACITY_PROPS.has(property)) {
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+  }
+  return value;
+}
+
 // ─── Easing functions ────────────────────────────────────────────────
 export function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -65,21 +93,28 @@ export function animatePaint(
   } catch {
     startValue = targetValue;
   }
+  // Clamp readback — a residual out-of-range value from a prior broken animation
+  // or stale style could propagate through here.
+  startValue = clampForProperty(property, startValue);
+  // Also clamp the requested target so we never animate to an invalid value.
+  const clampedTarget = clampForProperty(property, targetValue);
 
   // If already at target, skip
-  if (Math.abs(startValue - targetValue) < 0.001) {
+  if (Math.abs(startValue - clampedTarget) < 0.001) {
     activeAnimations.delete(animKey);
     return;
   }
 
   const startTime = performance.now();
-  const delta = targetValue - startValue;
+  const delta = clampedTarget - startValue;
 
   function step(now: number) {
     const elapsed = now - startTime;
     const progress = Math.min(elapsed / durationMs, 1);
     const eased = easeFn(progress);
-    const value = startValue + delta * eased;
+    // Clamp to valid range for opacity-style props to avoid Mapbox validation
+    // warnings AND the downstream TypeError that negative opacities can trigger.
+    const value = clampForProperty(property, startValue + delta * eased);
 
     try {
       map.setPaintProperty(layerId, property, value);
@@ -148,13 +183,16 @@ export function fadeLayerOut(
   } catch {
     startOpacity = 0.5;
   }
+  // Clamp readback value — a residual negative opacity from a prior broken
+  // animation could leak through here and re-trigger the Mapbox crash.
+  startOpacity = clampForProperty(opacityProp, startOpacity);
   if (startOpacity < 0.01) {
     if (setHidden) {
       try { map.setLayoutProperty(layerId, 'visibility', 'none'); } catch { /* ignore */ }
     }
     return;
   }
-  map.setPaintProperty(layerId, opacityProp, startOpacity);
+  try { map.setPaintProperty(layerId, opacityProp, startOpacity); } catch { /* ignore */ }
 
   const animKey = `${layerId}::${opacityProp}`;
   const prev = activeAnimations.get(animKey);
@@ -166,7 +204,9 @@ export function fadeLayerOut(
     const elapsed = now - startTime;
     const progress = Math.min(elapsed / durationMs, 1);
     const eased = easeFn(progress);
-    const value = startOpacity * (1 - eased);
+    // Clamp to valid range for opacity-style props to avoid Mapbox validation
+    // warnings AND the downstream TypeError that negative opacities can trigger.
+    const value = clampForProperty(opacityProp, startOpacity * (1 - eased));
 
     try {
       map.setPaintProperty(layerId, opacityProp, value);

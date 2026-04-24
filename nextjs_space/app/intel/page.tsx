@@ -6501,20 +6501,7 @@ function DeerIntelContent() {
     // (those are transient and Mapbox retries them automatically)
     map.on('error', (e: any) => {
       const err = e?.error || e;
-      console.error("[MAP-DIAG] map.on('error'):", err?.message, "status:", err?.status, "stack:", err?.stack);
-      // Capture for DevTools retrieval
-      try {
-        (window as any).__TFP_LAST_MAP_ERROR__ = {
-          message: err?.message,
-          status: err?.status,
-          stack: err?.stack,
-          name: err?.name,
-          full: String(err),
-          ts: Date.now(),
-        };
-        (window as any).__TFP_MAP_ERRORS__ = (window as any).__TFP_MAP_ERRORS__ || [];
-        (window as any).__TFP_MAP_ERRORS__.push((window as any).__TFP_LAST_MAP_ERROR__);
-      } catch (_) {}
+      console.error("[MAP-DIAG] map.on('error'):", err?.message, "status:", err?.status);
       // Only surface auth failures — everything else is transient
       if (err?.status === 401 || err?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
