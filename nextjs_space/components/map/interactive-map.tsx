@@ -25,7 +25,6 @@ interface InitialParcel {
 interface InteractiveMapProps {
   onParcelSelect?: (parcel: SelectedParcel | null) => void;
   onLayersChange?: (layers: string[]) => void;
-  onCheckout?: (product?: string) => void;
   initialLayers?: string[];
   autoOpen3D?: boolean;
   initialParcel?: InitialParcel | null;
@@ -78,7 +77,6 @@ const MAPBOX_STYLES: Record<string, string> = {
 export default function InteractiveMap({
   onParcelSelect,
   onLayersChange,
-  onCheckout,
   initialLayers = [],
   autoOpen3D = false,
   initialParcel = null,
@@ -130,12 +128,12 @@ export default function InteractiveMap({
     includedIn?: string;
   }
   const premiumLayers: PremiumLayer[] = [
-    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'land_report' },
-    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'land_report' },
-    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'land_report' },
-    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'land_report' },
-    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'land_report' },
-    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'land_report' },
+    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'pro' },
+    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'pro' },
+    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'pro' },
+    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'pro' },
+    { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'pro' },
+    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'pro' },
   ];
   
   const freeLayers = [
@@ -964,7 +962,7 @@ export default function InteractiveMap({
                           </button>
                         ) : (
                           <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
-                            in $49 report
+                            Pro plan
                           </span>
                         )}
                       </div>
@@ -976,30 +974,23 @@ export default function InteractiveMap({
 
             {/* Divider */}
             <div className="border-t border-stone-200 pt-1">
-              <p className="text-[10px] font-semibold text-stone-400 uppercase tracking-wide mb-3">Get Your Report</p>
+              <p className="text-[10px] font-semibold text-stone-400 uppercase tracking-wide mb-3">Unlock Full Access</p>
             </div>
 
-            {/* Land Intelligence Report */}
+            {/* Pro Subscription CTA */}
             <div style={{background: 'white', border: '2px solid #e0e0e0', borderRadius: 12, padding: 16, marginBottom: 12}}>
               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8}}>
-                <span style={{color:'#1a3a2a', fontWeight:'bold', fontSize: 13}}>\uD83D\uDCCB Land Intelligence Report</span>
-                <span style={{color:'#1a3a2a', fontWeight:'bold', fontSize: 16}}>$49</span>
+                <span style={{color:'#1a3a2a', fontWeight:'bold', fontSize: 13}}>🗺️ TerraFirma Pro</span>
+                <span style={{color:'#1a3a2a', fontWeight:'bold', fontSize: 16}}>$99/yr</span>
               </div>
               <p style={{color:'#666', fontSize: 11, marginBottom: 12}}>
-                Professional land analysis — terrain, water, access, valuation, and market data.
+                Unlimited parcel intel — terrain, water, access, valuation, and hunt layers.
               </p>
               <button
-                onClick={() => {
-                  if (parcelData) {
-                    setShowLayerPanel(false);
-                    onCheckout?.('land_report');
-                  } else {
-                    alert('Search for a property first, then order your report.');
-                  }
-                }}
+                onClick={() => { window.location.href = '/pricing'; }}
                 style={{width:'100%', background:'#1a3a2a', color:'white', border:'none', borderRadius: 8, padding:'10px 0', fontWeight:'bold', fontSize: 13, cursor:'pointer'}}
               >
-                Get Land Report — $49
+                See Plans &amp; Subscribe
               </button>
             </div>
 
@@ -1110,19 +1101,19 @@ export default function InteractiveMap({
         </div>
       )}
 
-      {/* Floating Order Button */}
+      {/* Floating View Details Button */}
       {parcelData && !showFullPanel && !isLoadingParcel && (
         <div className={`absolute left-1/2 -translate-x-1/2 z-10 ${isMobile ? 'bottom-4' : 'bottom-6'}`}>
           <button
-            onClick={() => { setShowFullPanel(true); onCheckout?.('land_report'); }}
-            className={`bg-emerald-700 hover:bg-emerald-800 text-white rounded-full font-semibold shadow-2xl flex items-center gap-2 transition-all hover:scale-105 animate-pulse hover:animate-none
+            onClick={() => { setShowFullPanel(true); }}
+            className={`bg-emerald-700 hover:bg-emerald-800 text-white rounded-full font-semibold shadow-2xl flex items-center gap-2 transition-all hover:scale-105
               ${isMobile ? 'py-3 px-6 text-base' : 'py-4 px-8 text-lg gap-3'}`}
           >
             <FileText className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
-            Order Land Report — $49
+            View Parcel Details
           </button>
           <p className={`text-white text-center mt-2 drop-shadow-lg bg-black/50 rounded-full px-4 py-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-            {isMobile ? 'Tap for parcel details' : 'Click to see parcel details & order report'}
+            {isMobile ? 'Tap to see details' : 'Click to see full parcel details'}
           </p>
         </div>
       )}
@@ -1176,11 +1167,22 @@ export default function InteractiveMap({
             {/* Action Buttons */}
             <div className="space-y-2">
               <button
-                onClick={() => onCheckout?.('land_report')}
+                onClick={() => {
+                  if (parcelData) {
+                    const q = new URLSearchParams({
+                      lat: String(parcelData.lat ?? selectedParcel?.lat ?? ''),
+                      lng: String(parcelData.lng ?? selectedParcel?.lng ?? ''),
+                      address: parcelData.siteAddress || selectedParcel?.address || '',
+                    }).toString();
+                    window.location.href = `/intel?${q}`;
+                  } else {
+                    window.location.href = '/pricing';
+                  }
+                }}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
               >
-                <FileText className="w-4 h-4" />
-                Order Land Report — $49
+                <Unlock className="w-4 h-4" />
+                Unlock Full Parcel Intel
               </button>
               <div className="flex gap-2">
                 <a
@@ -1424,9 +1426,16 @@ export default function InteractiveMap({
         previewMode={true}
         onUnlockIntel={() => {
           setShow3DView(false);
+          setShowLayerPanel(false);
           if (parcelData) {
-            setShowLayerPanel(false);
-            onCheckout?.('land_report');
+            const q = new URLSearchParams({
+              lat: String(parcelData.lat ?? selectedParcel?.lat ?? ''),
+              lng: String(parcelData.lng ?? selectedParcel?.lng ?? ''),
+              address: parcelData.siteAddress || selectedParcel?.address || '',
+            }).toString();
+            window.location.href = `/intel?${q}`;
+          } else {
+            window.location.href = '/pricing';
           }
         }}
       />

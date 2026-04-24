@@ -6,7 +6,6 @@ import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
 import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
-import { generateLandPdfDirect } from "@/lib/report-generators";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -476,16 +475,6 @@ export async function POST(request: NextRequest) {
 
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    }
-
-    if (order.productType === 'land_report') {
-      console.log('[generate-pdf] land_report branch hit, orderId:', order.id);
-      // Direct function call — no HTTP round-trip
-      const result = await generateLandPdfDirect(order.id);
-      return NextResponse.json({
-        pdf: result.pdf,
-        filename: result.filename,
-      });
     }
 
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });

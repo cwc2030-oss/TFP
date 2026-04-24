@@ -47,72 +47,13 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Product pricing configuration (in cents)
-const PRICES: Record<string, number> = {
-  land_report: 4900,   // $49.00
-};
-
-export async function POST(request: NextRequest) {
-  try {
-    const session = await getServerSession(authOptions);
-    const body = await request.json();
-
-    const {
-      parcelId,
-      parcelAddress,
-      parcelLat,
-      parcelLng,
-      selectedLayers,
-      guestEmail,
-      productType = "full_report", // Default to full report
-    } = body;
-
-    if (!parcelAddress || parcelLat === undefined || parcelLng === undefined) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
-
-    // Validate product type
-    const validTypes = ['land_report'];
-    if (!validTypes.includes(productType)) {
-      return NextResponse.json({ error: 'Invalid product type' }, { status: 400 });
-    }
-
-    // Get price based on product type (in cents)
-    const price = PRICES[productType] ?? 4900;
-
-    // Get user ID if logged in
-    let userId = null;
-    if (session?.user?.email) {
-      const user = await prisma.user.findUnique({
-        where: { email: session.user.email },
-      });
-      userId = user?.id || null;
-    }
-
-    const order = await prisma.order.create({
-      data: {
-        parcelId,
-        parcelAddress,
-        parcelLat,
-        parcelLng,
-        selectedLayers: JSON.stringify(selectedLayers || []),
-        price,
-        productType,
-        status: "pending",
-        userId,
-        guestEmail: !userId ? guestEmail : null,
-      },
-    });
-
-    return NextResponse.json({ order });
-  } catch (error) {
-    console.error("Error creating order:", error);
-    return NextResponse.json(
-      { error: "Failed to create order" },
-      { status: 500 }
-    );
-  }
+// One-time report products have been discontinued. Keep POST as a safety stub
+// so any lingering client callers receive a clear 410 Gone response rather than
+// silently succeeding. Active SKUs: $19 parcel unlock (/api/parcels/purchase),
+// $99/yr Pro subscription, $199/yr Pro Max subscription.
+export async function POST(_request: NextRequest) {
+  return NextResponse.json(
+    { error: "One-time report products are no longer available. Please use parcel unlock or subscribe to Pro for full access." },
+    { status: 410 }
+  );
 }

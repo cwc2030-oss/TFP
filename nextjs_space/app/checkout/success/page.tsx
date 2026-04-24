@@ -4,119 +4,34 @@ import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import {
-  CheckCircle,
-  Download,
-  FileText,
-  Loader2,
-  ArrowRight,
-} from "lucide-react";
+import { CheckCircle, FileText, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { trackPurchaseCompleted } from "@/lib/gtag";
 
 function SuccessContent() {
   const searchParams = useSearchParams();
   const orderId = searchParams?.get("orderId") || "";
   const sessionId = searchParams?.get("session_id") || "";
   const isDemo = searchParams?.get("demo") === "true";
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadComplete, setDownloadComplete] = useState(false);
   const [orderCompleted, setOrderCompleted] = useState(false);
-  const [orderDetails, setOrderDetails] = useState<{
-    productType: string;
-    parcelLat: number;
-    parcelLng: number;
-    parcelAddress: string;
-  } | null>(null);
 
-  // Complete the order when page loads
+  // Complete the order when page loads (for any legacy pending orders)
   useEffect(() => {
     const completeOrder = async () => {
       if (!orderId || orderCompleted) return;
-
       try {
-        const response = await fetch(`/api/orders/${orderId}/complete`, {
+        await fetch(`/api/orders/${orderId}/complete`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId: sessionId || `demo_${Date.now()}` }),
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.order) {
-            setOrderDetails({
-              productType: data.order.productType,
-              parcelLat: data.order.parcelLat,
-              parcelLng: data.order.parcelLng,
-              parcelAddress: data.order.parcelAddress,
-            });
-            trackPurchaseCompleted(orderId, data.order.productType, data.order.parcelAddress || '');
-          }
-          setOrderCompleted(true);
-        }
+        setOrderCompleted(true);
       } catch (error) {
         console.error("Error completing order:", error);
       }
     };
-
     completeOrder();
   }, [orderId, sessionId, orderCompleted]);
-
-  const handleDownload = async () => {
-    if (!orderId) return;
-
-    setIsDownloading(true);
-    try {
-      const response = await fetch("/api/generate-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (data.error) {
-        alert(`Download failed: ${data.error}`);
-        return;
-      }
-
-      if (data.pdf) {
-        const contentType = data.contentType || 'application/pdf';
-        const byteCharacters = atob(data.pdf);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: contentType });
-
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = data.filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-
-        setDownloadComplete(true);
-
-        alert("Report downloaded successfully! A confirmation email has also been sent to your inbox. Check your email (including spam folder) for a copy.");
-      } else {
-        alert("Download failed: No PDF data received. Please try again or contact support at info@terrafirmapartners.com");
-      }
-    } catch (error) {
-      console.error("Download error:", error);
-      alert("Download failed. Please check your internet connection and try again. If the problem persists, contact support at info@terrafirmapartners.com");
-    } finally {
-      setIsDownloading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen pt-16 bg-gradient-to-br from-emerald-50 to-stone-50 flex items-center justify-center py-12 px-4">
@@ -141,44 +56,20 @@ function SuccessContent() {
               {isDemo ? "Demo Order Complete!" : "Payment Successful!"}
             </h1>
             <p className="text-stone-600 mb-6">
-              {isDemo
-                ? "Your demo report is ready for download."
-                : "Thank you for your purchase. Your land analysis report is ready."}
+              Thank you — your order is confirmed. A receipt has been emailed
+              to you. Visit your dashboard to view order history and any
+              unlocked parcels.
             </p>
 
             {isDemo && (
               <div className="bg-blue-50 text-blue-700 text-sm p-3 rounded-lg mb-6">
-                <strong>Demo Mode:</strong> This is a test order. Stripe is not
-                configured yet.
+                <strong>Demo Mode:</strong> This is a test order.
               </div>
             )}
 
-            <div className="space-y-4">
-              <Button
-                onClick={handleDownload}
-                disabled={isDownloading || downloadComplete}
-                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white h-12"
-              >
-                {isDownloading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    Generating Report...
-                  </>
-                ) : downloadComplete ? (
-                  <>
-                    <CheckCircle className="w-5 h-5 mr-2" />
-                    Downloaded!
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-5 h-5 mr-2" />
-                    Download Land Intelligence Report
-                  </>
-                )}
-              </Button>
-
+            <div className="space-y-3">
               <Link href="/dashboard" className="block">
-                <Button variant="outline" className="w-full">
+                <Button className="w-full bg-emerald-700 hover:bg-emerald-800 text-white h-12">
                   <FileText className="w-4 h-4 mr-2" />
                   View in Dashboard
                 </Button>
@@ -186,7 +77,7 @@ function SuccessContent() {
 
               <Link href="/map" className="block">
                 <Button variant="ghost" className="w-full text-stone-600">
-                  Create Another Report
+                  Back to Map
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
               </Link>

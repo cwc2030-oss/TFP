@@ -17,7 +17,7 @@ export interface StateConfig {
   // Product availability
   products: {
     free_look: boolean;      // 3D terrain preview (national-ready)
-    quick_look: boolean;     // $49 broker report (near national-ready)
+    quick_look: boolean;     // Legacy broker report flag — product discontinued (kept for config compat)
     hunting_intel: boolean;  // $79 deer intel (state-specific)
     full_report: boolean;    // $350 custom (requires hunting_intel)
   };

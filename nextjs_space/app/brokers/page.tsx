@@ -65,17 +65,17 @@ export default function BrokersPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Link
-                href="/map?product=quick_look"
+                href="/pricing"
                 className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
               >
-                Run a Report Now
+                See Plans &amp; Pricing
                 <ArrowRight className="w-5 h-5" />
               </Link>
               <Link
-                href="/api/sample-quick-look"
+                href="/map"
                 className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white font-semibold px-8 py-4 rounded-lg transition-colors text-lg border border-white/20"
               >
-                See Sample Quick Look
+                Explore the Map
               </Link>
             </div>
           </div>
@@ -161,38 +161,6 @@ export default function BrokersPage() {
         </div>
       </section>
 
-      {/* Broker Quick Look - Now Available */}
-      <section className="py-16 bg-gradient-to-r from-amber-50 to-stone-50 border-y border-amber-200">
-        <div className="max-w-4xl mx-auto px-4">
-          <div className="text-center mb-8">
-            <p className="text-amber-700 font-medium mb-2 uppercase text-sm tracking-wide">Now Available</p>
-            <h2 className="text-2xl md:text-3xl font-bold text-stone-800 mb-4">
-              Broker Quick Look — $49
-            </h2>
-            <p className="text-stone-600 max-w-2xl mx-auto">
-              A streamlined 2-page report designed specifically for listing attachments. 
-              Covers the essentials: boundaries, acreage verification, flood zones, road access, 
-              and buildability basics. Perfect for every listing in your portfolio.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              href="/map?product=quick_look"
-              className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-white font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
-            >
-              Order Quick Look — $49
-              <ArrowRight className="w-5 h-5" />
-            </Link>
-            <Link
-              href="/pricing"
-              className="inline-flex items-center justify-center gap-2 bg-white hover:bg-stone-50 text-stone-700 font-semibold px-8 py-4 rounded-lg transition-colors text-lg border border-stone-300"
-            >
-              Compare Products
-            </Link>
-          </div>
-        </div>
-      </section>
-
       {/* CTA Section */}
       <section className="py-20 bg-stone-800 text-white">
         <div className="max-w-4xl mx-auto px-4 text-center">
@@ -205,10 +173,10 @@ export default function BrokersPage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
             <Link
-              href="/map?product=quick_look"
+              href="/pricing"
               className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-semibold px-8 py-4 rounded-lg transition-colors text-lg"
             >
-              Start Your First Report
+              See Plans &amp; Pricing
               <ArrowRight className="w-5 h-5" />
             </Link>
           </div>

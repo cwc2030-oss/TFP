@@ -5,7 +5,7 @@ const SITE_URL = "https://terrafirma.partners";
 export const metadata: Metadata = {
   title: "Demo | See What Your Land Is Hiding — Terra Firma Partners",
   description:
-    "Explore real Missouri hunting properties with LiDAR-powered terrain analysis. See deer movement corridors, funnel zones, and intercept placements — then get your own Hunt Report for $49.",
+    "Explore real Missouri hunting properties with LiDAR-powered terrain analysis. See deer movement corridors, funnel zones, and intercept placements — then unlock your own parcel intel.",
   openGraph: {
     type: "website",
     locale: "en_US",

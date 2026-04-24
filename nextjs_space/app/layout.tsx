@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: "Terra Firma Partners™ | Land Intelligence | Missouri",
   description:
-    "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones, soil data & more. Reports from $49.",
+    "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones, soil data & more. Unlock any parcel for $19, or go unlimited with Pro.",
   keywords: [
     "land intelligence", "hunting land report", "recreational land analysis", "CWD status Missouri", 
     "deer hunting property", "land analysis report", "harvest pressure data", "deer intel",
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     siteName: "Terra Firma Partners™",
     title: "Terra Firma Partners™ | Land Intelligence",
     description:
-      "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones & soil data. Reports from $49.",
+      "Land Intelligence for hunting and recreational property. Terrain-derived deer intel, CWD status, harvest pressure, flood zones & soil data. Single-parcel unlock $19, or Pro unlimited.",
     images: [
       {
         url: OG_IMAGE_URL,

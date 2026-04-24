@@ -190,18 +190,18 @@ export default function DemoPage() {
             Ready to scout your own land?
           </h2>
           <p className="text-stone-400 text-sm sm:text-base mb-6 max-w-md mx-auto">
-            Get a full Land Report with property data, terrain analysis, and CWD zone status for any Missouri parcel.
+            Unlock property data, terrain analysis, and CWD zone status for any Missouri parcel.
           </p>
           <Link href="/pricing">
             <Button
               size="lg"
               className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-base sm:text-lg px-8 py-4 h-auto rounded-xl shadow-lg shadow-emerald-900/30 w-full sm:w-auto"
             >
-              Get My Report — $49
+              See Plans &amp; Pricing
             </Button>
           </Link>
           <p className="text-stone-600 text-xs mt-3">
-            No signup required · Instant download
+            Single-parcel unlock or unlimited with Pro
           </p>
         </div>
       </div>
