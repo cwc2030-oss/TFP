@@ -41,15 +41,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ alreadyPurchased: true });
     }
 
-    // Check if user is Pro (shouldn't need to buy, but just in case)
+    // Check if user is Pro (shouldn't need to buy, but just in case).
+    // Admins are exempt from this short-circuit so they can run real $19
+    // checkouts end-to-end for QA/testing without comping themselves.
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { subscriptionStatus: true, stripeCustomerId: true },
+      select: { subscriptionStatus: true, stripeCustomerId: true, role: true },
     });
 
     const subStatus = user?.subscriptionStatus || 'free';
-    if (subStatus === 'pro' || subStatus === 'promax') {
+    const isAdmin = user?.role === 'admin';
+    if ((subStatus === 'pro' || subStatus === 'promax') && !isAdmin) {
+      console.log('[parcels/purchase] Pro/ProMax short-circuit for', session.user.email, 'subStatus=', subStatus);
       return NextResponse.json({ alreadyPurchased: true, isPro: true });
+    }
+    if ((subStatus === 'pro' || subStatus === 'promax') && isAdmin) {
+      console.log('[parcels/purchase] Admin override — allowing Pro/ProMax admin to run real checkout for', session.user.email, 'subStatus=', subStatus);
     }
 
     // Get or create Stripe customer
@@ -72,6 +79,20 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = req.headers.get('origin') || process.env.NEXTAUTH_URL || '';
+
+    console.log('[parcels/purchase] PRE-STRIPE', {
+      userId: session.user.id,
+      email: session.user.email,
+      priceId,
+      origin,
+      customerId,
+      lat,
+      lng,
+      address,
+      acreage,
+      subStatus,
+      isAdmin,
+    });
 
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -98,7 +119,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ url: checkoutSession.url });
   } catch (err: any) {
-    console.error('[parcels/purchase] Error:', err.message);
-    return NextResponse.json({ error: 'Checkout failed' }, { status: 500 });
+    console.error('[parcels/purchase] Error:', {
+      message: err?.message,
+      type: err?.type,
+      code: err?.code,
+      statusCode: err?.statusCode,
+      raw: err?.raw?.message,
+      stack: err?.stack?.split('\n').slice(0, 4).join('\n'),
+    });
+    const detail = err?.raw?.message || err?.message || 'Unknown error';
+    return NextResponse.json({ error: `Checkout failed: ${detail}` }, { status: 500 });
   }
 }
