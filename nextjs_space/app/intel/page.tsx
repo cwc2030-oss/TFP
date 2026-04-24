@@ -12253,7 +12253,7 @@ function DeerIntelContent() {
                       </p>
                       <div className="flex gap-2 mt-2.5">
                         <Link
-                          href="/map?product=hunt_report"
+                          href="/map?product=land_report"
                           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-[11px] font-semibold rounded-lg transition-colors shadow-lg shadow-red-900/30"
                         >
                           <Target className="h-3.5 w-3.5" />

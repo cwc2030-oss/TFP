@@ -6,7 +6,7 @@ import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
 import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
-import { generateLandPdfDirect, generateHuntPdfDirect } from "@/lib/report-generators";
+import { generateLandPdfDirect } from "@/lib/report-generators";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -476,41 +476,6 @@ export async function POST(request: NextRequest) {
 
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    }
-
-    if (order.productType === 'hunt_report') {
-      const terrainPayload = order.terrainData 
-        ? JSON.parse(order.terrainData)
-        : {
-            address: order.parcelAddress,
-            lat: order.parcelLat,
-            lng: order.parcelLng,
-            acreage: 0,
-            county: '',
-            state: 'MO',
-            prevailingWind: 'N',
-            stands: [],
-            summary: null,
-            corridors: null,
-            seasonScores: null,
-          };
-
-      const propertyName = order.parcelAddress?.split(',')[0]?.replace(/\s+/g, '-') || 'Property';
-
-      // Generate Hunt PDF + Land PDF in parallel (direct function calls — no HTTP)
-      const [huntPdfResult, landPdfResult] = await Promise.all([
-        generateHuntPdfDirect(terrainPayload),
-        generateLandPdfDirect(order.id),
-      ]);
-
-      return NextResponse.json({
-        pdf: huntPdfResult.pdf,
-        filename: `TFP-Hunt-Report-${propertyName}.pdf`,
-        contentType: huntPdfResult.contentType,
-        // Land PDF included as separate field for future use
-        landPdf: landPdfResult.pdf,
-        landFilename: landPdfResult.filename,
-      });
     }
 
     if (order.productType === 'land_report') {

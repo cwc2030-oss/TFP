@@ -44,16 +44,9 @@ interface SelectedParcel {
   bounds?: { lat: number; lng: number }[];
 }
 
-type ProductType = "hunt_report" | "land_report";
+type ProductType = "land_report";
 
 const PRODUCTS = {
-  hunt_report: {
-    name: "Hunt Intelligence Report",
-    description: "Complete terrain intelligence + full land analysis. Two premium reports in one package. Indefinite parcel access.",
-    price: 149,
-    color: "red",
-    badge: "🦌 MOST POPULAR",
-  },
   land_report: {
     name: "Land Intelligence Report",
     description: "Professional land analysis including terrain, water, access, valuation, and market data.",
@@ -71,7 +64,7 @@ export default function MapPage() {
   // Basic Report - all 5 layers pre-selected
   const [selectedLayers] = useState<string[]>(["flood_zones", "topography", "soil_types", "property_boundaries", "roads_transportation"]);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<ProductType>("hunt_report");
+  const [selectedProduct, setSelectedProduct] = useState<ProductType>("land_report");
   const [guestEmail, setGuestEmail] = useState("");
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isDemoCheckout, setIsDemoCheckout] = useState(false);
@@ -95,10 +88,10 @@ export default function MapPage() {
 
   useEffect(() => {
     const productParam = searchParams.get("product");
-    if (productParam === "hunt_report" || productParam === "land_report") {
+    if (productParam === "land_report") {
       setSelectedProduct(productParam);
     } else {
-      setSelectedProduct("hunt_report"); // default to most popular
+      setSelectedProduct("land_report");
     }
   }, [searchParams]);
 
@@ -179,7 +172,7 @@ export default function MapPage() {
       localStorage.setItem('tfp_current_order_id', order.id);
 
       // Track checkout initiation
-      const priceValue = selectedProduct === 'hunt_report' ? 149 : 49;
+      const priceValue = 49;
       trackCheckoutInitiated(selectedProduct, selectedParcel.address, priceValue);
 
       // If demo mode, skip Stripe and go directly to success
@@ -333,7 +326,7 @@ export default function MapPage() {
                     <span className="text-lg text-stone-700">Total</span>
                     <p className="text-xs text-stone-500">{PRODUCTS[selectedProduct].name}</p>
                   </div>
-                  <span className={`text-3xl font-bold ${selectedProduct === "hunt_report" ? "text-red-600" : "text-emerald-700"}`}>
+                  <span className="text-3xl font-bold text-emerald-700">
                     ${PRODUCTS[selectedProduct].price}
                   </span>
                 </div>

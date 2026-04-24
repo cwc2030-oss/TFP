@@ -130,12 +130,12 @@ export default function InteractiveMap({
     includedIn?: string;
   }
   const premiumLayers: PremiumLayer[] = [
-    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'hunt_report' },
-    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'hunt_report' },
-    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'hunt_report' },
-    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'hunt_report' },
+    { id: 'lidar_terrain', name: 'LiDAR 3D Terrain', icon: Mountain, description: 'Rotatable 3D view with deer corridors', status: 'preview', includedIn: 'land_report' },
+    { id: 'deer_movement', name: 'Deer Movement', icon: Target, description: 'AI-predicted travel corridors', status: 'coming_soon', includedIn: 'land_report' },
+    { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'land_report' },
+    { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'land_report' },
     { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'land_report' },
-    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'hunt_report' },
+    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'land_report' },
   ];
   
   const freeLayers = [
@@ -964,7 +964,7 @@ export default function InteractiveMap({
                           </button>
                         ) : (
                           <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
-                            {layer.includedIn === 'hunt_report' ? 'in $149 report' : 'in $49 report'}
+                            in $49 report
                           </span>
                         )}
                       </div>
@@ -977,30 +977,6 @@ export default function InteractiveMap({
             {/* Divider */}
             <div className="border-t border-stone-200 pt-1">
               <p className="text-[10px] font-semibold text-stone-400 uppercase tracking-wide mb-3">Get Your Report</p>
-            </div>
-
-            {/* Hunt Intelligence Report */}
-            <div style={{background: 'linear-gradient(135deg, #1a3a2a, #2d6a4f)', borderRadius: 12, padding: 16, marginBottom: 12}}>
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8}}>
-                <span style={{color:'#c9a84c', fontWeight:'bold', fontSize: 13}}>\uD83E\uDD8C Hunt Intelligence Report</span>
-                <span style={{color:'white', fontWeight:'bold', fontSize: 16}}>$149</span>
-              </div>
-              <p style={{color:'rgba(255,255,255,0.8)', fontSize: 11, marginBottom: 12}}>
-                Terrain analysis, stand placement, wind strategy, and satellite hunt map. Indefinite parcel access.
-              </p>
-              <button
-                onClick={() => {
-                  if (parcelData) {
-                    setShowLayerPanel(false);
-                    onCheckout?.('hunt_report');
-                  } else {
-                    alert('Search for a property first, then order your report.');
-                  }
-                }}
-                style={{width:'100%', background:'#c9a84c', color:'#1a1a1a', border:'none', borderRadius: 8, padding:'10px 0', fontWeight:'bold', fontSize: 13, cursor:'pointer'}}
-              >
-                Get Hunt Report — $149
-              </button>
             </div>
 
             {/* Land Intelligence Report */}
@@ -1138,12 +1114,12 @@ export default function InteractiveMap({
       {parcelData && !showFullPanel && !isLoadingParcel && (
         <div className={`absolute left-1/2 -translate-x-1/2 z-10 ${isMobile ? 'bottom-4' : 'bottom-6'}`}>
           <button
-            onClick={() => { setShowFullPanel(true); onCheckout?.('hunt_report'); }}
+            onClick={() => { setShowFullPanel(true); onCheckout?.('land_report'); }}
             className={`bg-emerald-700 hover:bg-emerald-800 text-white rounded-full font-semibold shadow-2xl flex items-center gap-2 transition-all hover:scale-105 animate-pulse hover:animate-none
               ${isMobile ? 'py-3 px-6 text-base' : 'py-4 px-8 text-lg gap-3'}`}
           >
             <FileText className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} />
-            Get Hunt Report — $149
+            Order Land Report — $49
           </button>
           <p className={`text-white text-center mt-2 drop-shadow-lg bg-black/50 rounded-full px-4 py-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>
             {isMobile ? 'Tap for parcel details' : 'Click to see parcel details & order report'}
@@ -1200,11 +1176,11 @@ export default function InteractiveMap({
             {/* Action Buttons */}
             <div className="space-y-2">
               <button
-                onClick={() => onCheckout?.('hunt_report')}
+                onClick={() => onCheckout?.('land_report')}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors text-sm"
               >
                 <FileText className="w-4 h-4" />
-                Get Hunt Report — $149
+                Order Land Report — $49
               </button>
               <div className="flex gap-2">
                 <a
@@ -1450,7 +1426,7 @@ export default function InteractiveMap({
           setShow3DView(false);
           if (parcelData) {
             setShowLayerPanel(false);
-            onCheckout?.('hunt_report');
+            onCheckout?.('land_report');
           }
         }}
       />
