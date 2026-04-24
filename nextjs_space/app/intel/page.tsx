@@ -2032,6 +2032,8 @@ function DeerIntelContent() {
   // Loaded user pins for the *current* parcel
   interface SitPin { id: string; parcel_id: string; name: string; lng: number; lat: number; created_at: string; }
   const [sitPins, setSitPins] = useState<SitPin[]>([]);
+  // Stand Journal modal — opened by left-clicking an existing Sit Pin marker.
+  const [journalPin, setJournalPin] = useState<{ id: string; name: string } | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
