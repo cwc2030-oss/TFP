@@ -8832,6 +8832,18 @@ function DeerIntelContent() {
 
         map.on('mouseenter', 'tfp-user-sit-pins-icon', onSitPinEnter);
         map.on('mouseleave', 'tfp-user-sit-pins-icon', onSitPinLeave);
+
+        // Left-click an existing green Sit Pin → open Stand Journal modal.
+        // Layer-specific click fires before the map-wide click handler that
+        // clears the right-click context menu, so the two don't interfere.
+        map.on('click', 'tfp-user-sit-pins-icon', (e: mapboxgl.MapLayerMouseEvent) => {
+          const f = e.features && e.features[0];
+          const id = String((f?.properties as any)?.id || '');
+          const name = String((f?.properties as any)?.name || '');
+          if (!id || !name) return;
+          console.log('[StandJournal] Pin clicked:', id, name);
+          setJournalPin({ id, name });
+        });
       } catch (sitPinLayerErr) {
         console.warn('[SitPin] layer setup failed:', sitPinLayerErr);
       }
@@ -14912,6 +14924,115 @@ function DeerIntelContent() {
               >
                 {sitPinSaving ? 'Saving…' : 'Confirm'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========== Stand Journal modal (placeholder) ========== */}
+      {journalPin && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 9700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setJournalPin(null);
+          }}
+        >
+          <div
+            style={{
+              background: '#1a1a2e',
+              border: '1px solid #4a5568',
+              borderRadius: '12px',
+              padding: '24px 28px 22px',
+              maxWidth: '520px',
+              width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+              color: '#e2e8f0',
+              position: 'relative',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                marginBottom: 4,
+                paddingRight: 32,
+              }}
+            >
+              <span style={{ fontSize: 22 }}>📓</span>
+              <h2
+                style={{
+                  color: '#f0c040',
+                  fontSize: '18px',
+                  margin: 0,
+                  fontWeight: 700,
+                  lineHeight: 1.3,
+                }}
+              >
+                {journalPin.name} — Stand Journal
+              </h2>
+            </div>
+
+            {/* Close button */}
+            <button
+              type="button"
+              aria-label="Close journal"
+              onClick={() => setJournalPin(null)}
+              style={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                background: 'transparent',
+                color: '#a0aec0',
+                border: 'none',
+                borderRadius: 6,
+                width: 32,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                fontSize: 18,
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#2d3748';
+                e.currentTarget.style.color = '#f0c040';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = '#a0aec0';
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            {/* Placeholder body */}
+            <div
+              style={{
+                marginTop: 18,
+                padding: '28px 20px',
+                background: '#0f1420',
+                border: '1px dashed #4a5568',
+                borderRadius: 8,
+                textAlign: 'center',
+                color: '#a0aec0',
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              Journal coming soon.
             </div>
           </div>
         </div>
