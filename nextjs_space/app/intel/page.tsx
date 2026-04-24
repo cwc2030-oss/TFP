@@ -12,7 +12,8 @@ import {
   Compass, Info, CheckCircle, AlertTriangle, Loader2, X, MapPin,
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
-  Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User, Share2
+  Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User, Share2,
+  Trash2, Plus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ScoreCard from '@/components/ScoreCard';
@@ -2032,8 +2033,30 @@ function DeerIntelContent() {
   // Loaded user pins for the *current* parcel
   interface SitPin { id: string; parcel_id: string; name: string; lng: number; lat: number; created_at: string; }
   const [sitPins, setSitPins] = useState<SitPin[]>([]);
-  // Stand Journal modal — opened by left-clicking an existing Sit Pin marker.
+  // ========== Stand Journal (Pro feature) ==========
+  // Opened by left-clicking an existing green Sit Pin marker.
+  interface StandJournalEntry {
+    id: string;
+    user_id: string;
+    sit_pin_id: string;
+    entry_date: string;             // YYYY-MM-DD
+    wind_direction: string | null;  // N | NE | E | SE | S | SW | W | NW
+    temp_f: number | null;
+    sightings: string | null;
+    notes: string | null;
+    created_at: string;
+  }
   const [journalPin, setJournalPin] = useState<{ id: string; name: string } | null>(null);
+  const [journalEntries, setJournalEntries] = useState<StandJournalEntry[]>([]);
+  const [journalLoading, setJournalLoading] = useState<boolean>(false);
+  const [journalError, setJournalError] = useState<string | null>(null);
+  const [journalFormOpen, setJournalFormOpen] = useState<boolean>(false);
+  const [journalSubmitting, setJournalSubmitting] = useState<boolean>(false);
+  const [journalDate, setJournalDate] = useState<string>('');
+  const [journalWind, setJournalWind] = useState<string>('');
+  const [journalTemp, setJournalTemp] = useState<string>('');
+  const [journalSightings, setJournalSightings] = useState<string>('');
+  const [journalNotes, setJournalNotes] = useState<string>('');
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
@@ -2405,6 +2428,135 @@ function DeerIntelContent() {
     })();
     return () => { cancelled = true; };
   }, [isPro, currentParcelKey]);
+
+  // ========== Stand Journal: load entries when a pin is opened ==========
+  useEffect(() => {
+    if (!journalPin || !isPro) {
+      setJournalEntries([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setJournalLoading(true);
+      setJournalError(null);
+      try {
+        const res = await fetch(
+          `/api/stand-journal?sitPinId=${encodeURIComponent(journalPin.id)}`,
+          { cache: 'no-store' }
+        );
+        if (!res.ok) {
+          if (!cancelled) setJournalError('Could not load journal entries.');
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data?.entries)) {
+          setJournalEntries(data.entries as StandJournalEntry[]);
+          console.log(`[StandJournal] Loaded ${data.entries.length} entries for pin ${journalPin.id}`);
+        }
+      } catch (err) {
+        if (!cancelled) setJournalError('Network error loading journal.');
+        console.warn('[StandJournal] load failed:', err);
+      } finally {
+        if (!cancelled) setJournalLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [journalPin, isPro]);
+
+  // ========== Stand Journal: handlers ==========
+  const closeJournal = useCallback(() => {
+    setJournalPin(null);
+    setJournalFormOpen(false);
+    setJournalEntries([]);
+    setJournalDate('');
+    setJournalWind('');
+    setJournalTemp('');
+    setJournalSightings('');
+    setJournalNotes('');
+    setJournalError(null);
+  }, []);
+
+  const openJournalForm = useCallback(() => {
+    // Default date = today (local)
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    setJournalDate(`${yyyy}-${mm}-${dd}`);
+    setJournalWind('');
+    setJournalTemp('');
+    setJournalSightings('');
+    setJournalNotes('');
+    setJournalError(null);
+    setJournalFormOpen(true);
+  }, []);
+
+  const cancelJournalForm = useCallback(() => {
+    setJournalFormOpen(false);
+    setJournalError(null);
+  }, []);
+
+  const submitJournalEntry = useCallback(async () => {
+    if (!journalPin || journalSubmitting) return;
+    if (!journalDate) {
+      setJournalError('Please pick a date.');
+      return;
+    }
+    setJournalSubmitting(true);
+    setJournalError(null);
+    try {
+      const res = await fetch('/api/stand-journal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sitPinId: journalPin.id,
+          entryDate: journalDate,
+          windDirection: journalWind || null,
+          tempF: journalTemp !== '' ? Number(journalTemp) : null,
+          sightings: journalSightings.trim() || null,
+          notes: journalNotes.trim() || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setJournalError(data?.error || 'Could not save entry.');
+        return;
+      }
+      const entry = data?.entry as StandJournalEntry | undefined;
+      if (entry) {
+        // Prepend — list is already ordered DESC by entry_date
+        setJournalEntries((prev) => [entry, ...prev]);
+      }
+      setJournalFormOpen(false);
+      setJournalDate('');
+      setJournalWind('');
+      setJournalTemp('');
+      setJournalSightings('');
+      setJournalNotes('');
+    } catch (err) {
+      console.error('[StandJournal] submit error:', err);
+      setJournalError('Network error. Please try again.');
+    } finally {
+      setJournalSubmitting(false);
+    }
+  }, [journalPin, journalDate, journalWind, journalTemp, journalSightings, journalNotes, journalSubmitting]);
+
+  const deleteJournalEntry = useCallback(async (entryId: string) => {
+    if (typeof window !== 'undefined' && !window.confirm('Delete this journal entry?')) return;
+    try {
+      const res = await fetch(`/api/stand-journal/${encodeURIComponent(entryId)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        toast.error('Could not delete entry.');
+        return;
+      }
+      setJournalEntries((prev) => prev.filter((e) => e.id !== entryId));
+    } catch (err) {
+      console.error('[StandJournal] delete error:', err);
+      toast.error('Network error.');
+    }
+  }, []);
 
   // Stand stability: remember previous top-3 stands to prevent jarring jumps on re-analysis
   const previousStandsRef = useRef<AlignedStand[]>([]);
@@ -8841,6 +8993,11 @@ function DeerIntelContent() {
           const id = String((f?.properties as any)?.id || '');
           const name = String((f?.properties as any)?.name || '');
           if (!id || !name) return;
+          // Tier gate — Stand Journal is Pro-only
+          if (!isProRef.current) {
+            toast('Upgrade to Pro to access Stand Journal');
+            return;
+          }
           console.log('[StandJournal] Pin clicked:', id, name);
           setJournalPin({ id, name });
         });
@@ -14929,114 +15086,499 @@ function DeerIntelContent() {
         </div>
       )}
 
-      {/* ========== Stand Journal modal (placeholder) ========== */}
-      {journalPin && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.65)',
-            zIndex: 9700,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setJournalPin(null);
-          }}
-        >
+      {/* ========== Stand Journal modal ========== */}
+      {journalPin && (() => {
+        // Wind → arrow glyph
+        const WIND_ARROWS: Record<string, string> = {
+          N: '↑', NE: '↗', E: '→', SE: '↘',
+          S: '↓', SW: '↙', W: '←', NW: '↖',
+        };
+        const windArrow = (dir: string | null | undefined): string =>
+          (dir ? WIND_ARROWS[dir.toUpperCase()] : '') || '';
+        // "2026-04-21" → "Tue, Apr 21" (parse as LOCAL date to avoid TZ drift)
+        const fmtDate = (iso: string): string => {
+          try {
+            const [y, m, d] = iso.split('-').map(Number);
+            if (!y || !m || !d) return iso;
+            const dt = new Date(y, m - 1, d);
+            return dt.toLocaleDateString('en-US', {
+              weekday: 'short',
+              month: 'short',
+              day: 'numeric',
+            });
+          } catch {
+            return iso;
+          }
+        };
+
+        // Shared input styling
+        const labelStyle: React.CSSProperties = {
+          display: 'block',
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: '#cbd5e0',
+          marginBottom: 5,
+        };
+        const inputStyle: React.CSSProperties = {
+          width: '100%',
+          background: '#0f1420',
+          border: '1px solid #4a5568',
+          borderRadius: 6,
+          padding: '8px 10px',
+          color: '#fff',
+          fontSize: 13,
+          outline: 'none',
+          boxSizing: 'border-box',
+          fontFamily: 'inherit',
+        };
+
+        return (
           <div
             style={{
-              background: '#1a1a2e',
-              border: '1px solid #4a5568',
-              borderRadius: '12px',
-              padding: '24px 28px 22px',
-              maxWidth: '520px',
-              width: '100%',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-              color: '#e2e8f0',
-              position: 'relative',
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.65)',
+              zIndex: 9700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !journalSubmitting) {
+                closeJournal();
+              }
+            }}
           >
-            {/* Header */}
             <div
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                marginBottom: 4,
-                paddingRight: 32,
+                background: '#1a1a2e',
+                border: '1px solid #4a5568',
+                borderRadius: '12px',
+                padding: '22px 26px 20px',
+                maxWidth: '560px',
+                width: '100%',
+                maxHeight: '85vh',
+                overflowY: 'auto',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                color: '#e2e8f0',
+                position: 'relative',
               }}
+              onClick={(e) => e.stopPropagation()}
             >
-              <span style={{ fontSize: 22 }}>📓</span>
-              <h2
+              {/* Header */}
+              <div
                 style={{
-                  color: '#f0c040',
-                  fontSize: '18px',
-                  margin: 0,
-                  fontWeight: 700,
-                  lineHeight: 1.3,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  marginBottom: 4,
+                  paddingRight: 32,
                 }}
               >
-                {journalPin.name} — Stand Journal
-              </h2>
-            </div>
+                <span style={{ fontSize: 22 }}>📓</span>
+                <h2
+                  style={{
+                    color: '#f0c040',
+                    fontSize: '18px',
+                    margin: 0,
+                    fontWeight: 700,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {journalPin.name} — Stand Journal
+                </h2>
+              </div>
+              <p style={{ color: '#a0aec0', fontSize: 12, margin: '0 0 14px', lineHeight: 1.5 }}>
+                Log wind, temp, and deer sightings for every sit at this stand.
+              </p>
 
-            {/* Close button */}
-            <button
-              type="button"
-              aria-label="Close journal"
-              onClick={() => setJournalPin(null)}
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                background: 'transparent',
-                color: '#a0aec0',
-                border: 'none',
-                borderRadius: 6,
-                width: 32,
-                height: 32,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                fontSize: 18,
-                lineHeight: 1,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#2d3748';
-                e.currentTarget.style.color = '#f0c040';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#a0aec0';
-              }}
-            >
-              <X size={18} />
-            </button>
+              {/* Close button */}
+              <button
+                type="button"
+                aria-label="Close journal"
+                disabled={journalSubmitting}
+                onClick={closeJournal}
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  background: 'transparent',
+                  color: '#a0aec0',
+                  border: 'none',
+                  borderRadius: 6,
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: journalSubmitting ? 'not-allowed' : 'pointer',
+                  fontSize: 18,
+                  lineHeight: 1,
+                  opacity: journalSubmitting ? 0.4 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!journalSubmitting) {
+                    e.currentTarget.style.background = '#2d3748';
+                    e.currentTarget.style.color = '#f0c040';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = '#a0aec0';
+                }}
+              >
+                <X size={18} />
+              </button>
 
-            {/* Placeholder body */}
-            <div
-              style={{
-                marginTop: 18,
-                padding: '28px 20px',
-                background: '#0f1420',
-                border: '1px dashed #4a5568',
-                borderRadius: 8,
-                textAlign: 'center',
-                color: '#a0aec0',
-                fontSize: 13,
-                lineHeight: 1.6,
-              }}
-            >
-              Journal coming soon.
+              {/* Entries list / empty state / loading */}
+              {journalLoading ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    color: '#a0aec0',
+                    fontSize: 12,
+                    padding: '28px 0',
+                  }}
+                >
+                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                  <div style={{ marginTop: 6 }}>Loading…</div>
+                </div>
+              ) : journalError && journalEntries.length === 0 ? (
+                <div
+                  role="alert"
+                  style={{
+                    background: '#3a1414',
+                    border: '1px solid #b45454',
+                    color: '#fca5a5',
+                    borderRadius: 6,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    marginBottom: 12,
+                  }}
+                >
+                  {journalError}
+                </div>
+              ) : journalEntries.length === 0 && !journalFormOpen ? (
+                <div
+                  style={{
+                    padding: '24px 16px',
+                    background: '#0f1420',
+                    border: '1px dashed #4a5568',
+                    borderRadius: 8,
+                    textAlign: 'center',
+                    color: '#a0aec0',
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    marginBottom: 12,
+                  }}
+                >
+                  No entries yet — add your first sit below.
+                </div>
+              ) : journalEntries.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  {journalEntries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      style={{
+                        background: '#0f1420',
+                        border: '1px solid #2d3748',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                      }}
+                    >
+                      {/* Top row: date + wind + temp + delete */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          marginBottom: (entry.sightings || entry.notes) ? 6 : 0,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            flexWrap: 'wrap',
+                            fontSize: 12,
+                          }}
+                        >
+                          <span style={{ color: '#f0c040', fontWeight: 700 }}>
+                            {fmtDate(entry.entry_date)}
+                          </span>
+                          {entry.wind_direction && (
+                            <span
+                              style={{
+                                color: '#93c5fd',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3,
+                              }}
+                            >
+                              <Wind size={11} />
+                              {entry.wind_direction}
+                              <span style={{ fontSize: 14, lineHeight: 1 }}>
+                                {windArrow(entry.wind_direction)}
+                              </span>
+                            </span>
+                          )}
+                          {entry.temp_f !== null && (
+                            <span style={{ color: '#fbbf24' }}>{entry.temp_f}°F</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          aria-label="Delete entry"
+                          title="Delete entry"
+                          onClick={() => deleteJournalEntry(entry.id)}
+                          style={{
+                            background: 'transparent',
+                            color: '#718096',
+                            border: 'none',
+                            borderRadius: 4,
+                            padding: 4,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#3a1414';
+                            e.currentTarget.style.color = '#fca5a5';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.color = '#718096';
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      {entry.sightings && (
+                        <div style={{ fontSize: 12, color: '#e2e8f0', lineHeight: 1.5 }}>
+                          <span style={{ color: '#a0aec0', fontWeight: 600 }}>Sightings:</span>{' '}
+                          {entry.sightings}
+                        </div>
+                      )}
+                      {entry.notes && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: '#e2e8f0',
+                            lineHeight: 1.5,
+                            marginTop: entry.sightings ? 3 : 0,
+                          }}
+                        >
+                          <span style={{ color: '#a0aec0', fontWeight: 600 }}>Notes:</span>{' '}
+                          {entry.notes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Add Entry button OR inline form */}
+              {!journalFormOpen ? (
+                <button
+                  type="button"
+                  onClick={openJournalForm}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: '#c0a020',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '9px 18px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'background 120ms',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#d1ae25';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#c0a020';
+                  }}
+                >
+                  <Plus size={14} /> Add Entry
+                </button>
+              ) : (
+                <div
+                  style={{
+                    background: '#0f1420',
+                    border: '1px solid #2d3748',
+                    borderRadius: 8,
+                    padding: '14px 14px 12px',
+                  }}
+                >
+                  {/* Row 1: Date + Wind */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: 10,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div>
+                      <label htmlFor="journal-date" style={labelStyle}>Date</label>
+                      <input
+                        id="journal-date"
+                        type="date"
+                        value={journalDate}
+                        onChange={(e) => setJournalDate(e.target.value)}
+                        disabled={journalSubmitting}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="journal-wind" style={labelStyle}>Wind</label>
+                      <select
+                        id="journal-wind"
+                        value={journalWind}
+                        onChange={(e) => setJournalWind(e.target.value)}
+                        disabled={journalSubmitting}
+                        style={inputStyle}
+                      >
+                        <option value="">—</option>
+                        <option value="N">N  ↑</option>
+                        <option value="NE">NE ↗</option>
+                        <option value="E">E  →</option>
+                        <option value="SE">SE ↘</option>
+                        <option value="S">S  ↓</option>
+                        <option value="SW">SW ↙</option>
+                        <option value="W">W  ←</option>
+                        <option value="NW">NW ↖</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Temp */}
+                  <div style={{ marginBottom: 10 }}>
+                    <label htmlFor="journal-temp" style={labelStyle}>Temp (°F)</label>
+                    <input
+                      id="journal-temp"
+                      type="number"
+                      min={-60}
+                      max={150}
+                      value={journalTemp}
+                      onChange={(e) => setJournalTemp(e.target.value)}
+                      disabled={journalSubmitting}
+                      placeholder="e.g. 42"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* Row 3: Sightings */}
+                  <div style={{ marginBottom: 10 }}>
+                    <label htmlFor="journal-sightings" style={labelStyle}>Sightings</label>
+                    <input
+                      id="journal-sightings"
+                      type="text"
+                      maxLength={200}
+                      value={journalSightings}
+                      onChange={(e) => setJournalSightings(e.target.value.slice(0, 200))}
+                      disabled={journalSubmitting}
+                      placeholder="2 does, 1 spike"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* Row 4: Notes */}
+                  <div style={{ marginBottom: journalError ? 10 : 14 }}>
+                    <label htmlFor="journal-notes" style={labelStyle}>Notes</label>
+                    <textarea
+                      id="journal-notes"
+                      rows={3}
+                      maxLength={200}
+                      value={journalNotes}
+                      onChange={(e) => setJournalNotes(e.target.value.slice(0, 200))}
+                      disabled={journalSubmitting}
+                      placeholder="Wind was perfect, heard something in the draw at dusk…"
+                      style={{ ...inputStyle, resize: 'vertical', minHeight: 60 }}
+                    />
+                  </div>
+
+                  {/* Inline error */}
+                  {journalError && (
+                    <div
+                      role="alert"
+                      style={{
+                        background: '#3a1414',
+                        border: '1px solid #b45454',
+                        color: '#fca5a5',
+                        borderRadius: 6,
+                        padding: '6px 10px',
+                        fontSize: 11,
+                        marginBottom: 10,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {journalError}
+                    </div>
+                  )}
+
+                  {/* Form actions */}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      disabled={journalSubmitting}
+                      onClick={cancelJournalForm}
+                      style={{
+                        background: 'transparent',
+                        color: '#a0aec0',
+                        border: '1px solid #4a5568',
+                        borderRadius: 8,
+                        padding: '8px 16px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: journalSubmitting ? 'not-allowed' : 'pointer',
+                        opacity: journalSubmitting ? 0.6 : 1,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!journalDate || journalSubmitting}
+                      onClick={submitJournalEntry}
+                      style={{
+                        background: !journalDate ? '#4a5568' : '#c0a020',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '8px 20px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: !journalDate || journalSubmitting ? 'not-allowed' : 'pointer',
+                        opacity: journalSubmitting ? 0.7 : 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      {journalSubmitting && (
+                        <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                      )}
+                      {journalSubmitting ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
 
         </div>
