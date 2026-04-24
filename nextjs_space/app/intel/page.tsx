@@ -1933,6 +1933,30 @@ function generateAdjacentParcelBoundary(parcelCoords: number[][]): GeoJSON.Featu
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// OPACITY CLAMPING — Defensive guards for direct setPaintProperty calls
+// ═══════════════════════════════════════════════════════════════════════════
+// Mapbox's style spec rejects opacity values outside [0, 1] with a console
+// warning AND leaves the internal property state partially undefined. The next
+// getPaintProperty / setPaintProperty call on that property then throws
+// `TypeError: Cannot read properties of undefined (reading 'value')` inside
+// Mapbox's PossiblyEvaluatedPropertyValue.getValue(), which crashes the entire
+// map useEffect and (among other things) prevents the sit-pin context-menu
+// handlers from registering. Floating-point precision from tweens and data
+// expressions can produce tiny sub-zero values that trigger this. We clamp
+// every scalar opacity value before it hits setPaintProperty, and wrap every
+// opacity *expression* in a Mapbox ['max', 0, ['min', 1, ...]] safety net.
+//
+// Scalar clamp: use on plain numbers passed to setPaintProperty opacity props.
+const clampOpacity = (v: number): number => {
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(1, v));
+};
+
+// Expression clamp: wraps a Mapbox style expression so its evaluated result
+// is always clamped to [0, 1]. Use on data-driven opacity expressions.
+const clampOpacityExpr = (expr: any): any => ['max', 0, ['min', 1, expr]];
+
+// ═══════════════════════════════════════════════════════════════════════════
 // HERO PARCELS — curated demo properties that reliably showcase terrain intel
 // ═══════════════════════════════════════════════════════════════════════════
 interface HeroParcel {
@@ -4622,7 +4646,7 @@ function DeerIntelContent() {
               const prop = propMapFade[(layer as any).type] || 'line-opacity';
               // Start at 0, animate up to reconciled target
               try {
-                map.setPaintProperty(layer.id, prop, 0);
+                map.setPaintProperty(layer.id, prop, clampOpacity(0));
               } catch { /* ignore */ }
             }
           }
@@ -4663,7 +4687,7 @@ function DeerIntelContent() {
               try {
                 // Set to 0 first so reconcileVisibility's snap doesn't flash,
                 // then animate up to full target opacity
-                map.setPaintProperty(layer.id, prop, 0);
+                map.setPaintProperty(layer.id, prop, clampOpacity(0));
               } catch { /* noop */ }
             }
             setTimeout(() => {
@@ -5343,14 +5367,14 @@ function DeerIntelContent() {
               'escape',    '#74c69d',
               '#52b788',
             ]);
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', [
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', clampOpacityExpr([
               'match', ['get', 'beddingType'],
               'sanctuary', 0.20,
               'thermal',   0.14,
               'staging',   0.10,
               'escape',    0.13,
               0.14,
-            ]);
+            ]));
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
               'interpolate', ['linear'], ['get', 'beddingScore'],
               0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
@@ -5720,9 +5744,9 @@ function DeerIntelContent() {
       try {
         // Show outline + glow only — fill stays at opacity 0 to prevent salmon wash
         map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-        map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.95);
+        map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.95));
         map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
-        map.setPaintProperty('tfp-territory-glow', 'line-opacity', 0.35);
+        map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.35));
         // Hide adjacent parcel layers to prevent grey film overlay on territory parcels
         map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
         map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
@@ -6295,7 +6319,7 @@ function DeerIntelContent() {
           0.75, 4
         ]);
         if (isPressureMode && flowVisibility.flowPrimary) {
-          map.setPaintProperty('tfp-flow-primary', 'line-opacity', isPressureMode ? [
+          map.setPaintProperty('tfp-flow-primary', 'line-opacity', clampOpacityExpr(isPressureMode ? [
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
             0.4, 0.65,
             0.55, 0.80,
@@ -6305,7 +6329,7 @@ function DeerIntelContent() {
             0.4, 0.55,
             0.55, 0.70,
             0.75, 0.85
-          ]);
+          ]));
         }
       }
       if (map.getLayer('tfp-flow-primary-glow')) {
@@ -8293,11 +8317,11 @@ function DeerIntelContent() {
               if (layerId === 'contour-line') {
                 map.setPaintProperty(layerId, 'line-color', LAYER_COLORS.contourRegular);
                 map.setPaintProperty(layerId, 'line-width', 0.8);
-                map.setPaintProperty(layerId, 'line-opacity', 0.4);
+                map.setPaintProperty(layerId, 'line-opacity', clampOpacity(0.4));
               }
               if (layerId === 'contour-label') {
                 map.setPaintProperty(layerId, 'text-color', LAYER_COLORS.contourIndex);
-                map.setPaintProperty(layerId, 'text-opacity', 0.5);
+                map.setPaintProperty(layerId, 'text-opacity', clampOpacity(0.5));
               }
               console.log(`[MAP] Restyled contour layer: ${layerId}`);
             } catch (err) {
@@ -9881,8 +9905,8 @@ function DeerIntelContent() {
           // Ensure parcel layers are visible (gracefulClear may have faded them)
           try { map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible'); } catch {}
           try { map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible'); } catch {}
-          try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', 0.95); } catch {}
-          try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', 0.35); } catch {}
+          try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.95)); } catch {}
+          try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.35)); } catch {}
           console.log('[PICK] Imperative paint: gold boundary visible immediately');
         }
       }
@@ -10650,7 +10674,7 @@ function DeerIntelContent() {
         if (map.getLayer(id)) {
           try {
             map.setLayoutProperty(id, 'visibility', 'visible');
-            map.setPaintProperty(id, prop, opacity);
+            map.setPaintProperty(id, prop, clampOpacity(opacity));
           } catch {}
         }
       });
@@ -10665,7 +10689,7 @@ function DeerIntelContent() {
       if (map.getLayer('tfp-hunt-pockets-fill')) {
         try {
           map.setLayoutProperty('tfp-hunt-pockets-fill', 'visibility', 'visible');
-          map.setPaintProperty('tfp-hunt-pockets-fill', 'fill-opacity', [
+          map.setPaintProperty('tfp-hunt-pockets-fill', 'fill-opacity', clampOpacityExpr([
             '*',
             ['get', 'resilienceFactor'],
             [
@@ -10679,19 +10703,19 @@ function DeerIntelContent() {
                 1.0,  0.004,
               ],
             ],
-          ]);
+          ]));
         } catch {}
       }
       if (map.getLayer('tfp-hunt-pockets-stroke')) {
         try {
           map.setLayoutProperty('tfp-hunt-pockets-stroke', 'visibility', 'visible');
           // Stroke opacity uses a simple case expression, restore it
-          map.setPaintProperty('tfp-hunt-pockets-stroke', 'line-opacity', [
+          map.setPaintProperty('tfp-hunt-pockets-stroke', 'line-opacity', clampOpacityExpr([
             'case',
             ['==', ['get', 'isTopStand'], true],
             0.10,
             0.18,
-          ]);
+          ]));
         } catch {}
       }
     }, 400);
