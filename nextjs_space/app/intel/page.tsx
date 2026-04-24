@@ -3155,6 +3155,34 @@ function DeerIntelContent() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Unconditional session refresh on mount ──
+  // If a user upgraded in another tab/window (or simply navigated here after
+  // their first ?upgrade=success visit), their client-side JWT may still carry
+  // the stale 'free' subscriptionStatus. Call updateSession() once on mount so
+  // the DB-backed tier is reflected immediately. Safe to call even if the tier
+  // hasn't changed — the auth-options jwt callback re-reads from DB on update.
+  const mountRefreshFiredRef = useRef(false);
+  useEffect(() => {
+    if (mountRefreshFiredRef.current) return;
+    if (!session?.user) return;
+    // Skip if the ?upgrade=success poller is about to run — it calls updateSession
+    // 5× already and we don't want to stomp on it or double-fetch.
+    if (searchParams.get('upgrade') === 'success') return;
+    mountRefreshFiredRef.current = true;
+    (async () => {
+      try {
+        const updated = await updateSession?.();
+        const newStatus = (updated as any)?.user?.subscriptionStatus;
+        if (newStatus && newStatus !== subStatus) {
+          console.log('[SessionRefresh] Tier updated on mount:', subStatus, '→', newStatus);
+        }
+      } catch (err) {
+        console.warn('[SessionRefresh] Error on mount:', err);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
   // ── Helper: build a login callback URL that preserves current query params
   //          + an optional intent flag, so purchase/upgrade intent survives the
   //          auth redirect and can be auto-resumed after sign-in. ──
@@ -3717,10 +3745,24 @@ function DeerIntelContent() {
         const cap = isProMax ? 10 : isPro ? 5 : 1;
         if (prev.length >= cap) {
           console.error('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
-          toast.error(
-            `Territory limit reached (${cap} parcel max on ${isProMax ? 'Pro Max' : isPro ? 'Pro' : 'Free'})`,
-            { duration: 4000 }
-          );
+          // Tailor the toast message to the user's situation:
+          //  - Pro Max users: they've hit the absolute top tier
+          //  - Pro users: upsell to Pro Max for larger territories
+          //  - Free users with an unlocked parcel ($19 buyer): explain that
+          //    the $19 unlock covers parcel intel, and multi-parcel territory
+          //    mode is a Pro-plan feature
+          //  - Pure Free users: simple upgrade prompt
+          let message: string;
+          if (isProMax) {
+            message = 'Territory limit reached (10 parcels max on Pro Max)';
+          } else if (isPro) {
+            message = 'Territory limit reached (5 parcels max on Pro). Upgrade to Pro Max for 10-parcel territories.';
+          } else if (parcelUnlockedRef.current) {
+            message = 'Upgrade to Pro to build multi-parcel territories';
+          } else {
+            message = 'Upgrade to Pro for 5-parcel Territory Mode';
+          }
+          toast.error(message, { duration: 5000 });
           return prev;
         }
       }
