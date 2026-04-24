@@ -54,6 +54,20 @@ export async function POST(request: NextRequest) {
     };
     const productInfo = PRODUCT_INFO[order.productType] ?? { name: 'TerraFirma Report', description: '' };
 
+    // Defensive log — verifies what amount/product is actually sent to Stripe.
+    // See it in prod logs as: [checkout] STRIPE-SESSION-OUT { … unit_amount: 14900 … }
+    console.log('[checkout] STRIPE-SESSION-OUT', {
+      orderId: order.id,
+      productType: order.productType,
+      productName: productInfo.name,
+      unit_amount: order.price,
+      amount_display: `$${(order.price / 100).toFixed(2)}`,
+      parcelAddress: order.parcelAddress,
+      userId: session?.user?.id || 'guest',
+      email: session?.user?.email || order.guestEmail || null,
+      origin,
+    });
+
     const checkoutSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
