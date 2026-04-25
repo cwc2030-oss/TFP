@@ -2290,22 +2290,6 @@ function DeerIntelContent() {
     _territoryModeGlobal.current = territoryMode;
   }, [territoryMode]);
 
-  // ── TERRITORY LOCK/UNLOCK STATE ──────────────────────────────────────────
-  // When TRUE: parcel picker disabled, sit pins enabled (right-click to drop)
-  // When FALSE (default): parcel picker enabled, sit pins disabled (territory still being built)
-  // Lock is auto-engaged after a successful Re-Align Territory operation.
-  const [territoryLocked, setTerritoryLocked] = useState(false);
-  const territoryLockedRef = useRef(false);
-  useEffect(() => { territoryLockedRef.current = territoryLocked; }, [territoryLocked]);
-  const [hasShownLockToast, setHasShownLockToast] = useState(false);
-  const [showLockToast, setShowLockToast] = useState(false);
-  // When territory mode is exited (closed or reset), unlock automatically
-  useEffect(() => {
-    if (!territoryMode) {
-      setTerritoryLocked(false);
-    }
-  }, [territoryMode]);
-
   // ── PINEVILLE-LINK FIX ─────────────────────────────────────────────────────
   // Tracks whether the currently-active parcel was explicitly chosen by the
   // user (URL lat/lng, hero slug, demo mode, Pick Parcel click, or a territory
@@ -9100,18 +9084,11 @@ function DeerIntelContent() {
             lat: e.lngLat?.lat,
             isPro: isProRef.current,
             territoryMode: territoryModeRef.current,
-            territoryLocked: territoryLockedRef.current,
             target: (e.originalEvent?.target as HTMLElement | null)?.tagName,
           });
           // Suppress the browser's native right-click menu so our custom
           // Sit Pin menu is the only thing the user sees.
           try { e.originalEvent?.preventDefault?.(); } catch (_) {}
-          // TERRITORY LOCK GATE: in territory mode, only allow sit pins after the
-          // user has locked the territory. Outside territory mode, sit pins always work.
-          if (territoryModeRef.current && !territoryLockedRef.current) {
-            console.log('[SitPin] suppressed — territory unlocked (still editing parcels)');
-            return;
-          }
           console.log('[SitPin] contextmenu fired', {
             isPro: isProRef.current,
             lng: e.lngLat.lng,
@@ -9141,11 +9118,6 @@ function DeerIntelContent() {
         const handleTouchStart = (evt: TouchEvent) => {
           if (evt.touches.length !== 1) {
             clearLongPress();
-            return;
-          }
-          // TERRITORY LOCK GATE: same gate as right-click — sit pins only allowed
-          // in territory mode AFTER lock has been engaged.
-          if (territoryModeRef.current && !territoryLockedRef.current) {
             return;
           }
           const touch = evt.touches[0];
@@ -10158,8 +10130,7 @@ function DeerIntelContent() {
   // Register map click handler for parcel pick mode
   useEffect(() => {
     const map = mapRef.current;
-    // TERRITORY LOCK GATE: don't register parcel-pick clicks while territory is locked
-    if (!map || !mapReady || !parcelPickMode || territoryLocked) return;
+    if (!map || !mapReady || !parcelPickMode) return;
     
     // Change cursor — crosshair when under cap, default when full
     if (territoryMode && territoryParcels.length >= TERRITORY_PARCEL_CAP) {
@@ -10188,7 +10159,7 @@ function DeerIntelContent() {
       map.getCanvas().style.cursor = '';
       console.log('[PICK] Click handler removed');
     };
-  }, [mapReady, parcelPickMode, handleParcelPick, territoryMode, territoryParcels.length, territoryLocked]);
+  }, [mapReady, parcelPickMode, handleParcelPick, territoryMode, territoryParcels.length]);
 
   // ========== TERRITORY MODE: CROSSHAIR CURSOR LOCK ==========
   // When territory mode is active, force crosshair on the map canvas using CSS !important
@@ -11447,10 +11418,6 @@ function DeerIntelContent() {
                   const centerLat = (bounds[1] + bounds[3]) / 2;
                   const centerLng = (bounds[0] + bounds[2]) / 2;
                   const totalAcres = String(totalTerritoryAcreage);
-                  // AUTO-LOCK: if this is a Re-Align (summary already exists), lock
-                  // the territory upon click — the user is committing to the parcels
-                  // as their final territory and switching to sit-pin mode.
-                  const isReAlignClick = !!summary;
                   setParcelPolygon(merged);
                   setActiveLat(centerLat);
                   setActiveLng(centerLng);
@@ -11473,15 +11440,6 @@ function DeerIntelContent() {
                   // Disable further parcel picks while analysis runs,
                   // but keep territoryMode=true so the Builder panel stays visible.
                   setParcelPickMode(false);
-                  // Re-Align auto-lock: trigger lock + one-time toast.
-                  if (isReAlignClick) {
-                    setTerritoryLocked(true);
-                    if (!hasShownLockToast) {
-                      setHasShownLockToast(true);
-                      setShowLockToast(true);
-                      setTimeout(() => setShowLockToast(false), 4500);
-                    }
-                  }
                 }}
                 style={{
                   width: '100%',
@@ -11498,45 +11456,6 @@ function DeerIntelContent() {
               >
                 {summary ? '⟳ Re-Align Territory' : 'Analyze Territory'}
               </button>
-
-              {/* TERRITORY LOCK TOGGLE — only visible after first analysis.
-                  Locking allows sit pins (right-click) and hides parcel picker.
-                  Unlocking re-enables parcel editing. */}
-              {summary && (
-                <button
-                  onClick={() => {
-                    const newLocked = !territoryLocked;
-                    setTerritoryLocked(newLocked);
-                    if (newLocked) {
-                      // Disable parcel pick mode when locking
-                      setParcelPickMode(false);
-                      if (!hasShownLockToast) {
-                        setHasShownLockToast(true);
-                        setShowLockToast(true);
-                        setTimeout(() => setShowLockToast(false), 4500);
-                      }
-                    }
-                  }}
-                  title={territoryLocked
-                    ? 'Click to unlock and edit territory parcels'
-                    : 'Lock the territory to drop sit pins on the map'}
-                  style={{
-                    width: '100%',
-                    padding: '10px 0',
-                    background: territoryLocked ? '#3a2e0f' : '#1a3a2a',
-                    color: territoryLocked ? '#c9a84c' : '#888',
-                    border: territoryLocked ? '1.5px solid #c9a84c' : '1px solid #2d6a4f',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: territoryLocked ? 'bold' : 'normal',
-                    cursor: 'pointer',
-                    marginTop: 8,
-                    letterSpacing: 1,
-                  }}
-                >
-                  {territoryLocked ? '🔒 Territory Locked' : '🔓 Edit Territory'}
-                </button>
-              )}
 
               {/* Copy Territory Link — shareable URL that rebuilds this territory with one click.
                   Checks both state AND ref so the button stays visible after territoryMode toggles off. */}
@@ -11852,28 +11771,22 @@ function DeerIntelContent() {
                 : 'Territory'}
               {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded">PRO</span>}
             </Button>
-            {/* Parcel Pick Mode — de-emphasized in demo, available for exploration.
-                TERRITORY LOCK: greyed out + disabled while territory is locked. */}
+            {/* Parcel Pick Mode — de-emphasized in demo, available for exploration. */}
             <Button
               size="sm"
               variant="ghost"
-              className={`${territoryLocked 
-                ? 'text-white/30 cursor-not-allowed opacity-50'
-                : parcelPickMode 
-                  ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
-                  : (demoMode || heroParcel)
-                    ? 'text-white/40 hover:text-white/70 hover:bg-white/5'
-                    : 'text-white/80 hover:text-white hover:bg-white/10'
+              className={`${parcelPickMode 
+                ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
+                : (demoMode || heroParcel)
+                  ? 'text-white/40 hover:text-white/70 hover:bg-white/5'
+                  : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
               onClick={() => {
-                if (territoryLocked) return;
                 setParcelPickMode(!parcelPickMode);
                 if (!parcelPickMode) setActiveHeroSlug(null);
               }}
-              title={territoryLocked
-                ? 'Territory locked — unlock to add or remove parcels'
-                : 'Pick a Parcel — click any parcel on the map to analyze it'}
-              disabled={parcelPickLoading || territoryLocked}
+              title="Pick a Parcel — click any parcel on the map to analyze it"
+              disabled={parcelPickLoading}
             >
               <MapPin className="h-4 w-4 mr-1" />
               {parcelPickMode ? 'Picking…' : 'Pick Parcel'}
@@ -11940,22 +11853,6 @@ function DeerIntelContent() {
           <div className="bg-stone-900/90 backdrop-blur-sm border border-stone-600/40 rounded-xl px-5 py-3 shadow-xl flex items-center gap-3">
             <Loader2 className="h-5 w-5 text-amber-300 flex-shrink-0 animate-spin" />
             <p className="text-stone-200 font-medium text-sm">Finding parcel boundary…</p>
-          </div>
-        </div>
-      )}
-
-      {/* ========== TERRITORY LOCK TOAST (one-time on first lock) ========== */}
-      {showLockToast && (
-        <div
-          className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
-          style={{ animation: 'fadeIn 0.3s ease-out' }}
-        >
-          <div className="bg-amber-900/95 backdrop-blur-sm border-[1.5px] border-amber-400/60 rounded-xl px-5 py-3 shadow-2xl flex items-center gap-3 pointer-events-auto">
-            <span className="text-2xl">🔒</span>
-            <div>
-              <p className="text-amber-100 font-bold text-sm">Territory locked</p>
-              <p className="text-amber-200/80 text-xs">Right-click the map to drop Sit Pins</p>
-            </div>
           </div>
         </div>
       )}
