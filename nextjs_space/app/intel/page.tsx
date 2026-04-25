@@ -2033,8 +2033,10 @@ function DeerIntelContent() {
   const router = useRouter();
   const { data: session, update: updateSession } = useSession() || {};
   const subStatus = session?.user?.subscriptionStatus || 'free';
-  const isPro = subStatus === 'pro' || subStatus === 'promax';
-  const isProMax = subStatus === 'promax';
+  const role = (session?.user as any)?.role || 'user';
+  // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
+  const isPro = subStatus === 'pro' || subStatus === 'promax' || role === 'admin';
+  const isProMax = subStatus === 'promax' || role === 'admin';
   const TERRITORY_PARCEL_CAP = isProMax ? 10 : isPro ? 5 : 1;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
