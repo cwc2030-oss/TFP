@@ -30,8 +30,9 @@ export interface StandJournalRow {
   created_at: string;
 }
 
-function isPro(status?: string | null): boolean {
-  return status === "pro" || status === "promax";
+function isPro(status?: string | null, role?: string | null): boolean {
+  // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
+  return status === "pro" || status === "promax" || role === "admin";
 }
 
 // -------------------------------------------------------------------------
@@ -80,11 +81,12 @@ export async function POST(request: NextRequest) {
     const subStatus = (session?.user as any)?.subscriptionStatus as
       | string
       | undefined;
+    const role = (session?.user as any)?.role as string | undefined;
 
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
-    if (!isPro(subStatus)) {
+    if (!isPro(subStatus, role)) {
       return NextResponse.json(
         { error: "Pro subscription required", code: "UPGRADE_REQUIRED" },
         { status: 403 }

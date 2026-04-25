@@ -26,13 +26,15 @@ export async function GET(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { subscriptionStatus: true },
+    select: { subscriptionStatus: true, role: true },
   });
 
   const subStatus = user?.subscriptionStatus || 'free';
-  const isPro = subStatus === 'pro' || subStatus === 'promax';
+  const role = user?.role || 'user';
+  // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
+  const isPro = subStatus === 'pro' || subStatus === 'promax' || role === 'admin';
 
-  // Pro/ProMax subscribers always have full access
+  // Pro/ProMax subscribers (and admins) always have full access
   if (isPro) {
     return NextResponse.json({ hasAccess: true, isPro: true, isLoggedIn: true });
   }

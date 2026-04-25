@@ -96,11 +96,14 @@ const css = `
 export async function POST(req: NextRequest) {
   try {
     // ── SOFT AUTH ── No session → free tier (PREVIEW watermark). Tier derived from DB when logged in.
+    // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
     const session = await getServerSession(authOptions);
     const serverTier = session?.user
       ? ((session.user as any).subscriptionStatus || 'free')
       : 'free';
-    const isFreePreview = serverTier === 'free';
+    const serverRole = session?.user ? ((session.user as any).role || 'user') : 'guest';
+    const isAdmin = serverRole === 'admin';
+    const isFreePreview = !isAdmin && serverTier === 'free';
 
     const data = await req.json();
     const {
