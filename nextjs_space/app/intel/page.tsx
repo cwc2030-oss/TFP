@@ -2358,7 +2358,19 @@ function DeerIntelContent() {
   const parcelUnlockedRef = useRef(false);
   useEffect(() => { parcelUnlockedRef.current = parcelUnlocked; }, [parcelUnlocked]);
   const isProRef = useRef(false);
-  useEffect(() => { isProRef.current = isPro; }, [isPro]);
+  useEffect(() => {
+    isProRef.current = isPro;
+    // [DIAGNOSTIC] Track isPro transitions for sit-pin debugging.
+    // If isProRef stays false even though the user has Pro/Pro Max/admin,
+    // the contextmenu handler will gate the menu (CAUSE B from diagnosis).
+    console.warn('[SitPin][DIAG-B] isPro updated', {
+      isPro,
+      isProRef: isProRef.current,
+      subStatus,
+      role,
+      sessionEmail: session?.user?.email,
+    });
+  }, [isPro, subStatus, role, session?.user?.email]);
 
   // v3.9.0 — Persist a sit pin for the current parcel (Pro-only)
   const saveSitPin = useCallback(async () => {
@@ -9078,6 +9090,19 @@ function DeerIntelContent() {
 
         // Desktop: right-click
         map.on('contextmenu', (e: mapboxgl.MapMouseEvent) => {
+          // [DIAGNOSTIC] Unconditional probe — fires before any gates.
+          // If you see this log, the Mapbox canvas IS receiving the contextmenu
+          // event. If you don't see it, an overlay div is intercepting clicks
+          // before they reach the canvas (CAUSE A from the diagnosis).
+          console.warn('[SitPin][DIAG-A] contextmenu reached map handler', {
+            ts: Date.now(),
+            lng: e.lngLat?.lng,
+            lat: e.lngLat?.lat,
+            isPro: isProRef.current,
+            territoryMode: territoryModeRef.current,
+            territoryLocked: territoryLockedRef.current,
+            target: (e.originalEvent?.target as HTMLElement | null)?.tagName,
+          });
           // Suppress the browser's native right-click menu so our custom
           // Sit Pin menu is the only thing the user sees.
           try { e.originalEvent?.preventDefault?.(); } catch (_) {}
@@ -9161,6 +9186,45 @@ function DeerIntelContent() {
         map.on('movestart', () => setSitPinMenu(null));
         map.on('zoomstart', () => setSitPinMenu(null));
         map.on('click', () => setSitPinMenu(null));
+
+        // [DIAGNOSTIC] Document-level contextmenu probe — capture phase.
+        // Fires for ALL right-clicks anywhere on the page. We use this to identify
+        // which DOM element is receiving the right-click when the Mapbox handler
+        // doesn't fire (CAUSE A — overlay blocking the canvas).
+        const docContextMenuProbe = (evt: MouseEvent) => {
+          const target = evt.target as HTMLElement | null;
+          const tagName = target?.tagName;
+          const className = target?.className;
+          const id = target?.id;
+          // Walk up to find the first absolutely/fixed-positioned ancestor.
+          let positionedAncestor: string | null = null;
+          let cur: HTMLElement | null = target;
+          let depth = 0;
+          while (cur && depth < 8) {
+            const cs = (typeof window !== 'undefined') ? window.getComputedStyle(cur) : null;
+            const pos = cs?.position;
+            if (pos === 'absolute' || pos === 'fixed') {
+              positionedAncestor = `${cur.tagName}.${typeof cur.className === 'string' ? cur.className.slice(0, 80) : ''}`;
+              break;
+            }
+            cur = cur.parentElement;
+            depth++;
+          }
+          console.warn('[SitPin][DIAG-DOC] document.contextmenu', {
+            ts: Date.now(),
+            x: evt.clientX,
+            y: evt.clientY,
+            target: tagName,
+            targetClass: typeof className === 'string' ? className.slice(0, 100) : '',
+            targetId: id,
+            positionedAncestor,
+            isCanvas: tagName === 'CANVAS',
+          });
+        };
+        // Use capture phase to ensure we observe the event even if a child stops propagation.
+        document.addEventListener('contextmenu', docContextMenuProbe, true);
+        // We don't bother to remove this listener — the page is full-screen and the listener
+        // is bound once per map creation. If it ever needs cleanup, add it to the cleanup function.
 
         console.error('[SitPin] Context-menu handlers registered (right-click + long-press)');
       } catch (sitPinErr) {
