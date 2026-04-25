@@ -6582,6 +6582,7 @@ function DeerIntelContent() {
       // Create native Mapbox sources and layers (NO Deck.gl)
       try {
         console.log('[MAP] Creating native Mapbox sources...');
+        console.log('[DEBUG] checkpoint-1 — entered source/layer setup');
         
         // ========== v3.5.1 — SELECTED PARCEL BOUNDARY (gold/amber with glow) ==========
         // Gold/amber dashed line (~4-5px) with subtle outer glow so it clearly stands out
@@ -7057,6 +7058,8 @@ function DeerIntelContent() {
           });
         }
         
+        console.log('[DEBUG] checkpoint-2 — past parcel/QA/debug/V2 corridor/spine sources');
+
         // ========== PRESSURE POLYGON FILL GRID (HIDDEN — kept in code) ==========
         // Crisp per-cell rectangles colored by pressure score — hidden at 0 opacity.
         if (!map.getSource('tfp-pressure-grid')) {
@@ -7555,6 +7558,8 @@ function DeerIntelContent() {
           });
         }
 
+        console.log('[DEBUG] checkpoint-3 — past pressure heatmap, movement-delta, refuge, terrain-spine, terrain-flow, nearest-corridor, territory layers');
+
         // ========== HUNT POCKET LAYER (v3.8.6) ==========
         // Upstream-biased teardrop intercept zones with corridor-axis intensity bias.
         // Opacity = base curve × opacityScale × corridorBias for flow-reinforced fade.
@@ -8021,6 +8026,8 @@ function DeerIntelContent() {
           });
         }
         
+        console.log('[DEBUG] checkpoint-4 — past hunt pocket, kill zone, stand layers, top-stand attention, huntability sources');
+
         // ========== v3.6.1: BEDDING PROBABILITY LAYER ==========
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
         if (!map.getSource('tfp-bedding-probability')) {
@@ -8849,6 +8856,8 @@ function DeerIntelContent() {
           console.error('[INTEL-DIAG] getStyle skipped — style not loaded yet');
         }
       } catch (_) { /* ignore */ }
+
+      console.log('[DEBUG] checkpoint-5 — past full source/layer setup + diagnostic; about to enter sit-pin green-icon block');
 
       // ========== v3.9.0 — Custom Sit Pins: green pin source + layers ==========
       try {
