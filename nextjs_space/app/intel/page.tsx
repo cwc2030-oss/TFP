@@ -14900,6 +14900,8 @@ function DeerIntelContent() {
               </button>
             </div>
           </div>
+        </div>
+      )}
 
       {/* ========== v3.9.0 — Custom Sit Pin context menu (Pro feature) ========== */}
       {sitPinMenu && (() => {
@@ -15791,8 +15793,6 @@ function DeerIntelContent() {
       })()}
 
 
-        </div>
-      )}
     </div>
   );
 }
