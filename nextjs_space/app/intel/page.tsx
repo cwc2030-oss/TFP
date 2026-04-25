@@ -6569,20 +6569,28 @@ function DeerIntelContent() {
 
     // Handler for when map is fully loaded
     const onMapLoad = () => {
-      console.error('[MAP-DIAG] LOAD EVENT FIRED id=' + mountId + ' loaded=' + map.loaded() + ' canvas=' + (map.getCanvas()?.width || '?') + 'x' + (map.getCanvas()?.height || '?'));
+      console.error('[DEBUG] checkpoint-A — onMapLoad ENTERED');
+      try {
+        console.error('[MAP-DIAG] LOAD EVENT FIRED id=' + mountId + ' loaded=' + map.loaded() + ' canvas=' + (map.getCanvas()?.width || '?') + 'x' + (map.getCanvas()?.height || '?'));
+      } catch (logErr) {
+        console.error('[DEBUG] LOAD-EVENT log itself threw:', logErr);
+      }
+      console.error('[DEBUG] checkpoint-B — past LOAD EVENT FIRED log');
       
       // DISABLED: 3D terrain + sky - using flat 2D map only for stability
       // Guard: only call setTerrain if the method exists (Mapbox GL v2+)
+      console.error('[DEBUG] checkpoint-C — about to typeof setTerrain check');
       if (typeof map.setTerrain === 'function') {
         console.log('[MAP] setTerrain is available but DISABLED for stability');
       } else {
         console.log('[MAP] setTerrain not available (Mapbox GL v1 or MapLibre)');
       }
+      console.error('[DEBUG] checkpoint-D — past setTerrain check, about to enter source-setup try');
       
       // Create native Mapbox sources and layers (NO Deck.gl)
       try {
+        console.error('[DEBUG] checkpoint-1 — entered source/layer setup try block');
         console.log('[MAP] Creating native Mapbox sources...');
-        console.log('[DEBUG] checkpoint-1 — entered source/layer setup');
         
         // ========== v3.5.1 — SELECTED PARCEL BOUNDARY (gold/amber with glow) ==========
         // Gold/amber dashed line (~4-5px) with subtle outer glow so it clearly stands out
@@ -7058,7 +7066,7 @@ function DeerIntelContent() {
           });
         }
         
-        console.log('[DEBUG] checkpoint-2 — past parcel/QA/debug/V2 corridor/spine sources');
+        console.error('[DEBUG] checkpoint-2 — past parcel/QA/debug/V2 corridor/spine sources');
 
         // ========== PRESSURE POLYGON FILL GRID (HIDDEN — kept in code) ==========
         // Crisp per-cell rectangles colored by pressure score — hidden at 0 opacity.
@@ -7558,7 +7566,7 @@ function DeerIntelContent() {
           });
         }
 
-        console.log('[DEBUG] checkpoint-3 — past pressure heatmap, movement-delta, refuge, terrain-spine, terrain-flow, nearest-corridor, territory layers');
+        console.error('[DEBUG] checkpoint-3 — past pressure heatmap, movement-delta, refuge, terrain-spine, terrain-flow, nearest-corridor, territory layers');
 
         // ========== HUNT POCKET LAYER (v3.8.6) ==========
         // Upstream-biased teardrop intercept zones with corridor-axis intensity bias.
@@ -8026,7 +8034,7 @@ function DeerIntelContent() {
           });
         }
         
-        console.log('[DEBUG] checkpoint-4 — past hunt pocket, kill zone, stand layers, top-stand attention, huntability sources');
+        console.error('[DEBUG] checkpoint-4 — past hunt pocket, kill zone, stand layers, top-stand attention, huntability sources');
 
         // ========== v3.6.1: BEDDING PROBABILITY LAYER ==========
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
@@ -8857,7 +8865,7 @@ function DeerIntelContent() {
         }
       } catch (_) { /* ignore */ }
 
-      console.log('[DEBUG] checkpoint-5 — past full source/layer setup + diagnostic; about to enter sit-pin green-icon block');
+      console.error('[DEBUG] checkpoint-5 — past full source/layer setup + diagnostic; about to enter sit-pin green-icon block');
 
       // ========== v3.9.0 — Custom Sit Pins: green pin source + layers ==========
       try {
@@ -9039,7 +9047,7 @@ function DeerIntelContent() {
 
       // ========== v3.9.0 — Custom Sit Pins: right-click (desktop) + long-press (mobile) ==========
       try {
-        console.log('[SitPin] REACHED');
+        console.error('[SitPin] REACHED');
         const openSitPinMenu = (viewportX: number, viewportY: number, lng: number, lat: number) => {
           setSitPinMenu({
             x: viewportX,
@@ -9125,9 +9133,9 @@ function DeerIntelContent() {
         map.on('zoomstart', () => setSitPinMenu(null));
         map.on('click', () => setSitPinMenu(null));
 
-        console.log('[SitPin] Context-menu handlers registered (right-click + long-press)');
+        console.error('[SitPin] Context-menu handlers registered (right-click + long-press)');
       } catch (sitPinErr) {
-        console.log('[SitPin] CATCH', sitPinErr);
+        console.error('[SitPin] CATCH', sitPinErr);
         console.warn('[SitPin] Failed to register context-menu handlers:', sitPinErr);
       }
 
