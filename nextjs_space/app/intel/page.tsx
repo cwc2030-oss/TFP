@@ -2361,7 +2361,30 @@ function DeerIntelContent() {
     if (!sitPinModal) return;
     const name = sitPinName.trim().slice(0, 20);
     if (!name) return;
-    if (!currentParcelKey) {
+
+    // v3.9.1 — Resolve the parcel ID to save the pin against.
+    // In territory mode, use point-in-polygon to find the actual parcel that
+    // contains the pin's lat/lng. This keeps the pin tied to a real Regrid
+    // parcel ID so it survives territory edits (add/remove parcels, re-align).
+    // Fallback: if no territory parcel matches (e.g., pin is in a gap between
+    // parcels), use the synthetic currentParcelKey.
+    let saveParcelId = currentParcelKey;
+    if (territoryMode && territoryParcels.length > 0) {
+      const pt: [number, number] = [sitPinModal.lng, sitPinModal.lat];
+      const containingParcel = territoryParcels.find(p => {
+        try {
+          return pointInParcelGeometry(pt, p.polygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon);
+        } catch { return false; }
+      });
+      if (containingParcel?.id) {
+        saveParcelId = containingParcel.id;
+        console.log(`[SitPin] Territory mode: saving pin under parcel ${containingParcel.id} (${containingParcel.address})`);
+      } else {
+        console.warn('[SitPin] Territory mode: no containing parcel found, using fallback key', saveParcelId);
+      }
+    }
+
+    if (!saveParcelId) {
       setSitPinError('No parcel loaded yet — please wait for analysis.');
       return;
     }
@@ -2372,7 +2395,7 @@ function DeerIntelContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          parcelId: currentParcelKey,
+          parcelId: saveParcelId,
           name,
           lng: sitPinModal.lng,
           lat: sitPinModal.lat,
@@ -2393,7 +2416,7 @@ function DeerIntelContent() {
       const pin = data?.pin as SitPin | undefined;
       if (pin) {
         setSitPins((prev) => [...prev, pin]);
-        console.log('[SitPin] Saved:', pin.id, pin.name);
+        console.log('[SitPin] Saved:', pin.id, pin.name, 'under parcelId:', saveParcelId);
       }
       setSitPinModal(null);
       setSitPinName('');
@@ -2404,7 +2427,7 @@ function DeerIntelContent() {
       setSitPinSaving(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sitPinModal, sitPinName, currentParcelKey]);
+  }, [sitPinModal, sitPinName, currentParcelKey, territoryMode, territoryParcels]);
 
   // v3.9.0 — Keep the map's sit-pin source in sync with React state
   useEffect(() => {
@@ -2437,35 +2460,65 @@ function DeerIntelContent() {
     }
   }, [sitPins, mapReady]);
 
-  // v3.9.0 — Load user sit pins whenever the current parcel changes (Pro-only)
+  // v3.9.0 — Load user sit pins whenever the current parcel/territory changes (Pro-only)
+  // v3.9.1 — In territory mode, fetch pins for ALL parcels in the territory so they
+  // remain visible after Analyze/Re-Align (which replaces parcelPolygon with a merged
+  // shape and shifts activeLat/Lng to the centroid — making currentParcelKey synthetic).
   useEffect(() => {
-    if (!isPro || !currentParcelKey) {
-      setSitPins([]);
-      return;
+    if (!isPro) { setSitPins([]); return; }
+
+    // Build the list of parcel IDs to fetch pins for.
+    let parcelIds: string[] = [];
+    if (territoryMode && territoryParcels.length > 0) {
+      // Territory mode: load pins for EVERY parcel in the territory.
+      parcelIds = territoryParcels.map(p => p.id).filter(Boolean);
+      // Also include the current parcel key in case the user dropped pins under
+      // a synthetic territory key (e.g., from a prior territory build).
+      if (currentParcelKey && !parcelIds.includes(currentParcelKey)) {
+        parcelIds.push(currentParcelKey);
+      }
+    } else if (currentParcelKey) {
+      parcelIds = [currentParcelKey];
     }
+
+    if (parcelIds.length === 0) { setSitPins([]); return; }
+
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(
-          `/api/sit-pins?parcelId=${encodeURIComponent(currentParcelKey)}`,
-          { cache: 'no-store' }
+        const results = await Promise.all(
+          parcelIds.map(pid =>
+            fetch(`/api/sit-pins?parcelId=${encodeURIComponent(pid)}`, { cache: 'no-store' })
+              .then(r => (r.ok ? r.json() : { pins: [] }))
+              .catch(() => ({ pins: [] }))
+          )
         );
-        if (!res.ok) {
-          if (!cancelled) setSitPins([]);
-          return;
+        if (cancelled) return;
+        // Flatten and de-dupe by pin id (in case the same pin is returned under
+        // multiple parcel queries — defensive against future API changes).
+        const seen = new Set<string>();
+        const allPins: SitPin[] = [];
+        for (const r of results) {
+          if (!r || !Array.isArray(r.pins)) continue;
+          for (const p of r.pins as SitPin[]) {
+            if (p?.id && !seen.has(p.id)) {
+              seen.add(p.id);
+              allPins.push(p);
+            }
+          }
         }
-        const data = await res.json();
-        if (!cancelled && Array.isArray(data?.pins)) {
-          setSitPins(data.pins as SitPin[]);
-          console.log(`[SitPin] Loaded ${data.pins.length} pin(s) for parcel ${currentParcelKey}`);
-        }
+        setSitPins(allPins);
+        console.log(
+          `[SitPin] Loaded ${allPins.length} pin(s) across ${parcelIds.length} parcel key(s)` +
+          (territoryMode ? ` [territoryMode]` : '')
+        );
       } catch (err) {
         if (!cancelled) setSitPins([]);
         console.warn('[SitPin] load failed:', err);
       }
     })();
     return () => { cancelled = true; };
-  }, [isPro, currentParcelKey]);
+  }, [isPro, currentParcelKey, territoryMode, territoryParcels]);
 
   // ========== Stand Journal: load entries when a pin is opened ==========
   useEffect(() => {
