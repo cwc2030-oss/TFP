@@ -29,6 +29,12 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 15000,
   },
+  // Override Next.js's `jsx: "preserve"` (in tsconfig.json) so vitest (vite 4
+  // uses oxc) can transform .tsx imports for tests that render server
+  // components.
+  oxc: {
+    jsx: { runtime: 'automatic' },
+  } as any,
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
