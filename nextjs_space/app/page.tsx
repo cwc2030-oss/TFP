@@ -272,7 +272,20 @@ function HeroSection() {
                 <p className="text-red-400 text-sm mt-2">{searchError}</p>
               )}
             </form>
-            
+
+            {/* Secondary CTA \u2014 surfaces the Terrain Brain demo for hunters
+                who don't have an address in mind. Only 1.1% of homepage
+                visitors discover /demo today; this lifts that. */}
+            <div className="mb-6">
+              <Link
+                href="/demo"
+                className="inline-flex items-center gap-2 text-emerald-300 hover:text-emerald-200 underline-offset-4 hover:underline transition-colors text-base font-medium"
+              >
+                Or see The Terrain Brain in action
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+
             <p className="text-stone-400 text-sm mb-6">
               Try: <button type="button" onClick={() => setAddress('425 SE 850th Rd, Leeton, MO')} className="text-emerald-400 hover:underline">425 SE 850th Rd, Leeton, MO</button>
               {' '} or {' '}
