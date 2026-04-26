@@ -21,6 +21,7 @@ model User {
   orders           Order[]
   savedProperties  SavedProperty[]
   parcelPurchases  ParcelPurchase[]
+  listings         Listing[]
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
@@ -135,6 +136,92 @@ model SavedProperty {
   isShared        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  listings        Listing[]
 
   @@index([userId])
+}
+
+// ============================================================================
+// Marketplace — additive Chunk 1.
+//
+// Listing is anchored to a SavedProperty (the user's certified hunt
+// territory). The certification is the value prop.
+//
+// OPSEC: Listing intentionally has NO precise-location fields.
+// County is the finest geographic grain. centroidLat/centroidLng on
+// SavedProperty must NEVER copy onto Listing at any step.
+// ============================================================================
+model Listing {
+  id                       String          @id @default(cuid())
+  // FK -> SavedProperty (the hunt-report anchor for this listing).
+  savedPropertyId          String
+  // Drift tracking: the SavedProperty.updatedAt at the moment we snapshot.
+  // Lets chunk 3 detect when the underlying analysis has been re-run and
+  // prompt the owner to re-publish.
+  savedPropertyUpdatedAt   DateTime?
+  ownerUserId              String
+
+  // Snapshot from SavedProperty at publish time (chunk 3 writes these;
+  // chunk 1 just reserves the columns). All nullable for DRAFT.
+  state                    String?         // 2-letter, e.g. "MO"
+  county                   String?
+  acres                    Float?          // from SavedProperty.totalAcres
+  terrainScore             Int?            // from SavedProperty.terrainScore
+  primaryMovement          String?         // from SavedProperty.primaryMovement
+  bedAcres                 Float?          // from SavedProperty.bedAcres
+  funnelCount              Int?            // from SavedProperty.funnelCount
+
+  // Lease terms — null in DRAFT, required at PENDING_REVIEW (chunk 3)
+  askingPriceMin           Int?            // USD/year, integer dollars
+  askingPriceMax           Int?
+  leaseType                LeaseType?
+  huntersMax               Int?
+  seasonAvailability       String[]        @default([])  // ["bow","rifle","muzzleloader","youth"]
+  amenities                Json?           // { water, foodPlots, parking, lodging, atvAccess, electricity }
+
+  // Listing content
+  title                    String?         // optional; fall-back rendered as "{acres} ac in {county}, {state}"
+  description              String?         @db.Text   // ~500 char cap, validated in app layer
+  photos                   String[]        @default([])  // object-storage URLs, max 6, listings/ prefix
+
+  // Contact
+  contactMethod            ContactMethod?
+  contactEmail             String?
+  contactPhone             String?
+
+  // Lifecycle
+  status                   ListingStatus   @default(DRAFT)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  publishedAt              DateTime?
+
+  savedProperty            SavedProperty   @relation(fields: [savedPropertyId], references: [id])
+  owner                    User            @relation(fields: [ownerUserId], references: [id])
+
+  @@index([ownerUserId, status])
+  @@index([state, status])
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  LEASED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum LeaseType {
+  ANNUAL
+  SEASON_FULL
+  RIFLE_ONLY
+  BOW_ONLY
+  YOUTH
+  OTHER
+}
+
+enum ContactMethod {
+  EMAIL_RELAY
+  PHONE
+  BOTH
 }
