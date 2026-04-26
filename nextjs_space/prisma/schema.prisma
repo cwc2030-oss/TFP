@@ -225,3 +225,36 @@ enum ContactMethod {
   PHONE
   BOTH
 }
+
+
+// ─── Waitlist (Chunk 2 — FB landing pages) ─────────────────────────────────
+// Captures intent from /lease-your-land and /find-a-lease landing pages
+// before the public marketplace ships. No auth required — this is a
+// pre-launch signup capture, not a user account.
+
+model Waitlist {
+  id              String         @id @default(cuid())
+  side            WaitlistSide
+  email           String
+  name            String?
+  state           String?        // 2-letter; landowners (single state)
+  states          String[]       @default([])  // hunters (multiple regions of interest)
+  acres           Float?         // landowners only, approximate
+  maxBudgetUsd    Int?           // hunters only, USD/year
+  seasonInterest  String[]       @default([])  // hunters only ("bow","rifle","muzzleloader","youth")
+  groupSize       Int?           // hunters only
+  source          String?        // free-text e.g. "fb_organic", "homepage_cta"
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  notes           String?        @db.Text
+  createdAt       DateTime       @default(now())
+
+  @@index([side, state])
+  @@index([email])
+}
+
+enum WaitlistSide {
+  LANDOWNER
+  HUNTER
+}
