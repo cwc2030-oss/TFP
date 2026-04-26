@@ -8,23 +8,36 @@
  * Auth-gated. Requires ≥1 SavedProperty; otherwise redirects to /listings
  * (the index page handles the empty-state messaging).
  */
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
 import Navbar from '@/components/navbar';
+import { getListingPrefillForOwner } from '@/lib/listing-prefill';
 import StepHeader from './_components/step-header';
 import SavedPropertyPickerForm from './_components/saved-property-picker-form';
+import ListingCtaArrivalTracker from './_components/listing-cta-arrival-tracker';
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewListingPage() {
+interface Props {
+  searchParams?: { savedPropertyId?: string; cta?: string };
+}
+
+export default async function NewListingPage({ searchParams = {} }: Props) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     redirect('/login?callbackUrl=%2Fdashboard%2Flistings%2Fnew');
   }
   const userId = session.user.id;
+  const requestedSavedPropertyId = searchParams.savedPropertyId?.trim() || null;
+  const prefill = requestedSavedPropertyId
+    ? await getListingPrefillForOwner(requestedSavedPropertyId, userId)
+    : null;
+  if (requestedSavedPropertyId && !prefill) {
+    notFound();
+  }
 
   const savedProperties = await prisma.savedProperty.findMany({
     where: { userId },
@@ -56,7 +69,15 @@ export default async function NewListingPage() {
           score and metadata are what makes the listing trustworthy.
         </p>
 
-        <SavedPropertyPickerForm savedProperties={savedProperties} />
+        <ListingCtaArrivalTracker
+          savedPropertyId={requestedSavedPropertyId}
+          cta={searchParams.cta ?? null}
+        />
+        <SavedPropertyPickerForm
+          savedProperties={savedProperties}
+          initialSelectedId={requestedSavedPropertyId}
+          prefill={prefill}
+        />
 
         <div className="mt-8">
           <Link href="/dashboard/listings" className="text-stone-500 hover:text-stone-400 text-sm">

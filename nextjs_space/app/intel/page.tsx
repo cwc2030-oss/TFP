@@ -2421,7 +2421,7 @@ function DeerIntelContent() {
       setSitPinModal(null);
       setSitPinName('');
     } catch (err) {
-      console.error('[SitPin] save error:', err);
+      console.log('[SitPin] save error:', err);
       setSitPinError('Network error. Please try again.');
     } finally {
       setSitPinSaving(false);
@@ -2890,15 +2890,15 @@ function DeerIntelContent() {
         : String(event.reason);
       const errorStack = event.reason instanceof Error ? event.reason.stack : undefined;
       // Diagnostic log only — visible in dev, silenced in prod by Step 12 filter
-      console.error('[INTEL-DIAG] Unhandled promise rejection:', errorMsg);
-      if (errorStack) console.error('[INTEL-DIAG] Stack:', errorStack);
+      console.log('[INTEL-DIAG] Unhandled promise rejection:', errorMsg);
+      if (errorStack) console.log('[INTEL-DIAG] Stack:', errorStack);
     };
 
     const handleGlobalError = (event: ErrorEvent) => {
       const msg = event.message || '';
       // Diagnostic log only
-      console.error('[INTEL-DIAG] Global error:', msg, 'file:', event.filename, 'line:', event.lineno);
-      if (event.error?.stack) console.error('[INTEL-DIAG] Stack:', event.error.stack);
+      console.log('[INTEL-DIAG] Global error:', msg, 'file:', event.filename, 'line:', event.lineno);
+      if (event.error?.stack) console.log('[INTEL-DIAG] Stack:', event.error.stack);
     };
 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
@@ -3109,19 +3109,19 @@ function DeerIntelContent() {
       // Diagnostic logging
       if (snapped.length > 0) {
         snapped.forEach(r => {
-          console.error(`[STAND-DIAG] snapped stand id=${r.rank} "${r.name}" from [${r.from[0].toFixed(6)}, ${r.from[1].toFixed(6)}] → [${r.to[0].toFixed(6)}, ${r.to[1].toFixed(6)}]`);
+          console.log(`[STAND-DIAG] snapped stand id=${r.rank} "${r.name}" from [${r.from[0].toFixed(6)}, ${r.from[1].toFixed(6)}] → [${r.to[0].toFixed(6)}, ${r.to[1].toFixed(6)}]`);
         });
       }
       if (rejected.length > 0) {
         rejected.forEach(r => {
-          console.error(`[STAND-DIAG] rejecting off-parcel stand candidate id=${r.rank} name="${r.name}" coords=[${r.coords[0].toFixed(6)}, ${r.coords[1].toFixed(6)}] reason=${r.reason}`);
+          console.log(`[STAND-DIAG] rejecting off-parcel stand candidate id=${r.rank} name="${r.name}" coords=[${r.coords[0].toFixed(6)}, ${r.coords[1].toFixed(6)}] reason=${r.reason}`);
         });
       }
-      console.error(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
+      console.log(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
     } else {
       // No parcel geometry available — use diversity-selected stands (fallback)
       aligned = allScoredDiverse;
-      console.error('[STAND-DIAG] no parcel geometry available — using all stand candidates');
+      console.log('[STAND-DIAG] no parcel geometry available — using all stand candidates');
     }
 
     // v2.1: EDGE STAND POSITION BIAS — nudge edge stands ~10m toward the field edge
@@ -3613,7 +3613,7 @@ function DeerIntelContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, isPro]);
 
-  async function handleSaveProperty() {
+  async function handleSaveProperty(): Promise<string | null> {
     const payload = territoryMode ? {
       name: territoryName || 'My Territory',
       type: 'territory',
@@ -3656,13 +3656,32 @@ function DeerIntelContent() {
 
     if (res.ok) {
       const data = await res.json();
-      setLastSavedPropertyId(data.property?.id || null);
+      const id = data.property?.id || null;
+      setLastSavedPropertyId(id);
       setShareLink(null); // Reset share link on new save
       setSaveConfirmed(true);
       setTimeout(() => setSaveConfirmed(false), 3000);
+      return id;
     }
+
+    return null;
   }
 
+  async function ensureSavedPropertyForListing(): Promise<string | null> {
+    if (lastSavedPropertyId) return lastSavedPropertyId;
+    const id = await handleSaveProperty();
+    if (!id) {
+      toast.error('Save this property before listing it.');
+      return null;
+    }
+    return id;
+  }
+
+  async function handleListThisProperty(source: 'report_ready' | 'pdf' = 'report_ready') {
+    const id = await ensureSavedPropertyForListing();
+    if (!id) return;
+    router.push(`/dashboard/listings/new?savedPropertyId=${encodeURIComponent(id)}&cta=${source}`);
+  }
   async function handleShareTerritory() {
     // If we already have a share link, just copy it
     if (shareLink) {
@@ -3749,6 +3768,8 @@ function DeerIntelContent() {
     setIsDownloading(true);
     try {
       const top3 = alignedStands.slice(0, 3);
+      const reportSavedPropertyId = await ensureSavedPropertyForListing();
+      if (!reportSavedPropertyId) return;
       const isTerritory = territoryParcelsRef.current.length > 1;
       const territoryAcreageSum = territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0);
       const payload = {
@@ -3804,6 +3825,7 @@ function DeerIntelContent() {
           slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
           parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
         },
+        savedPropertyId: reportSavedPropertyId,
         seasonScores: {
           recommended: summary?.recommendedSeason ?? 'rut',
           topScore: summary?.topStandScore ?? 0,
@@ -3972,13 +3994,13 @@ function DeerIntelContent() {
   }, []);
 
   const addParcelToTerritory = useCallback((parcel: TerritoryParcel, opts?: { bypassCap?: boolean }) => {
-    console.error('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id, 'address:', parcel.address, 'acreage:', parcel.acreage);
+    console.log('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id, 'address:', parcel.address, 'acreage:', parcel.acreage);
     setTerritoryParcels(prev => {
-      console.error('[TERRITORY-DIAG] setTerritoryParcels updater. prev.length:', prev.length, 'prev IDs:', prev.map(p => p.id));
+      console.log('[TERRITORY-DIAG] setTerritoryParcels updater. prev.length:', prev.length, 'prev IDs:', prev.map(p => p.id));
       // Duplicate guard
       const exists = prev.find(p => p.id === parcel.id);
       if (exists) {
-        console.error('[TERRITORY-DIAG] DUPLICATE — parcel already in territory, skipping:', parcel.id);
+        console.log('[TERRITORY-DIAG] DUPLICATE — parcel already in territory, skipping:', parcel.id);
         return prev;
       }
 
@@ -3989,7 +4011,7 @@ function DeerIntelContent() {
         // Tier-based parcel cap: free=1, pro=5, promax=10
         const cap = isProMax ? 10 : isPro ? 5 : 1;
         if (prev.length >= cap) {
-          console.error('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
+          console.log('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
           // Tailor the toast message to the user's situation:
           //  - Pro Max users: they've hit the absolute top tier
           //  - Pro users: upsell to Pro Max for larger territories
@@ -4014,7 +4036,7 @@ function DeerIntelContent() {
 
       const updated = [...prev, parcel];
       territoryParcelsRef.current = updated;
-      console.error('[TERRITORY-DIAG] PARCEL ADDED. new count:', updated.length);
+      console.log('[TERRITORY-DIAG] PARCEL ADDED. new count:', updated.length);
 
       // Safety catch: hide adjacent parcel layers on first territory parcel add
       if (prev.length === 0) {
@@ -4095,7 +4117,7 @@ function DeerIntelContent() {
     const map = mapRef.current;
     if (!map) return;
 
-    console.error('[INTEL-DIAG] === OVERLAYS CLEARING ===');
+    console.log('[INTEL-DIAG] === OVERLAYS CLEARING ===');
 
     // vNext: Stand popup cleanup (GeoJSON layers cleared via gracefulClear below)
     if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
@@ -4109,7 +4131,7 @@ function DeerIntelContent() {
     // v4-fix13: Preserve parcel boundary layers during clear — they don't change
     // between re-analysis runs and should stay visually stable.
     gracefulClear(map, ALL_TFP_SOURCES.current, 220, ['tfp-parcel-', 'tfp-territory-']).then(() => {
-      console.error('[INTEL-DIAG] OVERLAYS CLEARED — sources wiped, layers faded');
+      console.log('[INTEL-DIAG] OVERLAYS CLEARED — sources wiped, layers faded');
     });
   }, []);
 
@@ -4201,7 +4223,7 @@ function DeerIntelContent() {
   const analysisInFlightRef = useRef(false);
   const runAnalysis = useCallback(async () => {
     // ── DIAGNOSTIC: Log every runAnalysis entry with full context ──
-    console.error('[TRIGGER-DIAG] runAnalysis() ENTERED — territoryMode:', territoryModeRef.current,
+    console.log('[TRIGGER-DIAG] runAnalysis() ENTERED — territoryMode:', territoryModeRef.current,
       'parcels:', territoryParcelsRef.current.length,
       'inFlight:', analysisInFlightRef.current,
       'prefetched:', !!prefetchedParcelRef.current,
@@ -4211,7 +4233,7 @@ function DeerIntelContent() {
     // is still in flight would reset the seeded PRNG mid-generation, corrupting
     // both runs' stand candidate sequences.
     if (analysisInFlightRef.current) {
-      console.error('[TRIGGER-DIAG] runAnalysis SKIPPED — analysis already in flight');
+      console.log('[TRIGGER-DIAG] runAnalysis SKIPPED — analysis already in flight');
       return;
     }
 
@@ -4221,7 +4243,7 @@ function DeerIntelContent() {
     // Stale mount calls, setTimeout leftovers, and demo fallbacks must be blocked.
     const isTerritoryRun = territoryParcelsRef.current.length > 1;
     if (territoryModeRef.current && !prefetchedParcelRef.current && !isTerritoryRun) {
-      console.error('[TRIGGER-DIAG] runAnalysis BLOCKED — territory mode active, no prefetched parcel, not a territory run');
+      console.log('[TRIGGER-DIAG] runAnalysis BLOCKED — territory mode active, no prefetched parcel, not a territory run');
       return;
     }
 
@@ -4283,16 +4305,16 @@ function DeerIntelContent() {
       const [minLng, minLat, maxLng, maxLat] = getTerritoryBounds(territoryParcelsRef.current);
       currentLat = (minLat + maxLat) / 2;
       currentLng = (minLng + maxLng) / 2;
-      console.error('[INTEL-DIAG] TERRITORY MODE — using centroid:', currentLat, currentLng,
+      console.log('[INTEL-DIAG] TERRITORY MODE — using centroid:', currentLat, currentLng,
         `(${territoryParcelsRef.current.length} parcels)`);
     }
     
     const startTime = Date.now();
-    console.error('[INTEL-DIAG] === ANALYSIS START ===');
-    console.error('[INTEL-DIAG] Coordinates:', currentLat, currentLng);
-    console.error('[INTEL-DIAG] Season:', currentSeason, 'Wind:', currentWind);
-    console.error('[INTEL-DIAG] demoMode:', demoMode);
-    console.error('[INTEL-DIAG] prefetchedParcel:', prefetchedParcel ? 'YES' : 'NO');
+    console.log('[INTEL-DIAG] === ANALYSIS START ===');
+    console.log('[INTEL-DIAG] Coordinates:', currentLat, currentLng);
+    console.log('[INTEL-DIAG] Season:', currentSeason, 'Wind:', currentWind);
+    console.log('[INTEL-DIAG] demoMode:', demoMode);
+    console.log('[INTEL-DIAG] prefetchedParcel:', prefetchedParcel ? 'YES' : 'NO');
 
     try {
       // Import shared terrain client
@@ -4304,7 +4326,7 @@ function DeerIntelContent() {
         // Parcel already fetched by Pick Parcel / Explore / Analyze Territory
         // — use it directly, boundary is already painted, camera already fitted.
         parcel = prefetchedParcel;
-        console.error('[INTEL-DIAG] Using PREFETCHED parcel, skipping Regrid lookup');
+        console.log('[INTEL-DIAG] Using PREFETCHED parcel, skipping Regrid lookup');
       } else if (isTerritoryRun) {
         // TERRITORY RE-ALIGN: no prefetched parcel (consumed on first run),
         // but territory parcels still exist → re-merge them into a MultiPolygon
@@ -4313,39 +4335,39 @@ function DeerIntelContent() {
         if (merged) {
           parcel = merged;
           setParcelPolygon(merged);
-          console.error('[INTEL-DIAG] TERRITORY RE-ALIGN — re-merged', territoryParcelsRef.current.length, 'parcels');
+          console.log('[INTEL-DIAG] TERRITORY RE-ALIGN — re-merged', territoryParcelsRef.current.length, 'parcels');
         } else {
-          console.error('[INTEL-DIAG] TERRITORY RE-ALIGN — merge failed, falling through to Regrid');
+          console.log('[INTEL-DIAG] TERRITORY RE-ALIGN — merge failed, falling through to Regrid');
         }
       } else if (demoMode || heroParcel) {
         // Demo / hero mode: skip Regrid lookup, use cached parcel directly
         const dLat = currentLat;
         const dLng = currentLng;
         const dAcres = parseFloat(currentAcreage || '100');
-        console.error('[INTEL-DIAG] DEMO/HERO MODE — skipping parcel lookup, fetching cached parcel at', dLat, dLng);
+        console.log('[INTEL-DIAG] DEMO/HERO MODE — skipping parcel lookup, fetching cached parcel at', dLat, dLng);
         setProgress(15);
         setProgressStep('Loading demo parcel\u2026');
         const demoFetchPromise = fetchParcelGeometry(dLat, dLng);
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000));
         parcel = await Promise.race([demoFetchPromise, timeoutPromise]);
         if (!parcel) {
-          console.error('[INTEL-DIAG] DEMO/HERO MODE — cache miss, using synthetic parcel');
+          console.log('[INTEL-DIAG] DEMO/HERO MODE — cache miss, using synthetic parcel');
           parcel = generateSyntheticParcel(dLat, dLng, dAcres) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
         }
-        console.error('[INTEL-DIAG] DEMO/HERO MODE — parcel ready:', parcel.geometry.type);
+        console.log('[INTEL-DIAG] DEMO/HERO MODE — parcel ready:', parcel.geometry.type);
       } else {
         // Normal mode: fetch parcel geometry from Regrid
         setProgress(15);
-        console.error('[INTEL-DIAG] Fetching parcel geometry for:', currentLat, currentLng);
+        console.log('[INTEL-DIAG] Fetching parcel geometry for:', currentLat, currentLng);
         parcel = await fetchParcelGeometry(currentLat, currentLng);
-        console.error('[INTEL-DIAG] Parcel fetch returned:', parcel ? 'HAS DATA' : 'NULL');
+        console.log('[INTEL-DIAG] Parcel fetch returned:', parcel ? 'HAS DATA' : 'NULL');
       }
       
       if (!parcel) {
         // Use synthetic fallback instead of failing
-        console.error('[INTEL-DIAG] No Regrid parcel, using synthetic boundary');
+        console.log('[INTEL-DIAG] No Regrid parcel, using synthetic boundary');
         const syntheticParcel = generateSyntheticParcel(currentLat, currentLng, parseFloat(currentAcreage || '80'));
-        console.error('[INTEL-DIAG] Setting parcelPolygon to SYNTHETIC parcel');
+        console.log('[INTEL-DIAG] Setting parcelPolygon to SYNTHETIC parcel');
         setParcelPolygon(syntheticParcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
         setProgress(20);
         setProgressStep('Using estimated boundary...');
@@ -4376,19 +4398,19 @@ function DeerIntelContent() {
         setProvenance(data.provenance);
         setProgress(100);
         setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
-        console.error('[INTEL-DIAG] Analysis complete (synthetic):', result.durationMs, 'ms');
+        console.log('[INTEL-DIAG] Analysis complete (synthetic):', result.durationMs, 'ms');
         return;
       }
       
       // Only update parcelPolygon if it wasn't already set by the caller
       if (!prefetchedParcel) {
-        console.error('[INTEL-DIAG] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
-        console.error('[INTEL-DIAG] Parcel geometry type:', parcel.geometry.type);
+        console.log('[INTEL-DIAG] Setting parcelPolygon to REAL parcel:', parcel.properties?.parcelId);
+        console.log('[INTEL-DIAG] Parcel geometry type:', parcel.geometry.type);
         setParcelPolygon(parcel);
       }
       setProgress(20);
       setProgressStep('Running terrain analysis...');
-      console.error('[INTEL-DIAG] Got real parcel:', parcel.properties?.parcelId);
+      console.log('[INTEL-DIAG] Got real parcel:', parcel.properties?.parcelId);
 
       // Territory runs need longer timeout (multi-parcel DEM fetch + stitching)
       const analysisTimeout = isTerritoryRun ? 90_000 : 45_000;
@@ -4407,7 +4429,7 @@ function DeerIntelContent() {
       );
 
       const totalDuration = Date.now() - startTime;
-      console.error('[INTEL-DIAG] Total analysis time:', totalDuration, 'ms');
+      console.log('[INTEL-DIAG] Total analysis time:', totalDuration, 'ms');
 
       if (!result.success) {
         // Show the actual error, not generic message
@@ -4425,7 +4447,7 @@ function DeerIntelContent() {
       setProgress(100);
       setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
       
-      console.error('[INTEL-DIAG] === ANALYSIS COMPLETE ===');
+      console.log('[INTEL-DIAG] === ANALYSIS COMPLETE ===');
 
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
@@ -4444,7 +4466,7 @@ function DeerIntelContent() {
       // Never fire demo fallback for territory runs — user chose specific parcels.
       // TERRITORY FIREWALL: Also block if territory mode is active (even if only 1 parcel so far)
       if (!demoFallbackAttempted.current && !isTerritoryRun && !territoryModeRef.current) {
-        console.error('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to verified demo parcel');
+        console.log('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to verified demo parcel');
         demoFallbackAttempted.current = true;
         const df = DEMO_FALLBACK.current;
         // Schedule state updates after this try/catch/finally completes
@@ -4805,11 +4827,11 @@ function DeerIntelContent() {
           bounds.extend([coord[0], coord[1]]);
         });
         
-        console.error('[MAP-DIAG] INITIAL FIT BOUNDS:', JSON.stringify({
+        console.log('[MAP-DIAG] INITIAL FIT BOUNDS:', JSON.stringify({
           sw: [bounds.getSouthWest().lng.toFixed(6), bounds.getSouthWest().lat.toFixed(6)],
           ne: [bounds.getNorthEast().lng.toFixed(6), bounds.getNorthEast().lat.toFixed(6)],
         }));
-        console.error('[MAP-DIAG] PARCEL BOUNDS USED: parcelPolygon only (no corridors/buffers)');
+        console.log('[MAP-DIAG] PARCEL BOUNDS USED: parcelPolygon only (no corridors/buffers)');
         
         // Fit parcel to fill ~70-85% of viewport with comfortable padding
         const TARGET_MIN_ZOOM = 14.5;
@@ -4823,9 +4845,9 @@ function DeerIntelContent() {
         const onMoveEnd = () => {
           map.off('moveend', onMoveEnd);
           const finalZoom = map.getZoom();
-          console.error('[MAP-DIAG] INITIAL ZOOM LEVEL:', finalZoom.toFixed(2));
+          console.log('[MAP-DIAG] INITIAL ZOOM LEVEL:', finalZoom.toFixed(2));
           if (finalZoom < TARGET_MIN_ZOOM) {
-            console.error('[MAP-DIAG] Enforcing minimum zoom:', TARGET_MIN_ZOOM, '(was', finalZoom.toFixed(2), ')');
+            console.log('[MAP-DIAG] Enforcing minimum zoom:', TARGET_MIN_ZOOM, '(was', finalZoom.toFixed(2), ')');
             map.setZoom(TARGET_MIN_ZOOM);
           }
         };
@@ -6495,19 +6517,19 @@ function DeerIntelContent() {
     // v4-fix2: WebGL check with retry — if context is temporarily lost (e.g. previous
     // 3D terrain just released it), wait a beat and retry rather than showing error.
     const webglOk = checkWebGLSupport();
-    console.error('[MAP-DIAG] WebGL check result:', webglOk, 'attempt:', mapRetryCountRef.current, 'of', MAX_MAP_RETRIES);
+    console.log('[MAP-DIAG] WebGL check result:', webglOk, 'attempt:', mapRetryCountRef.current, 'of', MAX_MAP_RETRIES);
     if (!webglOk) {
       if (mapRetryCountRef.current < MAX_MAP_RETRIES) {
         mapRetryCountRef.current++;
         const delay = mapRetryCountRef.current * 500; // 500ms, 1000ms, 1500ms (more generous)
-        console.error('[MAP-DIAG] WebGL not ready — retry ' + mapRetryCountRef.current + '/' + MAX_MAP_RETRIES + ' in ' + delay + 'ms');
+        console.log('[MAP-DIAG] WebGL not ready — retry ' + mapRetryCountRef.current + '/' + MAX_MAP_RETRIES + ' in ' + delay + 'ms');
         const retryTimer = setTimeout(() => {
           if (mountIdRef.current !== mountId) return;
           setMapCreateAttempt(prev => prev + 1);
         }, delay);
         return () => clearTimeout(retryTimer);
       }
-      console.error('[MAP-DIAG] FINAL FAILURE: WebGL unavailable after', MAX_MAP_RETRIES, 'retries');
+      console.log('[MAP-DIAG] FINAL FAILURE: WebGL unavailable after', MAX_MAP_RETRIES, 'retries');
       setMapError("Your browser doesn't support WebGL, which is required for terrain viewing.");
       setIsLoading(false);
       return;
@@ -6546,7 +6568,7 @@ function DeerIntelContent() {
     const createMap = (mId: string) => {
     let map: mapboxgl.Map;
 
-    console.error('[MAP-DIAG] BEFORE new mapboxgl.Map() id=' + mId + ' center=[' + lng + ',' + lat + ']');
+    console.log('[MAP-DIAG] BEFORE new mapboxgl.Map() id=' + mId + ' center=[' + lng + ',' + lat + ']');
     try {
       map = new mapboxgl.Map({
         container: container,
@@ -6556,15 +6578,15 @@ function DeerIntelContent() {
         pitch: 0,    // Flat 2D view - no 3D terrain
         bearing: 0,  // North up
       });
-      console.error('[MAP-DIAG] Map constructor SUCCESS id=' + mId);
+      console.log('[MAP-DIAG] Map constructor SUCCESS id=' + mId);
       
       // Expose for debugging
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = map;
       }
     } catch (err) {
-      console.error("[MAP-DIAG] Map constructor FAILED:", err);
-      console.error("[MAP-DIAG] SUMMARY: map_create=FAILED, webgl=true, container=" + container.offsetWidth + "x" + container.offsetHeight);
+      console.log("[MAP-DIAG] Map constructor FAILED:", err);
+      console.log("[MAP-DIAG] SUMMARY: map_create=FAILED, webgl=true, container=" + container.offsetWidth + "x" + container.offsetHeight);
       setMapError("Failed to load map. Please try refreshing the page.");
       setIsLoading(false);
       return;
@@ -6577,22 +6599,22 @@ function DeerIntelContent() {
       if (mapCanvas) {
         mapCanvas.addEventListener('webglcontextlost', (e: Event) => {
           e.preventDefault(); // Tell browser we'll handle recovery
-          console.error('[MAP-DIAG] WebGL context LOST on analyzer map canvas');
+          console.log('[MAP-DIAG] WebGL context LOST on analyzer map canvas');
         });
         mapCanvas.addEventListener('webglcontextrestored', () => {
-          console.error('[MAP-DIAG] WebGL context RESTORED on analyzer map canvas');
+          console.log('[MAP-DIAG] WebGL context RESTORED on analyzer map canvas');
           try { map.resize(); } catch (_) { /* ignore */ }
         });
       }
     } catch (canvasErr) {
-      console.error('[MAP-DIAG] Could not attach WebGL context listeners:', canvasErr);
+      console.log('[MAP-DIAG] Could not attach WebGL context listeners:', canvasErr);
     }
 
     // Map error handler — log only; don't set mapError for tile/style errors
     // (those are transient and Mapbox retries them automatically)
     map.on('error', (e: any) => {
       const err = e?.error || e;
-      console.error("[MAP-DIAG] map.on('error'):", err?.message, "status:", err?.status);
+      console.log("[MAP-DIAG] map.on('error'):", err?.message, "status:", err?.status);
       // Only surface auth failures — everything else is transient
       if (err?.status === 401 || err?.status === 403) {
         setMapError("Map authentication error. Please contact support.");
@@ -6621,42 +6643,42 @@ function DeerIntelContent() {
       }
     });
     map.once('style.load', () => {
-      console.error('[MAP-DIAG] style.load — forcing resize()');
+      console.log('[MAP-DIAG] style.load — forcing resize()');
       try {
         map.resize();
       } catch (resErr) {
-        console.error('[MAP-DIAG] style.load resize() failed:', resErr);
+        console.log('[MAP-DIAG] style.load resize() failed:', resErr);
       }
     });
     map.once('idle', () => {
       const canvas = map.getCanvas();
-      console.error('[MAP-DIAG] idle — canvas:', canvas?.width, 'x', canvas?.height,
+      console.log('[MAP-DIAG] idle — canvas:', canvas?.width, 'x', canvas?.height,
         'loaded:', map.loaded(), 'tilesLoaded:', map.areTilesLoaded());
     });
 
     // Handler for when map is fully loaded
     const onMapLoad = () => {
-      console.error('[DEBUG] checkpoint-A — onMapLoad ENTERED');
+      console.log('[DEBUG] checkpoint-A — onMapLoad ENTERED');
       try {
-        console.error('[MAP-DIAG] LOAD EVENT FIRED id=' + mountId + ' loaded=' + map.loaded() + ' canvas=' + (map.getCanvas()?.width || '?') + 'x' + (map.getCanvas()?.height || '?'));
+        console.log('[MAP-DIAG] LOAD EVENT FIRED id=' + mountId + ' loaded=' + map.loaded() + ' canvas=' + (map.getCanvas()?.width || '?') + 'x' + (map.getCanvas()?.height || '?'));
       } catch (logErr) {
-        console.error('[DEBUG] LOAD-EVENT log itself threw:', logErr);
+        console.log('[DEBUG] LOAD-EVENT log itself threw:', logErr);
       }
-      console.error('[DEBUG] checkpoint-B — past LOAD EVENT FIRED log');
+      console.log('[DEBUG] checkpoint-B — past LOAD EVENT FIRED log');
       
       // DISABLED: 3D terrain + sky - using flat 2D map only for stability
       // Guard: only call setTerrain if the method exists (Mapbox GL v2+)
-      console.error('[DEBUG] checkpoint-C — about to typeof setTerrain check');
+      console.log('[DEBUG] checkpoint-C — about to typeof setTerrain check');
       if (typeof map.setTerrain === 'function') {
         console.log('[MAP] setTerrain is available but DISABLED for stability');
       } else {
         console.log('[MAP] setTerrain not available (Mapbox GL v1 or MapLibre)');
       }
-      console.error('[DEBUG] checkpoint-D — past setTerrain check, about to enter source-setup try');
+      console.log('[DEBUG] checkpoint-D — past setTerrain check, about to enter source-setup try');
       
       // Create native Mapbox sources and layers (NO Deck.gl)
       try {
-        console.error('[DEBUG] checkpoint-1 — entered source/layer setup try block');
+        console.log('[DEBUG] checkpoint-1 — entered source/layer setup try block');
         console.log('[MAP] Creating native Mapbox sources...');
         
         // ========== v3.5.1 — SELECTED PARCEL BOUNDARY (gold/amber with glow) ==========
@@ -7133,7 +7155,7 @@ function DeerIntelContent() {
           });
         }
         
-        console.error('[DEBUG] checkpoint-2 — past parcel/QA/debug/V2 corridor/spine sources');
+        console.log('[DEBUG] checkpoint-2 — past parcel/QA/debug/V2 corridor/spine sources');
 
         // ========== PRESSURE POLYGON FILL GRID (HIDDEN — kept in code) ==========
         // Crisp per-cell rectangles colored by pressure score — hidden at 0 opacity.
@@ -7633,7 +7655,7 @@ function DeerIntelContent() {
           });
         }
 
-        console.error('[DEBUG] checkpoint-3 — past pressure heatmap, movement-delta, refuge, terrain-spine, terrain-flow, nearest-corridor, territory layers');
+        console.log('[DEBUG] checkpoint-3 — past pressure heatmap, movement-delta, refuge, terrain-spine, terrain-flow, nearest-corridor, territory layers');
 
         // ========== HUNT POCKET LAYER (v3.8.6) ==========
         // Upstream-biased teardrop intercept zones with corridor-axis intensity bias.
@@ -8101,7 +8123,7 @@ function DeerIntelContent() {
           });
         }
         
-        console.error('[DEBUG] checkpoint-4 — past hunt pocket, kill zone, stand layers, top-stand attention, huntability sources');
+        console.log('[DEBUG] checkpoint-4 — past hunt pocket, kill zone, stand layers, top-stand attention, huntability sources');
 
         // ========== v3.6.1: BEDDING PROBABILITY LAYER ==========
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
@@ -8928,11 +8950,11 @@ function DeerIntelContent() {
           const style = map.getStyle();
           console.log('[MAP DIAG] After layer setup — sources:', Object.keys(style?.sources || {}).length, 'layers:', (style?.layers || []).length);
         } else {
-          console.error('[INTEL-DIAG] getStyle skipped — style not loaded yet');
+          console.log('[INTEL-DIAG] getStyle skipped — style not loaded yet');
         }
       } catch (_) { /* ignore */ }
 
-      console.error('[DEBUG] checkpoint-5 — past full source/layer setup + diagnostic; about to enter sit-pin green-icon block');
+      console.log('[DEBUG] checkpoint-5 — past full source/layer setup + diagnostic; about to enter sit-pin green-icon block');
 
       // ========== v3.9.0 — Custom Sit Pins: green pin source + layers ==========
       try {
@@ -9114,7 +9136,7 @@ function DeerIntelContent() {
 
       // ========== v3.9.0 — Custom Sit Pins: right-click (desktop) + long-press (mobile) ==========
       try {
-        console.error('[SitPin] REACHED');
+        console.log('[SitPin] REACHED');
         const openSitPinMenu = (viewportX: number, viewportY: number, lng: number, lat: number) => {
           setSitPinMenu({
             x: viewportX,
@@ -9251,9 +9273,9 @@ function DeerIntelContent() {
         // We don't bother to remove this listener — the page is full-screen and the listener
         // is bound once per map creation. If it ever needs cleanup, add it to the cleanup function.
 
-        console.error('[SitPin] Context-menu handlers registered (right-click + long-press)');
+        console.log('[SitPin] Context-menu handlers registered (right-click + long-press)');
       } catch (sitPinErr) {
-        console.error('[SitPin] CATCH', sitPinErr);
+        console.log('[SitPin] CATCH', sitPinErr);
         console.warn('[SitPin] Failed to register context-menu handlers:', sitPinErr);
       }
 
@@ -9262,7 +9284,7 @@ function DeerIntelContent() {
       setMapError(null); // v4-fix2: clear any transient map errors on successful load
       let srcCount = '?';
       try { if (map.isStyleLoaded()) srcCount = String(Object.keys(map.getStyle()?.sources || {}).length); } catch (_) {}
-      console.error('[MAP-DIAG] SUMMARY: map_ready=true, map_error=cleared, style_loaded=true, sources=' + srcCount);
+      console.log('[MAP-DIAG] SUMMARY: map_ready=true, map_error=cleared, style_loaded=true, sources=' + srcCount);
       
       setTimeout(() => {
         try {
@@ -9295,7 +9317,7 @@ function DeerIntelContent() {
     initMap();
 
     return () => {
-      console.error('[MAP-DIAG] CLEANUP id=' + mountId + ' mapExists=' + !!mapRef.current);
+      console.log('[MAP-DIAG] CLEANUP id=' + mountId + ' mapExists=' + !!mapRef.current);
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = null;
       }
@@ -9305,7 +9327,7 @@ function DeerIntelContent() {
         flowAnimationRef.current = null;
       }
       if (mapRef.current) {
-        try { mapRef.current.remove(); } catch (e) { console.error('[MAP-DIAG] map.remove() error:', e); }
+        try { mapRef.current.remove(); } catch (e) { console.log('[MAP-DIAG] map.remove() error:', e); }
         mapRef.current = null;
       }
       if (container && container.childNodes.length > 0) {
@@ -9350,10 +9372,10 @@ function DeerIntelContent() {
 
       const elapsed = Date.now() - lastProgressRef.current.time;
       if (elapsed > 10_000 && isLoading && progress < 20) {
-        console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
+        console.log('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
         // Auto-fallback to demo parcel if not already tried
         if (!demoFallbackAttempted.current) {
-          console.error('[INTEL-DIAG] AUTO DEMO FALLBACK — stall > 10s, switching to verified demo parcel');
+          console.log('[INTEL-DIAG] AUTO DEMO FALLBACK — stall > 10s, switching to verified demo parcel');
           demoFallbackAttempted.current = true;
           setIsDemoFallbackActive(true);
           const df = DEMO_FALLBACK.current;
@@ -9369,7 +9391,7 @@ function DeerIntelContent() {
           setAnalysisStalled(true); // Show manual retry UI
         }
       } else if (elapsed > 25_000 && isLoading && progress < 100) {
-        console.error('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
+        console.log('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
         setAnalysisStalled(true);
       }
     }, 3_000);
@@ -9393,10 +9415,10 @@ function DeerIntelContent() {
 
     if (hasParcel && hasLayers) return; // Data looks good
 
-    console.error('[INTEL-DIAG] EMPTY RESULT GUARD — parcel:', hasParcel, 'layers:', hasLayers);
+    console.log('[INTEL-DIAG] EMPTY RESULT GUARD — parcel:', hasParcel, 'layers:', hasLayers);
 
     if (!demoFallbackAttempted.current) {
-      console.error('[INTEL-DIAG] EMPTY RESULT → triggering demo fallback');
+      console.log('[INTEL-DIAG] EMPTY RESULT → triggering demo fallback');
       demoFallbackAttempted.current = true;
       setIsDemoFallbackActive(true);
       const df = DEMO_FALLBACK.current;
@@ -9790,11 +9812,11 @@ function DeerIntelContent() {
 
     // ── TERRITORY MODE — add parcel only, no analysis ──
     if (territoryModeRef.current) {
-      console.error('[TERRITORY-DIAG] handleParcelPick TERRITORY path entered. parcels:', territoryParcelsRef.current.length, 'isLoading:', isLoading, 'parcelPickLoading:', parcelPickLoading);
+      console.log('[TERRITORY-DIAG] handleParcelPick TERRITORY path entered. parcels:', territoryParcelsRef.current.length, 'isLoading:', isLoading, 'parcelPickLoading:', parcelPickLoading);
       setParcelPickLoading(true);
 
       const attemptTerritoryLookup = async (attempt: number): Promise<void> => {
-        console.error('[TERRITORY-DIAG] attemptTerritoryLookup attempt', attempt, 'at', clickLat.toFixed(5), clickLng.toFixed(5));
+        console.log('[TERRITORY-DIAG] attemptTerritoryLookup attempt', attempt, 'at', clickLat.toFixed(5), clickLng.toFixed(5));
         const lookupUrl = `/api/parcels/lookup?lat=${clickLat}&lng=${clickLng}&debug=true`;
         const resp = await fetch(lookupUrl);
         // ── REGRID DIAGNOSTICS ──────────────────────────────────────────────
@@ -9805,7 +9827,7 @@ function DeerIntelContent() {
         try {
           data = JSON.parse(responseText);
         } catch (parseErr) {
-          console.error('[TERRITORY-REGRID-DIAG] Non-JSON response body', {
+          console.log('[TERRITORY-REGRID-DIAG] Non-JSON response body', {
             attempt,
             clickLat,
             clickLng,
@@ -9818,7 +9840,7 @@ function DeerIntelContent() {
         }
 
         if (!resp.ok) {
-          console.error('[TERRITORY-REGRID-DIAG] HTTP error from lookup endpoint', {
+          console.log('[TERRITORY-REGRID-DIAG] HTTP error from lookup endpoint', {
             attempt,
             clickLat,
             clickLng,
@@ -9833,7 +9855,7 @@ function DeerIntelContent() {
         if (!data.found || !data.parcel) {
           // Full diagnostic dump — covers OK coverage gap, outside-region gate,
           // Regrid "No parcel found", invalid geometry, rate-limit, etc.
-          console.error('[TERRITORY-REGRID-DIAG] Lookup returned no parcel', {
+          console.log('[TERRITORY-REGRID-DIAG] Lookup returned no parcel', {
             attempt,
             clickLat,
             clickLng,
@@ -9863,7 +9885,7 @@ function DeerIntelContent() {
         }
         const parcel = data.parcel;
         if ((parcel?.acreage || 0) < 5) {
-          console.error('[TERRITORY-DIAG] Skipping tiny parcel under 5 acres:', parcel?.acreage);
+          console.log('[TERRITORY-DIAG] Skipping tiny parcel under 5 acres:', parcel?.acreage);
           return;
         }
 
@@ -9878,7 +9900,7 @@ function DeerIntelContent() {
             properties: { parcelId: parcel.parcelId, address: parcel.address, owner: parcel.owner, acreage: parcel.acreage },
             geometry: { type: 'MultiPolygon', coordinates: parcel.coordinates || [] },
           };
-          console.error('[TERRITORY-DIAG] MultiPolygon parcel:', parcel.parcelId, 'rings:', (parcel.coordinates || []).length);
+          console.log('[TERRITORY-DIAG] MultiPolygon parcel:', parcel.parcelId, 'rings:', (parcel.coordinates || []).length);
         } else {
           // coordinates is number[][][] — extract first ring and ensure closure
           const rawCoords = parcel.coordinates || [];
@@ -10259,7 +10281,7 @@ function DeerIntelContent() {
       }
     });
 
-    console.error('[TERRITORY-DIAG] Cursor lock + layer visibility block APPLIED');
+    console.log('[TERRITORY-DIAG] Cursor lock + layer visibility block APPLIED');
 
     return () => {
       // Remove cursor lock
@@ -10271,7 +10293,7 @@ function DeerIntelContent() {
       // (managed by territory mode toggle), territory-fill is only shown during analysis
       // So we don't blindly restore to 'visible' — leave them as territory mode manages them.
 
-      console.error('[TERRITORY-DIAG] Cursor lock + layer visibility block REMOVED');
+      console.log('[TERRITORY-DIAG] Cursor lock + layer visibility block REMOVED');
     };
   }, [mapReady, territoryMode]);
 
@@ -11232,7 +11254,7 @@ function DeerIntelContent() {
   // Instead, auto-clear the error and show a gentle toast so the builder stays usable.
   // NOTE: We can't call setState during render, so we schedule it for the next tick.
   if (globalError && territoryMode) {
-    console.error('[TRIGGER-DIAG] globalError SUPPRESSED in territory mode:', globalError?.message);
+    console.log('[TRIGGER-DIAG] globalError SUPPRESSED in territory mode:', globalError?.message);
     setTimeout(() => {
       setGlobalError(null);
       setError(null);
@@ -13720,6 +13742,31 @@ function DeerIntelContent() {
                   {isPro ? '5-page terrain & alignment report' : 'Free preview — upgrade to download PDF'}
                 </p>
               </div>
+
+              {(parcelUnlocked || isPro) && summary && !isLoading && (
+                <div className="mx-3 mb-3 rounded-xl border border-amber-500/25 bg-gradient-to-br from-amber-500/[0.10] to-emerald-500/[0.08] p-3">
+                  <p className="text-[11px] text-amber-200 font-semibold">What&apos;s next?</p>
+                  <p className="text-[10px] text-stone-400 leading-relaxed mt-1 mb-2">
+                    Download your report, then turn this certified hunt plan into a lease listing.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleDownloadParcelHuntFile}
+                      disabled={isDownloading || isLoading}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-100 text-[11px] font-semibold transition-colors"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Download PDF
+                    </button>
+                    <button
+                      onClick={() => handleListThisProperty('report_ready')}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition-colors"
+                    >
+                      List this property →
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* ========== OPEN IN onX HUNT ========== */}
               {activeLat && activeLng && (

@@ -226,7 +226,7 @@ export function reconcileVisibility(
   map: mapboxgl.Map,
   state: ReconcileState,
 ): void {
-  console.error('[INTEL-DIAG] VISIBILITY RECONCILE START');
+  console.log('[INTEL-DIAG] VISIBILITY RECONCILE START');
 
   let visibleCount = 0;
   let hiddenCount  = 0;
@@ -267,9 +267,9 @@ export function reconcileVisibility(
 
   // Concise diagnostic: one line per group of visible layers
   if (applied.length > 0) {
-    console.error(`[INTEL-DIAG] VISIBILITY APPLY — ${applied.join(', ')}`);
+    console.log(`[INTEL-DIAG] VISIBILITY APPLY — ${applied.join(', ')}`);
   }
-  console.error(
+  console.log(
     `[INTEL-DIAG] VISIBILITY RECONCILE COMPLETE — visible:${visibleCount} hidden:${hiddenCount} skipped:${skippedCount}`
   );
 }

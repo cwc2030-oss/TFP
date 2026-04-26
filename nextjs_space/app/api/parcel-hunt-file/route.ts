@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
       territoryName = 'My Territory',
       territoryParcelCount = 1,
       territoryParcels: territoryParcelList = null,
+      savedPropertyId = null,
     } = data;
 
     // Derive elevation range from stand elevations if demMetrics unavailable
@@ -240,6 +241,16 @@ export async function POST(req: NextRequest) {
     const certificateTitle = isTerritory
       ? `TERRITORY HUNT CERTIFICATE`
       : `TERRAIN HUNT CERTIFICATE`;
+    const listCtaHref = typeof savedPropertyId === 'string' && savedPropertyId.trim()
+      ? `${req.headers.get('origin') || process.env.NEXTAUTH_URL || 'https://terrafirma.partners'}/dashboard/listings/new?savedPropertyId=${encodeURIComponent(savedPropertyId.trim())}&cta=pdf`
+      : null;
+
+    const listPropertyCtaHTML = listCtaHref ? `
+<div style="margin-top:24px;border:2px solid #c9a84c;background:#fffaf0;padding:18px 20px;text-align:center">
+  <div style="font-size:20px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">You&apos;ve mapped it. Ready to lease it?</div>
+  <div style="font-size:12px;color:#444;line-height:1.6;margin-bottom:14px">List this property and connect with vetted hunters in your area.</div>
+  <a href="${listCtaHref}" style="display:inline-block;background:#1a3a2a;color:white;text-decoration:none;padding:11px 18px;border-radius:3px;font-size:12px;font-weight:bold;letter-spacing:1px">→ List This Property</a>
+</div>` : '';
 
     const territorySection = isTerritory && territoryParcelList ? `
 <div style="margin-bottom:20px;text-align:left">
@@ -634,6 +645,7 @@ ${mapImageBase64 ? `
         intelligence, elevation modeling, and deer movement prediction. 
         Assessment valid at time of generation. Adjacent parcel analysis available separately.
       </div>
+      ${listPropertyCtaHTML}
       <div style="padding-top:16px;border-top:1px solid #ddd">
         <div style="font-size:11px;font-weight:bold;color:#1a3a2a;letter-spacing:1px">TERRA FIRMA PARTNERS</div>
         <div style="font-size:10px;color:#888">terrafirma.partners | Terrain Intelligence for Serious Hunters</div>

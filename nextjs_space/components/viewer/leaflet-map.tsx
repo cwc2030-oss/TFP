@@ -185,7 +185,7 @@ export default function LeafletMap({
       } else {
         // Fallback to Esri World Imagery (free, no API key needed)
         basemapUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-        attribution = '© Esri, Maxar, Earthstar Geographics';
+        attribution = '© Esri World Imagery';
         console.log('[LeafletMap] Using Esri World Imagery fallback (no MapTiler key)');
       }
       

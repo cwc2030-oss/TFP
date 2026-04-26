@@ -33,8 +33,8 @@ export async function POST(request: NextRequest) {
   let body: RidgeRequest | null = null;
   
   try {
-    body = await request.json() as RidgeRequest;
-    const { parcel, parcel_id, bufferMeters = 400 } = body;
+    body = await request.json().catch(() => null) as RidgeRequest | null;
+    const { parcel, parcel_id, bufferMeters = 400 } = (body ?? {}) as RidgeRequest;
 
     // Validate input
     if (!parcel || !parcel.geometry) {
@@ -91,11 +91,11 @@ export async function POST(request: NextRequest) {
         console.log('[RidgeSpines] Got real DEM data from Modal');
       } else {
         const errorText = await modalResponse.text();
-        console.warn('[RidgeSpines] Modal returned error, falling back to synthetic:', errorText);
+        console.log('[RidgeSpines] Modal returned error, falling back to synthetic:', errorText);
       }
     } catch (modalErr) {
       const errMsg = modalErr instanceof Error ? modalErr.message : String(modalErr);
-      console.warn('[RidgeSpines] Modal call failed, using synthetic:', errMsg);
+      console.log('[RidgeSpines] Modal call failed, using synthetic:', errMsg);
     }
 
     // Fall back to synthetic generation if Modal not available

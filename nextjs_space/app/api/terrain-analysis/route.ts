@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
   console.log(`[Terrain:${reqId}] === REQUEST START ===`);
   
   try {
-    const body = await request.json();
-    const { parcel, bufferMeters, seasonProfile, prevailingWinds } = body as TerrainAnalysisRequest;
+    const body = await request.json().catch(() => null);
+    const { parcel, bufferMeters, seasonProfile, prevailingWinds } = (body ?? {}) as TerrainAnalysisRequest;
 
     // Validate parcel geometry - accept both Polygon and MultiPolygon
     if (!parcel || !parcel.geometry || (parcel.geometry.type !== 'Polygon' && parcel.geometry.type !== 'MultiPolygon')) {
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[Terrain:${reqId}] Modal error:`, response.status, errorText.slice(0, 200));
+      console.log(`[Terrain:${reqId}] Modal error:`, response.status, errorText.slice(0, 200));
       return NextResponse.json(
         { code: 'SERVICE_ERROR', message: `Service error: ${response.status}` },
         { status: 502 }

@@ -306,12 +306,12 @@ export function gracefulClear(
   let style: mapboxgl.Style | undefined;
   try {
     if (!map.isStyleLoaded()) {
-      console.error('[INTEL-DIAG] gracefulClear: style not loaded — skipping getStyle()');
+      console.log('[INTEL-DIAG] gracefulClear: style not loaded — skipping getStyle()');
       return Promise.resolve();
     }
     style = map.getStyle();
   } catch (e) {
-    console.error('[INTEL-DIAG] gracefulClear: getStyle() threw', e);
+    console.log('[INTEL-DIAG] gracefulClear: getStyle() threw', e);
     return Promise.resolve();
   }
   if (style?.layers) {

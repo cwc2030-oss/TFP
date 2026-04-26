@@ -103,13 +103,13 @@ export async function POST(request: NextRequest) {
   let body: TerrainFlowRequest | null = null;
   
   try {
-    body = await request.json() as TerrainFlowRequest;
+    body = await request.json().catch(() => null) as TerrainFlowRequest | null;
     const { 
       parcel, 
       parcel_id, 
       bufferMeters = ANALYSIS_BUFFER_M,
       options = {} 
-    } = body;
+    } = (body ?? {}) as TerrainFlowRequest;
 
     // Validate input
     if (!parcel || !parcel.geometry) {
@@ -200,15 +200,15 @@ export async function POST(request: NextRequest) {
             dem_source: corridorData.metadata?.dem_source,
           });
         } else {
-          console.warn('[TerrainFlow] Corridor data empty or unsuccessful');
+          console.log('[TerrainFlow] Corridor data empty or unsuccessful');
           corridorData = null;
         }
       } catch (parseErr) {
-        console.warn('[TerrainFlow] Corridor response parse failed:', parseErr);
+        console.log('[TerrainFlow] Corridor response parse failed:', parseErr);
       }
     } else if (corridorResponse) {
       const errorText = await corridorResponse.text().catch(() => 'unreadable');
-      console.warn('[TerrainFlow] Corridor API error:', corridorResponse.status, errorText);
+      console.log('[TerrainFlow] Corridor API error:', corridorResponse.status, errorText);
     }
 
     // Fetch ridge data (optional — timeout %dms, 1 retry)

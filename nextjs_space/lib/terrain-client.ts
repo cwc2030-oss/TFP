@@ -46,11 +46,11 @@ export async function fetchTerrainAnalysis(
     bufferMeters: params.bufferMeters ?? 800,
   };
 
-  console.error('[TerrainClient] === FETCH START ===' );
-  console.error('[TerrainClient] URL:', apiUrl);
-  console.error('[TerrainClient] Timeout:', timeoutMs, 'ms');
-  console.error('[TerrainClient] Season:', params.seasonProfile, 'Wind:', params.prevailingWinds);
-  console.error('[TerrainClient] Parcel type:', params.parcel.geometry.type);
+  console.log('[TerrainClient] === FETCH START ===' );
+  console.log('[TerrainClient] URL:', apiUrl);
+  console.log('[TerrainClient] Timeout:', timeoutMs, 'ms');
+  console.log('[TerrainClient] Season:', params.seasonProfile, 'Wind:', params.prevailingWinds);
+  console.log('[TerrainClient] Parcel type:', params.parcel.geometry.type);
   
   onProgress?.('Connecting to terrain server...', 15);
 
@@ -65,13 +65,13 @@ export async function fetchTerrainAnalysis(
     { at: 38000, msg: 'Almost complete...', prog: 70 },
   ];
   
-  console.error('[TerrainClient] Starting progress ticker (timeout: ' + timeoutMs + 'ms)');
+  console.log('[TerrainClient] Starting progress ticker (timeout: ' + timeoutMs + 'ms)');
   const progressInterval = setInterval(() => {
     const elapsed = Date.now() - startTime;
     const nextMsg = progressMessages.find(p => p.at <= elapsed && p.prog > progressTick);
     if (nextMsg) {
       progressTick = nextMsg.prog;
-      console.error(`[TerrainClient] Progress: ${nextMsg.msg} (${nextMsg.prog}%) at ${elapsed}ms`);
+      console.log(`[TerrainClient] Progress: ${nextMsg.msg} (${nextMsg.prog}%) at ${elapsed}ms`);
       onProgress?.(nextMsg.msg, nextMsg.prog);
     }
   }, 1000); // Check every second
@@ -86,7 +86,7 @@ export async function fetchTerrainAnalysis(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
-        console.error('[TerrainClient] Request timed out after', timeoutMs, 'ms (attempt', attempt + ')');
+        console.log('[TerrainClient] Request timed out after', timeoutMs, 'ms (attempt', attempt + ')');
       }, timeoutMs);
 
       const response = await fetch(apiUrl, {
@@ -99,8 +99,8 @@ export async function fetchTerrainAnalysis(
       clearTimeout(timeoutId);
       const fetchDuration = Date.now() - startTime;
 
-      console.error('[TerrainClient] Response received in', fetchDuration, 'ms (attempt', attempt + ')');
-      console.error('[TerrainClient] Status:', response.status, response.statusText);
+      console.log('[TerrainClient] Response received in', fetchDuration, 'ms (attempt', attempt + ')');
+      console.log('[TerrainClient] Status:', response.status, response.statusText);
 
       // ── 502 / HTML cold-start detection ──
       // Modal returns an HTML error page instead of JSON during cold starts.
@@ -112,11 +112,11 @@ export async function fetchTerrainAnalysis(
       if (is502 || isHtmlError) {
         let errorBody = '';
         try { errorBody = await response.text(); } catch { /* ignore */ }
-        console.error(`[TerrainClient] Cold-start error (attempt ${attempt}/${MAX_RETRIES}):`, response.status, errorBody.slice(0, 300));
+        console.log(`[TerrainClient] Cold-start error (attempt ${attempt}/${MAX_RETRIES}):`, response.status, errorBody.slice(0, 300));
 
         if (attempt < MAX_RETRIES) {
           onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
-          console.error(`[TerrainClient] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+          console.log(`[TerrainClient] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
           await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
           continue; // retry
         }
@@ -139,7 +139,7 @@ export async function fetchTerrainAnalysis(
         let errorMsg = `HTTP ${response.status}`;
         try {
           const errorBody = await response.text();
-          console.error('[TerrainClient] Error body:', errorBody.slice(0, 500));
+          console.log('[TerrainClient] Error body:', errorBody.slice(0, 500));
           // Try to parse as JSON for structured error
           try {
             const parsed = JSON.parse(errorBody);
@@ -165,10 +165,10 @@ export async function fetchTerrainAnalysis(
       const data = await response.json() as TerrainAnalysisResponse;
       const totalDuration = Date.now() - startTime;
 
-      console.error('[TerrainClient] === FETCH COMPLETE ===' );
-      console.error('[TerrainClient] Total duration:', totalDuration, 'ms');
-      console.error('[TerrainClient] Mode:', data.mode);
-      console.error('[TerrainClient] Layers:', {
+      console.log('[TerrainClient] === FETCH COMPLETE ===' );
+      console.log('[TerrainClient] Total duration:', totalDuration, 'ms');
+      console.log('[TerrainClient] Mode:', data.mode);
+      console.log('[TerrainClient] Layers:', {
         bedding: data.layers?.beddingPolygons?.features?.length || 0,
         funnels: data.layers?.funnels?.features?.length || 0,
         stands: data.layers?.standPoints?.features?.length || 0,
@@ -187,11 +187,11 @@ export async function fetchTerrainAnalysis(
       const duration = Date.now() - startTime;
 
       if (err instanceof Error && err.name === 'AbortError') {
-        console.error('[TerrainClient] Request aborted (timeout) attempt', attempt);
+        console.log('[TerrainClient] Request aborted (timeout) attempt', attempt);
         // Timeouts on earlier attempts get retried too
         if (attempt < MAX_RETRIES) {
           onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
-          console.error(`[TerrainClient] Retrying after timeout in ${RETRY_DELAY_MS / 1000}s...`);
+          console.log(`[TerrainClient] Retrying after timeout in ${RETRY_DELAY_MS / 1000}s...`);
           await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
           continue;
         }
@@ -206,14 +206,14 @@ export async function fetchTerrainAnalysis(
 
       // Network errors on earlier attempts get retried
       if (attempt < MAX_RETRIES) {
-        console.error(`[TerrainClient] Network error (attempt ${attempt}), retrying in ${RETRY_DELAY_MS / 1000}s:`, err);
+        console.log(`[TerrainClient] Network error (attempt ${attempt}), retrying in ${RETRY_DELAY_MS / 1000}s:`, err);
         onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
         await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
         continue;
       }
 
       clearInterval(progressInterval);
-      console.error('[TerrainClient] Fetch error (final attempt):', err);
+      console.log('[TerrainClient] Fetch error (final attempt):', err);
       onProgress?.('Connection error', 0);
       return {
         success: false,
@@ -239,13 +239,13 @@ export async function fetchParcelGeometry(
   lat: number,
   lng: number
 ): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> {
-  console.error('[TerrainClient] Fetching parcel boundary for:', lat, lng);
+  console.log('[TerrainClient] Fetching parcel boundary for:', lat, lng);
   
   // 15-second timeout for parcel fetch to prevent indefinite hang
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
-    console.error('[TerrainClient] Parcel fetch timed out after 15s');
+    console.log('[TerrainClient] Parcel fetch timed out after 15s');
   }, 15_000);
 
   try {
@@ -255,7 +255,7 @@ export async function fetchParcelGeometry(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error('[TerrainClient] Parcel fetch failed:', response.status);
+      console.log('[TerrainClient] Parcel fetch failed:', response.status);
       return null;
     }
 
@@ -263,11 +263,11 @@ export async function fetchParcelGeometry(
     const data = result.parcels?.[0];
     
     if (!data || !data.coordinates || !data.geometryType) {
-      console.error('[TerrainClient] No parcel data in response');
+      console.log('[TerrainClient] No parcel data in response');
       return null;
     }
 
-    console.error('[TerrainClient] Got parcel:', data.parcelId, data.acreage, 'acres');
+    console.log('[TerrainClient] Got parcel:', data.parcelId, data.acreage, 'acres');
     
     return {
       type: 'Feature',
@@ -285,9 +285,9 @@ export async function fetchParcelGeometry(
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === 'AbortError') {
-      console.error('[TerrainClient] Parcel fetch aborted (timeout)');
+      console.log('[TerrainClient] Parcel fetch aborted (timeout)');
     } else {
-      console.error('[TerrainClient] Parcel fetch error:', err);
+      console.log('[TerrainClient] Parcel fetch error:', err);
     }
     return null;
   }
