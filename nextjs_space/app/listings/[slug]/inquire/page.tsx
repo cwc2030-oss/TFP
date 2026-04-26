@@ -1,28 +1,39 @@
 /**
- * /listings/[slug]/inquire — placeholder for chunk 4 inquiry flow.
+ * /listings/[slug]/inquire — PUBLIC inquiry form (chunk 4).
  *
- * Validates that the listing is real (PUBLISHED) and returns a friendly
- * "Inquiries open soon" page. Inquiry data capture lands in chunk 4.
+ * Server component: validates the listing exists + is PUBLISHED, then
+ * renders the <InquiryForm /> client component for submission.
+ *
+ * OPSEC: only safe summary fields (state/county/acres/lease/grade/price)
+ * are shown to the hunter. Listing detail page already enforces this via
+ * stripForPublic; we re-apply the same allowlist here.
  */
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { prisma } from '@/lib/db';
 import Navbar from '@/components/navbar';
 import {
   extractIdFromSlugId,
   listingTitleFallback,
   stripForPublic,
+  gradeFromScore,
 } from '@/lib/listings';
+import InquiryForm from './_components/inquiry-form';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Inquire — Terra Firma Partners',
   description:
-    'Inquire about a Terra Firma Partners hunt-lease listing. Inquiries are routed to the landowner.',
+    'Send your inquiry directly to a Terra Firma Partners landowner. County-level information only — precise location is shared after contact.',
 };
 
-export default async function InquirePage({ params }: { params: { slug: string } }) {
+interface Props {
+  params: { slug: string };
+}
+
+export default async function InquirePage({ params }: Props) {
   const id = extractIdFromSlugId(params.slug);
   if (!id) notFound();
 
@@ -36,6 +47,8 @@ export default async function InquirePage({ params }: { params: { slug: string }
       acres: true,
       terrainScore: true,
       leaseType: true,
+      askingPriceMin: true,
+      askingPriceMax: true,
     },
   });
   if (!listing) notFound();
@@ -47,12 +60,13 @@ export default async function InquirePage({ params }: { params: { slug: string }
     county: safe.county,
     state: safe.state,
   });
+  const grade = gradeFromScore(safe.terrainScore);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-stone-950 via-stone-900 to-stone-950">
       <Navbar />
 
-      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
         <Link
           href={`/listings/${params.slug}`}
           className="inline-flex items-center text-stone-500 hover:text-stone-300 text-sm mb-6"
@@ -60,34 +74,46 @@ export default async function InquirePage({ params }: { params: { slug: string }
           ← Back to listing
         </Link>
 
-        <div className="rounded-2xl border border-stone-800 bg-gradient-to-br from-stone-900 via-emerald-950/30 to-stone-900 p-8 sm:p-12">
+        <div className="rounded-2xl border border-stone-800 bg-gradient-to-br from-stone-900 via-emerald-950/30 to-stone-900 p-6 sm:p-10 mb-6">
           <p className="text-emerald-400 uppercase tracking-widest text-xs font-semibold">
-            Inquiries open soon
+            Inquire about this listing
           </p>
-          <h1 className="text-3xl sm:text-4xl font-bold text-stone-100 mt-2">
-            We're polishing the inquiry flow.
+          <h1 className="text-2xl sm:text-3xl font-bold text-stone-100 mt-2 leading-tight">
+            {titleStr}
           </h1>
-          <p className="text-stone-400 mt-4 text-base sm:text-lg">
-            You're inquiring about{' '}
-            <span className="text-stone-200 font-medium">{titleStr}</span>. Email-relayed
-            messaging launches in the next release. In the meantime, hop on the early
-            access list and we'll wire you up the moment it goes live.
-          </p>
-          <div className="flex flex-wrap gap-3 mt-8">
-            <Link
-              href="/find-a-lease"
-              className="inline-flex items-center justify-center bg-emerald-500 hover:bg-emerald-400 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-            >
-              Get on the hunter waitlist →
-            </Link>
-            <Link
-              href={`/listings/${params.slug}`}
-              className="inline-flex items-center justify-center bg-stone-800 hover:bg-stone-700 text-stone-200 px-6 py-3 rounded-lg font-medium transition-colors"
-            >
-              Back to listing
-            </Link>
+          <div className="flex flex-wrap items-center gap-3 mt-3 text-stone-300 text-sm">
+            {safe.county && (
+              <span>
+                {safe.county} County{safe.state ? `, ${safe.state}` : ''}
+              </span>
+            )}
+            {safe.acres != null && (
+              <span className="text-stone-500">•</span>
+            )}
+            {safe.acres != null && (
+              <span>{Math.round(safe.acres).toLocaleString('en-US')} acres</span>
+            )}
+            {grade !== '\u2014' && (
+              <>
+                <span className="text-stone-500">•</span>
+                <span className="text-emerald-300">Grade {grade}</span>
+              </>
+            )}
           </div>
         </div>
+
+        <InquiryForm
+          listingId={listing.id}
+          slug={params.slug}
+          county={safe.county ?? null}
+          state={safe.state ?? null}
+        />
+
+        <p className="text-stone-500 text-xs mt-6 leading-relaxed">
+          Your inquiry is sent directly to the landowner via email. Replies come from the landowner,
+          not from Terra Firma Partners. We don't share your contact info beyond the listing owner
+          and our internal records.
+        </p>
       </main>
     </div>
   );

@@ -197,6 +197,7 @@ model Listing {
 
   savedProperty            SavedProperty   @relation(fields: [savedPropertyId], references: [id])
   owner                    User            @relation(fields: [ownerUserId], references: [id])
+  inquiries                Inquiry[]
 
   @@index([ownerUserId, status])
   @@index([state, status])
@@ -257,4 +258,49 @@ model Waitlist {
 enum WaitlistSide {
   LANDOWNER
   HUNTER
+}
+
+
+// ─── Inquiry (Chunk 4 — public inquiry form on PUBLISHED listings) ─────────
+// Captured when a hunter submits the inquiry form on a public listing detail
+// page. Email-relayed to landowner via lib/email.ts; hunter gets confirmation.
+//
+// OPSEC: This row stores hunter contact + free-text message. It does NOT
+// store the listing's location any more precisely than the Listing already
+// does (state + county only).
+
+model Inquiry {
+  id              String          @id @default(cuid())
+  listingId       String
+  listing         Listing         @relation(fields: [listingId], references: [id])
+
+  hunterEmail     String          // lowercased on write
+  hunterName      String
+  hunterPhone     String?
+  preferredDates  String?         // free-text v1 (e.g. "First two weeks of November")
+  partySize       Int             @default(1)
+  message         String          @db.Text  // 20-2000 chars, validated at API
+
+  status          InquiryStatus   @default(NEW)
+
+  source          String?         // "listing_detail" | "find_a_lease" | etc.
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+
+  // sha256(IP + INQUIRY_IP_SALT) — never raw IP. Used for rate-limit only.
+  ipHash          String?
+
+  createdAt       DateTime        @default(now())
+  repliedAt       DateTime?
+  closedAt        DateTime?
+
+  @@index([listingId, status])
+  @@index([hunterEmail])
+}
+
+enum InquiryStatus {
+  NEW
+  REPLIED
+  CLOSED
 }

@@ -205,6 +205,11 @@ export default function DashboardPage() {
                   My Listings
                 </Button>
               </Link>
+              <Link href="/dashboard/inquiries">
+                <Button variant="outline" className="border-emerald-700 text-emerald-700 hover:bg-emerald-50">
+                  Inquiries
+                </Button>
+              </Link>
               <Link href="/map">
                 <Button className="bg-emerald-700 hover:bg-emerald-800 text-white">
                   <Map className="w-4 h-4 mr-2" />
