@@ -199,12 +199,19 @@ export default function DashboardPage() {
                 Manage your land analysis reports
               </p>
             </div>
-            <Link href="/map">
-              <Button className="bg-emerald-700 hover:bg-emerald-800 text-white">
-                <Map className="w-4 h-4 mr-2" />
-                New Report
-              </Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/dashboard/listings">
+                <Button variant="outline" className="border-emerald-700 text-emerald-700 hover:bg-emerald-50">
+                  My Listings
+                </Button>
+              </Link>
+              <Link href="/map">
+                <Button className="bg-emerald-700 hover:bg-emerald-800 text-white">
+                  <Map className="w-4 h-4 mr-2" />
+                  New Report
+                </Button>
+              </Link>
+            </div>
           </div>
         </motion.div>
 

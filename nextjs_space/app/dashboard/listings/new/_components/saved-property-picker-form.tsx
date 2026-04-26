@@ -40,7 +40,7 @@ export default function SavedPropertyPickerForm({
         throw new Error(j?.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
-      router.push(`/listings/${data.listing.id}/edit?step=2`);
+      router.push(`/dashboard/listings/${data.listing.id}/edit?step=2`);
     } catch (e: any) {
       setErr(e.message ?? 'Failed to create listing');
       setSubmitting(false);

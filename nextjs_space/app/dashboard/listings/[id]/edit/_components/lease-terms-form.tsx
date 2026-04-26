@@ -7,10 +7,13 @@ import {
   SEASON_OPTIONS,
   AMENITY_KEYS,
 } from '@/lib/listings';
+import { US_STATES } from '@/app/_landing-shared/states';
 
 type Amenities = Record<string, boolean>;
 
 interface Initial {
+  state: string | null;
+  county: string | null;
   askingPriceMin: number | null;
   askingPriceMax: number | null;
   leaseType: string | null;
@@ -27,6 +30,8 @@ export default function LeaseTermsForm({
   initial: Initial;
 }) {
   const router = useRouter();
+  const [stateCode, setStateCode] = useState<string>(initial.state ?? '');
+  const [county, setCounty] = useState<string>(initial.county ?? '');
   const [askingPriceMin, setAskingPriceMin] = useState(
     initial.askingPriceMin?.toString() ?? '',
   );
@@ -57,6 +62,8 @@ export default function LeaseTermsForm({
     setErr(null);
     try {
       const body: Record<string, unknown> = {
+        state: stateCode || null,
+        county: county.trim() || null,
         askingPriceMin: askingPriceMin ? Number(askingPriceMin) : null,
         askingPriceMax: askingPriceMax ? Number(askingPriceMax) : null,
         leaseType: leaseType || null,
@@ -74,9 +81,9 @@ export default function LeaseTermsForm({
         throw new Error(j?.error ?? `HTTP ${res.status}`);
       }
       if (nextStep === 'index') {
-        router.push('/listings');
+        router.push('/dashboard/listings');
       } else {
-        router.push(`/listings/${listingId}/edit?step=${nextStep}`);
+        router.push(`/dashboard/listings/${listingId}/edit?step=${nextStep}`);
       }
     } catch (e: any) {
       setErr(e.message ?? 'Save failed');
@@ -92,6 +99,39 @@ export default function LeaseTermsForm({
       }}
       className="space-y-6"
     >
+      <div className="rounded-lg border border-stone-700 bg-stone-900/50 p-4">
+        <h3 className="text-stone-100 font-medium mb-3">Public location (county-level only)</h3>
+        <p className="text-stone-400 text-xs mb-3">
+          Only state and county are shown publicly. Hunters never see your address, parcel boundary, or precise coordinates.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="State">
+            <select
+              value={stateCode}
+              onChange={(e) => setStateCode(e.target.value)}
+              className="w-full bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-stone-100 focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="">— Select state —</option>
+              {US_STATES.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.code} — {s.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="County">
+            <input
+              type="text"
+              value={county}
+              onChange={(e) => setCounty(e.target.value)}
+              maxLength={64}
+              placeholder="e.g. Howard"
+              className="w-full bg-stone-950 border border-stone-700 rounded-lg px-3 py-2 text-stone-100 focus:border-emerald-500 focus:outline-none"
+            />
+          </Field>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <Field label="Asking price min ($/yr)">
           <input
@@ -192,7 +232,7 @@ export default function LeaseTermsForm({
           disabled={submitting}
           className="inline-flex items-center justify-center bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium transition-colors"
         >
-          {submitting ? 'Saving…' : 'Save and continue →'}
+          {submitting ? 'Saving...' : 'Save and continue →'}
         </button>
         <button
           type="button"

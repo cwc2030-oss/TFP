@@ -74,9 +74,9 @@ export default function ContentContactForm({
         throw new Error(j?.error ?? `HTTP ${res.status}`);
       }
       if (returnTo === 'step2') {
-        router.push(`/listings/${listingId}/edit?step=2`);
+        router.push(`/dashboard/listings/${listingId}/edit?step=2`);
       } else {
-        router.push('/listings');
+        router.push('/dashboard/listings');
       }
     } catch (e: any) {
       setErr(e.message ?? 'Save failed');

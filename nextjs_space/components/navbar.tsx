@@ -60,6 +60,9 @@ export default function Navbar() {
             <NavLink href="/map" active={pathname === "/map"}>
               Map Tool
             </NavLink>
+            <NavLink href="/listings" active={pathname?.startsWith("/listings")}>
+              Marketplace
+            </NavLink>
             <NavLink href="/pricing" active={pathname === "/pricing"}>
               Pricing
             </NavLink>
@@ -147,6 +150,9 @@ export default function Navbar() {
               </MobileNavLink>
               <MobileNavLink href="/map" onClick={() => setIsMenuOpen(false)}>
                 Map Tool
+              </MobileNavLink>
+              <MobileNavLink href="/listings" onClick={() => setIsMenuOpen(false)}>
+                Marketplace
               </MobileNavLink>
               <MobileNavLink href="/pricing" onClick={() => setIsMenuOpen(false)}>
                 Pricing

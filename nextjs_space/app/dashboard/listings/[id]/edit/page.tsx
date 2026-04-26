@@ -26,7 +26,7 @@ interface Props {
 export default async function EditListingPage({ params, searchParams }: Props) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
-    redirect(`/login?callbackUrl=/listings/${params.id}/edit`);
+    redirect(`/login?callbackUrl=/dashboard/listings/${params.id}/edit`);
   }
 
   const listing = await prisma.listing.findFirst({
@@ -48,11 +48,10 @@ export default async function EditListingPage({ params, searchParams }: Props) {
   });
   if (!listing) notFound();
 
-  // Once a listing transitions out of DRAFT (chunk 3), this page should
-  // become read-only / redirect. For chunk 1 every Listing is DRAFT, so
-  // we just guard for completeness.
+  // Once a listing leaves DRAFT it can no longer be edited via the wizard.
+  // (lifecycle changes use the dedicated POST /api/listings/[id]/{publish,withdraw,lease,relist} routes)
   if (listing.status !== 'DRAFT') {
-    redirect('/listings');
+    redirect('/dashboard/listings');
   }
 
   const step = getStepFromQuery(searchParams.step);
@@ -99,6 +98,8 @@ export default async function EditListingPage({ params, searchParams }: Props) {
             <LeaseTermsForm
               listingId={listing.id}
               initial={{
+                state: listing.state,
+                county: listing.county,
                 askingPriceMin: listing.askingPriceMin,
                 askingPriceMax: listing.askingPriceMax,
                 leaseType: listing.leaseType,
@@ -141,7 +142,7 @@ export default async function EditListingPage({ params, searchParams }: Props) {
               different property, create a new listing instead.
             </p>
             <Link
-              href={`/listings/${listing.id}/edit?step=2`}
+              href={`/dashboard/listings/${listing.id}/edit?step=2`}
               className="inline-flex items-center justify-center mt-4 bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2 rounded-lg font-medium transition-colors"
             >
               Continue →
@@ -150,7 +151,7 @@ export default async function EditListingPage({ params, searchParams }: Props) {
         )}
 
         <div className="mt-10">
-          <Link href="/listings" className="text-stone-500 hover:text-stone-400 text-sm">
+          <Link href="/dashboard/listings" className="text-stone-500 hover:text-stone-400 text-sm">
             ← Back to my listings
           </Link>
         </div>

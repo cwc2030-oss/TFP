@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic';
 export default async function NewListingPage() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
-    redirect('/login?callbackUrl=%2Flistings%2Fnew');
+    redirect('/login?callbackUrl=%2Fdashboard%2Flistings%2Fnew');
   }
   const userId = session.user.id;
 
@@ -40,7 +40,7 @@ export default async function NewListingPage() {
   });
 
   if (savedProperties.length === 0) {
-    redirect('/listings');
+    redirect('/dashboard/listings');
   }
 
   return (
@@ -59,7 +59,7 @@ export default async function NewListingPage() {
         <SavedPropertyPickerForm savedProperties={savedProperties} />
 
         <div className="mt-8">
-          <Link href="/listings" className="text-stone-500 hover:text-stone-400 text-sm">
+          <Link href="/dashboard/listings" className="text-stone-500 hover:text-stone-400 text-sm">
             ← Back to my listings
           </Link>
         </div>
