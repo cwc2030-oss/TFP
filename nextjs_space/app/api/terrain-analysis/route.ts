@@ -1,5 +1,5 @@
 // Terra Firma Terrain Analysis API Route
-// Proxies to Python geoprocessor on Modal - v3.3 (Feb 27, 2026)
+// Proxies to Python geoprocessor on Modal - v1 FastAPI (Apr 27, 2026)
 
 import { NextRequest, NextResponse } from 'next/server';
 import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisResponse } from '@/types/terrain';
@@ -7,8 +7,8 @@ import type { TerrainAnalysisRequest, TerrainAnalysisError, TerrainAnalysisRespo
 const MAX_AOI_ACRES = 5000;
 const REQUEST_TIMEOUT_MS = 55_000; // 55 seconds — territory multi-parcel needs headroom
 
-// HARDCODED Modal v3 URL - do NOT rely on env vars for this critical path
-const GEOPROCESSOR_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/v1/terrain-analysis';
+// HARDCODED Modal v1 FastAPI URL - do NOT rely on env vars for this critical path
+const GEOPROCESSOR_URL = 'https://cwc2030--terrain-brain-fastapi-app.modal.run/v1/analyze';
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();

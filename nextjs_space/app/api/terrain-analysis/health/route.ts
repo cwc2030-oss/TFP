@@ -1,7 +1,7 @@
 // Diagnostic endpoint to test Modal connectivity from production
 import { NextResponse } from 'next/server';
 
-const MODAL_HEALTH_URL = 'https://cwc2030--terrain-brain-v3-web.modal.run/health';
+const MODAL_HEALTH_URL = 'https://cwc2030--terrain-brain-fastapi-app.modal.run/health';
 
 export async function GET() {
   const startTime = Date.now();
@@ -13,7 +13,7 @@ export async function GET() {
   // Test 1: DNS resolution
   try {
     const dns = await import('dns').then(m => m.promises);
-    const addresses = await dns.lookup('cwc2030--terrain-brain-v3-web.modal.run');
+    const addresses = await dns.lookup('cwc2030--terrain-brain-fastapi-app.modal.run');
     results.dnsResolution = { success: true, address: addresses };
   } catch (e) {
     results.dnsResolution = { success: false, error: e instanceof Error ? e.message : String(e) };
