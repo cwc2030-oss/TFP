@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, Clock, Info, RefreshCw, Loader2, Server, MapPin, AlertTriangle } from 'lucide-react';
 import type { TerrainAnalysisResponse, SeasonProfile, WindDirection } from '@/types/terrain';
+import { adaptV1Response } from '@/types/terrain';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
@@ -584,13 +585,13 @@ function ParcelMap({ parcel, scoring, acreage, isEstimated, parcelId, address, t
 
 // Convert terrain response to scoring result
 function convertTerrainToScoring(
-  terrain: TerrainAnalysisResponse,
+  adapted: import('@/types/terrain').AdaptedTerrainResponse,
   season: SeasonProfile,
   parcelAcres: number,
   processingTimeMs: number
 ): ScoringResult {
   const weights = SEASON_WEIGHTS[season] || SEASON_WEIGHTS.rut;
-  const { layers, summary, provenance } = terrain;
+  const { layers, summary } = adapted;
   
   // Calculate real scores from terrain data
   const standCount = layers.standPoints.features.length;
@@ -761,10 +762,10 @@ function convertTerrainToScoring(
     components,
     overallConfidence: Math.round(weightedConfidence * 100) / 100,
     statusBreakdown: { real: realCount, estimated: estimatedCount, stubbed: stubbedCount },
-    timestamp: provenance.analysisTimestamp,
+    timestamp: adapted.provenance.analysisTimestamp,
     source: 'real',
     processingTimeMs,
-    rawTerrainResponse: terrain
+    rawTerrainResponse: adapted.v1
   };
 }
 
@@ -1028,7 +1029,8 @@ function CoreScoringContent() {
       setProgressStep('Parsing response...');
       
       const terrain = await response.json() as TerrainAnalysisResponse;
-      console.log('[CORE] Terrain mode:', terrain.mode);
+      console.log('[CORE] Terrain mode:', terrain.meta?.mode);
+      console.log('[CORE] Huntability:', terrain.huntabilityScore);
       console.log('[CORE] Layers:', {
         bedding: terrain.layers?.beddingPolygons?.features?.length || 0,
         funnels: terrain.layers?.funnels?.features?.length || 0,
@@ -1041,8 +1043,10 @@ function CoreScoringContent() {
       setProgress(80);
       setProgressStep('Computing scores...');
       
+      // Adapt v1 envelope to legacy internal shapes for scoring
+      const adapted = adaptV1Response(terrain);
       const processingMs = Date.now() - startTime;
-      const result = convertTerrainToScoring(terrain, season, acreage, processingMs);
+      const result = convertTerrainToScoring(adapted, season, acreage, processingMs);
       
       setProgress(100);
       setProgressStep('Complete!');

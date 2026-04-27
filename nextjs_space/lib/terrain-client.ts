@@ -167,7 +167,8 @@ export async function fetchTerrainAnalysis(
 
       console.log('[TerrainClient] === FETCH COMPLETE ===' );
       console.log('[TerrainClient] Total duration:', totalDuration, 'ms');
-      console.log('[TerrainClient] Mode:', data.mode);
+      console.log('[TerrainClient] Mode:', data.meta?.mode);
+      console.log('[TerrainClient] Huntability:', data.huntabilityScore);
       console.log('[TerrainClient] Layers:', {
         bedding: data.layers?.beddingPolygons?.features?.length || 0,
         funnels: data.layers?.funnels?.features?.length || 0,

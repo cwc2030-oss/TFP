@@ -46,6 +46,7 @@ import type {
   TieredCorridorResponse,
   RidgeSpineResponse,
 } from '@/types/terrain';
+import { adaptV1Response } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
@@ -4391,11 +4392,11 @@ function DeerIntelContent() {
           throw new Error(result.error || 'Analysis failed');
         }
         
-        const data = result.data!;
-        setMode(data.mode);
-        setLayers(data.layers);
-        setSummary(data.summary);
-        setProvenance(data.provenance);
+        const adapted = adaptV1Response(result.data!);
+        setMode(adapted.mode);
+        setLayers(adapted.layers);
+        setSummary(adapted.summary);
+        setProvenance(adapted.provenance);
         setProgress(100);
         setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
         console.log('[INTEL-DIAG] Analysis complete (synthetic):', result.durationMs, 'ms');
@@ -4439,11 +4440,11 @@ function DeerIntelContent() {
         throw new Error(errorMsg);
       }
 
-      const data = result.data!;
-      setMode(data.mode);
-      setLayers(data.layers);
-      setSummary(data.summary);
-      setProvenance(data.provenance);
+      const adapted = adaptV1Response(result.data!);
+      setMode(adapted.mode);
+      setLayers(adapted.layers);
+      setSummary(adapted.summary);
+      setProvenance(adapted.provenance);
       setProgress(100);
       setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
       

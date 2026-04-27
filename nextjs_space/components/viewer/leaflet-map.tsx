@@ -77,7 +77,7 @@ interface LeafletMapProps {
     corridors: boolean;
     spatialCorridors?: boolean;
   };
-  provenance: TerrainAnalysisResponse['provenance'] | null;
+  provenance: import('@/types/terrain').TerrainProvenance | null;
   onMapReady?: () => void;
   activeParcel?: ActiveParcelInfo | null;
   onParcelClick?: (parcelInfo: ActiveParcelInfo) => void;

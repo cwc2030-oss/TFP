@@ -109,16 +109,11 @@ export async function POST(request: NextRequest) {
     const result = await response.json() as TerrainAnalysisResponse;
     const totalDuration = Date.now() - startTime;
     
-    console.log(`[Terrain:${reqId}] === SUCCESS === Total: ${totalDuration}ms, mode: ${result.mode}`);
-
-    // Update processing time to include network latency
-    if (result.provenance) {
-      result.provenance.processingTimeSeconds = totalDuration / 1000;
-    }
+    console.log(`[Terrain:${reqId}] === SUCCESS === Total: ${totalDuration}ms, mode: ${result.meta?.mode}`);
 
     return NextResponse.json(result, {
       headers: {
-        'X-Terrain-Mode': result.mode || 'real',
+        'X-Terrain-Mode': result.meta?.mode || 'real',
         'X-Processing-Time-Ms': String(totalDuration),
         'X-Request-Id': reqId,
       },
@@ -147,7 +142,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   // Health check - ping the Python service
   try {
-    const healthUrl = GEOPROCESSOR_URL.replace('/v1/terrain-analysis', '/health');
+    const healthUrl = GEOPROCESSOR_URL.replace('/v1/analyze', '/health');
     const response = await fetch(healthUrl, { 
       signal: AbortSignal.timeout(5000) 
     });

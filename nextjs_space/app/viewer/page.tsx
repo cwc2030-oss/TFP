@@ -12,6 +12,7 @@ import { AlertTriangle, Layers, X, Target, ChevronRight, Activity, CheckCircle2,
 import { Button } from '@/components/ui/button';
 import { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } from '@/lib/terrain-client';
 import type { TerrainAnalysisResponse, TerrainLayers } from '@/types/terrain';
+import { adaptV1Response } from '@/types/terrain';
 import type { ActiveParcelInfo } from '@/components/viewer/leaflet-map';
 
 // Compute state types
@@ -95,7 +96,7 @@ function ViewerContent() {
   // State
   const [parcel, setParcel] = useState<GeoJSON.Feature | null>(null);
   const [layers, setLayers] = useState<TerrainLayers | null>(null);
-  const [provenance, setProvenance] = useState<TerrainAnalysisResponse['provenance'] | null>(null);
+  const [provenance, setProvenance] = useState<import('@/types/terrain').TerrainProvenance | null>(null);
   const [corridorData, setCorridorData] = useState<CorridorData | null>(null);
   const [corridorLoading, setCorridorLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -213,16 +214,17 @@ function ViewerContent() {
       clearTimeout(timeoutId);
 
       if (result.success && result.data) {
-        setLayers(result.data.layers);
-        setProvenance(result.data.provenance);
+        const adapted = adaptV1Response(result.data);
+        setLayers(adapted.layers);
+        setProvenance(adapted.provenance);
         setComputeStatus(prev => ({
           ...prev,
           terrain: { state: 'computed', timestamp: new Date().toISOString() }
         }));
         console.log('[Viewer:runTerrainAnalysis] ✅ Terrain loaded:', {
-          bedding: result.data.layers.beddingPolygons?.features?.length || 0,
-          funnels: result.data.layers.funnels?.features?.length || 0,
-          stands: result.data.layers.standPoints?.features?.length || 0,
+          bedding: adapted.layers.beddingPolygons?.features?.length || 0,
+          funnels: adapted.layers.funnels?.features?.length || 0,
+          stands: adapted.layers.standPoints?.features?.length || 0,
         });
       } else {
         setOverlayError(result.error || 'Could not load terrain overlays');

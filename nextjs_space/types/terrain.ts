@@ -26,29 +26,82 @@ export interface TerrainAnalysisOptions {
   tpiScales?: number[];  // default: [100, 500]
 }
 
-// ============ Response Types ============
+// ============ v1 Response Types (Intelligence Engine envelope) ============
 
-export interface TerrainAnalysisResponse {
-  mode: TerrainMode;
-  layers: TerrainLayers;
-  summary: TerrainSummary;
-  provenance: TerrainProvenance;
+export interface Top3Stand {
+  rank: number;
+  score: number;
+  label: string;
+  reasoning: string;
+  geometry: { type: 'Point'; coordinates: [number, number] };
 }
 
+export interface TerrainSummaryV1 {
+  bedding:   { count: number; totalAcres: number };
+  funnels:   { count: number };
+  corridors: { count: number; primary: number; secondary: number };
+  narrative: string;
+}
+
+export interface TerrainLayersV1 {
+  beddingPolygons: GeoJSON.FeatureCollection;
+  funnels:         GeoJSON.FeatureCollection;
+  standPoints:     GeoJSON.FeatureCollection;
+  corridors:       GeoJSON.FeatureCollection;
+}
+
+export interface TodaysSit {
+  standRank?: number;
+  score?:     number;
+  label?:     string;
+  reasoning?: string;
+  geometry?:  { type: 'Point'; coordinates: [number, number] };
+  isStub:     boolean;
+  note:       string;
+}
+
+export interface TerrainMeta {
+  apiVersion:        string;
+  analysisAreaAcres: number;
+  recommendedSeason: string;
+  generatedAt:       string;
+  requestId:         string;
+  mode:              string;
+}
+
+/** v1 Intelligence Engine response envelope */
+export interface TerrainAnalysisResponse {
+  huntabilityScore: number;
+  top3Stands:       Top3Stand[];
+  terrainSummary:   TerrainSummaryV1;
+  layers:           TerrainLayersV1;
+  todaysSit:        TodaysSit;
+  meta:             TerrainMeta;
+}
+
+// ============ Legacy Internal Types (used by scoring, overlays, UI state) ============
+
+/**
+ * Internal layers shape — typed feature collections.
+ * Consumers that need typed features should use this.
+ */
 export interface TerrainLayers {
   beddingPolygons: GeoJSON.FeatureCollection<GeoJSON.Polygon, BeddingProperties>;
   funnels: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.LineString, FunnelProperties>;
   standPoints: GeoJSON.FeatureCollection<GeoJSON.Point, StandPointProperties>;
+  corridors?: GeoJSON.FeatureCollection;
 }
 
+/**
+ * Legacy summary shape — used by scoring engine and overlay components.
+ * Populated by adaptV1Response() from the v1 terrainSummary.
+ */
 export interface TerrainSummary {
   totalBeddingAcres: number;
   funnelCount: number;
   topStandScore: number;
   analysisAreaAcres: number;
   recommendedSeason: SeasonProfile;
-  
-  // === DEM-derived metrics (optional, from geoprocessor v3+) ===
   demMetrics?: DEMMetrics;
 }
 
@@ -73,14 +126,71 @@ export interface DEMMetrics {
   slopeMean?: number;
 }
 
+/**
+ * Legacy provenance shape — used by overlay and intel panels.
+ * Populated by adaptV1Response() from the v1 meta.
+ */
 export interface TerrainProvenance {
-  demSource: string;           // e.g., 'USGS_3DEP_1m' or 'MAPBOX_TERRAIN_RGB'
-  demResolution: string;       // e.g., '1m' or '~30m'
-  demAcquisitionDate?: string; // ISO date or null for preview
-  landcoverSource: string;     // e.g., 'NLCD_2021' or 'ESTIMATED'
-  analysisTimestamp: string;   // ISO timestamp
+  demSource: string;
+  demResolution: string;
+  demAcquisitionDate?: string;
+  landcoverSource: string;
+  analysisTimestamp: string;
   processingTimeSeconds?: number;
   isPreview: boolean;
+  mode?: string;
+}
+
+// ============ v1 → Legacy Adapter ============
+
+export interface AdaptedTerrainResponse {
+  mode: TerrainMode;
+  layers: TerrainLayers;
+  summary: TerrainSummary;
+  provenance: TerrainProvenance;
+  /** Pass-through of the raw v1 envelope for components that need it */
+  v1: TerrainAnalysisResponse;
+}
+
+/**
+ * Convert a v1 Intelligence Engine response to the legacy internal shape
+ * used by scoring, overlays, and UI state components.
+ */
+export function adaptV1Response(v1: TerrainAnalysisResponse): AdaptedTerrainResponse {
+  const topStandScore = v1.top3Stands?.[0]?.score ?? 0;
+
+  const layers: TerrainLayers = {
+    beddingPolygons: v1.layers.beddingPolygons as TerrainLayers['beddingPolygons'],
+    funnels: v1.layers.funnels as TerrainLayers['funnels'],
+    standPoints: v1.layers.standPoints as TerrainLayers['standPoints'],
+    corridors: v1.layers.corridors,
+  };
+
+  const summary: TerrainSummary = {
+    totalBeddingAcres: v1.terrainSummary.bedding.totalAcres,
+    funnelCount: v1.terrainSummary.funnels.count,
+    topStandScore,
+    analysisAreaAcres: v1.meta.analysisAreaAcres,
+    recommendedSeason: (v1.meta.recommendedSeason as SeasonProfile) || 'rut',
+    // demMetrics not in v1 envelope — left undefined, scoring stubs handle it
+  };
+
+  const provenance: TerrainProvenance = {
+    demSource: 'USGS_3DEP',
+    demResolution: '~10m',
+    landcoverSource: 'ESTIMATED',
+    analysisTimestamp: v1.meta.generatedAt,
+    isPreview: false,
+    mode: v1.meta.mode,
+  };
+
+  return {
+    mode: (v1.meta.mode as TerrainMode) || 'real',
+    layers,
+    summary,
+    provenance,
+    v1,
+  };
 }
 
 // ============ Feature Properties ============
@@ -251,6 +361,8 @@ export interface TerrainIntelState {
   summary: TerrainSummary | null;
   provenance: TerrainProvenance | null;
   selectedStand: number | null;  // rank of selected stand
+  /** Raw v1 envelope when available */
+  v1?: TerrainAnalysisResponse | null;
 }
 
 // ============ Layer Visibility ============
