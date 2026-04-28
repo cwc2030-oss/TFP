@@ -188,12 +188,14 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   const displayElevAvg = standElevations.length
     ? Math.round(standElevations.reduce((a: number, b: number) => a + b, 0) / standElevations.length)
     : 0;
+  const hasElevationData = displayElevRange > 0 || displayElevMin > 0 || displayElevMax > 0;
 
   // ── Corridor totals ──
   const corridorPrimary  = Number(corridors?.primaryCount      ?? 0) || 0;
   const corridorPossible = Number(corridors?.possibleCount     ?? 0) || 0;
   const funnelHard       = Number(corridors?.hardFunnelCount   ?? 0) || 0;
   const funnelSlight     = Number(corridors?.slightFunnelCount ?? 0) || 0;
+  const funnelTotal      = Number(summary?.funnelCount ?? 0) || 0;
   const corridorTotal    = corridorPrimary + corridorPossible;
   const movementFeatureTotal = corridorTotal + funnelHard + funnelSlight;
 
@@ -430,7 +432,7 @@ ${ogMeta}
     </div>`;
     }).join('')}
   </div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
+  ${hasElevationData ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
     <div class="stat-box">
       <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'}</div>
       <div class="stat-label">Analysis Area (Acres)</div>
@@ -447,7 +449,12 @@ ${ogMeta}
       <div class="stat-value">${displayElevAvg} ft</div>
       <div class="stat-label">Avg Elevation</div>
     </div>
-  </div>
+  </div>` : `<div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:10px">
+    <div class="stat-box">
+      <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'} acres</div>
+      <div class="stat-label">Analysis Area</div>
+    </div>
+  </div>`}
   <div class="footer">
     <span>Report ID: ${reportId}</span>
     <span>TERRA FIRMA PARTNERS</span>
@@ -528,10 +535,18 @@ ${ogMeta}
       <div style="font-size:10px;color:#666;margin-top:4px">${Math.min(100, Math.round((corridors?.parcelCoverage ?? 0) * 100))}% parcel corridor coverage</div>
     </div>
     <div class="stat-box">
-      <div class="stat-value">${funnelHard} hard · ${funnelSlight} slight</div>
+      <div class="stat-value">${(funnelHard + funnelSlight) > 0
+        ? `${funnelHard} hard · ${funnelSlight} slight`
+        : funnelTotal > 0
+          ? `${funnelTotal} funnel${funnelTotal === 1 ? '' : 's'} detected · classification pending`
+          : 'No funnel zones detected'}</div>
       <div class="stat-label">Funnel Zones Detected</div>
       <div style="font-size:11px;color:#1a3a2a;margin-top:8px;font-weight:bold">
-        ${funnelHard > 0 ? '★ Hard funnels present — high value intercept locations' : 'Soft funnels only — terrain dependent movement'}
+        ${funnelHard > 0
+          ? '★ Hard funnels present — high value intercept locations'
+          : funnelTotal > 0
+            ? '⟳ Funnel classification in progress — check back after full analysis'
+            : 'No funnel pinch points identified on this parcel'}
       </div>
     </div>
   </div>
@@ -546,7 +561,9 @@ ${ogMeta}
       to travel but aren't forced. These are excellent intercept locations but require more precise wind management.<br><br>
       <strong>Pro Tip:</strong> ${funnelHard > 0
         ? `This property has ${funnelHard} hard funnel${funnelHard > 1 ? 's' : ''} — prioritize intercept placement within 50 yards of these natural pinch points for maximum encounter rates.`
-        : 'Focus intercept points on slight funnels with favorable wind — approach from downwind for best results.'}
+        : funnelTotal > 0
+          ? `This property has ${funnelTotal} funnel zone${funnelTotal === 1 ? '' : 's'} identified by terrain analysis. Once classification completes, revisit for hard vs. slight breakdown.`
+          : 'Focus intercept points on corridor edges with favorable wind — approach from downwind for best results.'}
     </div>
   </div>
   <div class="disclaimer">
