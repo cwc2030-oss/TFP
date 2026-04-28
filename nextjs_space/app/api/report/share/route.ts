@@ -68,9 +68,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const origin = req.headers.get('origin')
+    const rawOrigin = req.headers.get('origin')
       || process.env.NEXTAUTH_URL
-      || 'https://terrafirma.partners';
+      || '';
+    const origin = rawOrigin.replace(/\/+$/, '');
 
     return NextResponse.json({
       reportId: report.id,
