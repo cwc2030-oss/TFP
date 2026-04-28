@@ -2324,6 +2324,7 @@ function DeerIntelContent() {
 
   // Parcel-Hunt File download state
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   const [showDownloadWall, setShowDownloadWall] = useState(false);
   const [showReportPreview, setShowReportPreview] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -3762,103 +3763,105 @@ function DeerIntelContent() {
     }
   }
 
+  // ── Shared payload builder for Download + Share ──
+  const buildReportPayload = useCallback(async () => {
+    const top3 = alignedStands.slice(0, 3);
+    const reportSavedPropertyId = await ensureSavedPropertyForListing();
+    if (!reportSavedPropertyId) return null;
+    const isTerritory = territoryParcelsRef.current.length > 1;
+    const territoryAcreageSum = territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0);
+    return {
+      address: isTerritory
+        ? `${territoryName} (${territoryParcels.length} parcels)`
+        : address,
+      lat,
+      lng,
+      acreage: isTerritory
+        ? territoryAcreageSum
+        : (acreageParam ?? 40),
+      county: parcelPolygon?.properties?.county ??
+        address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
+      state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
+      prevailingWind: windDirection,
+      terrainHeadline: terrainStory?.headline ?? null,
+      terrainNarrative: terrainStory?.narrative ?? null,
+      terrainDriver: terrainStory?.primaryDriver?.label ?? null,
+      terrainConfidence: terrainStory?.confidence ?? null,
+      elevRange: Math.round((summary?.demMetrics?.elevRange ?? 0) * 3.281),
+      stands: top3.map((s, i) => ({
+        rank: i + 1,
+        name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
+        score: s.alignment?.score ?? 0,
+        tier: s.alignment?.label ?? 'Field Stone',
+        reasoning: s.props?.reasoning ?? '',
+        approachRisk: s.props?.approachRisk ?? 'medium',
+        windOk: s.props?.windOk ?? [],
+        windBad: s.props?.windBad ?? [],
+        distToCorridorM: s.props?.distToCorridorMeters ?? 0,
+        distToBeddingM: s.props?.distToBeddingMeters ?? 0,
+        elevation: s.props?.elevation ?? 0,
+        resilience: s.resilience?.label ?? 'Unknown',
+        resilienceScore: s.resilience?.score ?? 0,
+        coords: s.coords,
+      })),
+      summary: {
+        totalBeddingAcres: summary?.totalBeddingAcres ?? 0,
+        funnelCount: summary?.funnelCount ?? 0,
+        topStandScore: summary?.topStandScore ?? 0,
+        analysisAreaAcres: summary?.analysisAreaAcres ?? 0,
+        recommendedSeason: summary?.recommendedSeason ?? 'rut',
+        elevRange: (summary?.demMetrics?.elevMax ?? 0) - (summary?.demMetrics?.elevMin ?? 0),
+        elevMin: summary?.demMetrics?.elevMin ?? 0,
+        elevMax: summary?.demMetrics?.elevMax ?? 0,
+        slopeStd: summary?.demMetrics?.slopeStd ?? 0,
+        roughness: summary?.demMetrics?.roughness ?? 0,
+      },
+      corridors: {
+        primaryCount: tieredCorridorData?.corridors_primary?.features?.length ?? 0,
+        possibleCount: tieredCorridorData?.corridors_possible?.features?.length ?? 0,
+        hardFunnelCount: tieredCorridorData?.funnels_hard?.features?.length ?? 0,
+        slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
+        parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
+      },
+      savedPropertyId: reportSavedPropertyId,
+      seasonScores: {
+        recommended: summary?.recommendedSeason ?? 'rut',
+        topScore: summary?.topStandScore ?? 0,
+      },
+      parcelCoords: parcelPolygon?.geometry?.type === 'Polygon'
+        ? (parcelPolygon.geometry as any).coordinates[0]
+            .filter((_: any, i: number) => i % 3 === 0) // take every 3rd point = ~33% of coords
+            .slice(0, 15) // hard cap at 15 points
+        : null,
+      isTerritory,
+      territoryName: isTerritory ? territoryName : undefined,
+      territoryParcelCount: isTerritory ? territoryParcels.length : undefined,
+      territoryParcels: isTerritory ? territoryParcelsRef.current.map(p => ({
+        address: p.address,
+        acreage: Math.round(p.acreage),
+        owner: p.owner,
+        county: p.county,
+      })) : undefined,
+    };
+  }, [alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Download Parcel-Hunt File PDF
   const handleDownloadParcelHuntFile = useCallback(async () => {
     if (isDownloading) return;
-    
+
     setIsDownloading(true);
     try {
-      const top3 = alignedStands.slice(0, 3);
-      const reportSavedPropertyId = await ensureSavedPropertyForListing();
-      if (!reportSavedPropertyId) return;
-      const isTerritory = territoryParcelsRef.current.length > 1;
-      const territoryAcreageSum = territoryParcelsRef.current.reduce((sum, p) => sum + p.acreage, 0);
-      const payload = {
-        address: isTerritory
-          ? `${territoryName} (${territoryParcels.length} parcels)`
-          : address,
-        lat,
-        lng,
-        acreage: isTerritory
-          ? territoryAcreageSum
-          : (acreageParam ?? 40),
-        county: parcelPolygon?.properties?.county ?? 
-          address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
-        state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
-        prevailingWind: windDirection,
-        terrainHeadline: terrainStory?.headline ?? null,
-        terrainNarrative: terrainStory?.narrative ?? null,
-        terrainDriver: terrainStory?.primaryDriver?.label ?? null,
-        terrainConfidence: terrainStory?.confidence ?? null,
-        elevRange: Math.round((summary?.demMetrics?.elevRange ?? 0) * 3.281),
-        stands: top3.map((s, i) => ({
-          rank: i + 1,
-          name: s.name ?? s.props?.name ?? `Stand ${i + 1}`,
-          score: s.alignment?.score ?? 0,
-          tier: s.alignment?.label ?? 'Field Stone',
-          reasoning: s.props?.reasoning ?? '',
-          approachRisk: s.props?.approachRisk ?? 'medium',
-          windOk: s.props?.windOk ?? [],
-          windBad: s.props?.windBad ?? [],
-          distToCorridorM: s.props?.distToCorridorMeters ?? 0,
-          distToBeddingM: s.props?.distToBeddingMeters ?? 0,
-          elevation: s.props?.elevation ?? 0,
-          resilience: s.resilience?.label ?? 'Unknown',
-          resilienceScore: s.resilience?.score ?? 0,
-          coords: s.coords,
-        })),
-        summary: {
-          totalBeddingAcres: summary?.totalBeddingAcres ?? 0,
-          funnelCount: summary?.funnelCount ?? 0,
-          topStandScore: summary?.topStandScore ?? 0,
-          analysisAreaAcres: summary?.analysisAreaAcres ?? 0,
-          recommendedSeason: summary?.recommendedSeason ?? 'rut',
-          elevRange: (summary?.demMetrics?.elevMax ?? 0) - (summary?.demMetrics?.elevMin ?? 0),
-          elevMin: summary?.demMetrics?.elevMin ?? 0,
-          elevMax: summary?.demMetrics?.elevMax ?? 0,
-          slopeStd: summary?.demMetrics?.slopeStd ?? 0,
-          roughness: summary?.demMetrics?.roughness ?? 0,
-        },
-        corridors: {
-          primaryCount: tieredCorridorData?.corridors_primary?.features?.length ?? 0,
-          possibleCount: tieredCorridorData?.corridors_possible?.features?.length ?? 0,
-          hardFunnelCount: tieredCorridorData?.funnels_hard?.features?.length ?? 0,
-          slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
-          parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
-        },
-        savedPropertyId: reportSavedPropertyId,
-        seasonScores: {
-          recommended: summary?.recommendedSeason ?? 'rut',
-          topScore: summary?.topStandScore ?? 0,
-        },
-        parcelCoords: parcelPolygon?.geometry?.type === 'Polygon'
-          ? (parcelPolygon.geometry as any).coordinates[0]
-              .filter((_: any, i: number) => i % 3 === 0) // take every 3rd point = ~33% of coords
-              .slice(0, 15) // hard cap at 15 points
-          : null,
-        isTerritory,
-        territoryName: isTerritory ? territoryName : undefined,
-        territoryParcelCount: isTerritory ? territoryParcels.length : undefined,
-        territoryParcels: isTerritory ? territoryParcelsRef.current.map(p => ({
-          address: p.address,
-          acreage: Math.round(p.acreage),
-          owner: p.owner,
-          county: p.county,
-        })) : undefined,
-      };
+      const payload = await buildReportPayload();
+      if (!payload) return;
 
       // Save terrain results to order for report generation
-      // Part 3: prefer URL param orderId (from checkout success link) over localStorage
-      // This eliminates the broken-tab race condition where localStorage isn't shared across tabs
       try {
         const targetOrderId = urlOrderId || localStorage.getItem('tfp_current_order_id');
         if (targetOrderId) {
           await fetch(`/api/orders/${targetOrderId}/save-terrain`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              terrainPayload: payload,
-            }),
+            body: JSON.stringify({ terrainPayload: payload }),
           });
         }
       } catch (e) {
@@ -3895,7 +3898,52 @@ function DeerIntelContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [isDownloading, alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, urlOrderId, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDownloading, buildReportPayload, urlOrderId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Share Hunting Report — POST to /api/report/share, copy link
+  const handleShareReport = useCallback(async () => {
+    if (isSharing) return;
+
+    setIsSharing(true);
+    try {
+      const payload = await buildReportPayload();
+      if (!payload) return;
+
+      const response = await fetch('/api/report/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to create share link');
+      }
+
+      const { url } = await response.json();
+      const displayUrl = url.length > 60 ? url.slice(0, 57) + '...' : url;
+
+      toast.success('Report ready to share', {
+        description: displayUrl,
+        duration: 10000,
+        action: {
+          label: 'Copy link',
+          onClick: () => {
+            navigator.clipboard.writeText(url).then(() => {
+              toast.success('Copied to clipboard!', { duration: 3000 });
+            }).catch(() => {
+              toast.error('Failed to copy — try manually');
+            });
+          },
+        },
+      });
+    } catch (err: any) {
+      console.error('[ShareReport] Error:', err);
+      toast.error(err.message || 'Failed to share report');
+    } finally {
+      setIsSharing(false);
+    }
+  }, [isSharing, buildReportPayload]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Progress step text for UI
   const [progressStep, setProgressStep] = useState<string>('Initializing...');
@@ -13685,35 +13733,65 @@ function DeerIntelContent() {
               {/* ========== PARCEL-HUNT FILE DOWNLOAD / PREVIEW ========== */}
               <div className="p-3 border-t border-white/[0.06]">
                 {isPro ? (
-                  /* Pro/ProMax: direct download */
-                  <button
-                    onClick={handleDownloadParcelHuntFile}
-                    disabled={isDownloading || isLoading}
-                    style={{
-                      background: isDownloading || isLoading ? '#1c1917' : '#c0a020',
-                      color: isDownloading || isLoading ? '#78716c' : '#fff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '10px 20px',
-                      fontSize: '14px',
-                      fontWeight: 600,
-                      cursor: isDownloading || isLoading ? 'not-allowed' : 'pointer',
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                    }}
-                  >
-                    {isDownloading ? (
-                      <>
+                  /* Pro/ProMax: download + share row */
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleDownloadParcelHuntFile}
+                      disabled={isDownloading || isLoading}
+                      style={{
+                        background: isDownloading || isLoading ? '#1c1917' : '#c0a020',
+                        color: isDownloading || isLoading ? '#78716c' : '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '10px 20px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        cursor: isDownloading || isLoading ? 'not-allowed' : 'pointer',
+                        flex: '1 1 0%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      {isDownloading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Generating...</span>
+                        </>
+                      ) : (
+                        <span>⬇ Download Hunt Report</span>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleShareReport}
+                      disabled={isSharing || isLoading}
+                      style={{
+                        background: isSharing || isLoading ? '#1c1917' : '#2d6a4f',
+                        color: isSharing || isLoading ? '#78716c' : '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '10px 16px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        cursor: isSharing || isLoading ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        whiteSpace: 'nowrap' as const,
+                      }}
+                    >
+                      {isSharing ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <span>⬇ Download Hunt Report</span>
-                    )}
-                  </button>
+                      ) : (
+                        <>
+                          <Share2 className="h-4 w-4" />
+                          <span>Share</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 ) : (
                   /* Free/logged-out: VIEW button opens on-screen preview */
                   <button
@@ -13750,20 +13828,34 @@ function DeerIntelContent() {
                   <p className="text-[10px] text-stone-400 leading-relaxed mt-1 mb-2">
                     Download your report, then turn this certified hunt plan into a lease listing.
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={handleDownloadParcelHuntFile}
                       disabled={isDownloading || isLoading}
                       className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-100 text-[11px] font-semibold transition-colors"
                     >
                       <Download className="h-3.5 w-3.5" />
-                      Download PDF
+                      PDF
+                    </button>
+                    <button
+                      onClick={handleShareReport}
+                      disabled={isSharing || isLoading}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
+                    >
+                      {isSharing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <>
+                          <Share2 className="h-3.5 w-3.5" />
+                          Share
+                        </>
+                      )}
                     </button>
                     <button
                       onClick={() => handleListThisProperty('report_ready')}
                       className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition-colors"
                     >
-                      List this property →
+                      List →
                     </button>
                   </div>
                 </div>
