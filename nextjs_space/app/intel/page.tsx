@@ -11621,6 +11621,10 @@ function DeerIntelContent() {
                   // This also prevents clearAllOverlaySources() from firing
                   // and keeps backgroundAnalysis=true (no full-screen overlay).
                   prefetchedParcelRef.current = merged;
+                  // Clear the stability anchor so computeAlignmentScores()
+                  // distributes stands across the full (expanded) territory
+                  // instead of pinning them to old positions.
+                  previousStandsRef.current = [];
                   // Signal the data-painting useEffect to fade new results in
                   // instead of snapping them to full opacity.
                   territoryFadeInPending.current = true;
