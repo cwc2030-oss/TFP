@@ -3124,9 +3124,17 @@ function DeerIntelContent() {
       // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
       // but the engine DID return candidates, show the raw top-3 scored stands
       // with an "unverified" flag so the user still sees actionable data.
+      // Clamp outside coords to nearest parcel edge so pins don't land 500m away.
       if (aligned.length === 0 && allScored.length > 0) {
         console.warn(`[STAND-DIAG] OPTION-B FALLBACK: all ${allScored.length} candidates rejected by parcel-safe. Falling back to raw top-3 with unverified flag.`);
-        aligned = allScored.slice(0, 3).map(s => ({ ...s, unverified: true }));
+        aligned = allScored.slice(0, 3).map(s => {
+          const sd = signedDistanceToParcel(s.coords, geom);
+          const clamped: [number, number] = sd.distance >= 0 ? s.coords : sd.closestBoundaryPoint;
+          if (sd.distance < 0) {
+            console.log(`[STAND-DIAG] OPTION-B clamped rank=${s.rank} "${s.name}" from [${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}] → edge [${clamped[0].toFixed(6)}, ${clamped[1].toFixed(6)}] (was ${Math.abs(sd.distance).toFixed(0)}m outside)`);
+          }
+          return { ...s, coords: clamped, unverified: true };
+        });
       }
     } else {
       // No parcel geometry available — use diversity-selected stands (fallback)
@@ -3163,12 +3171,24 @@ function DeerIntelContent() {
     // ═══ PAD TO TOP 3 — when partial alignment succeeded (1 or 2 verified stands),
     // fill remaining slots from allScored remainder with unverified flag so the
     // report always shows 3 actionable intercept points.
+    // Clamp outside coords to nearest parcel edge so pins stay on the property.
     if (aligned.length > 0 && aligned.length < 3 && allScored.length > aligned.length) {
       const usedKeys = new Set(aligned.map(a => `${a.coords[0].toFixed(8)},${a.coords[1].toFixed(8)}`));
+      const padGeom = parcelPolygon?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
       const padding = allScored
         .filter(s => !usedKeys.has(`${s.coords[0].toFixed(8)},${s.coords[1].toFixed(8)}`))
         .slice(0, 3 - aligned.length)
-        .map(s => ({ ...s, unverified: true }));
+        .map(s => {
+          let clamped = s.coords;
+          if (padGeom) {
+            const sd = signedDistanceToParcel(s.coords, padGeom);
+            if (sd.distance < 0) {
+              clamped = sd.closestBoundaryPoint;
+              console.log(`[STAND-DIAG] PAD clamped rank=${s.rank} "${s.name}" from [${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}] → edge [${clamped[0].toFixed(6)}, ${clamped[1].toFixed(6)}] (was ${Math.abs(sd.distance).toFixed(0)}m outside)`);
+            }
+          }
+          return { ...s, coords: clamped, unverified: true };
+        });
       if (padding.length > 0) {
         console.warn(`[STAND-DIAG] PAD: aligned ${aligned.length} → ${aligned.length + padding.length} via ${padding.length} unverified padding stand(s)`);
         aligned = [...aligned, ...padding];
