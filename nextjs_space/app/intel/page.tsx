@@ -3309,6 +3309,15 @@ function DeerIntelContent() {
     }
   }, [layers?.standPoints, windDirection, season, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Stability invalidation: when the user explicitly cycles
+  // wind direction or season, the stability anchor should
+  // NOT fight the new analysis. Clear it so stands move
+  // freely on the next compute. (Render-only re-runs with
+  // unchanged wind/season still get jitter protection.)
+  useEffect(() => {
+    previousStandsRef.current = [];
+  }, [windDirection, season]);
+
   // v1.2 wind-compass fix: fire alignment scorer directly when deps change.
   // Removed the prevWindDirection stability gate — compass clicks are always 45°
   // increments which far exceed any useful jitter threshold. The old gate could
