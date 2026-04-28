@@ -10,6 +10,10 @@
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Escape HTML-special chars for safe attribute embedding */
+const escHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+
 const seasonLabel = (s: string) =>
   s === 'early' ? 'Early Season' : s === 'rut' ? 'Rut Season' : 'Late Season';
 
@@ -147,7 +151,7 @@ export interface HuntingReportPayload {
 
 export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   const {
-    address, acreage, county, state,
+    address, lat, lng, acreage, county, state,
     prevailingWind, stands, summary, corridors, seasonScores,
     terrainHeadline, terrainNarrative, terrainDriver, terrainConfidence, elevRange,
     isTerritory = false,
@@ -312,10 +316,38 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   const totalPages = mapImageBase64 ? 4 : 3;
 
   // ── Assemble HTML ─────────────────────────────────────────────────────────
+  // ── Open Graph + Twitter Card meta ──
+  const titleSubject = isTerritory
+    ? `${territoryName} — ${territoryParcelCount} Parcels`
+    : address;
+  const ogTitle = `${titleSubject} · Huntability Score: ${summary?.topStandScore ?? 'N/A'}`;
+  const standCount = stands?.length ?? 0;
+  const ogDescription = `${acreage} acres · ${standCount} stand locations · Verified Terrain · Powered by TFP Intelligence Engine`;
+  const ogUrl = `${origin}/report/${reportId}`;
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
+  const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static';
+  const ogImage = `${mapboxBase}/pin-s+ffd700(${lng},${lat})/${lng},${lat},13,0/1200x630@2x?access_token=${mapboxToken}`;
+
+  const ogMeta = `
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Terra Firma Partners" />
+<meta property="og:title" content="${escHtml(ogTitle)}" />
+<meta property="og:description" content="${escHtml(ogDescription)}" />
+<meta property="og:url" content="${ogUrl}" />
+<meta property="og:image" content="${ogImage}" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Satellite view of ${escHtml(titleSubject)}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${escHtml(ogTitle)}" />
+<meta name="twitter:description" content="${escHtml(ogDescription)}" />
+<meta name="twitter:image" content="${ogImage}" />`;
+
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
+${ogMeta}
 <style>${css}</style>
 </head>
 <body>
