@@ -22,6 +22,7 @@ model User {
   savedProperties  SavedProperty[]
   parcelPurchases  ParcelPurchase[]
   listings         Listing[]
+  huntingReports   HuntingReport[]
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
@@ -303,4 +304,15 @@ enum InquiryStatus {
   NEW
   REPLIED
   CLOSED
+}
+
+model HuntingReport {
+  id          String   @id @default(cuid())
+  payload     Json
+  ownerUserId String?
+  owner       User?    @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  viewCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([ownerUserId])
 }
