@@ -14,6 +14,12 @@
 const escHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
 
+/** Title-case an address string, preserving separators (spaces, hyphens, commas) */
+const titleCaseAddress = (s: string) =>
+  s.replace(/[a-zA-Z]+/g, w =>
+    w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+  );
+
 const seasonLabel = (s: string) =>
   s === 'early' ? 'Early Season' : s === 'rut' ? 'Rut Season' : 'Late Season';
 
@@ -164,6 +170,11 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
     origin = 'https://terrafirma.partners',
   } = payload;
 
+  // ── Defensive acreage coercion (Bug 1/4/5: URL param may arrive as string) ──
+  const safeAcreage = typeof acreage === 'number' && Number.isFinite(acreage)
+    ? acreage
+    : (parseFloat(String(acreage).replace(/[^0-9.]/g, '')) || 40);
+
   // ── Elevation derived values ──
   const standElevations = (stands ?? [])
     .map((s: any) => s.elevation ? Math.round(s.elevation * 3.281) : 0)
@@ -212,7 +223,7 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
     ? `<div style="background:#8b6f47;color:white;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#9680; CONDITIONALLY HUNTABLE</div>`
     : `<div style="background:#8b0000;color:white;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10007; LIMITED HUNTABILITY</div>`;
 
-  const carryingCapacity = Math.max(1, Math.round((acreage ?? 40) / 40));
+  const carryingCapacity = Math.max(1, Math.round(safeAcreage / 40));
   const standInventory = (stands ?? []).length;
 
   const leaseIntelHTML = `
@@ -300,15 +311,17 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   `).join('')}
   <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12px;font-weight:bold">
     <span style="color:#1a3a2a">Total Territory</span>
-    <span style="color:#c9a84c">${Math.round(acreage)} acres across ${territoryParcelCount} parcels</span>
+    <span style="color:#c9a84c">${Math.round(safeAcreage)} acres across ${territoryParcelCount} parcels</span>
   </div>
 </div>` : '';
 
   // ── County / state parsing ──
   const addressParts = (address ?? '').split(',').map((s: string) => s.trim());
   const parsedCounty = addressParts
-    .find((p: string) => p.toLowerCase().includes('county'))
-    ?.replace(/county/i, '').trim() ?? county ?? '';
+    .find((p: string) =>
+      /\bcounty\b/i.test(p) &&
+      !/county\s+(road|rd|highway|hwy|route|rt|line|ln|street|st|drive|dr|lane)/i.test(p)
+    )?.replace(/county/i, '').trim() ?? county ?? '';
   const stateZipMatch = (address ?? '').match(/\b([A-Z]{2})\s+\d{5}\b/);
   const parsedState = stateZipMatch?.[1] ?? state ?? 'MO';
 
@@ -322,7 +335,7 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
     : address;
   const ogTitle = `${titleSubject} · Huntability Score: ${summary?.topStandScore ?? 'N/A'}`;
   const standCount = stands?.length ?? 0;
-  const ogDescription = `${acreage} acres · ${standCount} stand locations · Verified Terrain · Powered by TFP Intelligence Engine`;
+  const ogDescription = `${safeAcreage} acres · ${standCount} stand locations · Verified Terrain · Powered by TFP Intelligence Engine`;
   const ogUrl = `${origin}/report/${reportId}`;
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
   const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static';
@@ -361,8 +374,8 @@ ${ogMeta}
   </div>
   <div style="text-align:center;margin-bottom:14px">
     <div style="font-size:26px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">${isTerritory ? 'TERRITORY INTELLIGENCE REPORT' : 'HUNTING INTELLIGENCE REPORT'}</div>
-    <div style="font-size:13px;color:#666;margin-top:4px">${isTerritory ? `${territoryName} — ${territoryParcelCount} parcels — ${Math.round(acreage)} total acres` : address}</div>
-    <div style="font-size:12px;color:#999;margin-top:2px">${acreage} Acres | ${parsedCounty} County, ${parsedState}</div>
+    <div style="font-size:13px;color:#666;margin-top:4px">${isTerritory ? `${territoryName} — ${territoryParcelCount} parcels — ${Math.round(safeAcreage)} total acres` : titleCaseAddress(address)}</div>
+    <div style="font-size:12px;color:#999;margin-top:2px">${safeAcreage.toFixed(1)} Acres | ${parsedCounty} County, ${parsedState}</div>
   </div>
   <div class="gold-bar"></div>
   ${terrainNarrative ? `
@@ -455,7 +468,12 @@ ${ogMeta}
     <div style="font-size:12px;color:#666;margin-top:6px">Top recommended intercept locations based on terrain, wind, and deer movement intelligence</div>
   </div>
   <div class="gold-bar"></div>
-  ${(stands ?? []).map((stand: any, i: number) => `
+  ${(stands ?? []).length === 0 ? `
+  <div style="text-align:center;padding:40px 24px;border:2px dashed #c9a84c;background:#fdf9f0;margin-bottom:24px">
+    <div style="font-size:16px;font-weight:bold;color:#1a3a2a;margin-bottom:8px">Stand Analysis In Progress</div>
+    <div style="font-size:12px;color:#666;line-height:1.6">Intercept point data was not available when this report was generated.<br/>Re-download after the terrain analysis completes to include stand locations.</div>
+  </div>
+  ` : (stands ?? []).map((stand: any, i: number) => `
   <div class="stand-card">
     <div class="stand-header" style="background:${i === 0 ? '#1a3a2a' : '#f8f6f0'};color:${i === 0 ? 'white' : '#1a1a1a'}">
       <div style="display:flex;align-items:center">
@@ -625,7 +643,7 @@ ${mapImageBase64 ? `
       <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
         <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
         <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
-        <div style="font-size:12px;color:#666">${Math.round(acreage ?? 40)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
+        <div style="font-size:12px;color:#666">${Math.round(safeAcreage)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
       </div>
       ${territorySection}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">

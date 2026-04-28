@@ -3778,9 +3778,12 @@ function DeerIntelContent() {
       lng,
       acreage: isTerritory
         ? territoryAcreageSum
-        : (acreageParam ?? 40),
+        : (Number(acreageParam) || 40),
       county: parcelPolygon?.properties?.county ??
-        address?.split(',').find((p: string) => p.toLowerCase().includes('county'))?.replace(/county/i,'').trim() ?? '',
+        address?.split(',').find((p: string) =>
+          /\bcounty\b/i.test(p) &&
+          !/county\s+(road|rd|highway|hwy|route|rt|line|ln|street|st|drive|dr|lane)/i.test(p)
+        )?.replace(/county/i,'').trim() ?? '',
       state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
       prevailingWind: windDirection,
       terrainHeadline: terrainStory?.headline ?? null,
@@ -3848,6 +3851,10 @@ function DeerIntelContent() {
   // Download Parcel-Hunt File PDF
   const handleDownloadParcelHuntFile = useCallback(async () => {
     if (isDownloading) return;
+    if (!alignedStands || alignedStands.length === 0) {
+      toast.warning('Stand analysis still loading — wait a moment and try again.');
+      return;
+    }
 
     setIsDownloading(true);
     try {
@@ -3903,6 +3910,10 @@ function DeerIntelContent() {
   // Share Hunting Report — POST to /api/report/share, copy link
   const handleShareReport = useCallback(async () => {
     if (isSharing) return;
+    if (!alignedStands || alignedStands.length === 0) {
+      toast.warning('Stand analysis still loading — wait a moment and try again.');
+      return;
+    }
 
     setIsSharing(true);
     try {
