@@ -3120,6 +3120,14 @@ function DeerIntelContent() {
         });
       }
       console.log(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
+
+      // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
+      // but the engine DID return candidates, show the raw top-3 scored stands
+      // with an "unverified" flag so the user still sees actionable data.
+      if (aligned.length === 0 && allScored.length > 0) {
+        console.warn(`[STAND-DIAG] OPTION-B FALLBACK: all ${allScored.length} candidates rejected by parcel-safe. Falling back to raw top-3 with unverified flag.`);
+        aligned = allScored.slice(0, 3).map(s => ({ ...s, unverified: true }));
+      }
     } else {
       // No parcel geometry available — use diversity-selected stands (fallback)
       aligned = allScoredDiverse;
@@ -3806,6 +3814,7 @@ function DeerIntelContent() {
         resilience: s.resilience?.label ?? 'Unknown',
         resilienceScore: s.resilience?.score ?? 0,
         coords: s.coords,
+        ...(s.unverified ? { unverified: true } : {}),
       })),
       summary: {
         totalBeddingAcres: summary?.totalBeddingAcres ?? 0,
@@ -13737,6 +13746,15 @@ function DeerIntelContent() {
                     </button>
                   </div>
                 )}
+                 {/* OPTION B — unverified stands warning */}
+                 {alignedStands.some(s => s.unverified) && (parcelUnlocked || isPro) && (
+                   <div className="mt-1.5 px-2 py-1.5 bg-amber-900/40 border border-amber-700/50 rounded-lg flex items-start gap-2">
+                     <span className="text-amber-400 text-xs mt-0.5">⚠</span>
+                     <p className="text-[10px] text-amber-300/80 leading-relaxed">
+                       <strong>Near-boundary stands.</strong> These intercept points were placed by the engine outside the confirmed parcel boundary. Verify locations on-site.
+                     </p>
+                   </div>
+                 )}
                </div>
                )}
                {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}

@@ -12,6 +12,8 @@ export type AlignedStand = {
   inputs: StandInputs;
   alignment: StandScore;
   coords: [number, number];
+  /** True when stand was placed by the engine but could not be verified inside the parcel boundary. */
+  unverified?: boolean;
   resilience?: {
     score: number;
     corridorCount: number;
@@ -176,6 +178,9 @@ export function StandAlignmentPanel({
                         {isTodaysSit ? '★' : `#${standIdx + 1}`} {sitLabel.split(' ').slice(-1)[0].toUpperCase()}
                       </span>
                       <span className="text-white text-sm font-medium truncate block">{stand.name}</span>
+                      {stand.unverified && (
+                        <span className="text-[7px] bg-amber-700/80 text-amber-100 px-1 py-0.5 rounded font-semibold whitespace-nowrap" title="Engine-placed stand could not be confirmed inside parcel boundary — verify on-site">⚠ VERIFY</span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
                       <span className="text-[9px] text-stone-500 uppercase">{tierLabel}</span>

@@ -489,7 +489,7 @@ ${ogMeta}
           <div style="font-size:24px;font-weight:bold;color:#c9a84c">#${stand.rank}</div>
         </div>
         <div>
-          <div class="stand-name">${stand.name}</div>
+          <div class="stand-name">${stand.name}${stand.unverified ? ' <span style="font-size:9px;background:#92400e;color:#fef3c7;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:600;vertical-align:middle">⚠ VERIFY ON-SITE</span>' : ''}</div>
           <div class="stand-tier">${stand.tier} · ${stand.resilience}</div>
         </div>
       </div>
@@ -524,6 +524,13 @@ ${ogMeta}
       </div>
     </div>
   </div>`).join('')}
+  ${(stands ?? []).some((s: any) => s.unverified) ? `
+  <div style="background:#fffbeb;border:1px solid #d97706;border-radius:6px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:flex-start;gap:8px">
+    <span style="font-size:16px;line-height:1">⚠</span>
+    <div style="font-size:11px;color:#92400e;line-height:1.5">
+      <strong>Boundary verification needed.</strong> These intercept points were placed by the Terrain Brain engine but fell outside the confirmed parcel boundary. Coordinates are approximate — verify locations on-site before hanging a stand.
+    </div>
+  </div>` : ''}
   <div class="section-title" style="margin-top:16px">Corridor Intelligence</div>
   <div class="grid-2">
     <div class="stat-box">
