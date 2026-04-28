@@ -3160,6 +3160,21 @@ function DeerIntelContent() {
     // dropdowns) expect at most 3 stands. This is the single enforcement point.
     aligned = aligned.slice(0, 3);
 
+    // ═══ PAD TO TOP 3 — when partial alignment succeeded (1 or 2 verified stands),
+    // fill remaining slots from allScored remainder with unverified flag so the
+    // report always shows 3 actionable intercept points.
+    if (aligned.length > 0 && aligned.length < 3 && allScored.length > aligned.length) {
+      const usedKeys = new Set(aligned.map(a => `${a.coords[0].toFixed(8)},${a.coords[1].toFixed(8)}`));
+      const padding = allScored
+        .filter(s => !usedKeys.has(`${s.coords[0].toFixed(8)},${s.coords[1].toFixed(8)}`))
+        .slice(0, 3 - aligned.length)
+        .map(s => ({ ...s, unverified: true }));
+      if (padding.length > 0) {
+        console.warn(`[STAND-DIAG] PAD: aligned ${aligned.length} → ${aligned.length + padding.length} via ${padding.length} unverified padding stand(s)`);
+        aligned = [...aligned, ...padding];
+      }
+    }
+
     // ═══ STAND STABILITY — prevent jarring jumps on re-analysis ═══
     // Compare new candidates against previously-shown stands.
     // Only replace a previous stand if:
