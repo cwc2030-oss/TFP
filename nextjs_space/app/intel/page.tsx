@@ -2237,14 +2237,14 @@ function DeerIntelContent() {
     // Physical terrain structure - SHOW in Terrain Work Mode
     funnels: true,    // Legacy combined key (kept for compat)
     saddles: true,    // Independent saddle visibility
-    draws: true,      // Independent draw visibility
+    draws: false,     // DEFAULT OFF — blue dashed draw lines are noisy; user opts-in via toggle
     // Always show terrain anatomy
     ridgeSpines: true,
   });
   
   // Terrain Flow visibility (separate from main visibility for cleaner control)
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
-    pressureHeatmap: false, // DEFAULT OFF — user opts-in via "Deer Flow" toggle
+    pressureHeatmap: true,  // PRIMARY: Terrain pressure heat map (the main visual)
     flowPrimary: true,      // Primary flow corridors (active when Deer Flow enabled)
     flowSecondary: true,    // Secondary feeder lines (active when Deer Flow enabled)
     convergenceZones: true, // Convergence zone markers (active when Deer Flow enabled)
@@ -6946,7 +6946,7 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-funnels-lines',
             filter: ['==', ['get', 'funnelType'], 'draw'],
-            layout: { visibility: 'visible' }, // Draws = terrain structure, always visible initially
+            layout: { visibility: 'none' }, // Draws default OFF — user opts-in via panel toggle
             paint: {
               'line-color': LAYER_COLORS.funnelDraw,
               'line-width': 3,
