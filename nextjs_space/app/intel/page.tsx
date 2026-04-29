@@ -2244,10 +2244,10 @@ function DeerIntelContent() {
   
   // Terrain Flow visibility (separate from main visibility for cleaner control)
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
-    pressureHeatmap: true,  // PRIMARY: Terrain pressure heat map (the main visual)
-    flowPrimary: true,      // Primary flow corridors (validates heat map)
-    flowSecondary: true,    // Secondary feeder lines (terrain-justified only)
-    convergenceZones: true, // Convergence zone markers (convergence IS opportunity)
+    pressureHeatmap: false, // DEFAULT OFF — user opts-in via "Deer Flow" toggle
+    flowPrimary: true,      // Primary flow corridors (active when Deer Flow enabled)
+    flowSecondary: true,    // Secondary feeder lines (active when Deer Flow enabled)
+    convergenceZones: true, // Convergence zone markers (active when Deer Flow enabled)
   });
   
   // Derived: true when the Pressure Map master toggle is ON
@@ -13794,15 +13794,6 @@ function DeerIntelContent() {
                     </button>
                   </div>
                 )}
-                 {/* OPTION B — unverified stands warning */}
-                 {alignedStands.some(s => s.unverified) && (parcelUnlocked || isPro) && (
-                   <div className="mt-1.5 px-2 py-1.5 bg-amber-900/40 border border-amber-700/50 rounded-lg flex items-start gap-2">
-                     <span className="text-amber-400 text-xs mt-0.5">⚠</span>
-                     <p className="text-[10px] text-amber-300/80 leading-relaxed">
-                       <strong>Near-boundary stands.</strong> These intercept points were placed by the engine outside the confirmed parcel boundary. Verify locations on-site.
-                     </p>
-                   </div>
-                 )}
                </div>
                )}
                {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
