@@ -49,6 +49,21 @@ import {
 
 import { pointInAnyWaterBody } from './terrain-raster';
 
+// ========== PARCEL CLIP HELPER ==========
+
+/** Ray-casting point-in-polygon (same algo as intel/page.tsx). */
+function pointInsideParcel(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 // ========== CONFIGURATION ==========
 
 // Grid resolution for huntability analysis
@@ -1956,8 +1971,21 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   const corridorLines = corridorsToGeoJSON(corridors);
   const corridorZones = corridorZonesToGeoJSON(corridors);  // v3.7.0: zone polygons
   const convergencePoints = convergenceNodesToGeoJSON(convergenceNodes);
-  const beddingProbabilityGeoJSON = beddingZonesToGeoJSON(beddingZones);
-  
+  const beddingProbabilityRaw = beddingZonesToGeoJSON(beddingZones);
+
+  // ═══ PARCEL CLIP — drop bedding points outside parcel boundary ═══
+  const parcelRing = input.parcelCoords;
+  const beddingProbabilityGeoJSON: GeoJSON.FeatureCollection = parcelRing?.length >= 3
+    ? {
+        type: 'FeatureCollection',
+        features: beddingProbabilityRaw.features.filter(f => {
+          const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates;
+          return pointInsideParcel(lng, lat, parcelRing);
+        }),
+      }
+    : beddingProbabilityRaw;
+
+  console.log('[Huntability] Bedding clip:', beddingProbabilityRaw.features.length, '→', beddingProbabilityGeoJSON.features.length, 'inside parcel');
   console.log('[Huntability] v3.7.0 corridor zones:', corridorZones.features.length, 'polygons');
   
   // Terrain skeleton from input data

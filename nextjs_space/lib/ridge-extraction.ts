@@ -145,6 +145,19 @@ export async function fetchRidgeSpines(
 
 // ========== GEOMETRY UTILITIES ==========
 
+/** Ray-casting point-in-polygon — used to clip saddle nodes to parcel boundary. */
+function pointInParcelRing(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /**
  * Calculate distance between two points in meters
  */
@@ -585,13 +598,20 @@ export function generateSyntheticRidgeSpines(
   
   console.log('[Backbone] Synthetic generated:', primaryFeatures.length, 'primary,', 
     secondaryFeatures.length, 'secondary,', saddleFeatures.length, 'saddles');
-  
+
+  // ═══ PARCEL CLIP — drop saddle nodes outside parcel boundary ═══
+  const clippedSaddles = saddleFeatures.filter(f => {
+    const [sLng, sLat] = f.geometry.coordinates;
+    return pointInParcelRing(sLng, sLat, coords);
+  });
+  console.log('[Backbone] Saddle clip:', saddleFeatures.length, '→', clippedSaddles.length, 'inside parcel');
+
   return {
     success: true,
     bbox,
     ridges_primary: { type: 'FeatureCollection', features: primaryFeatures },
     ridges_secondary: { type: 'FeatureCollection', features: secondaryFeatures },
-    saddle_nodes: { type: 'FeatureCollection', features: saddleFeatures },
+    saddle_nodes: { type: 'FeatureCollection', features: clippedSaddles },
     metadata: {
       processing_time_seconds: processingTime,
       dem_source: 'SYNTHETIC_AXIS',

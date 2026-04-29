@@ -4743,11 +4743,34 @@ function DeerIntelContent() {
       }
 
       // Update funnel polygons (saddles)
+      // ═══ PARCEL CLIP — drop funnel polygons whose centroid is outside parcel ═══
       // ═══ SADDLE POLYGON STABILITY — prefer previous geometry when zones overlap ═══
       const funnelPolysSource = map.getSource('tfp-funnels-polys') as mapboxgl.GeoJSONSource;
       if (funnelPolysSource) {
         const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
-        const polys = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
+        const polysRaw = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
+
+        // Clip: keep only funnel polys whose centroid is inside the parcel boundary
+        let polys = polysRaw;
+        if (parcelPolygon?.geometry) {
+          const clipRing: number[][] = parcelPolygon.geometry.type === 'Polygon'
+            ? (parcelPolygon.geometry as GeoJSON.Polygon).coordinates[0]
+            : ((parcelPolygon.geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
+          if (clipRing.length >= 3) {
+            const before = polysRaw.features.length;
+            const clippedFeats = polysRaw.features.filter(f => {
+              const coords: number[][] = [];
+              if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+              else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+              if (!coords.length) return false;
+              const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+              const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+              return pointInPolygon([cLng, cLat], clipRing);
+            });
+            polys = { type: 'FeatureCollection', features: clippedFeats };
+            console.log('[MAP] Funnel polygon parcel clip:', before, '→', clippedFeats.length);
+          }
+        }
 
         const prevSaddlePolys = previousSaddlePolysRef.current;
         const SADDLE_POLY_NEIGHBORHOOD_M = 30; // metres — snap to prev if centroid within this
