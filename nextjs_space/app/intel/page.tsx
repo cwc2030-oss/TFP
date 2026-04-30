@@ -2196,12 +2196,6 @@ function DeerIntelContent() {
   const [analysisStalled, setAnalysisStalled] = useState(false);
   const lastProgressRef = useRef({ value: 0, time: Date.now() });
 
-  // Demo fallback: known-good parcel for FB demo safety net
-  const DEMO_FALLBACK = useRef({ lat: 36.638590, lng: -94.345581, address: '761 Schlessman Rd, Pineville, MO 64831', acreage: '118' });
-  const demoFallbackAttempted = useRef(false);
-  const [isDemoFallbackActive, setIsDemoFallbackActive] = useState(false);
-  const [showDemoBadge, setShowDemoBadge] = useState(false);
-
   // Global/unhandled error state
   const [globalError, setGlobalError] = useState<{ message: string; stack?: string } | null>(null);
 
@@ -4497,7 +4491,7 @@ function DeerIntelContent() {
       setProgressStep('Running terrain analysis...');
     } else {
       setProgress(10);
-      setProgressStep((demoMode || heroParcel) ? 'Loading demo parcel\u2026' : demoFallbackAttempted.current ? 'Loading verified demo parcel\u2026' : 'Fetching parcel boundary...');
+      setProgressStep((demoMode || heroParcel) ? 'Loading demo parcel\u2026' : 'Fetching parcel boundary...');
     }
     lastProgressRef.current = { value: (prefetchedParcel || isReAlign) ? 20 : 10, time: Date.now() };
     
@@ -4672,33 +4666,6 @@ function DeerIntelContent() {
         reAlignFadeInPending.current = false;
         dimOverlayLayers(1.0);
         console.log('[INTEL] Restored dimmed layers after analysis error');
-      }
-
-      // DEMO SAFETY NET: if analysis fails and we haven't tried demo fallback yet, auto-switch.
-      // Never fire demo fallback for territory runs — user chose specific parcels.
-      // TERRITORY FIREWALL: Also block if territory mode is active (even if only 1 parcel so far)
-      if (!demoFallbackAttempted.current && !isTerritoryRun && !territoryModeRef.current) {
-        console.log('[INTEL-DIAG] DEMO FALLBACK — analysis failed, switching to verified demo parcel');
-        demoFallbackAttempted.current = true;
-        const df = DEMO_FALLBACK.current;
-        // Schedule state updates after this try/catch/finally completes
-        // Sync refs immediately so runAnalysis reads fresh coords
-        activeLatRef.current = df.lat;
-        activeLngRef.current = df.lng;
-        activeAcreageRef.current = df.acreage;
-        setTimeout(() => {
-          setIsDemoFallbackActive(true);
-          setActiveLat(df.lat);
-          setActiveLng(df.lng);
-          setActiveAddress(df.address);
-          setActiveAcreage(df.acreage);
-          setError(null);
-          setIsLoading(true);
-          setProgress(5);
-          setProgressStep('Loading verified demo parcel\u2026');
-          runAnalysis();
-        }, 100);
-        return;
       }
 
       // TERRITORY FIREWALL: In territory mode, swallow the error silently.
@@ -9622,7 +9589,7 @@ function DeerIntelContent() {
     runAnalysis();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Stall watchdog: detect if progress hasn't advanced for 10s → auto-fallback to demo parcel
+  // Stall watchdog: detect if progress hasn't advanced → surface manual retry UI.
   // TERRITORY FIREWALL: Completely disabled during territory mode — stall detection
   // only matters for single-parcel analysis, not for territory building.
   useEffect(() => {
@@ -9643,23 +9610,7 @@ function DeerIntelContent() {
       const elapsed = Date.now() - lastProgressRef.current.time;
       if (elapsed > 10_000 && isLoading && progress < 20) {
         console.log('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
-        // Auto-fallback to demo parcel if not already tried
-        if (!demoFallbackAttempted.current) {
-          console.log('[INTEL-DIAG] AUTO DEMO FALLBACK — stall > 10s, switching to verified demo parcel');
-          demoFallbackAttempted.current = true;
-          setIsDemoFallbackActive(true);
-          const df = DEMO_FALLBACK.current;
-          setActiveLat(df.lat);
-          setActiveLng(df.lng);
-          setActiveAddress(df.address);
-          setActiveAcreage(df.acreage);
-          setError(null);
-          setProgress(5);
-          setProgressStep('Switching to verified demo parcel\u2026');
-          // lat/lng change triggers runAnalysis via dep array
-        } else {
-          setAnalysisStalled(true); // Show manual retry UI
-        }
+        setAnalysisStalled(true); // Surface manual retry UI instead of silent demo swap
       } else if (elapsed > 25_000 && isLoading && progress < 100) {
         console.log('[INTEL-DIAG] STALL DETECTED — progress stuck at', lastProgressRef.current.value, 'for', Math.round(elapsed / 1000), 's');
         setAnalysisStalled(true);
@@ -9668,7 +9619,7 @@ function DeerIntelContent() {
     return () => clearInterval(stallCheck);
   }, [isLoading, progress]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Final guard: if analysis "completed" but result is empty, auto-fallback to demo parcel
+  // Final guard: if analysis "completed" but result is empty, show explicit error.
   // TERRITORY FIREWALL: Disabled during territory mode — empty results are expected
   // when user is building a territory (no analysis has run yet).
   useEffect(() => {
@@ -9686,32 +9637,8 @@ function DeerIntelContent() {
     if (hasParcel && hasLayers) return; // Data looks good
 
     console.log('[INTEL-DIAG] EMPTY RESULT GUARD — parcel:', hasParcel, 'layers:', hasLayers);
-
-    if (!demoFallbackAttempted.current) {
-      console.log('[INTEL-DIAG] EMPTY RESULT → triggering demo fallback');
-      demoFallbackAttempted.current = true;
-      setIsDemoFallbackActive(true);
-      const df = DEMO_FALLBACK.current;
-      setActiveLat(df.lat);
-      setActiveLng(df.lng);
-      setActiveAddress(df.address);
-      setActiveAcreage(df.acreage);
-      setError(null);
-      setIsLoading(true);
-      setProgress(5);
-      setProgressStep('Loading verified demo parcel\u2026');
-    }
+    setError('Analysis completed but no terrain features found for this parcel. Try a larger property or a different location.');
   }, [isLoading, error, progress, parcelPolygon, layers]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Demo badge: show briefly after demo fallback completes, then auto-dismiss
-  useEffect(() => {
-    if (isDemoFallbackActive && !isLoading && !error) {
-      setShowDemoBadge(true);
-      const timer = setTimeout(() => setShowDemoBadge(false), 8_000);
-      return () => clearTimeout(timer);
-    }
-    setShowDemoBadge(false);
-  }, [isDemoFallbackActive, isLoading, error]);
 
   // ========== EDGE INTELLIGENCE CLICK EVENT LISTENER ==========
   useEffect(() => {
@@ -10453,9 +10380,6 @@ function DeerIntelContent() {
     hasFitToParcel.current = false;
     hasPostAnalysisFit.current = false;
     
-    // Reset fallback state
-    demoFallbackAttempted.current = false;
-    setIsDemoFallbackActive(false);
     prefetchedParcelRef.current = null;
     
     // Fly camera to the new location
@@ -14784,7 +14708,7 @@ function DeerIntelContent() {
               </div>
             </div>
             <h3 className="text-white font-semibold text-lg mb-1 tracking-tight">
-              {(demoMode || heroParcel) ? 'Loading Demo Parcel' : isDemoFallbackActive ? 'Loading Verified Demo Parcel' : 'Refining Terrain Intelligence'}
+              {(demoMode || heroParcel) ? 'Loading Demo Parcel' : 'Refining Terrain Intelligence'}
             </h3>
             <p className="text-stone-400 text-[11px] mb-4 font-mono tracking-wide">
               {progressStep}
@@ -14853,23 +14777,6 @@ function DeerIntelContent() {
               </div>
             </div>
             <span className="text-amber-400 text-[10px] font-mono font-semibold flex-shrink-0">{progress}%</span>
-          </div>
-        </div>
-      )}
-
-      {/* Demo parcel badge — subtle, non-alarming confirmation that auto-dismisses */}
-      {isDemoFallbackActive && !isLoading && (
-        <div 
-          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
-          style={{ 
-            opacity: showDemoBadge ? 1 : 0,
-            transform: showDemoBadge ? 'translate(-50%, 0)' : 'translate(-50%, -6px)',
-            transition: 'opacity 0.6s ease, transform 0.6s ease',
-          }}
-        >
-          <div className="flex items-center gap-2 bg-gray-950/90 backdrop-blur-sm border border-amber-500/20 rounded-full px-4 py-1.5 shadow-lg shadow-black/30">
-            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-            <span className="text-amber-400/90 text-[11px] font-medium tracking-wide">Demo Parcel Loaded</span>
           </div>
         </div>
       )}
