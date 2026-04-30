@@ -3136,62 +3136,6 @@ function DeerIntelContent() {
       }
       console.log(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
 
-      // ═══ POST-SNAP SEPARATION ENFORCEMENT ═══
-      // After snapping, multiple stands may have converged toward the centroid.
-      // Push overlapping lower-ranked stands away to maintain MIN_STAND_SEPARATION_M.
-      if (aligned.length >= 2) {
-        const top = aligned.slice(0, Math.min(aligned.length, 6)); // check top candidates
-        for (let i = 1; i < top.length && i < aligned.length; i++) {
-          for (let j = 0; j < i; j++) {
-            const dist = distanceMeters(aligned[i].coords, aligned[j].coords);
-            if (dist < MIN_STAND_SEPARATION_M) {
-              // Push stand i away from stand j
-              const needed = MIN_STAND_SEPARATION_M - dist + 30; // extra 30m buffer
-              // Direction: away from stand j (bearing from j → i, extended)
-              const dLng = aligned[i].coords[0] - aligned[j].coords[0];
-              const dLat = aligned[i].coords[1] - aligned[j].coords[1];
-              const mag = Math.sqrt(dLng * dLng + dLat * dLat);
-              let pushDir: [number, number];
-              if (mag < 1e-9) {
-                // Identical coords — push perpendicular to a random axis
-                pushDir = [1e-4, 0];
-              } else {
-                pushDir = [dLng / mag, dLat / mag];
-              }
-              // Try pushing in the away direction; if that fails, try perpendicular directions
-              const directions: [number, number][] = [
-                pushDir,
-                [-pushDir[1], pushDir[0]],  // 90° clockwise
-                [pushDir[1], -pushDir[0]],  // 90° counter-clockwise
-                [-pushDir[0], -pushDir[1]], // opposite (toward j, unlikely but last resort)
-              ];
-              let pushed = false;
-              for (const dir of directions) {
-                const metersPerDegLat = 111320;
-                const metersPerDegLng = 111320 * Math.cos(aligned[i].coords[1] * Math.PI / 180);
-                const candidate: [number, number] = [
-                  aligned[i].coords[0] + dir[0] * needed / metersPerDegLng,
-                  aligned[i].coords[1] + dir[1] * needed / metersPerDegLat,
-                ];
-                if (pointInParcelGeometry(candidate, geom)) {
-                  const newDist = distanceMeters(candidate, aligned[j].coords);
-                  if (newDist >= MIN_STAND_SEPARATION_M * 0.8) {
-                    console.log(`[STAND-DIAG] separation push: stand ${aligned[i].rank} "${aligned[i].name}" moved ${Math.round(needed)}m away from stand ${aligned[j].rank} (was ${Math.round(dist)}m, now ${Math.round(newDist)}m)`);
-                    aligned[i] = { ...aligned[i], coords: candidate };
-                    pushed = true;
-                    break;
-                  }
-                }
-              }
-              if (!pushed) {
-                console.log(`[STAND-DIAG] separation push failed for stand ${aligned[i].rank} — could not maintain ${MIN_STAND_SEPARATION_M}m from stand ${aligned[j].rank}`);
-              }
-            }
-          }
-        }
-      }
-      // ═══ END POST-SNAP SEPARATION ═══
-
       // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
       // but the engine DID return candidates, show the raw top-3 scored stands
       // with an "unverified" flag so the user still sees actionable data.
@@ -3287,6 +3231,61 @@ function DeerIntelContent() {
         aligned = [...aligned, ...padding];
       }
     }
+
+    // ═══ FINAL SEPARATION ENFORCEMENT ═══
+    // Runs AFTER slice-to-3 and PAD TO TOP 3 so it sees ALL final stands,
+    // including padded-in ones that used snapToParcelInterior (which can
+    // converge toward the centroid and stack on top of verified stands).
+    const sepGeom = parcelPolygon?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+    if (aligned.length >= 2 && sepGeom) {
+      for (let i = 1; i < aligned.length; i++) {
+        for (let j = 0; j < i; j++) {
+          const dist = distanceMeters(aligned[i].coords, aligned[j].coords);
+          if (dist < MIN_STAND_SEPARATION_M) {
+            // Push stand i away from stand j
+            const needed = MIN_STAND_SEPARATION_M - dist + 30; // extra 30m buffer
+            const dLng = aligned[i].coords[0] - aligned[j].coords[0];
+            const dLat = aligned[i].coords[1] - aligned[j].coords[1];
+            const mag = Math.sqrt(dLng * dLng + dLat * dLat);
+            let pushDir: [number, number];
+            if (mag < 1e-9) {
+              // Identical coords — push perpendicular to a random axis
+              pushDir = [1e-4, 0];
+            } else {
+              pushDir = [dLng / mag, dLat / mag];
+            }
+            const directions: [number, number][] = [
+              pushDir,
+              [-pushDir[1], pushDir[0]],  // 90° clockwise
+              [pushDir[1], -pushDir[0]],  // 90° counter-clockwise
+              [-pushDir[0], -pushDir[1]], // opposite (last resort)
+            ];
+            let pushed = false;
+            for (const dir of directions) {
+              const metersPerDegLat = 111320;
+              const metersPerDegLng = 111320 * Math.cos(aligned[i].coords[1] * Math.PI / 180);
+              const candidate: [number, number] = [
+                aligned[i].coords[0] + dir[0] * needed / metersPerDegLng,
+                aligned[i].coords[1] + dir[1] * needed / metersPerDegLat,
+              ];
+              if (pointInParcelGeometry(candidate, sepGeom)) {
+                const newDist = distanceMeters(candidate, aligned[j].coords);
+                if (newDist >= MIN_STAND_SEPARATION_M * 0.8) {
+                  console.log(`[STAND-DIAG] separation push: stand ${aligned[i].rank} "${aligned[i].name}" moved ${Math.round(needed)}m away from stand ${aligned[j].rank} (was ${Math.round(dist)}m, now ${Math.round(newDist)}m)`);
+                  aligned[i] = { ...aligned[i], coords: candidate };
+                  pushed = true;
+                  break;
+                }
+              }
+            }
+            if (!pushed) {
+              console.log(`[STAND-DIAG] separation push failed for stand ${aligned[i].rank} — could not maintain ${MIN_STAND_SEPARATION_M}m from stand ${aligned[j].rank}`);
+            }
+          }
+        }
+      }
+    }
+    // ═══ END FINAL SEPARATION ═══
 
     // ═══ STAND STABILITY — prevent jarring jumps on re-analysis ═══
     // Compare new candidates against previously-shown stands.
