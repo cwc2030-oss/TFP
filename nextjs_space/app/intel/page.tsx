@@ -640,13 +640,34 @@ function closestPointOnPolygon(point: [number, number], polygon: number[][]): { 
 // All Top-3 stands must be strictly inside the parcel with an interior buffer.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Interior safety margin — stands must be at least this far from parcel edge.
-// 15m ≈ ~50ft, keeps stands visually inside even at high zoom levels.
-const PARCEL_INSET_METERS = 15;
+// Dynamic inset: stands should land in the "meaty interior", not hugging the edge.
+// computeParcelInset returns 10% of parcel half-diameter, clamped [50, 150]m.
+// Fallback constant for tiny parcels where geometry is unavailable.
+const PARCEL_INSET_METERS = 50;
 
 // Maximum distance (meters) from parcel boundary for an off-parcel candidate
 // to be eligible for snap-inward repair. Beyond this → discard.
-const MAX_SNAP_DISTANCE_METERS = 80;
+const MAX_SNAP_DISTANCE_METERS = 120;
+
+/** Compute a dynamic inset based on parcel size — 10% of half-diameter, clamped [50, 150]m. */
+function computeParcelInset(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon): number {
+  const rings = getParcelRings(geometry);
+  let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const ring of rings) {
+    for (const c of ring) {
+      if (c[0] < minLng) minLng = c[0];
+      if (c[0] > maxLng) maxLng = c[0];
+      if (c[1] < minLat) minLat = c[1];
+      if (c[1] > maxLat) maxLat = c[1];
+    }
+  }
+  const centerLat = (minLat + maxLat) / 2;
+  const widthM = (maxLng - minLng) * 111000 * Math.cos(centerLat * Math.PI / 180);
+  const heightM = (maxLat - minLat) * 111000;
+  const halfDiameter = Math.max(widthM, heightM) / 2;
+  const tenPercent = halfDiameter * 0.10;
+  return Math.max(50, Math.min(150, tenPercent));
+}
 
 /**
  * Compute a parcel complexity/irregularity score (0-1).
@@ -776,18 +797,20 @@ function signedDistanceToParcel(
 function snapToParcelInterior(
   point: [number, number],
   geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
-  insetMeters: number = PARCEL_INSET_METERS
+  insetMetersOverride?: number
 ): { snapped: boolean; coords: [number, number] } | null {
+  // Use dynamic inset (10% of half-diameter, clamped [50,150]m) unless caller overrides
+  const insetMeters = insetMetersOverride ?? computeParcelInset(geometry);
   const { distance, closestBoundaryPoint } = signedDistanceToParcel(point, geometry);
   
-  // Already safely inside with buffer — no action needed
+  // Already safely inside with generous buffer — no action needed
   if (distance >= insetMeters) {
     return { snapped: false, coords: point };
   }
   
-  // Outside but within snap range — repair
-  if (distance < insetMeters && distance > -MAX_SNAP_DISTANCE_METERS) {
-    // Find the centroid of the polygon to determine "inward" direction
+  // Outside but within snap range, OR inside but too close to edge — repair toward interior
+  if (distance > -MAX_SNAP_DISTANCE_METERS) {
+    // Compute parcel centroid
     const rings = getParcelRings(geometry);
     let cx = 0, cy = 0, count = 0;
     for (const ring of rings) {
@@ -798,22 +821,20 @@ function snapToParcelInterior(
     cx /= count; cy /= count;
     const centroid: [number, number] = [cx, cy];
     
-    // Strategy: move the closest boundary point toward centroid by insetMeters
-    const insetPoint = movePointToward(closestBoundaryPoint, centroid, insetMeters + 2);
-    
-    // Verify the inset point is actually inside
-    if (pointInParcelGeometry(insetPoint, geometry)) {
-      return { snapped: true, coords: insetPoint };
-    }
-    
-    // Fallback: move original point toward centroid until inside with buffer
-    // Iterative approach for complex geometries
-    for (let step = 1; step <= 10; step++) {
-      const candidate = movePointToward(point, centroid, insetMeters * step);
+    // Primary strategy: move the ORIGINAL point toward centroid until it's inside
+    // with inset buffer. This preserves the terrain-meaningful direction.
+    for (let step = 1; step <= 15; step++) {
+      const candidate = movePointToward(point, centroid, insetMeters * step * 0.5);
       const candidateDist = signedDistanceToParcel(candidate, geometry);
       if (candidateDist.distance >= insetMeters) {
         return { snapped: true, coords: candidate };
       }
+    }
+    
+    // Fallback: move closest boundary point deep toward centroid
+    const deepInset = movePointToward(closestBoundaryPoint, centroid, insetMeters * 1.5);
+    if (pointInParcelGeometry(deepInset, geometry)) {
+      return { snapped: true, coords: deepInset };
     }
     
     // Last resort: use centroid if nothing else works
@@ -3124,16 +3145,32 @@ function DeerIntelContent() {
       // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
       // but the engine DID return candidates, show the raw top-3 scored stands
       // with an "unverified" flag so the user still sees actionable data.
-      // Clamp outside coords to nearest parcel edge so pins don't land 500m away.
+      // Snap outside coords toward parcel interior (not raw edge).
       if (aligned.length === 0 && allScored.length > 0) {
         console.warn(`[STAND-DIAG] OPTION-B FALLBACK: all ${allScored.length} candidates rejected by parcel-safe. Falling back to raw top-3 with unverified flag.`);
+        const fallbackInset = computeParcelInset(geom);
+        // Compute centroid for interior snap
+        const fbRings = getParcelRings(geom);
+        let fbCx = 0, fbCy = 0, fbN = 0;
+        for (const ring of fbRings) { for (const c of ring) { fbCx += c[0]; fbCy += c[1]; fbN++; } }
+        fbCx /= fbN; fbCy /= fbN;
+        const fbCentroid: [number, number] = [fbCx, fbCy];
+
         aligned = allScored.slice(0, 3).map(s => {
           const sd = signedDistanceToParcel(s.coords, geom);
-          const clamped: [number, number] = sd.distance >= 0 ? s.coords : sd.closestBoundaryPoint;
-          if (sd.distance < 0) {
-            console.log(`[STAND-DIAG] OPTION-B clamped rank=${s.rank} "${s.name}" from [${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}] → edge [${clamped[0].toFixed(6)}, ${clamped[1].toFixed(6)}] (was ${Math.abs(sd.distance).toFixed(0)}m outside)`);
+          if (sd.distance >= fallbackInset) return { ...s, unverified: true };
+          // Move toward centroid until inside with buffer
+          for (let step = 1; step <= 15; step++) {
+            const candidate = movePointToward(s.coords, fbCentroid, fallbackInset * step * 0.5);
+            const cd = signedDistanceToParcel(candidate, geom);
+            if (cd.distance >= fallbackInset) {
+              console.log(`[STAND-DIAG] OPTION-B interior-snap rank=${s.rank} "${s.name}" → ${Math.round(cd.distance)}m inside`);
+              return { ...s, coords: candidate, unverified: true };
+            }
           }
-          return { ...s, coords: clamped, unverified: true };
+          // Last resort: centroid
+          console.log(`[STAND-DIAG] OPTION-B centroid-fallback rank=${s.rank} "${s.name}"`);
+          return { ...s, coords: fbCentroid, unverified: true };
         });
       }
     } else {
@@ -3171,7 +3208,7 @@ function DeerIntelContent() {
     // ═══ PAD TO TOP 3 — when partial alignment succeeded (1 or 2 verified stands),
     // fill remaining slots from allScored remainder with unverified flag so the
     // report always shows 3 actionable intercept points.
-    // Clamp outside coords to nearest parcel edge so pins stay on the property.
+    // Snap toward parcel interior (not raw edge).
     if (aligned.length > 0 && aligned.length < 3 && allScored.length > aligned.length) {
       const usedKeys = new Set(aligned.map(a => `${a.coords[0].toFixed(8)},${a.coords[1].toFixed(8)}`));
       const padGeom = parcelPolygon?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
@@ -3179,15 +3216,21 @@ function DeerIntelContent() {
         .filter(s => !usedKeys.has(`${s.coords[0].toFixed(8)},${s.coords[1].toFixed(8)}`))
         .slice(0, 3 - aligned.length)
         .map(s => {
-          let clamped = s.coords;
           if (padGeom) {
-            const sd = signedDistanceToParcel(s.coords, padGeom);
-            if (sd.distance < 0) {
-              clamped = sd.closestBoundaryPoint;
-              console.log(`[STAND-DIAG] PAD clamped rank=${s.rank} "${s.name}" from [${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}] → edge [${clamped[0].toFixed(6)}, ${clamped[1].toFixed(6)}] (was ${Math.abs(sd.distance).toFixed(0)}m outside)`);
+            const snapResult = snapToParcelInterior(s.coords, padGeom);
+            if (snapResult) {
+              if (snapResult.snapped) {
+                console.log(`[STAND-DIAG] PAD interior-snap rank=${s.rank} "${s.name}"`);
+              }
+              return { ...s, coords: snapResult.coords, unverified: true };
             }
+            // Can't snap — use centroid as last resort
+            const pRings = getParcelRings(padGeom);
+            let px = 0, py = 0, pn = 0;
+            for (const ring of pRings) { for (const c of ring) { px += c[0]; py += c[1]; pn++; } }
+            return { ...s, coords: [px / pn, py / pn] as [number, number], unverified: true };
           }
-          return { ...s, coords: clamped, unverified: true };
+          return { ...s, unverified: true };
         });
       if (padding.length > 0) {
         console.warn(`[STAND-DIAG] PAD: aligned ${aligned.length} → ${aligned.length + padding.length} via ${padding.length} unverified padding stand(s)`);
@@ -4673,12 +4716,34 @@ function DeerIntelContent() {
       }
 
       // Update bedding polygons — filter out zones near buildings/maintained areas
+      // ═══ PARCEL CLIP — drop legacy bedding polygons whose centroid is outside parcel ═══
       // ═══ BEDDING STABILITY — prefer previous geometry when zones overlap ═══
       const beddingSource = map.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
       if (beddingSource) {
         let beddingFC = layers?.beddingPolygons ? validateGeoJSON(layers.beddingPolygons) : EMPTY_FC;
         beddingFC = filterBeddingNearBuildings(beddingFC, map, 120);
-        const polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
+        let polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
+
+        // Clip: keep only bedding polys whose centroid is inside the parcel boundary
+        if (parcelPolygon?.geometry) {
+          const bedClipRing: number[][] = parcelPolygon.geometry.type === 'Polygon'
+            ? (parcelPolygon.geometry as GeoJSON.Polygon).coordinates[0]
+            : ((parcelPolygon.geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
+          if (bedClipRing.length >= 3) {
+            const before = polygonsOnly.features.length;
+            const clippedBed = polygonsOnly.features.filter(f => {
+              const coords: number[][] = [];
+              if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+              else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+              if (!coords.length) return false;
+              const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+              const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+              return pointInPolygon([cLng, cLat], bedClipRing);
+            });
+            polygonsOnly = { type: 'FeatureCollection', features: clippedBed };
+            console.log('[MAP] Legacy bedding parcel clip:', before, '→', clippedBed.length);
+          }
+        }
 
         const prevBedding = previousBeddingRef.current;
         const BEDDING_NEIGHBORHOOD_M = 80; // metres — if new centroid is within this of prev, snap to prev geometry
@@ -5424,10 +5489,29 @@ function DeerIntelContent() {
       }
 
       // Update saddle nodes source
+      // ═══ PARCEL CLIP (belt-and-suspenders) — drop saddle nodes outside parcel ═══
       // ═══ SADDLE NODE STABILITY — snap new nodes to previous positions within tolerance ═══
       const saddleSource = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
       if (saddleSource) {
-        const newNodes = ridgeSpineData.saddle_nodes;
+        let newNodes = ridgeSpineData.saddle_nodes;
+        // Clip saddle nodes to parcel boundary (catches stale un-clipped data from cache/stability)
+        if (parcelPolygon?.geometry) {
+          const sClipRing: number[][] = parcelPolygon.geometry.type === 'Polygon'
+            ? (parcelPolygon.geometry as GeoJSON.Polygon).coordinates[0]
+            : ((parcelPolygon.geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
+          if (sClipRing.length >= 3 && newNodes.features.length > 0) {
+            const before = newNodes.features.length;
+            const clippedNodes = newNodes.features.filter(f => {
+              if (f.geometry?.type !== 'Point') return true; // keep non-point features
+              const [sLng, sLat] = (f.geometry as GeoJSON.Point).coordinates;
+              return pointInPolygon([sLng, sLat], sClipRing);
+            });
+            newNodes = { type: 'FeatureCollection', features: clippedNodes };
+            if (before !== clippedNodes.length) {
+              console.log('[MAP] Saddle nodes parcel clip:', before, '→', clippedNodes.length);
+            }
+          }
+        }
         const prevNodes = previousSaddleNodesRef.current;
         const SADDLE_NODE_NEIGHBORHOOD_M = 25; // metres — snap to prev if within this
 
@@ -5476,7 +5560,7 @@ function DeerIntelContent() {
     } catch (err) {
       console.error('[Backbone] Error updating map sources (non-fatal):', err);
     }
-  }, [ridgeSpineData, mapReady]);
+  }, [ridgeSpineData, mapReady, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== HUNTABILITY ENGINE — BIG BEAUTIFUL MAP v1 ==========
   useEffect(() => {
