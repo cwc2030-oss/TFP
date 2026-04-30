@@ -3142,6 +3142,62 @@ function DeerIntelContent() {
       }
       console.log(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
 
+      // ═══ POST-SNAP SEPARATION ENFORCEMENT ═══
+      // After snapping, multiple stands may have converged toward the centroid.
+      // Push overlapping lower-ranked stands away to maintain MIN_STAND_SEPARATION_M.
+      if (aligned.length >= 2) {
+        const top = aligned.slice(0, Math.min(aligned.length, 6)); // check top candidates
+        for (let i = 1; i < top.length && i < aligned.length; i++) {
+          for (let j = 0; j < i; j++) {
+            const dist = distanceMeters(aligned[i].coords, aligned[j].coords);
+            if (dist < MIN_STAND_SEPARATION_M) {
+              // Push stand i away from stand j
+              const needed = MIN_STAND_SEPARATION_M - dist + 30; // extra 30m buffer
+              // Direction: away from stand j (bearing from j → i, extended)
+              const dLng = aligned[i].coords[0] - aligned[j].coords[0];
+              const dLat = aligned[i].coords[1] - aligned[j].coords[1];
+              const mag = Math.sqrt(dLng * dLng + dLat * dLat);
+              let pushDir: [number, number];
+              if (mag < 1e-9) {
+                // Identical coords — push perpendicular to a random axis
+                pushDir = [1e-4, 0];
+              } else {
+                pushDir = [dLng / mag, dLat / mag];
+              }
+              // Try pushing in the away direction; if that fails, try perpendicular directions
+              const directions: [number, number][] = [
+                pushDir,
+                [-pushDir[1], pushDir[0]],  // 90° clockwise
+                [pushDir[1], -pushDir[0]],  // 90° counter-clockwise
+                [-pushDir[0], -pushDir[1]], // opposite (toward j, unlikely but last resort)
+              ];
+              let pushed = false;
+              for (const dir of directions) {
+                const metersPerDegLat = 111320;
+                const metersPerDegLng = 111320 * Math.cos(aligned[i].coords[1] * Math.PI / 180);
+                const candidate: [number, number] = [
+                  aligned[i].coords[0] + dir[0] * needed / metersPerDegLng,
+                  aligned[i].coords[1] + dir[1] * needed / metersPerDegLat,
+                ];
+                if (pointInParcelGeometry(candidate, geom)) {
+                  const newDist = distanceMeters(candidate, aligned[j].coords);
+                  if (newDist >= MIN_STAND_SEPARATION_M * 0.8) {
+                    console.log(`[STAND-DIAG] separation push: stand ${aligned[i].rank} "${aligned[i].name}" moved ${Math.round(needed)}m away from stand ${aligned[j].rank} (was ${Math.round(dist)}m, now ${Math.round(newDist)}m)`);
+                    aligned[i] = { ...aligned[i], coords: candidate };
+                    pushed = true;
+                    break;
+                  }
+                }
+              }
+              if (!pushed) {
+                console.log(`[STAND-DIAG] separation push failed for stand ${aligned[i].rank} — could not maintain ${MIN_STAND_SEPARATION_M}m from stand ${aligned[j].rank}`);
+              }
+            }
+          }
+        }
+      }
+      // ═══ END POST-SNAP SEPARATION ═══
+
       // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
       // but the engine DID return candidates, show the raw top-3 scored stands
       // with an "unverified" flag so the user still sees actionable data.
@@ -4725,24 +4781,21 @@ function DeerIntelContent() {
         let polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
 
         // Clip: keep only bedding polys whose centroid is inside the parcel boundary
+        // Uses pointInParcelGeometry which handles both Polygon AND MultiPolygon (territory mode)
         if (parcelPolygon?.geometry) {
-          const bedClipRing: number[][] = parcelPolygon.geometry.type === 'Polygon'
-            ? (parcelPolygon.geometry as GeoJSON.Polygon).coordinates[0]
-            : ((parcelPolygon.geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
-          if (bedClipRing.length >= 3) {
-            const before = polygonsOnly.features.length;
-            const clippedBed = polygonsOnly.features.filter(f => {
-              const coords: number[][] = [];
-              if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
-              else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
-              if (!coords.length) return false;
-              const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
-              const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
-              return pointInPolygon([cLng, cLat], bedClipRing);
-            });
-            polygonsOnly = { type: 'FeatureCollection', features: clippedBed };
-            console.log('[MAP] Legacy bedding parcel clip:', before, '→', clippedBed.length);
-          }
+          const clipGeom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+          const before = polygonsOnly.features.length;
+          const clippedBed = polygonsOnly.features.filter(f => {
+            const coords: number[][] = [];
+            if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+            else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+            if (!coords.length) return false;
+            const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+            const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+            return pointInParcelGeometry([cLng, cLat], clipGeom);
+          });
+          polygonsOnly = { type: 'FeatureCollection', features: clippedBed };
+          if (before !== clippedBed.length) console.log('[MAP] Legacy bedding parcel clip:', before, '→', clippedBed.length);
         }
 
         const prevBedding = previousBeddingRef.current;
@@ -4816,25 +4869,22 @@ function DeerIntelContent() {
         const polysRaw = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
 
         // Clip: keep only funnel polys whose centroid is inside the parcel boundary
+        // Uses pointInParcelGeometry which handles both Polygon AND MultiPolygon (territory mode)
         let polys = polysRaw;
         if (parcelPolygon?.geometry) {
-          const clipRing: number[][] = parcelPolygon.geometry.type === 'Polygon'
-            ? (parcelPolygon.geometry as GeoJSON.Polygon).coordinates[0]
-            : ((parcelPolygon.geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
-          if (clipRing.length >= 3) {
-            const before = polysRaw.features.length;
-            const clippedFeats = polysRaw.features.filter(f => {
-              const coords: number[][] = [];
-              if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
-              else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
-              if (!coords.length) return false;
-              const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
-              const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
-              return pointInPolygon([cLng, cLat], clipRing);
-            });
-            polys = { type: 'FeatureCollection', features: clippedFeats };
-            console.log('[MAP] Funnel polygon parcel clip:', before, '→', clippedFeats.length);
-          }
+          const fClipGeom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+          const before = polysRaw.features.length;
+          const clippedFeats = polysRaw.features.filter(f => {
+            const coords: number[][] = [];
+            if (f.geometry?.type === 'Polygon') coords.push(...(f.geometry as GeoJSON.Polygon).coordinates[0]);
+            else if (f.geometry?.type === 'MultiPolygon') (f.geometry as GeoJSON.MultiPolygon).coordinates.forEach(p => coords.push(...p[0]));
+            if (!coords.length) return false;
+            const cLng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+            const cLat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+            return pointInParcelGeometry([cLng, cLat], fClipGeom);
+          });
+          polys = { type: 'FeatureCollection', features: clippedFeats };
+          if (before !== clippedFeats.length) console.log('[MAP] Funnel polygon parcel clip:', before, '→', clippedFeats.length);
         }
 
         const prevSaddlePolys = previousSaddlePolysRef.current;
@@ -5496,15 +5546,12 @@ function DeerIntelContent() {
         let newNodes = ridgeSpineData.saddle_nodes;
         // Clip saddle nodes to parcel boundary (catches stale un-clipped data from cache/stability)
         if (parcelPolygon?.geometry) {
-          const sClipRing: number[][] = parcelPolygon.geometry.type === 'Polygon'
-            ? (parcelPolygon.geometry as GeoJSON.Polygon).coordinates[0]
-            : ((parcelPolygon.geometry as GeoJSON.MultiPolygon).coordinates[0] || [])[0] || [];
-          if (sClipRing.length >= 3 && newNodes.features.length > 0) {
+          if (newNodes.features.length > 0) {
             const before = newNodes.features.length;
             const clippedNodes = newNodes.features.filter(f => {
               if (f.geometry?.type !== 'Point') return true; // keep non-point features
               const [sLng, sLat] = (f.geometry as GeoJSON.Point).coordinates;
-              return pointInPolygon([sLng, sLat], sClipRing);
+              return pointInParcelGeometry([sLng, sLat], parcelPolygon.geometry);
             });
             newNodes = { type: 'FeatureCollection', features: clippedNodes };
             if (before !== clippedNodes.length) {
@@ -5572,25 +5619,28 @@ function DeerIntelContent() {
     const generateHuntability = async () => {
       setHuntabilityLoading(true);
       try {
-        // Extract parcel coordinates
-        let parcelCoords: number[][] | undefined;
+        // Extract ALL outer rings for multi-parcel territory support
         const geom = parcelPolygon.geometry;
+        let allOuterRings: number[][][] = [];
         if (geom.type === 'Polygon') {
-          parcelCoords = (geom as GeoJSON.Polygon).coordinates[0];
+          allOuterRings = [(geom as GeoJSON.Polygon).coordinates[0]];
         } else if (geom.type === 'MultiPolygon') {
-          parcelCoords = ((geom as GeoJSON.MultiPolygon).coordinates[0] || [])[0];
+          allOuterRings = (geom as GeoJSON.MultiPolygon).coordinates.map(poly => poly[0]).filter(r => r && r.length >= 3);
         }
+        // Concatenate all outer ring coords for bounding-box computation
+        const parcelCoords = allOuterRings.flat();
 
-        if (!parcelCoords || parcelCoords.length < 3) {
+        if (parcelCoords.length < 3) {
           console.warn('[Huntability] Invalid parcel coordinates');
           setHuntabilityLoading(false);
           return;
         }
 
-        console.log('[Huntability] Building huntability analysis...');
+        console.log('[Huntability] Building huntability analysis...', { rings: allOuterRings.length, totalCoords: parcelCoords.length });
 
         const result = buildTerrainHuntability({
           parcelCoords,
+          parcelRings: allOuterRings,
           ridgeData: ridgeSpineData ? {
             ridges_primary: ridgeSpineData.ridges_primary,
             ridges_secondary: ridgeSpineData.ridges_secondary,

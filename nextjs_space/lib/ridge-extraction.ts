@@ -349,25 +349,27 @@ export function generateSyntheticRidgeSpines(
 ): RidgeSpineResponse {
   const startTime = Date.now();
   
-  // Extract parcel coordinates
-  let coords: number[][] = [];
+  // Extract ALL outer rings for multi-parcel territory support
+  let allOuterRings: number[][][] = [];
   if (parcel.geometry.type === 'Polygon') {
-    coords = parcel.geometry.coordinates[0];
+    allOuterRings = [parcel.geometry.coordinates[0]];
   } else {
-    let maxLen = 0;
-    parcel.geometry.coordinates.forEach(poly => {
-      if (poly[0].length > maxLen) {
-        maxLen = poly[0].length;
-        coords = poly[0];
-      }
-    });
+    allOuterRings = parcel.geometry.coordinates.map(poly => poly[0]).filter(r => r && r.length >= 3);
   }
+  // Use largest ring for primary coord-based generation; concat all for bbox
+  let coords: number[][] = [];
+  let maxLen = 0;
+  for (const ring of allOuterRings) {
+    if (ring.length > maxLen) { maxLen = ring.length; coords = ring; }
+  }
+  const allCoords = allOuterRings.flat();
   
   if (coords.length < 4) {
     return emptyRidgeResponse('Insufficient parcel coordinates');
   }
   
-  const bbox = getBbox(coords);
+  // Bounding box from ALL rings so features span the whole territory
+  const bbox = getBbox(allCoords);
   const centerLng = (bbox[0] + bbox[2]) / 2;
   const centerLat = (bbox[1] + bbox[3]) / 2;
   
@@ -599,10 +601,10 @@ export function generateSyntheticRidgeSpines(
   console.log('[Backbone] Synthetic generated:', primaryFeatures.length, 'primary,', 
     secondaryFeatures.length, 'secondary,', saddleFeatures.length, 'saddles');
 
-  // ═══ PARCEL CLIP — drop saddle nodes outside parcel boundary ═══
+  // ═══ PARCEL CLIP — drop saddle nodes outside parcel boundary (multi-ring) ═══
   const clippedSaddles = saddleFeatures.filter(f => {
     const [sLng, sLat] = f.geometry.coordinates;
-    return pointInParcelRing(sLng, sLat, coords);
+    return allOuterRings.some(ring => pointInParcelRing(sLng, sLat, ring));
   });
   console.log('[Backbone] Saddle clip:', saddleFeatures.length, '→', clippedSaddles.length, 'inside parcel');
 

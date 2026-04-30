@@ -52,7 +52,7 @@ import { pointInAnyWaterBody } from './terrain-raster';
 // ========== PARCEL CLIP HELPER ==========
 
 /** Ray-casting point-in-polygon (same algo as intel/page.tsx). */
-function pointInsideParcel(lng: number, lat: number, ring: number[][]): boolean {
+function pointInsideRing(lng: number, lat: number, ring: number[][]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const xi = ring[i][0], yi = ring[i][1];
@@ -62,6 +62,11 @@ function pointInsideParcel(lng: number, lat: number, ring: number[][]): boolean 
     }
   }
   return inside;
+}
+
+/** Multi-ring-aware point-in-parcel check. Returns true if point is inside ANY of the rings. */
+function pointInsideParcel(lng: number, lat: number, rings: number[][][]): boolean {
+  return rings.some(ring => pointInsideRing(lng, lat, ring));
 }
 
 // ========== CONFIGURATION ==========
@@ -122,8 +127,10 @@ const HUNTABILITY_WEIGHTS = {
 // ========== TYPES ==========
 
 export interface HuntabilityInput {
-  /** Parcel boundary coordinates [[lng, lat], ...] */
+  /** Parcel boundary coordinates [[lng, lat], ...] — concatenation of ALL outer rings for bounding-box */
   parcelCoords: number[][];
+  /** All outer rings of the parcel (supports multi-parcel territories). Used for point-in-parcel clips. */
+  parcelRings?: number[][][];
   /** Optional elevation samples for DEM construction */
   elevationSamples?: Array<{ coord: [number, number]; elevation_m: number }>;
   /** Optional pre-computed ridge data */
@@ -1973,14 +1980,16 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   const convergencePoints = convergenceNodesToGeoJSON(convergenceNodes);
   const beddingProbabilityRaw = beddingZonesToGeoJSON(beddingZones);
 
-  // ═══ PARCEL CLIP — drop bedding points outside parcel boundary ═══
-  const parcelRing = input.parcelCoords;
-  const beddingProbabilityGeoJSON: GeoJSON.FeatureCollection = parcelRing?.length >= 3
+  // ═══ PARCEL CLIP — drop bedding points outside parcel boundary (multi-ring aware) ═══
+  const clipRings: number[][][] = input.parcelRings && input.parcelRings.length > 0
+    ? input.parcelRings
+    : (input.parcelCoords?.length >= 3 ? [input.parcelCoords] : []);
+  const beddingProbabilityGeoJSON: GeoJSON.FeatureCollection = clipRings.length > 0
     ? {
         type: 'FeatureCollection',
         features: beddingProbabilityRaw.features.filter(f => {
           const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates;
-          return pointInsideParcel(lng, lat, parcelRing);
+          return pointInsideParcel(lng, lat, clipRings);
         }),
       }
     : beddingProbabilityRaw;
