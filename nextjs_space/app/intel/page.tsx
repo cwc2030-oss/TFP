@@ -5702,11 +5702,11 @@ function DeerIntelContent() {
             ]));
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
               'interpolate', ['linear'], ['get', 'beddingScore'],
-              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
-              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
-              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 24, 'staging', 14, 20],
+              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 5, 6],
+              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 11, 'staging', 8, 9],
+              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 14, 'staging', 10, 12],
             ]);
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 1.2);
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 0.5);
           }
         } catch (e) {
           console.warn('[BeddingStyle] setPaintProperty failed:', e);
@@ -6714,8 +6714,8 @@ function DeerIntelContent() {
       }
       // v3.6.0: Bedding Probability visibility — smooth fade
       fadeToggleLayers(map, showBeddingProbability, [
-        { id: 'tfp-bedding-probability-glow', targetOpacity: 0.4, opacityProp: 'circle-opacity' },
-        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.40, opacityProp: 'circle-opacity' },
+        { id: 'tfp-bedding-probability-glow', targetOpacity: 0.15, opacityProp: 'circle-opacity' },
+        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.35, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-outline', targetOpacity: 0.5 },
       ], FADE_IN);
     } catch (err) {
@@ -8365,7 +8365,7 @@ function DeerIntelContent() {
         // Muted earthy/plum tones — tighter, high-confidence pockets (not scattered circles)
         if (!map.getSource('tfp-bedding-probability')) {
           map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
-          // v3.7: Outer glow — ultra-soft ambient halo
+          // v3.7.1: Outer glow — subtle ambient halo (tuned down: less bleed, smaller cap)
           map.addLayer({
             id: 'tfp-bedding-probability-glow',
             type: 'circle',
@@ -8374,20 +8374,20 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 22, 'staging', 14, 18],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 30, 'staging', 18, 24],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 38, 'staging', 22, 30],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 15, 'staging', 11, 13],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 14, 16],
               ] as any,
               'circle-color': [
                 'match', ['get', 'beddingType'],
                 'sanctuary', '#1a5c2a',
                 '#2d6a4f',
               ] as any,
-              'circle-opacity': 0.06,
-              'circle-blur': 1.8,
+              'circle-opacity': 0.03,
+              'circle-blur': 1.0,
             },
           });
-          // v3.7: Inner fill — softened data-driven colors by bedding type
+          // v3.7.1: Inner fill — tighter cover patches (capped at 14px, cleaner edges)
           map.addLayer({
             id: 'tfp-bedding-probability-fill',
             type: 'circle',
@@ -8396,9 +8396,9 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 12, 14],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 24, 'staging', 14, 20],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 5, 6],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 11, 'staging', 8, 9],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 14, 'staging', 10, 12],
               ] as any,
               'circle-color': [
                 'match', ['get', 'beddingType'],
@@ -8416,7 +8416,7 @@ function DeerIntelContent() {
                 'escape',    0.18,
                 0.20,
               ] as any,
-              'circle-blur': 1.2,
+              'circle-blur': 0.5,
             },
           });
           // v3.7: Outline ring — disabled (hard edges removed)
