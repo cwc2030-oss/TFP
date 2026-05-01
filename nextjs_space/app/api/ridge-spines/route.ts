@@ -74,9 +74,9 @@ export async function POST(request: NextRequest) {
           parcel_id,
           bufferMeters,
           options: {
-            dem_source: 'USGS3DEP1m',
-            min_prominence_ft: 20,
-            min_length_m: 200,
+            dem_source: 'SRTMGL1',
+            min_prominence_ft: 8,
+            min_length_m: 60,
             output_format: 'geojson',
           },
         }),
@@ -86,9 +86,18 @@ export async function POST(request: NextRequest) {
       clearTimeout(timeoutId);
 
       if (modalResponse.ok) {
-        ridgeData = await modalResponse.json() as RidgeSpineResponse;
-        useRealDEM = true;
-        console.log('[RidgeSpines] Got real DEM data from Modal');
+        const modalData = await modalResponse.json() as RidgeSpineResponse;
+        const totalFeatures = 
+          (modalData.ridges_primary?.features?.length || 0) +
+          (modalData.ridges_secondary?.features?.length || 0);
+        
+        if (totalFeatures > 0) {
+          ridgeData = modalData;
+          useRealDEM = true;
+          console.log(`[RidgeSpines] Got real DEM data from Modal: ${totalFeatures} ridge features`);
+        } else {
+          console.log('[RidgeSpines] Modal returned 0 ridge features, falling back to synthetic');
+        }
       } else {
         const errorText = await modalResponse.text();
         console.log('[RidgeSpines] Modal returned error, falling back to synthetic:', errorText);

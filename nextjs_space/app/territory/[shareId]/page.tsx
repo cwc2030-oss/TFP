@@ -419,7 +419,35 @@ function SharedTerritoryContent() {
           <h3 className="text-xl font-bold mb-2">Run Your Own Terrain Analysis</h3>
           <p className="text-gray-400 text-sm mb-5">Get deer movement corridors, intercept placements, and wind strategy for any property.</p>
           <Link
-            href={`/intel?lat=${territory.centroidLat}&lng=${territory.centroidLng}&address=${encodeURIComponent(territory.parcels[0]?.address || territory.name)}`}
+            href={(() => {
+              // Build territory-mode URL if multiple parcels
+              if (territory.type === 'territory' && territory.parcels.length >= 2) {
+                const params = new URLSearchParams({
+                  territory: 'true',
+                  name: territory.name,
+                });
+                territory.parcels.slice(0, 5).forEach((p, i) => {
+                  // Use geometry centroid or stored lat/lng for each parcel
+                  const geo = p.geometry?.geometry ?? p.geometry;
+                  const coords = geo?.coordinates;
+                  if (coords) {
+                    const gType = geo?.type;
+                    const ring = gType === 'MultiPolygon' ? (coords as number[][][][])[0]?.[0] : (coords as number[][][])?.[0];
+                    if (ring && ring.length > 0) {
+                      const lats = ring.map((c: number[]) => c[1]);
+                      const lngs = ring.map((c: number[]) => c[0]);
+                      const cLat = lats.reduce((a: number, b: number) => a + b, 0) / lats.length;
+                      const cLng = lngs.reduce((a: number, b: number) => a + b, 0) / lngs.length;
+                      params.set(`p${i + 1}lat`, cLat.toFixed(6));
+                      params.set(`p${i + 1}lng`, cLng.toFixed(6));
+                    }
+                  }
+                });
+                return `/intel?${params.toString()}`;
+              }
+              // Single parcel — use simple lat/lng
+              return `/intel?lat=${territory.centroidLat}&lng=${territory.centroidLng}&address=${encodeURIComponent(territory.parcels[0]?.address || territory.name)}`;
+            })()}
             className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold transition-colors"
           >
             Open in Terrain Analyzer <ArrowRight className="w-4 h-4" />
