@@ -51,13 +51,13 @@ export default function LoginPage() {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md"
       >
-        <Card className="shadow-xl">
+        <Card className="shadow-xl bg-white">
           <CardHeader className="text-center">
             <div className="w-14 h-14 bg-emerald-700 rounded-lg flex items-center justify-center mx-auto mb-4">
               <Map className="w-8 h-8 text-white" />
             </div>
-            <CardTitle className="text-2xl">Welcome Back</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-2xl text-stone-900">Welcome Back</CardTitle>
+            <CardDescription className="text-stone-500">
               Sign in to access your Terra Firma account
             </CardDescription>
           </CardHeader>
@@ -81,7 +81,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="pl-10"
+                    className="pl-10 text-stone-900 placeholder:text-stone-400 bg-white border-stone-300"
                     required
                   />
                 </div>
@@ -98,7 +98,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
-                    className="pl-10"
+                    className="pl-10 text-stone-900 placeholder:text-stone-400 bg-white border-stone-300"
                     required
                   />
                 </div>
@@ -121,10 +121,10 @@ export default function LoginPage() {
             </form>
 
             <div className="mt-6 text-center text-sm text-stone-600">
-              Don't have an account?{" "}
+              Don&apos;t have an account?{" "}
               <Link
                 href={callbackUrl !== '/dashboard' ? `/signup?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/signup'}
-                className="text-emerald-700 hover:text-emerald-800 font-medium"
+                className="text-emerald-700 hover:text-emerald-800 font-medium underline"
               >
                 Create one
               </Link>

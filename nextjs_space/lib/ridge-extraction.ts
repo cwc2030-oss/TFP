@@ -401,7 +401,8 @@ export function generateSyntheticRidgeSpines(
   const seed = Math.abs(centerLng * 10000 + centerLat * 10000) % 1000;
 
   // ===== FIND PRIMARY AXIS (longest internal diagonal) =====
-  const typedCoords = coords.map(c => [c[0], c[1]] as [number, number]);
+  // Use ALL coords from ALL rings so the axis spans the full territory, not just one parcel
+  const typedCoords = allCoords.map(c => [c[0], c[1]] as [number, number]);
   let maxDist = 0;
   let axisStart: [number, number] = [centerLng, centerLat];
   let axisEnd: [number, number] = [centerLng, centerLat];
@@ -469,8 +470,9 @@ export function generateSyntheticRidgeSpines(
     const startPt = offsetM !== 0 ? movePoint(startRaw, perpBearing, offsetM) : startRaw;
     const endPt = offsetM !== 0 ? movePoint(endRaw, perpBearing, offsetM) : endRaw;
 
-    // Generate curved backbone with 6-8 interior points
-    const numSegments = 6 + Math.floor(pIdx * 0.5);
+    // Generate curved backbone with more points for larger territories
+    const baseSegments = parcelAcres > 500 ? 12 : 6;
+    const numSegments = baseSegments + Math.floor(pIdx * 0.5);
     const ridgeCoords: [number, number][] = [];
     const ridgeSeed = seed + pIdx * 317; // Unique per ridge
 
@@ -493,27 +495,54 @@ export function generateSyntheticRidgeSpines(
       }
     }
 
-    // Filter: keep only points inside parcel and not in water
-    const filtered = ridgeCoords.filter(c => isInsideParcel(c) && !isInWater(c));
-    if (filtered.length < 2) continue;
+    // Filter: keep only points inside parcel and not in water.
+    // For multi-parcel territories, split into contiguous segments so
+    // gaps between parcels don't kill the whole ridge.
+    const segments: [number, number][][] = [];
+    let currentSeg: [number, number][] = [];
+    for (const c of ridgeCoords) {
+      if (isInsideParcel(c) && !isInWater(c)) {
+        currentSeg.push(c);
+      } else if (currentSeg.length >= 2) {
+        segments.push(currentSeg);
+        currentSeg = [];
+      } else {
+        currentSeg = [];
+      }
+    }
+    if (currentSeg.length >= 2) segments.push(currentSeg);
 
+    // Use adaptive min length: relax for large territories
+    const effectiveMinPrimary = parcelAcres > 500 ? MIN_LENGTH_M_PRIMARY * 0.5 : MIN_LENGTH_M_PRIMARY;
+
+    // Add each qualifying segment as a feature
+    let addedPrimary = false;
+    for (const seg of segments) {
+      const segLength = lineLength(seg);
+      if (segLength < effectiveMinPrimary) continue;
+
+      const ridgeId = `ridge_primary_${pIdx}${segments.length > 1 ? `_s${segments.indexOf(seg)}` : ''}`;
+      primaryFeatures.push({
+        type: 'Feature',
+        properties: {
+          id: ridgeId,
+          tier: 'primary' as RidgeTier,
+          prominenceFt: Math.round(55 - pIdx * 5),
+          lengthMeters: Math.round(segLength),
+          avgElevationM: Math.round(300 - pIdx * 10),
+          avgSlopeDeg: Math.round(8 - pIdx * 0.5),
+          curvatureProfile: 0.02,
+        },
+        geometry: { type: 'LineString', coordinates: seg },
+      });
+      addedPrimary = true;
+    }
+    if (!addedPrimary) continue;
+
+    // Use longest segment for spur generation
+    const filtered = segments.reduce((a, b) => lineLength(a) > lineLength(b) ? a : b, segments[0]);
     const ridgeLength = lineLength(filtered);
-    if (ridgeLength < MIN_LENGTH_M_PRIMARY) continue;
-
     const ridgeId = `ridge_primary_${pIdx}`;
-    primaryFeatures.push({
-      type: 'Feature',
-      properties: {
-        id: ridgeId,
-        tier: 'primary' as RidgeTier,
-        prominenceFt: Math.round(55 - pIdx * 5),
-        lengthMeters: Math.round(ridgeLength),
-        avgElevationM: Math.round(300 - pIdx * 10),
-        avgSlopeDeg: Math.round(8 - pIdx * 0.5),
-        curvatureProfile: 0.02,
-      },
-      geometry: { type: 'LineString', coordinates: filtered },
-    });
 
     // ===== SECONDARY SPURS for this primary =====
     const spurCount = Math.min(spursPerPrimary, Math.max(1, Math.floor(ridgeLength / 600)));
@@ -545,7 +574,8 @@ export function generateSyntheticRidgeSpines(
       if (spurCoords.length < 2) continue;
 
       const spurLength = lineLength(spurCoords);
-      if (spurLength < MIN_LENGTH_M_SECONDARY) continue;
+      const effectiveMinSecondary = parcelAcres > 500 ? MIN_LENGTH_M_SECONDARY * 0.5 : MIN_LENGTH_M_SECONDARY;
+      if (spurLength < effectiveMinSecondary) continue;
 
       const spurId = `ridge_secondary_${primaryFeatures.length - 1}_${sIdx}`;
       secondaryFeatures.push({

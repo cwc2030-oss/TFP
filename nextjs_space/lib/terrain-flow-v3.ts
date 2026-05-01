@@ -323,9 +323,13 @@ export function generatePatternBasedFlow(
 }
 
 /**
- * LINEAR: Single dominant corridor with 0-1 parallel feeder
+ * LINEAR: Dominant corridor(s) with parallel feeders
  * Classic ridge-line or drainage-axis pattern
- * Target: 1 primary, 0-1 secondary (only on large parcels)
+ * Scales with parcel size:
+ *   <100ac → 1 primary, 0-1 secondary
+ *   100-400ac → 1-2 primary, 1-2 secondary
+ *   400-1000ac → 2-3 primary, 2-4 secondary
+ *   1000+ → 3-4 primary, 3-5 secondary
  */
 function generateLinearFlow(
   coords: number[][],
@@ -345,26 +349,52 @@ function generateLinearFlow(
   const primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
-  // Single strong primary flow along dominant bearing
-  const primaryLine = generateSingleFlowLine(centroid, bearing, maxLen, scale, 'primary', 0);
-  if (primaryLine) primary.push(primaryLine);
+  // Scale flow counts with acreage
+  const numPrimary = Math.max(1, Math.min(4, Math.floor(scale.areaAcres / 400) + 1));
+  const numSecondary = scale.areaAcres < 80 ? 0 : Math.max(1, Math.min(5, Math.floor(scale.areaAcres / 300)));
+  const perpDir = (bearing + 90) % 360;
+  const perpSpacing = Math.min(widthM, heightM) / (numPrimary + 1);
   
-  // Only 1 secondary feeder, only on larger parcels (≥80 acres)
-  if (scale.areaAcres >= 80) {
-    const offsetDir = (bearing + 90) % 360;
-    const offset = widthM * 0.18;
-    const startPoint = movePoint(centroid, offsetDir, offset);
-    const variedBearing = bearing + (sRand() - 0.5) * 12;
-    const line = generateSingleFlowLine(startPoint, variedBearing, maxLen * 0.55, scale, 'secondary', 0);
-    if (line) secondary.push(line);
+  for (let i = 0; i < numPrimary; i++) {
+    let offsetM = 0;
+    if (i > 0) {
+      const side = i % 2 === 1 ? 1 : -1;
+      const rank = Math.ceil(i / 2);
+      offsetM = side * rank * perpSpacing;
+    }
+    const startPt = offsetM !== 0 ? movePoint(centroid, perpDir, offsetM) : centroid;
+    const len = maxLen * (1 - i * 0.08); // slightly shorter for offset flows
+    const varBearing = bearing + (sRand() - 0.5) * (6 + i * 2);
+    const line = generateSingleFlowLine(startPt, varBearing, len, scale, 'primary', i);
+    if (line) {
+      line.properties.likelihood = Math.max(0.55, 0.82 - i * 0.06);
+      primary.push(line);
+    }
+  }
+  
+  // Secondary feeders spaced across the territory
+  for (let s = 0; s < numSecondary; s++) {
+    const side = s % 2 === 0 ? 1 : -1;
+    const rank = Math.ceil((s + 1) / 2);
+    const offset = widthM * 0.12 * rank * side;
+    const startPoint = movePoint(centroid, perpDir, offset);
+    const variedBearing = bearing + (sRand() - 0.5) * 15;
+    const line = generateSingleFlowLine(startPoint, variedBearing, maxLen * (0.45 + sRand() * 0.15), scale, 'secondary', s);
+    if (line) {
+      line.properties.likelihood = Math.max(0.4, 0.62 - s * 0.04);
+      secondary.push(line);
+    }
   }
   
   return { primary, secondary };
 }
 
 /**
- * FUNNEL: Converging flows toward one area
- * Target: 1 primary + 0-1 secondary feeder converging toward a point
+ * FUNNEL: Converging flows toward one or more convergence points
+ * Scales with parcel size:
+ *   <100ac → 1 convergence point, 1-2 flows
+ *   100-500ac → 1-2 convergence points, 2-4 flows
+ *   500+ → 2-3 convergence points, 3-6 flows
  */
 function generateFunnelFlow(
   coords: number[][],
@@ -375,47 +405,62 @@ function generateFunnelFlow(
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
 } {
   const centroid = getCentroid(coords);
-  
-  // Convergence point: offset from center toward dominant direction
-  const convergenceOffset = scale.diagonalM * 0.2;
-  const convergencePoint = movePoint(centroid, pattern.dominantBearing, convergenceOffset);
+  const bbox = getBbox(coords);
   
   const primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
-  // Max 2 flows: 1 primary + 1 secondary (only on ≥60 acre parcels)
-  const numFlows = scale.areaAcres >= 60 ? 2 : 1;
+  // Number of convergence funnels scales with acreage
+  const numFunnels = Math.max(1, Math.min(3, Math.floor(scale.areaAcres / 500) + 1));
+  const flowsPerFunnel = Math.max(2, Math.min(3, Math.floor(scale.areaAcres / 300) + 1));
   const spreadAngle = 35;
   
-  for (let i = 0; i < numFlows; i++) {
-    const angleOffset = (i - (numFlows - 1) / 2) * spreadAngle;
-    const incomingBearing = (pattern.dominantBearing + 180 + angleOffset) % 360;
-    
-    const startDist = scale.diagonalM * 0.4;
-    const startPoint = movePoint(convergencePoint, incomingBearing, startDist);
-    
-    const lineCoords = generateCurvedLineToTarget(startPoint, convergencePoint, scale);
-    const length = computeLineLength(lineCoords);
-    
-    if (length < scale.minLengthPrimary) continue;
-    
-    const feature: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties> = {
-      type: 'Feature',
-      properties: {
-        id: `flow_${i === 0 ? 'primary' : 'secondary'}_${i}`,
-        tier: i === 0 ? 'primary' : 'secondary',
-        likelihood: i === 0 ? 0.78 : 0.6,
-        lengthM: Math.round(length),
-        avgSlope: 8 + sRand() * 5,
-        convergenceScore: 0.7 + sRand() * 0.2,
-      },
-      geometry: { type: 'LineString', coordinates: lineCoords },
-    };
-    
-    if (i === 0) {
-      primary.push(feature);
+  for (let f = 0; f < numFunnels; f++) {
+    // Space convergence points across the territory
+    let convergencePoint: [number, number];
+    if (numFunnels === 1) {
+      const convergenceOffset = scale.diagonalM * 0.2;
+      convergencePoint = movePoint(centroid, pattern.dominantBearing, convergenceOffset);
     } else {
-      secondary.push(feature);
+      // Distribute convergence points along the dominant bearing axis
+      const t = (f + 0.5) / numFunnels;
+      const spanM = scale.diagonalM * 0.6;
+      const offset = (t - 0.5) * spanM;
+      convergencePoint = movePoint(centroid, pattern.dominantBearing, offset);
+    }
+    
+    for (let i = 0; i < flowsPerFunnel; i++) {
+      const angleOffset = (i - (flowsPerFunnel - 1) / 2) * spreadAngle;
+      const incomingBearing = (pattern.dominantBearing + 180 + angleOffset + f * 15) % 360;
+      
+      const startDist = scale.diagonalM * (0.3 + sRand() * 0.15);
+      const startPoint = movePoint(convergencePoint, incomingBearing, startDist);
+      
+      const lineCoords = generateCurvedLineToTarget(startPoint, convergencePoint, scale);
+      const length = computeLineLength(lineCoords);
+      
+      const minLen = i === 0 ? scale.minLengthPrimary : scale.minLengthSecondary;
+      if (length < minLen) continue;
+      
+      const isPrimary = i === 0; // First flow per funnel is primary
+      const feature: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties> = {
+        type: 'Feature',
+        properties: {
+          id: `flow_${isPrimary ? 'primary' : 'secondary'}_${f}_${i}`,
+          tier: isPrimary ? 'primary' : 'secondary',
+          likelihood: isPrimary ? 0.78 - f * 0.04 : 0.6 - f * 0.03,
+          lengthM: Math.round(length),
+          avgSlope: 8 + sRand() * 5,
+          convergenceScore: 0.7 + sRand() * 0.2,
+        },
+        geometry: { type: 'LineString', coordinates: lineCoords },
+      };
+      
+      if (isPrimary) {
+        primary.push(feature);
+      } else {
+        secondary.push(feature);
+      }
     }
   }
   
@@ -423,9 +468,12 @@ function generateFunnelFlow(
 }
 
 /**
- * BENCH: Sidehill contour-following pattern
- * Uses curved flow lines (not geometric arcs) for terrain-justified paths
- * Target: 1 primary contour-following line, 0-1 secondary on large parcels
+ * BENCH: Contour-following flow lines along terrain benches
+ * Scales with parcel size:
+ *   <100ac → 1 primary, 0-1 secondary
+ *   100-400ac → 1-2 primary, 1-2 secondary
+ *   400-1000ac → 2-3 primary, 2-4 secondary
+ *   1000+ → 3-4 primary, 3-5 secondary
  */
 function generateBenchFlow(
   coords: number[][],
@@ -442,21 +490,41 @@ function generateBenchFlow(
   const primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
-  // Primary: single curved flow along contour bearing (replaces arc)
-  const primaryLine = generateSingleFlowLine(centroid, bearing, maxLen, scale, 'primary', 0);
-  if (primaryLine) {
-    primaryLine.properties.likelihood = 0.72;
-    primary.push(primaryLine);
+  // Scale flow counts with acreage
+  const numPrimary = Math.max(1, Math.min(4, Math.floor(scale.areaAcres / 400) + 1));
+  const numSecondary = scale.areaAcres < 70 ? 0 : Math.max(1, Math.min(5, Math.floor(scale.areaAcres / 250)));
+  const perpDir = (bearing + 90) % 360;
+  const perpSpacing = Math.min(scale.widthM, scale.heightM) / (numPrimary + 1);
+  
+  // Generate primary bench flows spaced perpendicular to contour
+  for (let i = 0; i < numPrimary; i++) {
+    let offsetM = 0;
+    if (i > 0) {
+      const side = i % 2 === 1 ? 1 : -1;
+      const rank = Math.ceil(i / 2);
+      offsetM = side * rank * perpSpacing;
+    }
+    const startPt = offsetM !== 0 ? movePoint(centroid, perpDir, offsetM) : centroid;
+    const len = maxLen * (1 - i * 0.06);
+    const varBearing = bearing + (sRand() - 0.5) * (8 + i * 3);
+    const line = generateSingleFlowLine(startPt, varBearing, len, scale, 'primary', i);
+    if (line) {
+      line.properties.likelihood = Math.max(0.52, 0.72 - i * 0.05);
+      primary.push(line);
+    }
   }
   
-  // Secondary: only on ≥70 acre parcels, single offset feeder
-  if (scale.areaAcres >= 70) {
-    const offset = scale.widthM * 0.15;
-    const offsetPoint = movePoint(centroid, (bearing + 90) % 360, offset);
-    const variedBearing = bearing + (sRand() - 0.5) * 10;
-    const line = generateSingleFlowLine(offsetPoint, variedBearing, maxLen * 0.5, scale, 'secondary', 0);
+  // Secondary feeders: cross-slope connectors between bench levels
+  for (let s = 0; s < numSecondary; s++) {
+    const side = s % 2 === 0 ? 1 : -1;
+    const rank = Math.ceil((s + 1) / 2);
+    const offset = scale.widthM * 0.10 * rank * side;
+    const offsetPoint = movePoint(centroid, perpDir, offset);
+    // Cross-slope feeders run at ~45° to the main bench bearing
+    const crossBearing = bearing + 40 * side + (sRand() - 0.5) * 12;
+    const line = generateSingleFlowLine(offsetPoint, crossBearing, maxLen * (0.4 + sRand() * 0.15), scale, 'secondary', s);
     if (line) {
-      line.properties.likelihood = 0.55;
+      line.properties.likelihood = Math.max(0.38, 0.55 - s * 0.04);
       secondary.push(line);
     }
   }
@@ -478,18 +546,34 @@ function generateCrossroadsFlow(
 } {
   const centroid = getCentroid(coords);
   const maxLen = scale.diagonalM * 0.6;
+  const perpDir = (pattern.dominantBearing + 90) % 360;
   
   const primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
-  // Primary: dominant direction
-  const primaryLine = generateSingleFlowLine(centroid, pattern.dominantBearing, maxLen, scale, 'primary', 0);
-  if (primaryLine) primary.push(primaryLine);
+  // Scale crossroads count with acreage
+  const numCrossings = Math.max(1, Math.min(3, Math.floor(scale.areaAcres / 500) + 1));
+  const perpSpacing = Math.min(scale.widthM, scale.heightM) / (numCrossings + 1);
   
-  // Secondary: perpendicular direction (if detected)
-  if (pattern.secondaryBearing !== undefined) {
-    const secondaryLine = generateSingleFlowLine(centroid, pattern.secondaryBearing, maxLen * 0.8, scale, 'secondary', 0);
-    if (secondaryLine) secondary.push(secondaryLine);
+  for (let c = 0; c < numCrossings; c++) {
+    let offsetM = 0;
+    if (c > 0) {
+      const side = c % 2 === 1 ? 1 : -1;
+      const rank = Math.ceil(c / 2);
+      offsetM = side * rank * perpSpacing;
+    }
+    const crossCenter = offsetM !== 0 ? movePoint(centroid, perpDir, offsetM) : centroid;
+    const len = maxLen * (1 - c * 0.08);
+    
+    // Primary: dominant direction
+    const pLine = generateSingleFlowLine(crossCenter, pattern.dominantBearing + (sRand() - 0.5) * 8, len, scale, 'primary', c);
+    if (pLine) primary.push(pLine);
+    
+    // Secondary: perpendicular direction
+    if (pattern.secondaryBearing !== undefined) {
+      const sLine = generateSingleFlowLine(crossCenter, pattern.secondaryBearing + (sRand() - 0.5) * 8, len * 0.8, scale, 'secondary', c);
+      if (sLine) secondary.push(sLine);
+    }
   }
   
   return { primary, secondary };
