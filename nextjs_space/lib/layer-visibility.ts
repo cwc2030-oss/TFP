@@ -88,8 +88,8 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-debug-analysis-outline',    group: 'debug', opacityProp: 'line-opacity', targetOpacity: 0.8, source: { kind: 'hidden' } },
 
   // ── Bedding polygon areas (toggle: beddingProbability — shared with Bedding Zones button) ──
-  { id: 'tfp-bedding-fill',    group: 'bedding', opacityProp: 'fill-opacity', targetOpacity: 0.07, source: { kind: 'toggle', key: 'beddingProbability' } },
-  { id: 'tfp-bedding-outline',  group: 'bedding', opacityProp: 'line-opacity', targetOpacity: 0.45,  source: { kind: 'toggle', key: 'beddingProbability' } },
+  { id: 'tfp-bedding-fill',    group: 'bedding', opacityProp: 'fill-opacity', targetOpacity: 0.18, source: { kind: 'toggle', key: 'beddingProbability' } },
+  { id: 'tfp-bedding-outline',  group: 'bedding', opacityProp: 'line-opacity', targetOpacity: 0.6,  source: { kind: 'toggle', key: 'beddingProbability' } },
 
   // ── Draws / funnels line layers ──
   { id: 'tfp-funnels-lines-draws',   group: 'draws', opacityProp: 'line-opacity', targetOpacity: 1.0, source: { kind: 'toggle', key: 'draws' } },
@@ -119,9 +119,9 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-funnels-slight-fill',    group: 'funnelsV2', opacityProp: 'fill-opacity', targetOpacity: 0.2,  source: { kind: 'toggle', key: 'funnels' } },
   { id: 'tfp-funnels-slight-outline',  group: 'funnelsV2', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'toggle', key: 'funnels' } },
 
-  // ── Saddle node points (toggle: ridgeSpines) ──
-  { id: 'tfp-saddle-nodes',          group: 'ridgeSpines', opacityProp: 'circle-opacity',        targetOpacity: 0.8,  source: { kind: 'toggle', key: 'ridgeSpines' } },
-  { id: 'tfp-saddle-nodes-outline',   group: 'ridgeSpines', opacityProp: 'circle-stroke-opacity', targetOpacity: 0.6,  source: { kind: 'toggle', key: 'ridgeSpines' } },
+  // ── Saddle node points (toggle: saddles — matches Saddles button) ──
+  { id: 'tfp-saddle-nodes',          group: 'saddles', opacityProp: 'circle-opacity',        targetOpacity: 0.85,  source: { kind: 'toggle', key: 'saddles' } },
+  { id: 'tfp-saddle-nodes-outline',   group: 'saddles', opacityProp: 'circle-stroke-opacity', targetOpacity: 0.4,  source: { kind: 'toggle', key: 'saddles' } },
 
   // ── Heatmap views (complex: pressureHeatmap + pressureView) ──
   { id: 'tfp-pressure-heatmap', group: 'flow', opacityProp: 'heatmap-opacity', targetOpacity: 0.76, source: { kind: 'heatmapView', view: 'pressure' } },

@@ -6683,8 +6683,8 @@ function DeerIntelContent() {
       // v3.6.0: Bedding Zones visibility — polygon layers + inert circle stubs
       fadeToggleLayers(map, showBeddingProbability, [
         // Polygon bedding zones (the actual visible layers)
-        { id: 'tfp-bedding-fill', targetOpacity: 0.07, opacityProp: 'fill-opacity' },
-        { id: 'tfp-bedding-outline', targetOpacity: 0.45 },
+        { id: 'tfp-bedding-fill', targetOpacity: 0.18, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.6 },
         // Probability circles disabled — kept at 0 so toggle doesn't throw
         { id: 'tfp-bedding-probability-glow', targetOpacity: 0, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-fill', targetOpacity: 0, opacityProp: 'circle-opacity' },
