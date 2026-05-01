@@ -3923,12 +3923,12 @@ function DeerIntelContent() {
       acreage: isTerritory
         ? territoryAcreageSum
         : (Number(acreageParam) || 40),
-      county: parcelPolygon?.properties?.county ??
+      county: (parcelPolygon?.properties?.county ??
         address?.split(',').find((p: string) =>
           /\bcounty\b/i.test(p) &&
           !/county\s+(road|rd|highway|hwy|route|rt|line|ln|street|st|drive|dr|lane)/i.test(p)
-        )?.replace(/county/i,'').trim() ?? '',
-      state: address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO',
+        )?.replace(/county/i,'').trim() ?? '').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      state: (address?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO').toUpperCase(),
       prevailingWind: windDirection,
       terrainHeadline: terrainStory?.headline ?? null,
       terrainNarrative: terrainStory?.narrative ?? null,

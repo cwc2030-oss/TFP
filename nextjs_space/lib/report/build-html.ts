@@ -319,13 +319,18 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
 
   // ── County / state parsing ──
   const addressParts = (address ?? '').split(',').map((s: string) => s.trim());
-  const parsedCounty = addressParts
+  const rawCounty = addressParts
     .find((p: string) =>
       /\bcounty\b/i.test(p) &&
       !/county\s+(road|rd|highway|hwy|route|rt|line|ln|street|st|drive|dr|lane)/i.test(p)
     )?.replace(/county/i, '').trim() ?? county ?? '';
+  // Title-case the county name (fixes lowercase "plattin" → "Plattin", "ste. genevieve" → "Ste. Genevieve")
+  const parsedCounty = rawCounty
+    ? rawCounty.replace(/\b\w/g, (c: string) => c.toUpperCase())
+    : '';
   const stateZipMatch = (address ?? '').match(/\b([A-Z]{2})\s+\d{5}\b/);
-  const parsedState = stateZipMatch?.[1] ?? state ?? 'MO';
+  // Force uppercase state code (fixes "Mo" → "MO")
+  const parsedState = (stateZipMatch?.[1] ?? state ?? 'MO').toUpperCase();
 
   // ── Page count ──
   const totalPages = mapImageBase64 ? 4 : 3;
@@ -377,7 +382,7 @@ ${ogMeta}
   <div style="text-align:center;margin-bottom:14px">
     <div style="font-size:26px;font-weight:bold;letter-spacing:2px;color:#1a3a2a">${isTerritory ? 'TERRITORY INTELLIGENCE REPORT' : 'HUNTING INTELLIGENCE REPORT'}</div>
     <div style="font-size:13px;color:#666;margin-top:4px">${isTerritory ? `${territoryName} — ${territoryParcelCount} parcels — ${Math.round(safeAcreage)} total acres` : titleCaseAddress(address)}</div>
-    <div style="font-size:12px;color:#999;margin-top:2px">${safeAcreage.toFixed(1)} Acres | ${parsedCounty} County, ${parsedState}</div>
+    <div style="font-size:12px;color:#999;margin-top:2px">${safeAcreage.toFixed(1)} Acres${parsedCounty ? ` | ${parsedCounty} County, ${parsedState}` : ` | ${parsedState}`}</div>
   </div>
   <div class="gold-bar"></div>
   ${terrainNarrative ? `
@@ -661,7 +666,7 @@ ${mapImageBase64 ? `
       <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
         <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
         <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
-        <div style="font-size:12px;color:#666">${Math.round(safeAcreage)} Acres | ${county || 'Missouri'} County, ${state || 'MO'}</div>
+        <div style="font-size:12px;color:#666">${Math.round(safeAcreage)} Acres${parsedCounty ? ` | ${parsedCounty} County, ${parsedState}` : ` | ${parsedState}`}</div>
       </div>
       ${territorySection}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
