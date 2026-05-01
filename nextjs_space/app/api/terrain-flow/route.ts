@@ -51,8 +51,8 @@ const RIDGE_API_URL = process.env.RIDGE_API_URL ||
   'https://cwc2030--terrain-brain-v3-ridges-ridges-web.modal.run/v1/ridges';
 
 const CORRIDOR_TIMEOUT_MS = 45000; // 45s — allows Modal cold-start
-const RIDGE_TIMEOUT_MS = 30000;    // 30s — allows Modal cold-start
-const API_VERSION = 'v2.0-terrain-driven-2026-03-11';
+const RIDGE_TIMEOUT_MS = 45000;    // 45s — allows Modal cold-start + USGS 3DEP fallback
+const API_VERSION = 'v2.1-terrain-driven-2026-05-01';
 
 /**
  * Fetch with timeout + one automatic retry on abort/timeout.
@@ -132,6 +132,25 @@ export async function POST(request: NextRequest) {
       ANALYSIS_BUFFER_MAX_M
     );
 
+    // Terrain debug block — always returned
+    const terrainDebug: Record<string, any> = {
+      terrain_source: 'unknown',
+      fallback_used: false,
+      fallback_reason: null,
+      corridor_modal_status: null,
+      corridor_modal_error: null,
+      ridge_modal_status: null,
+      ridge_modal_error: null,
+      corridor_count: 0,
+      ridge_count_primary: 0,
+      ridge_count_secondary: 0,
+      flow_count_primary: 0,
+      flow_count_secondary: 0,
+      convergence_count: 0,
+      opportunity_count: 0,
+      pipeline_steps: {} as Record<string, any>,
+    };
+
     console.log('[TerrainFlow] Processing for parcel:', parcel_id);
     console.log('[TerrainFlow] Buffer:', effectiveBuffer, 'm');
     console.log('[TerrainFlow] Mode:', options.mode || 'terrain_driven');
@@ -151,6 +170,7 @@ export async function POST(request: NextRequest) {
         ...syntheticData,
         version: API_VERSION,
         request_id: `flow_synthetic_${Date.now().toString(36)}`,
+        terrain_debug: { ...terrainDebug, terrain_source: 'synthetic_comparison', fallback_used: true, fallback_reason: 'User requested synthetic comparison mode' },
       });
     }
 
@@ -162,7 +182,8 @@ export async function POST(request: NextRequest) {
     let ridgeData: any = null;
     let usedRealDEM = false;
 
-    console.log('[TerrainFlow] Fetching corridor data from Modal with buffer (timeout %dms, 1 retry)', CORRIDOR_TIMEOUT_MS);
+    terrainDebug.pipeline_steps.corridor_call = 'attempted';
+    console.log('[TerrainFlow] Fetching corridor data from Modal');
 
     const corridorResponse = await fetchWithRetry(
       CORRIDOR_API_URL,
@@ -190,29 +211,41 @@ export async function POST(request: NextRequest) {
     );
 
     if (corridorResponse?.ok) {
+      terrainDebug.corridor_modal_status = corridorResponse.status;
       try {
         corridorData = await corridorResponse.json();
-        if (corridorData.success &&
-            (corridorData.corridors?.features?.length > 0 || corridorData.features?.length > 0)) {
+        const corridorCount = corridorData.corridors?.features?.length || corridorData.features?.length || 0;
+        terrainDebug.corridor_count = corridorCount;
+        
+        if (corridorData.success && corridorCount > 0) {
           usedRealDEM = true;
-          console.log('[TerrainFlow] Got corridor data from Modal:', {
-            corridors: corridorData.corridors?.features?.length || corridorData.features?.length || 0,
-            dem_source: corridorData.metadata?.dem_source,
-          });
+          terrainDebug.pipeline_steps.corridor_call = 'success';
+          console.log('[TerrainFlow] Got corridor data from Modal:', corridorCount);
         } else {
+          terrainDebug.pipeline_steps.corridor_call = 'success_but_empty';
+          terrainDebug.corridor_modal_error = 'Corridor data empty or unsuccessful';
           console.log('[TerrainFlow] Corridor data empty or unsuccessful');
           corridorData = null;
         }
       } catch (parseErr) {
+        terrainDebug.pipeline_steps.corridor_call = 'parse_error';
+        terrainDebug.corridor_modal_error = String(parseErr);
         console.log('[TerrainFlow] Corridor response parse failed:', parseErr);
       }
     } else if (corridorResponse) {
+      terrainDebug.corridor_modal_status = corridorResponse.status;
       const errorText = await corridorResponse.text().catch(() => 'unreadable');
-      console.log('[TerrainFlow] Corridor API error:', corridorResponse.status, errorText);
+      terrainDebug.corridor_modal_error = errorText.slice(0, 300);
+      terrainDebug.pipeline_steps.corridor_call = `http_${corridorResponse.status}`;
+      console.log('[TerrainFlow] Corridor API error:', corridorResponse.status);
+    } else {
+      terrainDebug.pipeline_steps.corridor_call = 'unreachable';
+      terrainDebug.corridor_modal_error = 'No response (timeout or network error)';
     }
 
-    // Fetch ridge data (optional — timeout %dms, 1 retry)
-    console.log('[TerrainFlow] Fetching ridge data from Modal (timeout %dms, 1 retry)', RIDGE_TIMEOUT_MS);
+    // Fetch ridge data
+    terrainDebug.pipeline_steps.ridge_call = 'attempted';
+    console.log('[TerrainFlow] Fetching ridge data from Modal');
 
     const ridgeResponse = await fetchWithRetry(
       RIDGE_API_URL,
@@ -238,20 +271,36 @@ export async function POST(request: NextRequest) {
     );
 
     if (ridgeResponse?.ok) {
+      terrainDebug.ridge_modal_status = ridgeResponse.status;
       try {
         ridgeData = await ridgeResponse.json();
         if (ridgeData.success) {
-          console.log('[TerrainFlow] Got ridge data:', {
-            primary: ridgeData.ridges_primary?.features?.length || 0,
-            secondary: ridgeData.ridges_secondary?.features?.length || 0,
-            saddles: ridgeData.saddle_nodes?.features?.length || 0,
-          });
+          const rp = ridgeData.ridges_primary?.features?.length || 0;
+          const rs = ridgeData.ridges_secondary?.features?.length || 0;
+          terrainDebug.ridge_count_primary = rp;
+          terrainDebug.ridge_count_secondary = rs;
+          terrainDebug.pipeline_steps.ridge_call = rp + rs > 0 ? 'success' : 'success_but_empty';
+          
+          if (rp + rs > 0) usedRealDEM = true;
+          
+          console.log('[TerrainFlow] Got ridge data:', rp, 'P +', rs, 'S');
         } else {
+          terrainDebug.pipeline_steps.ridge_call = 'success_but_failed';
+          terrainDebug.ridge_modal_error = ridgeData.metadata?.error || 'success=false';
           ridgeData = null;
         }
       } catch (parseErr) {
+        terrainDebug.pipeline_steps.ridge_call = 'parse_error';
+        terrainDebug.ridge_modal_error = String(parseErr);
         console.warn('[TerrainFlow] Ridge response parse failed:', parseErr);
       }
+    } else if (ridgeResponse) {
+      terrainDebug.ridge_modal_status = ridgeResponse.status;
+      terrainDebug.pipeline_steps.ridge_call = `http_${ridgeResponse.status}`;
+      terrainDebug.ridge_modal_error = 'Non-200 response';
+    } else {
+      terrainDebug.pipeline_steps.ridge_call = 'unreachable';
+      terrainDebug.ridge_modal_error = 'No response (timeout or network error)';
     }
 
     // Generate terrain-driven flow
@@ -269,8 +318,21 @@ export async function POST(request: NextRequest) {
     flowData.metadata.processing_time_seconds = processingTime;
     flowData.metadata.buffer_m = effectiveBuffer;
     
-    // Determine flow mode — 'real_dem' when Modal succeeded, 'synthetic' on fallback
+    // Determine flow mode
     const flowMode = usedRealDEM ? 'real_dem' : 'synthetic';
+    terrainDebug.terrain_source = usedRealDEM ? 'modal_dem_real' : 'synthetic_fallback';
+    terrainDebug.fallback_used = !usedRealDEM;
+    if (!usedRealDEM) {
+      const reasons: string[] = [];
+      if (terrainDebug.corridor_modal_error) reasons.push(`Corridor: ${terrainDebug.corridor_modal_error}`);
+      if (terrainDebug.ridge_modal_error) reasons.push(`Ridge: ${terrainDebug.ridge_modal_error}`);
+      terrainDebug.fallback_reason = reasons.join('; ') || 'Both Modal endpoints returned no features';
+    }
+
+    terrainDebug.flow_count_primary = flowData.flow_primary.features.length;
+    terrainDebug.flow_count_secondary = flowData.flow_secondary.features.length;
+    terrainDebug.convergence_count = flowData.convergence_zones.features.length;
+    terrainDebug.opportunity_count = flowData.opportunity_zones.features.length;
 
     if (usedRealDEM) {
       flowData.metadata.mode = 'terrain_driven';
@@ -278,14 +340,12 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[TerrainFlow] Complete:', {
+      terrain_source: terrainDebug.terrain_source,
       flowMode,
-      mode: flowData.metadata.mode,
-      primary: flowData.flow_primary.features.length,
-      secondary: flowData.flow_secondary.features.length,
-      convergence: flowData.convergence_zones.features.length,
-      opportunity: flowData.opportunity_zones.features.length,
-      processingTime: processingTime.toFixed(2) + 's',
-      usedRealDEM,
+      primary: terrainDebug.flow_count_primary,
+      secondary: terrainDebug.flow_count_secondary,
+      convergence: terrainDebug.convergence_count,
+      time: processingTime.toFixed(2) + 's',
     });
 
     return NextResponse.json({
@@ -293,6 +353,7 @@ export async function POST(request: NextRequest) {
       flowMode,
       version: API_VERSION,
       request_id: `flow_terrain_${Date.now().toString(36)}`,
+      terrain_debug: terrainDebug,
     }, {
       headers: {
         'X-Processing-Time-Ms': String(Date.now() - startTime),

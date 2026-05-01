@@ -63,6 +63,7 @@ export interface RidgeFetchResult {
   status?: number;
   durationMs: number;
   isSynthetic: boolean;
+  terrainDebug?: Record<string, unknown>;
 }
 
 /**
@@ -113,18 +114,32 @@ export async function fetchRidgeSpines(
     const data = await response.json();
     const primaryCount = data.ridges_primary?.features?.length || 0;
     const secondaryCount = data.ridges_secondary?.features?.length || 0;
+    
+    // Use server-reported mode — NOT blind assumption
+    const serverMode = data.mode || 'unknown';
+    const isSynthetic = serverMode !== 'real_dem';
+    
     console.log('[Backbone] Response received:', {
       duration: durationMs + 'ms',
       primary: primaryCount,
       secondary: secondaryCount,
       dem_source: data.metadata?.dem_source || 'unknown',
+      mode: serverMode,
+      isSynthetic,
+      terrain_debug: data.terrain_debug ? 'present' : 'absent',
     });
+    
+    // Log terrain_debug for Phase 1 diagnostics
+    if (data.terrain_debug) {
+      console.log('[Backbone] terrain_debug:', JSON.stringify(data.terrain_debug, null, 2));
+    }
     
     return {
       success: true,
       data: data as RidgeSpineResponse,
       durationMs,
-      isSynthetic: false,
+      isSynthetic,
+      terrainDebug: data.terrain_debug,
     };
     
   } catch (err) {

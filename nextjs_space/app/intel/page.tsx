@@ -5409,8 +5409,12 @@ function DeerIntelContent() {
             saddles: saddleCount,
             total: primaryCount + secondaryCount + saddleCount,
             dem_source: result.data.metadata?.dem_source || 'unknown',
-            synthetic: result.isSynthetic,
+            isSynthetic: result.isSynthetic,
           });
+          // Phase 1: Log terrain_debug for pipeline transparency
+          if (result.terrainDebug) {
+            console.log('[Backbone] terrain_debug:', JSON.stringify(result.terrainDebug));
+          }
 
           // Post-process: strip any spine coordinates that fall inside NHD water bodies
           let filteredPrimary = result.data.ridges_primary;
@@ -5750,8 +5754,12 @@ function DeerIntelContent() {
             convergence: convergenceCount,
             mode: result.data.metadata?.mode || 'unknown',
             buffer_m: result.data.metadata?.buffer_m || 1000,
-            synthetic: result.isSynthetic,
+            isSynthetic: result.isSynthetic,
           });
+          // Phase 1: Log terrain_debug for pipeline transparency
+          if (result.terrainDebug) {
+            console.log('[TerrainFlow] terrain_debug:', JSON.stringify(result.terrainDebug));
+          }
 
           setTerrainFlowData({
             flow_primary: result.data.flow_primary,
@@ -12139,7 +12147,7 @@ function DeerIntelContent() {
                 state={qaParcel.state}
                 county={qaParcel.county}
                 acreage={qaParcel.acreage}
-                demMode={terrainFlowData?.metadata?.mode || terrainFlowData?.metadata?.dem_source || 'unknown'}
+                demMode={terrainFlowData?.isSynthetic ? 'synthetic' : (terrainFlowData?.metadata?.dem_source || 'real_dem')}
                 brokerScore={qaBrokerScore?.brokerScore}
                 brokerClass={qaBrokerScore?.brokerClass}
                 brokerComponents={qaBrokerScore?.components}
@@ -12254,7 +12262,7 @@ function DeerIntelContent() {
               <div className="space-y-2">
                 <div className="text-[10px] text-stone-400 uppercase tracking-wider font-medium">Analysis</div>
                 <AnalysisQualityBadge 
-                  mode={(terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode}
+                  mode={(terrainFlowData?.isSynthetic ? 'synthetic' : 'real_dem') as FlowMode}
                   compact={true}
                 />
               </div>
@@ -13069,7 +13077,7 @@ function DeerIntelContent() {
                 {!terrainFlowLoading && terrainFlowData && (
                   <div className="mb-2">
                     <AnalysisQualityBadge 
-                      mode={(terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode}
+                      mode={(terrainFlowData?.isSynthetic ? 'synthetic' : 'real_dem') as FlowMode}
                       compact={true}
                     />
                   </div>
@@ -13219,7 +13227,7 @@ function DeerIntelContent() {
                       const totalFlowLength = terrainFlowData?.metadata?.total_flow_length_m || 0;
                       const totalFeatures = primaryCount + secondaryCount + convergenceCount;
                       const isSynthetic = terrainFlowData?.isSynthetic || false;
-                      const mode = (terrainFlowData?.metadata?.mode || 'synthetic') as FlowMode;
+                      const mode = (isSynthetic ? 'synthetic' : 'real_dem') as FlowMode;
                       
                       if (terrainFlowLoading) {
                         return (

@@ -269,6 +269,7 @@ export interface TerrainFlowFetchResult {
   status?: number;
   durationMs: number;
   isSynthetic: boolean;
+  terrainDebug?: Record<string, unknown>;
 }
 
 /**
@@ -308,7 +309,7 @@ export async function fetchTerrainFlow(
       const errorText = await response.text();
       console.warn('[TerrainFlow] API error:', errorText);
       
-      // Fall back to client-side generation
+      // Client-side fallback is ALWAYS synthetic
       const fallbackData = params.options?.mode === 'synthetic'
         ? generateLegacySyntheticFlow(params.parcel)
         : generateTerrainDrivenFlow(params.parcel, null, null);
@@ -317,7 +318,8 @@ export async function fetchTerrainFlow(
         success: true,
         data: fallbackData,
         durationMs,
-        isSynthetic: params.options?.mode === 'synthetic',
+        isSynthetic: true,
+        terrainDebug: { terrain_source: 'client_fallback', fallback_used: true, fallback_reason: `API HTTP ${response.status}: ${errorText.substring(0, 200)}` },
       };
     }
     
@@ -326,19 +328,32 @@ export async function fetchTerrainFlow(
     const secondaryCount = data.flow_secondary?.features?.length || 0;
     const convergenceCount = data.convergence_zones?.features?.length || 0;
     
+    // Use server-reported flowMode — NOT blind assumption from metadata.mode
+    const serverFlowMode = data.flowMode || 'unknown';
+    const isSynthetic = serverFlowMode !== 'real_dem';
+    
     console.log('[TerrainFlow] Response:', {
       duration: durationMs + 'ms',
       primary: primaryCount,
       secondary: secondaryCount,
       convergence: convergenceCount,
-      mode: data.metadata?.mode || 'unknown',
+      flowMode: serverFlowMode,
+      metadataMode: data.metadata?.mode || 'unknown',
+      isSynthetic,
+      terrain_debug: data.terrain_debug ? 'present' : 'absent',
     });
+    
+    // Log terrain_debug for Phase 1 diagnostics
+    if (data.terrain_debug) {
+      console.log('[TerrainFlow] terrain_debug:', JSON.stringify(data.terrain_debug, null, 2));
+    }
     
     return {
       success: true,
       data: data as TerrainFlowResponse,
       durationMs,
-      isSynthetic: data.metadata?.mode === 'synthetic',
+      isSynthetic,
+      terrainDebug: data.terrain_debug,
     };
     
   } catch (err) {
@@ -346,7 +361,7 @@ export async function fetchTerrainFlow(
     const errMsg = err instanceof Error ? err.message : String(err);
     console.warn('[TerrainFlow] Fetch failed:', errMsg);
     
-    // Fall back to client-side generation
+    // Client-side fallback is ALWAYS synthetic
     const fallbackData = params.options?.mode === 'synthetic'
       ? generateLegacySyntheticFlow(params.parcel)
       : generateTerrainDrivenFlow(params.parcel, null, null);
@@ -355,7 +370,8 @@ export async function fetchTerrainFlow(
       success: true,
       data: fallbackData,
       durationMs,
-      isSynthetic: params.options?.mode === 'synthetic',
+      isSynthetic: true,
+      terrainDebug: { terrain_source: 'client_fallback', fallback_used: true, fallback_reason: `Fetch error: ${errMsg}` },
     };
   }
 }
