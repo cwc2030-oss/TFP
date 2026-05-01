@@ -5694,19 +5694,19 @@ function DeerIntelContent() {
             ]);
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', clampOpacityExpr([
               'match', ['get', 'beddingType'],
-              'sanctuary', 0.20,
-              'thermal',   0.14,
-              'staging',   0.10,
-              'escape',    0.13,
-              0.14,
+              'sanctuary', 0.14,
+              'thermal',   0.10,
+              'staging',   0.08,
+              'escape',    0.09,
+              0.10,
             ]));
             map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
               'interpolate', ['linear'], ['get', 'beddingScore'],
-              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 5, 6],
-              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 11, 'staging', 8, 9],
-              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 14, 'staging', 10, 12],
+              0.55, ['match', ['get', 'beddingType'], 'sanctuary', 6, 'staging', 4, 5],
+              0.75, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 6, 7],
+              1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 10, 'staging', 8, 9],
             ]);
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 0.5);
+            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 0.35);
           }
         } catch (e) {
           console.warn('[BeddingStyle] setPaintProperty failed:', e);
@@ -6551,8 +6551,8 @@ function DeerIntelContent() {
 
       // Bedding visibility — smooth fade
       fadeToggleLayers(map, visibility.bedding, [
-        { id: 'tfp-bedding-fill', targetOpacity: 0.28, opacityProp: 'fill-opacity' },
-        { id: 'tfp-bedding-outline', targetOpacity: 0.65 },
+        { id: 'tfp-bedding-fill', targetOpacity: 0.07, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.45 },
       ], FADE_IN);
 
       // Funnel visibility - draws layer (now independently controlled)
@@ -6714,9 +6714,9 @@ function DeerIntelContent() {
       }
       // v3.6.0: Bedding Probability visibility — smooth fade
       fadeToggleLayers(map, showBeddingProbability, [
-        { id: 'tfp-bedding-probability-glow', targetOpacity: 0.15, opacityProp: 'circle-opacity' },
-        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.35, opacityProp: 'circle-opacity' },
-        { id: 'tfp-bedding-probability-outline', targetOpacity: 0.5 },
+        { id: 'tfp-bedding-probability-glow', targetOpacity: 0.08, opacityProp: 'circle-opacity' },
+        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.18, opacityProp: 'circle-opacity' },
+        { id: 'tfp-bedding-probability-outline', targetOpacity: 0.3 },
       ], FADE_IN);
     } catch (err) {
       console.error('[MAP] Error updating visibility (non-fatal):', err);
@@ -7044,7 +7044,7 @@ function DeerIntelContent() {
             layout: { visibility: 'visible' },
             paint: {
               'fill-color': '#1a5c2a',
-              'fill-opacity': 0.28,
+              'fill-opacity': 0.07,
             },
           });
           map.addLayer({
@@ -7054,8 +7054,9 @@ function DeerIntelContent() {
             layout: { visibility: 'visible' },
             paint: {
               'line-color': '#1a5c2a',
-              'line-opacity': 0.65,
-              'line-width': 1.5,
+              'line-opacity': 0.45,
+              'line-width': 1.2,
+              'line-dasharray': [4, 3],
             },
           });
         }
@@ -8375,17 +8376,17 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 8, 10],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 15, 'staging', 11, 13],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 18, 'staging', 14, 16],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 5, 6],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 10, 'staging', 7, 8],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 12, 'staging', 9, 10],
               ] as any,
               'circle-color': [
                 'match', ['get', 'beddingType'],
                 'sanctuary', '#1a5c2a',
                 '#2d6a4f',
               ] as any,
-              'circle-opacity': 0.03,
-              'circle-blur': 1.0,
+              'circle-opacity': 0.015,
+              'circle-blur': 0.8,
             },
           });
           // v3.7.1: Inner fill — tighter cover patches (capped at 14px, cleaner edges)
@@ -8397,9 +8398,9 @@ function DeerIntelContent() {
             paint: {
               'circle-radius': [
                 'interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 5, 6],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 11, 'staging', 8, 9],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 14, 'staging', 10, 12],
+                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 6, 'staging', 4, 5],
+                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 8, 'staging', 6, 7],
+                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 10, 'staging', 8, 9],
               ] as any,
               'circle-color': [
                 'match', ['get', 'beddingType'],
@@ -8411,13 +8412,13 @@ function DeerIntelContent() {
               ] as any,
               'circle-opacity': [
                 'match', ['get', 'beddingType'],
-                'sanctuary', 0.28,
-                'thermal',   0.20,
-                'staging',   0.15,
-                'escape',    0.18,
-                0.20,
+                'sanctuary', 0.14,
+                'thermal',   0.10,
+                'staging',   0.08,
+                'escape',    0.09,
+                0.10,
               ] as any,
-              'circle-blur': 0.5,
+              'circle-blur': 0.35,
             },
           });
           // v3.7: Outline ring — disabled (hard edges removed)
