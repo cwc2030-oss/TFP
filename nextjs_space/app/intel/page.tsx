@@ -6521,11 +6521,7 @@ function DeerIntelContent() {
       const FADE_IN = 420;
       const FADE_OUT = 300;
 
-      // Bedding visibility — smooth fade
-      fadeToggleLayers(map, visibility.bedding, [
-        { id: 'tfp-bedding-fill', targetOpacity: 0.07, opacityProp: 'fill-opacity' },
-        { id: 'tfp-bedding-outline', targetOpacity: 0.45 },
-      ], FADE_IN);
+      // Bedding polygon visibility now controlled by showBeddingProbability toggle below
 
       // Funnel visibility - draws layer (now independently controlled)
       fadeToggleLayers(map, visibility.draws, [
@@ -6546,10 +6542,12 @@ function DeerIntelContent() {
         const funnelVisible = visibility.draws || visibility.saddles || visibility.corridors;
         map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
       }
-      // Saddle polygons — smooth fade
+      // Saddle polygons + saddle node markers — smooth fade
       fadeToggleLayers(map, visibility.saddles, [
         { id: 'tfp-funnels-polys-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
         { id: 'tfp-funnels-polys-outline', targetOpacity: 1.0 },
+        { id: 'tfp-saddle-nodes', targetOpacity: 0.85, opacityProp: 'circle-opacity' },
+        { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.4, opacityProp: 'circle-stroke-opacity' },
       ], FADE_IN);
       
       // V4 Step 11b: Staggered corridor reveal — cascading "drawing on" effect
@@ -6577,8 +6575,6 @@ function DeerIntelContent() {
         { id: 'tfp-ridges-primary', targetOpacity: 0.85 },
         { id: 'tfp-ridges-secondary-casing', targetOpacity: 0.15 },
         { id: 'tfp-ridges-secondary', targetOpacity: 0.55 },
-        { id: 'tfp-saddle-nodes', targetOpacity: 0.8, opacityProp: 'circle-opacity' },
-        { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.6, opacityProp: 'circle-stroke-opacity' },
       ], FADE_IN, 45);
       
       // Pressure overlays disabled — fill grid and heatmap both at 0
@@ -6684,8 +6680,11 @@ function DeerIntelContent() {
           fadeLayerOut(map, 'tfp-flow-convergence-pulse', 'circle-opacity', FADE_OUT);
         }
       }
-      // v3.6.0: Bedding Probability visibility — smooth fade
+      // v3.6.0: Bedding Zones visibility — polygon layers + inert circle stubs
       fadeToggleLayers(map, showBeddingProbability, [
+        // Polygon bedding zones (the actual visible layers)
+        { id: 'tfp-bedding-fill', targetOpacity: 0.07, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.45 },
         // Probability circles disabled — kept at 0 so toggle doesn't throw
         { id: 'tfp-bedding-probability-glow', targetOpacity: 0, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-fill', targetOpacity: 0, opacityProp: 'circle-opacity' },
@@ -7017,7 +7016,7 @@ function DeerIntelContent() {
             layout: { visibility: 'visible' },
             paint: {
               'fill-color': '#1a5c2a',
-              'fill-opacity': 0.07,
+              'fill-opacity': 0, // starts hidden; Bedding Zones button fades in
             },
           });
           map.addLayer({
@@ -7027,8 +7026,7 @@ function DeerIntelContent() {
             layout: { visibility: 'visible' },
             paint: {
               'line-color': '#1a5c2a',
-              'line-opacity': 0.45,
-              'line-width': 1.2,
+              'line-opacity': 0, // starts hidden; Bedding Zones button fades in
               'line-dasharray': [4, 3],
             },
           });

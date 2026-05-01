@@ -87,9 +87,9 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-debug-normalized-outline',  group: 'debug', opacityProp: 'line-opacity', targetOpacity: 0.8, source: { kind: 'hidden' } },
   { id: 'tfp-debug-analysis-outline',    group: 'debug', opacityProp: 'line-opacity', targetOpacity: 0.8, source: { kind: 'hidden' } },
 
-  // ── Bedding areas (toggle: bedding) ──
-  { id: 'tfp-bedding-fill',    group: 'bedding', opacityProp: 'fill-opacity', targetOpacity: 0.35, source: { kind: 'toggle', key: 'bedding' } },
-  { id: 'tfp-bedding-outline',  group: 'bedding', opacityProp: 'line-opacity', targetOpacity: 0.7,  source: { kind: 'toggle', key: 'bedding' } },
+  // ── Bedding polygon areas (toggle: beddingProbability — shared with Bedding Zones button) ──
+  { id: 'tfp-bedding-fill',    group: 'bedding', opacityProp: 'fill-opacity', targetOpacity: 0.07, source: { kind: 'toggle', key: 'beddingProbability' } },
+  { id: 'tfp-bedding-outline',  group: 'bedding', opacityProp: 'line-opacity', targetOpacity: 0.45,  source: { kind: 'toggle', key: 'beddingProbability' } },
 
   // ── Draws / funnels line layers ──
   { id: 'tfp-funnels-lines-draws',   group: 'draws', opacityProp: 'line-opacity', targetOpacity: 1.0, source: { kind: 'toggle', key: 'draws' } },
@@ -167,10 +167,10 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-huntability-convergence-glow',                   group: 'huntability', opacityProp: 'circle-opacity',  targetOpacity: 0.30, source: { kind: 'hidden' } },
   { id: 'tfp-huntability-convergence',                        group: 'huntability', opacityProp: 'circle-opacity',  targetOpacity: 0.90, source: { kind: 'hidden' } },
 
-  // ── Bedding probability (toggle: beddingProbability) ──
-  { id: 'tfp-bedding-probability-glow',    group: 'beddingProb', opacityProp: 'circle-opacity', targetOpacity: 0.4,  source: { kind: 'toggle', key: 'beddingProbability' } },
-  { id: 'tfp-bedding-probability-fill',    group: 'beddingProb', opacityProp: 'fill-opacity',   targetOpacity: 0.25, source: { kind: 'toggle', key: 'beddingProbability' } },
-  { id: 'tfp-bedding-probability-outline',  group: 'beddingProb', opacityProp: 'line-opacity',   targetOpacity: 0.5,  source: { kind: 'toggle', key: 'beddingProbability' } },
+  // ── Bedding probability circles (disabled — zeroed stubs) ──
+  { id: 'tfp-bedding-probability-glow',    group: 'beddingProb', opacityProp: 'circle-opacity', targetOpacity: 0,  source: { kind: 'toggle', key: 'beddingProbability' } },
+  { id: 'tfp-bedding-probability-fill',    group: 'beddingProb', opacityProp: 'fill-opacity',   targetOpacity: 0, source: { kind: 'toggle', key: 'beddingProbability' } },
+  { id: 'tfp-bedding-probability-outline',  group: 'beddingProb', opacityProp: 'line-opacity',   targetOpacity: 0,  source: { kind: 'toggle', key: 'beddingProbability' } },
 
   // ── Edge intelligence (always-on when TERRAIN_WORK_MODE = false) ──
   { id: 'tfp-edge-arrows-lines',          group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'always' } },
