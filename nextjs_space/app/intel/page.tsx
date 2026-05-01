@@ -6551,8 +6551,8 @@ function DeerIntelContent() {
 
       // Bedding visibility — smooth fade
       fadeToggleLayers(map, visibility.bedding, [
-        { id: 'tfp-bedding-fill', targetOpacity: 0.35, opacityProp: 'fill-opacity' },
-        { id: 'tfp-bedding-outline', targetOpacity: 0.7 },
+        { id: 'tfp-bedding-fill', targetOpacity: 0.28, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.65 },
       ], FADE_IN);
 
       // Funnel visibility - draws layer (now independently controlled)
@@ -7041,20 +7041,21 @@ function DeerIntelContent() {
             id: 'tfp-bedding-fill',
             type: 'fill',
             source: 'tfp-bedding',
-            layout: { visibility: 'none' },
+            layout: { visibility: 'visible' },
             paint: {
-              'fill-color': LAYER_COLORS.bedding,
-              'fill-opacity': 0.25,
+              'fill-color': '#1a5c2a',
+              'fill-opacity': 0.28,
             },
           });
           map.addLayer({
             id: 'tfp-bedding-outline',
             type: 'line',
             source: 'tfp-bedding',
-            layout: { visibility: 'none' },
+            layout: { visibility: 'visible' },
             paint: {
-              'line-color': LAYER_COLORS.beddingOutline,
-              'line-width': 2,
+              'line-color': '#1a5c2a',
+              'line-opacity': 0.65,
+              'line-width': 1.5,
             },
           });
         }
