@@ -7336,7 +7336,7 @@ function DeerIntelContent() {
           map.addSource('tfp-ridges-secondary', { type: 'geojson', data: EMPTY_FC });
         }
         
-        // Saddle nodes: Only meaningful low points (sparse, subtle)
+        // Saddle nodes: Prominent amber markers at terrain saddle points
         if (!map.getSource('tfp-saddle-nodes')) {
           map.addSource('tfp-saddle-nodes', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -7344,12 +7344,12 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 5,
-              'circle-color': 'transparent',
-              'circle-stroke-color': '#f59e0b',
+              'circle-radius': 7,
+              'circle-color': '#f59e0b',
+              'circle-opacity': 0.85,
+              'circle-stroke-color': '#ffffff',
               'circle-stroke-width': 2,
-              'circle-stroke-opacity': 0.80,
-              'circle-opacity': 0,
+              'circle-stroke-opacity': 0.9,
             },
           });
           map.addLayer({
@@ -7357,11 +7357,11 @@ function DeerIntelContent() {
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 7,
+              'circle-radius': 12,
               'circle-color': 'transparent',
               'circle-stroke-color': '#f59e0b',
-              'circle-stroke-width': 1,
-              'circle-stroke-opacity': 0.30,
+              'circle-stroke-width': 1.5,
+              'circle-stroke-opacity': 0.4,
             },
           });
         }
