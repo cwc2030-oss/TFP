@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState, useRef } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
@@ -33,6 +33,18 @@ interface TerritoryData {
 }
 
 export default function SharedTerritoryPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <Loader2 className="w-10 h-10 text-green-500 animate-spin" />
+      </div>
+    }>
+      <SharedTerritoryContent />
+    </Suspense>
+  );
+}
+
+function SharedTerritoryContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -80,75 +92,90 @@ export default function SharedTerritoryPage() {
     mapInitializedRef.current = true;
     (mapboxgl as any).accessToken = token;
 
-    const map = new mapboxgl.Map({
-      container: mapRef.current,
-      style: 'mapbox://styles/mapbox/satellite-streets-v12',
-      center: [territory.centroidLng, territory.centroidLat],
-      zoom: 14,
-      attributionControl: false,
-    });
+    let map: mapboxgl.Map;
+    try {
+      map = new mapboxgl.Map({
+        container: mapRef.current,
+        style: 'mapbox://styles/mapbox/satellite-streets-v12',
+        center: [territory.centroidLng, territory.centroidLat],
+        zoom: 14,
+        attributionControl: false,
+      });
+    } catch (err) {
+      console.error('[Territory] Map init failed:', err);
+      mapInitializedRef.current = false;
+      return;
+    }
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
     mapInstanceRef.current = map;
 
     map.on('load', () => {
-      const bounds = new mapboxgl.LngLatBounds();
-      const features: GeoJSON.Feature[] = [];
+      try {
+        const bounds = new mapboxgl.LngLatBounds();
+        const features: GeoJSON.Feature[] = [];
 
-      territory.parcels.forEach((parcel, idx) => {
-        const geo = parcel.geometry;
-        const coords = geo?.geometry?.coordinates;
-        if (!coords) return;
+        territory.parcels.forEach((parcel, idx) => {
+          const geo = parcel.geometry;
+          // Handle both Feature and raw Geometry formats
+          const geom = geo?.geometry ?? geo;
+          const coords = geom?.coordinates;
+          if (!coords) return;
 
-        const geoType = geo?.geometry?.type;
-        const rings: number[][][] = geoType === 'MultiPolygon'
-          ? (coords as number[][][][]).flatMap(p => p)
-          : coords as number[][][];
+          const geoType = geom?.type;
+          const rings: number[][][] = geoType === 'MultiPolygon'
+            ? (coords as number[][][][]).flatMap(p => p)
+            : coords as number[][][];
 
-        rings.forEach(ring => {
-          ring.forEach(([lng, lat]) => {
-            bounds.extend([lng, lat] as [number, number]);
+          rings.forEach(ring => {
+            if (!Array.isArray(ring)) return;
+            ring.forEach(pt => {
+              if (!Array.isArray(pt) || pt.length < 2) return;
+              bounds.extend([pt[0], pt[1]] as [number, number]);
+            });
+          });
+
+          features.push({
+            type: 'Feature',
+            properties: { idx, color: idx === 0 ? '#22c55e' : '#60a5fa' },
+            geometry: (geo?.geometry ?? geo) as GeoJSON.Geometry
           });
         });
 
-        features.push({
-          type: 'Feature',
-          properties: { idx, color: idx === 0 ? '#22c55e' : '#60a5fa' },
-          geometry: geo?.geometry as GeoJSON.Geometry
+        map.addSource('territory-parcels', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features }
         });
-      });
 
-      map.addSource('territory-parcels', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features }
-      });
+        map.addLayer({
+          id: 'territory-fill',
+          type: 'fill',
+          source: 'territory-parcels',
+          paint: {
+            'fill-color': ['get', 'color'],
+            'fill-opacity': 0.25
+          }
+        });
 
-      map.addLayer({
-        id: 'territory-fill',
-        type: 'fill',
-        source: 'territory-parcels',
-        paint: {
-          'fill-color': ['get', 'color'],
-          'fill-opacity': 0.25
+        map.addLayer({
+          id: 'territory-line',
+          type: 'line',
+          source: 'territory-parcels',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 2
+          }
+        });
+
+        if (bounds.getNorthEast() && bounds.getSouthWest()) {
+          map.fitBounds(bounds, { padding: 60, maxZoom: 16 });
         }
-      });
-
-      map.addLayer({
-        id: 'territory-line',
-        type: 'line',
-        source: 'territory-parcels',
-        paint: {
-          'line-color': ['get', 'color'],
-          'line-width': 2
-        }
-      });
-
-      if (bounds.getNorthEast() && bounds.getSouthWest()) {
-        map.fitBounds(bounds, { padding: 60, maxZoom: 16 });
+      } catch (err) {
+        console.error('[Territory] Map layer setup error:', err);
       }
     });
 
-    return () => { map.remove(); };
+    return () => { try { map.remove(); } catch {} };
   }, [territory]);
 
   const handleCopyLink = async () => {
