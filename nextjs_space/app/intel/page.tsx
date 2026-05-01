@@ -5681,49 +5681,8 @@ function DeerIntelContent() {
           : huntabilityData.beddingProbabilityGeoJSON;
         beddingProbSource.setData(filteredBedProb);
 
-        // Force Mapbox to re-evaluate data-driven paint expressions against new beddingType values
-        try {
-          if (map.getLayer('tfp-bedding-probability-fill')) {
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-color', [
-              'match', ['get', 'beddingType'],
-              'sanctuary', '#1a5c2a',
-              'thermal',   '#52b788',
-              'staging',   '#95d5b2',
-              'escape',    '#74c69d',
-              '#52b788',
-            ]);
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-opacity', clampOpacityExpr([
-              'match', ['get', 'beddingType'],
-              'sanctuary', 0.45,
-              'thermal',   0.30,
-              'staging',   0.22,
-              'escape',    0.25,
-              0.30,
-            ]));
-            // Zoom-scaled radius — shrinks at high zoom to prevent overlap on small parcels
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-radius', [
-              'interpolate', ['linear'], ['zoom'],
-              10, ['interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 4, 'staging', 2, 3],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 5, 'staging', 3, 4],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 6, 'staging', 4, 5],
-              ],
-              13, ['interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 5, 'staging', 3, 4],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 7, 'staging', 5, 6],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 9, 'staging', 7, 8],
-              ],
-              16, ['interpolate', ['linear'], ['get', 'beddingScore'],
-                0.55, ['match', ['get', 'beddingType'], 'sanctuary', 3, 'staging', 2, 2],
-                0.75, ['match', ['get', 'beddingType'], 'sanctuary', 4, 'staging', 3, 3],
-                1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 5, 'staging', 4, 4],
-              ],
-            ]);
-            map.setPaintProperty('tfp-bedding-probability-fill', 'circle-blur', 0.15);
-          }
-        } catch (e) {
-          console.warn('[BeddingStyle] setPaintProperty failed:', e);
-        }
+        // Probability circle layers DISABLED — no setPaintProperty needed.
+        // Bedding is shown via polygon fill+outline layers only.
       }
 
       console.log('[Huntability] Updated map sources:', {
@@ -6727,8 +6686,9 @@ function DeerIntelContent() {
       }
       // v3.6.0: Bedding Probability visibility — smooth fade
       fadeToggleLayers(map, showBeddingProbability, [
+        // Probability circles disabled — kept at 0 so toggle doesn't throw
         { id: 'tfp-bedding-probability-glow', targetOpacity: 0, opacityProp: 'circle-opacity' },
-        { id: 'tfp-bedding-probability-fill', targetOpacity: 0.45, opacityProp: 'circle-opacity' },
+        { id: 'tfp-bedding-probability-fill', targetOpacity: 0, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-outline', targetOpacity: 0 },
       ], FADE_IN);
     } catch (err) {
@@ -7047,7 +7007,7 @@ function DeerIntelContent() {
           });
         }
         
-        // Bedding source — legacy polygon layer (replaced by tfp-bedding-probability-* circles)
+        // Bedding source — polygon layer (primary bedding visual: subtle fill + dashed outline)
         if (!map.getSource('tfp-bedding')) {
           map.addSource('tfp-bedding', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -8377,80 +8337,33 @@ function DeerIntelContent() {
         console.log('[DEBUG] checkpoint-4 — past hunt pocket, kill zone, stand layers, top-stand attention, huntability sources');
 
         // ========== v3.6.1: BEDDING PROBABILITY LAYER ==========
-        // Bedding probability dots — small discrete markers, NOT a haze layer
+        // All circle layers DISABLED — bedding zones shown by polygon fill+outline only.
+        // Layers kept as inert stubs so toggle/fade code doesn't throw.
         if (!map.getSource('tfp-bedding-probability')) {
           map.addSource('tfp-bedding-probability', { type: 'geojson', data: EMPTY_FC });
-          // Glow layer — effectively disabled (zero opacity) to prevent green fog
           map.addLayer({
             id: 'tfp-bedding-probability-glow',
             type: 'circle',
             source: 'tfp-bedding-probability',
             layout: { visibility: 'none' },
-            paint: {
-              'circle-radius': 0,
-              'circle-color': 'transparent',
-              'circle-opacity': 0,
-              'circle-blur': 0,
-            },
+            paint: { 'circle-radius': 0, 'circle-color': 'transparent', 'circle-opacity': 0 },
           });
-          // Fill dots — zoom-scaled so they shrink when zoomed in on small parcels
           map.addLayer({
             id: 'tfp-bedding-probability-fill',
             type: 'circle',
             source: 'tfp-bedding-probability',
             layout: { visibility: 'none' },
-            paint: {
-              'circle-radius': [
-                'interpolate', ['linear'], ['zoom'],
-                10, ['interpolate', ['linear'], ['get', 'beddingScore'],
-                  0.55, ['match', ['get', 'beddingType'], 'sanctuary', 4, 'staging', 2, 3],
-                  0.75, ['match', ['get', 'beddingType'], 'sanctuary', 5, 'staging', 3, 4],
-                  1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 6, 'staging', 4, 5],
-                ],
-                13, ['interpolate', ['linear'], ['get', 'beddingScore'],
-                  0.55, ['match', ['get', 'beddingType'], 'sanctuary', 5, 'staging', 3, 4],
-                  0.75, ['match', ['get', 'beddingType'], 'sanctuary', 7, 'staging', 5, 6],
-                  1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 9, 'staging', 7, 8],
-                ],
-                16, ['interpolate', ['linear'], ['get', 'beddingScore'],
-                  0.55, ['match', ['get', 'beddingType'], 'sanctuary', 3, 'staging', 2, 2],
-                  0.75, ['match', ['get', 'beddingType'], 'sanctuary', 4, 'staging', 3, 3],
-                  1.0,  ['match', ['get', 'beddingType'], 'sanctuary', 5, 'staging', 4, 4],
-                ],
-              ] as any,
-              'circle-color': [
-                'match', ['get', 'beddingType'],
-                'sanctuary', '#1a5c2a',
-                'thermal',   '#52b788',
-                'staging',   '#95d5b2',
-                'escape',    '#74c69d',
-                '#52b788',
-              ] as any,
-              'circle-opacity': [
-                'match', ['get', 'beddingType'],
-                'sanctuary', 0.45,
-                'thermal',   0.30,
-                'staging',   0.22,
-                'escape',    0.25,
-                0.30,
-              ] as any,
-              'circle-blur': 0.15,
-            },
+            paint: { 'circle-radius': 0, 'circle-color': 'transparent', 'circle-opacity': 0 },
           });
-          // Outline ring — disabled
           map.addLayer({
             id: 'tfp-bedding-probability-outline',
             type: 'circle',
             source: 'tfp-bedding-probability',
             layout: { visibility: 'none' },
-            paint: {
-              'circle-radius': 0,
-              'circle-color': 'transparent',
-              'circle-stroke-width': 0,
-              'circle-stroke-opacity': 0,
-            },
+            paint: { 'circle-radius': 0, 'circle-color': 'transparent', 'circle-stroke-width': 0, 'circle-stroke-opacity': 0 },
           });
         }
+
         
         // ========== EDGE INTELLIGENCE SOURCES AND LAYERS ==========
         // ALL HIDDEN in Terrain Work Mode (deer interpretation)
