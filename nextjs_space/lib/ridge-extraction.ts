@@ -329,26 +329,29 @@ function computeBackboneConfidence(
 }
 
 /**
- * Generate backbone data for parcels
- * 
- * CONSERVATIVE APPROACH:
- * - Without real DEM data, we CANNOT reliably detect ridge crests
- * - The previous geometry-based approach created misleading hourglass shapes
- * - Following the principle: "Better no line than a misleading one"
- * 
- * This function now returns EMPTY results for synthetic generation
- * until real DEM-based ridge detection is available.
- * 
- * Acceptance test:
- * A hunter should toggle Backbone on and say: "Yep, that's the ridge."
- * If no backbone shows, that's better than showing a wrong one.
+ * Generate backbone data for parcels — SCALES WITH PARCEL SIZE
+ *
+ * Strategy:
+ * 1. Find the primary axis (longest-distance pair of boundary vertices)
+ * 2. Generate a primary ridge along that axis with gentle curvature
+ * 3. For large parcels (>200ac): generate ADDITIONAL primary ridges offset
+ *    perpendicular to the main axis, roughly 1 extra per 400 acres
+ * 4. For each primary ridge: generate 1-3 secondary spurs proportional to length
+ * 5. Place saddle nodes at spur junctions and curvature maxima
+ *
+ * Scaling table:
+ *   <60ac   → 1 primary, 1 secondary, 1 saddle
+ *   60-200  → 1 primary, 2 secondaries, 1-2 saddles
+ *   200-600 → 2 primaries, 3-5 secondaries, 3-5 saddles
+ *   600-1500 → 3 primaries, 5-8 secondaries, 4-7 saddles
+ *   1500+   → 4-6 primaries, 8-15 secondaries, 6-12 saddles
  */
 export function generateSyntheticRidgeSpines(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   waterBodies?: Array<{ coordinates: number[][][] }>
 ): RidgeSpineResponse {
   const startTime = Date.now();
-  
+
   // Extract ALL outer rings for multi-parcel territory support
   let allOuterRings: number[][][] = [];
   if (parcel.geometry.type === 'Polygon') {
@@ -363,51 +366,50 @@ export function generateSyntheticRidgeSpines(
     if (ring.length > maxLen) { maxLen = ring.length; coords = ring; }
   }
   const allCoords = allOuterRings.flat();
-  
+
   if (coords.length < 4) {
     return emptyRidgeResponse('Insufficient parcel coordinates');
   }
-  
+
   // Bounding box from ALL rings so features span the whole territory
   const bbox = getBbox(allCoords);
   const centerLng = (bbox[0] + bbox[2]) / 2;
   const centerLat = (bbox[1] + bbox[3]) / 2;
-  
+
   const widthM = distanceMeters([bbox[0], centerLat], [bbox[2], centerLat]);
   const heightM = distanceMeters([centerLng, bbox[1]], [centerLng, bbox[3]]);
   const parcelAreaSqM = widthM * heightM * 0.8;
   const parcelAcres = parcelAreaSqM / 4046.86;
   const aspectRatio = widthM / heightM;
-  
+
   console.log('[Backbone] Parcel ~', Math.round(parcelAcres), 'acres, w:', Math.round(widthM), 'm, h:', Math.round(heightM), 'm');
-  
+
   const { confidence, reason } = computeBackboneConfidence(
     widthM, heightM, parcelAcres, aspectRatio, coords
   );
-  
+
   console.log('[Backbone] Confidence:', (confidence * 100).toFixed(1) + '%', '-', reason);
-  
+
   if (confidence < MIN_BACKBONE_CONFIDENCE) {
     console.log('[Backbone] Confidence too low, returning empty');
     return emptyRidgeResponse(
       `Backbone confidence too low (${(confidence * 100).toFixed(0)}%). ${reason}`
     );
   }
-  
-  // ===== LONGEST-AXIS BACKBONE STRATEGY =====
-  // Instead of hourglass/convergence shapes, find the longest axis through
-  // the parcel and lay a gently-curved spine along it.
-  // This is a reasonable proxy for a ridge crest in rolling terrain.
-  
-  // Find the two most-distant boundary vertices (longest internal axis)
+
+  // Deterministic seed from parcel centroid for reproducible curves
+  const seed = Math.abs(centerLng * 10000 + centerLat * 10000) % 1000;
+
+  // ===== FIND PRIMARY AXIS (longest internal diagonal) =====
+  const typedCoords = coords.map(c => [c[0], c[1]] as [number, number]);
   let maxDist = 0;
   let axisStart: [number, number] = [centerLng, centerLat];
   let axisEnd: [number, number] = [centerLng, centerLat];
-  
-  const typedCoords = coords.map(c => [c[0], c[1]] as [number, number]);
-  
-  for (let i = 0; i < typedCoords.length; i++) {
-    for (let j = i + 1; j < typedCoords.length; j++) {
+
+  // For large coord arrays, subsample to keep O(n²) manageable
+  const sampleStep = typedCoords.length > 200 ? Math.floor(typedCoords.length / 100) : 1;
+  for (let i = 0; i < typedCoords.length; i += sampleStep) {
+    for (let j = i + 1; j < typedCoords.length; j += sampleStep) {
       const d = distanceMeters(typedCoords[i], typedCoords[j]);
       if (d > maxDist) {
         maxDist = d;
@@ -416,197 +418,204 @@ export function generateSyntheticRidgeSpines(
       }
     }
   }
-  
-  // Inset the endpoints so the backbone doesn't touch the boundary
-  const insetFraction = 0.12;
-  const startInset: [number, number] = [
-    axisStart[0] + (axisEnd[0] - axisStart[0]) * insetFraction,
-    axisStart[1] + (axisEnd[1] - axisStart[1]) * insetFraction,
-  ];
-  const endInset: [number, number] = [
-    axisEnd[0] + (axisStart[0] - axisEnd[0]) * insetFraction,
-    axisEnd[1] + (axisStart[1] - axisEnd[1]) * insetFraction,
-  ];
-  
-  // Generate primary backbone with gentle curvature (5-7 intermediate points)
-  const numSegments = 6;
-  const primaryCoords: [number, number][] = [];
-  const axisBearing = calculateBearing(startInset, endInset);
+
+  const axisBearing = calculateBearing(axisStart, axisEnd);
   const perpBearing = (axisBearing + 90) % 360;
-  
-  // Use a deterministic seed from parcel centroid for reproducible curves
-  const seed = Math.abs(centerLng * 10000 + centerLat * 10000) % 1000;
-  
-  for (let i = 0; i <= numSegments; i++) {
-    const t = i / numSegments;
-    const basePt: [number, number] = [
-      startInset[0] + (endInset[0] - startInset[0]) * t,
-      startInset[1] + (endInset[1] - startInset[1]) * t,
-    ];
-    
-    // Gentle sinusoidal offset perpendicular to axis
-    // The amplitude is ~3-5% of parcel diagonal, creating natural-looking curvature
-    const waveAmplitude = maxDist * 0.035;
-    const wavePhase = ((seed + i * 137) % 360) * Math.PI / 180;
-    const offset = Math.sin(t * Math.PI + wavePhase * 0.3) * waveAmplitude;
-    
-    if (i > 0 && i < numSegments) {
-      // Only offset interior points
-      primaryCoords.push(movePoint(basePt, perpBearing, offset));
-    } else {
-      primaryCoords.push(basePt);
-    }
-  }
-  
-  // Filter out coordinates inside water bodies
-  const filteredPrimaryCoords = waterBodies?.length
-    ? primaryCoords.filter(c => !pointInAnyWaterBody(c[0], c[1], waterBodies))
-    : primaryCoords;
-  if (filteredPrimaryCoords.length < 2) {
-    return {
-      success: true,
-      bbox: [
-        Math.min(...coords.map(c => c[0])),
-        Math.min(...coords.map(c => c[1])),
-        Math.max(...coords.map(c => c[0])),
-        Math.max(...coords.map(c => c[1])),
-      ] as [number, number, number, number],
-      ridges_primary: { type: 'FeatureCollection' as const, features: [] },
-      ridges_secondary: { type: 'FeatureCollection' as const, features: [] },
-      saddle_nodes: { type: 'FeatureCollection' as const, features: [] },
-      metadata: {
-        processing_time_seconds: (Date.now() - startTime) / 1000,
-        dem_source: 'SYNTHETIC_AXIS',
-        resolution_m: 0,
-        thresholds: {
-          min_prominence_ft_primary: MIN_PROMINENCE_FT_PRIMARY,
-          min_prominence_ft_secondary: MIN_PROMINENCE_FT_SECONDARY,
-          min_length_m_primary: MIN_LENGTH_M_PRIMARY,
-          min_length_m_secondary: MIN_LENGTH_M_SECONDARY,
-        },
-        total_ridge_length_m: 0,
-        ridge_count_primary: 0,
-        ridge_count_secondary: 0,
-        saddle_count: 0,
-        fallback_reason: 'Primary ridge entirely within water body',
-      },
-    };
-  }
 
-  const primaryLength = lineLength(filteredPrimaryCoords);
-  
-  const primaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [{
-    type: 'Feature',
-    properties: {
-      id: 'ridge_primary_0',
-      tier: 'primary' as RidgeTier,
-      prominenceFt: 55,
-      lengthMeters: Math.round(primaryLength),
-      avgElevationM: 300,
-      avgSlopeDeg: 8,
-      curvatureProfile: 0.02,
-    },
-    geometry: {
-      type: 'LineString',
-      coordinates: filteredPrimaryCoords,
-    },
-  }];
-  
-  // Generate one secondary spur (shorter, branching off at ~30-45° from mid-point)
+  // ===== DETERMINE FEATURE COUNTS BASED ON ACREAGE =====
+  const numPrimary = Math.max(1, Math.min(6, Math.floor(parcelAcres / 400) + 1));
+  const spursPerPrimary = parcelAcres < 60 ? 1 : parcelAcres < 200 ? 2 : 3;
+
+  console.log('[Backbone] Generating', numPrimary, 'primaries,', spursPerPrimary, 'spurs each for ~', Math.round(parcelAcres), 'ac');
+
+  const primaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
   const secondaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
-  
-  if (parcelAcres >= 25) {
-    const midIdx = Math.floor(filteredPrimaryCoords.length / 2);
-    const branchStart = filteredPrimaryCoords[midIdx];
-    const branchBearing = (axisBearing + 35 + (seed % 30)) % 360;
-    const branchLen = maxDist * 0.25;
-    
-    const branchEnd = movePoint(branchStart, branchBearing, branchLen);
-    // Inset branch end away from boundary
-    const branchMid = movePoint(branchStart, branchBearing, branchLen * 0.5);
-    
-    const branchCoordsRaw: [number, number][] = [
-      branchStart,
-      movePoint(branchMid, (branchBearing + 90) % 360, branchLen * 0.03),
-      movePoint(branchEnd, (branchBearing + 180) % 360, branchLen * 0.1),
+  const saddleFeatures: GeoJSON.Feature<GeoJSON.Point, SaddleNodeProperties>[] = [];
+
+  // Point-in-parcel check helper
+  const isInsideParcel = (pt: [number, number]) =>
+    allOuterRings.some(ring => pointInParcelRing(pt[0], pt[1], ring));
+
+  // Water body check helper
+  const isInWater = (pt: [number, number]) =>
+    waterBodies?.length ? pointInAnyWaterBody(pt[0], pt[1], waterBodies) : false;
+
+  // ===== GENERATE EACH PRIMARY RIDGE =====
+  // The first follows the longest axis. Additional ones are offset perpendicular.
+  // Offsets alternate sides: +d, -d, +2d, -2d, ...
+  const perpSpacingM = Math.min(widthM, heightM) / (numPrimary + 1);
+
+  for (let pIdx = 0; pIdx < numPrimary; pIdx++) {
+    // Perpendicular offset for this ridge
+    let offsetM = 0;
+    if (pIdx > 0) {
+      const side = pIdx % 2 === 1 ? 1 : -1;
+      const rank = Math.ceil(pIdx / 2);
+      offsetM = side * rank * perpSpacingM;
+    }
+
+    // Inset endpoints so backbone doesn't touch boundary
+    const insetFraction = 0.10 + (pIdx * 0.02); // outer ridges inset slightly more
+    const startRaw: [number, number] = [
+      axisStart[0] + (axisEnd[0] - axisStart[0]) * insetFraction,
+      axisStart[1] + (axisEnd[1] - axisStart[1]) * insetFraction,
+    ];
+    const endRaw: [number, number] = [
+      axisEnd[0] + (axisStart[0] - axisEnd[0]) * insetFraction,
+      axisEnd[1] + (axisStart[1] - axisEnd[1]) * insetFraction,
     ];
 
-    // Filter branch coords inside water bodies
-    const branchCoords = waterBodies?.length
-      ? branchCoordsRaw.filter(c => !pointInAnyWaterBody(c[0], c[1], waterBodies))
-      : branchCoordsRaw;
-    
-    if (branchCoords.length < 2) {
-      // Branch entirely in water — skip secondary
-    } else {
-    const branchLength = lineLength(branchCoords);
-    
-    secondaryFeatures.push({
-      type: 'Feature',
-      properties: {
-        id: 'ridge_secondary_0',
-        tier: 'secondary' as RidgeTier,
-        prominenceFt: 35,
-        lengthMeters: Math.round(branchLength),
-        avgElevationM: 290,
-        avgSlopeDeg: 6,
-        curvatureProfile: 0.015,
-      },
-      geometry: {
-        type: 'LineString',
-        coordinates: branchCoords,
-      },
-    });
-    } // end else (branch not in water)
-  }
-  
-  // Generate 1-2 saddle nodes where backbone changes direction most
-  const saddleFeatures: GeoJSON.Feature<GeoJSON.Point, SaddleNodeProperties>[] = [];
-  
-  if (filteredPrimaryCoords.length >= 4) {
-    // Place saddle at point of maximum curvature along backbone
-    let maxCurve = 0;
-    let saddleIdx = Math.floor(filteredPrimaryCoords.length / 2);
-    
-    for (let i = 1; i < filteredPrimaryCoords.length - 1; i++) {
-      const b1 = calculateBearing(filteredPrimaryCoords[i - 1], filteredPrimaryCoords[i]);
-      const b2 = calculateBearing(filteredPrimaryCoords[i], filteredPrimaryCoords[i + 1]);
-      const curve = bearingDiff(b1, b2);
-      if (curve > maxCurve) {
-        maxCurve = curve;
-        saddleIdx = i;
+    // Apply perpendicular offset
+    const startPt = offsetM !== 0 ? movePoint(startRaw, perpBearing, offsetM) : startRaw;
+    const endPt = offsetM !== 0 ? movePoint(endRaw, perpBearing, offsetM) : endRaw;
+
+    // Generate curved backbone with 6-8 interior points
+    const numSegments = 6 + Math.floor(pIdx * 0.5);
+    const ridgeCoords: [number, number][] = [];
+    const ridgeSeed = seed + pIdx * 317; // Unique per ridge
+
+    for (let i = 0; i <= numSegments; i++) {
+      const t = i / numSegments;
+      const basePt: [number, number] = [
+        startPt[0] + (endPt[0] - startPt[0]) * t,
+        startPt[1] + (endPt[1] - startPt[1]) * t,
+      ];
+
+      // Sinusoidal offset for natural curvature; amplitude decreases for secondary ridges
+      const waveAmplitude = maxDist * (0.035 - pIdx * 0.005);
+      const wavePhase = ((ridgeSeed + i * 137) % 360) * Math.PI / 180;
+      const off = Math.sin(t * Math.PI + wavePhase * 0.3) * waveAmplitude;
+
+      if (i > 0 && i < numSegments) {
+        ridgeCoords.push(movePoint(basePt, perpBearing, off));
+      } else {
+        ridgeCoords.push(basePt);
       }
     }
-    
-    saddleFeatures.push({
+
+    // Filter: keep only points inside parcel and not in water
+    const filtered = ridgeCoords.filter(c => isInsideParcel(c) && !isInWater(c));
+    if (filtered.length < 2) continue;
+
+    const ridgeLength = lineLength(filtered);
+    if (ridgeLength < MIN_LENGTH_M_PRIMARY) continue;
+
+    const ridgeId = `ridge_primary_${pIdx}`;
+    primaryFeatures.push({
       type: 'Feature',
       properties: {
-        id: 'saddle_0',
-        elevationM: 285,
-        ridgeDropFt: 30,
-        adjacentRidgeIds: ['ridge_primary_0'],
+        id: ridgeId,
+        tier: 'primary' as RidgeTier,
+        prominenceFt: Math.round(55 - pIdx * 5),
+        lengthMeters: Math.round(ridgeLength),
+        avgElevationM: Math.round(300 - pIdx * 10),
+        avgSlopeDeg: Math.round(8 - pIdx * 0.5),
+        curvatureProfile: 0.02,
       },
-      geometry: {
-        type: 'Point',
-        coordinates: filteredPrimaryCoords[saddleIdx],
-      },
+      geometry: { type: 'LineString', coordinates: filtered },
     });
-  }
-  
-  const totalLength = primaryLength + secondaryFeatures.reduce(
-    (sum, f) => sum + (f.properties.lengthMeters || 0), 0
-  );
-  const processingTime = (Date.now() - startTime) / 1000;
-  
-  console.log('[Backbone] Synthetic generated:', primaryFeatures.length, 'primary,', 
-    secondaryFeatures.length, 'secondary,', saddleFeatures.length, 'saddles');
 
-  // ═══ PARCEL CLIP — drop saddle nodes outside parcel boundary (multi-ring) ═══
+    // ===== SECONDARY SPURS for this primary =====
+    const spurCount = Math.min(spursPerPrimary, Math.max(1, Math.floor(ridgeLength / 600)));
+    for (let sIdx = 0; sIdx < spurCount; sIdx++) {
+      // Space spurs evenly along the ridge
+      const tSpur = (sIdx + 1) / (spurCount + 1);
+      const spurAnchorIdx = Math.min(
+        filtered.length - 1,
+        Math.max(0, Math.floor(tSpur * (filtered.length - 1)))
+      );
+      const spurStart = filtered[spurAnchorIdx];
+
+      // Alternate spur direction left/right of main bearing
+      const spurSide = (sIdx + pIdx) % 2 === 0 ? 1 : -1;
+      const spurAngle = 30 + ((ridgeSeed + sIdx * 73) % 25); // 30-55°
+      const spurBearing = (axisBearing + spurSide * spurAngle + 360) % 360;
+      const spurLen = ridgeLength * (0.15 + ((ridgeSeed + sIdx * 41) % 10) / 100); // 15-25% of primary
+
+      const spurMid = movePoint(spurStart, spurBearing, spurLen * 0.5);
+      const spurEnd = movePoint(spurStart, spurBearing, spurLen);
+
+      const spurCoordsRaw: [number, number][] = [
+        spurStart,
+        movePoint(spurMid, (spurBearing + 90) % 360, spurLen * 0.04),
+        spurEnd,
+      ];
+
+      const spurCoords = spurCoordsRaw.filter(c => isInsideParcel(c) && !isInWater(c));
+      if (spurCoords.length < 2) continue;
+
+      const spurLength = lineLength(spurCoords);
+      if (spurLength < MIN_LENGTH_M_SECONDARY) continue;
+
+      const spurId = `ridge_secondary_${primaryFeatures.length - 1}_${sIdx}`;
+      secondaryFeatures.push({
+        type: 'Feature',
+        properties: {
+          id: spurId,
+          tier: 'secondary' as RidgeTier,
+          prominenceFt: Math.round(35 - sIdx * 3),
+          lengthMeters: Math.round(spurLength),
+          avgElevationM: Math.round(290 - pIdx * 8 - sIdx * 5),
+          avgSlopeDeg: Math.round(6 + sIdx),
+          curvatureProfile: 0.015,
+        },
+        geometry: { type: 'LineString', coordinates: spurCoords },
+      });
+
+      // Saddle at spur junction
+      saddleFeatures.push({
+        type: 'Feature',
+        properties: {
+          id: `saddle_jct_${pIdx}_${sIdx}`,
+          elevationM: Math.round(285 - pIdx * 8),
+          ridgeDropFt: Math.round(25 + sIdx * 5),
+          adjacentRidgeIds: [ridgeId, spurId],
+        },
+        geometry: { type: 'Point', coordinates: spurStart },
+      });
+    }
+
+    // ===== CURVATURE-BASED SADDLES along this primary =====
+    if (filtered.length >= 4) {
+      // Find top 1-2 curvature maxima
+      const curvatures: { idx: number; curve: number }[] = [];
+      for (let i = 1; i < filtered.length - 1; i++) {
+        const b1 = calculateBearing(filtered[i - 1], filtered[i]);
+        const b2 = calculateBearing(filtered[i], filtered[i + 1]);
+        curvatures.push({ idx: i, curve: bearingDiff(b1, b2) });
+      }
+      curvatures.sort((a, b) => b.curve - a.curve);
+
+      const numCurvSaddles = parcelAcres > 400 ? 2 : 1;
+      for (let ci = 0; ci < Math.min(numCurvSaddles, curvatures.length); ci++) {
+        if (curvatures[ci].curve < 3) continue; // Skip if almost straight
+        const pt = filtered[curvatures[ci].idx];
+        saddleFeatures.push({
+          type: 'Feature',
+          properties: {
+            id: `saddle_curv_${pIdx}_${ci}`,
+            elevationM: Math.round(282 - pIdx * 10),
+            ridgeDropFt: Math.round(30 + ci * 8),
+            adjacentRidgeIds: [ridgeId],
+          },
+          geometry: { type: 'Point', coordinates: pt },
+        });
+      }
+    }
+  }
+
+  // ===== CLIP SADDLES to parcel =====
   const clippedSaddles = saddleFeatures.filter(f => {
     const [sLng, sLat] = f.geometry.coordinates;
     return allOuterRings.some(ring => pointInParcelRing(sLng, sLat, ring));
   });
-  console.log('[Backbone] Saddle clip:', saddleFeatures.length, '→', clippedSaddles.length, 'inside parcel');
+
+  const totalLength = primaryFeatures.reduce((s, f) => s + (f.properties.lengthMeters || 0), 0)
+    + secondaryFeatures.reduce((s, f) => s + (f.properties.lengthMeters || 0), 0);
+  const processingTime = (Date.now() - startTime) / 1000;
+
+  console.log('[Backbone] Synthetic generated:', primaryFeatures.length, 'primary,',
+    secondaryFeatures.length, 'secondary,', clippedSaddles.length, 'saddles (from', saddleFeatures.length, ')');
 
   return {
     success: true,
@@ -627,9 +636,9 @@ export function generateSyntheticRidgeSpines(
       total_ridge_length_m: Math.round(totalLength),
       ridge_count_primary: primaryFeatures.length,
       ridge_count_secondary: secondaryFeatures.length,
-      saddle_count: saddleFeatures.length,
+      saddle_count: clippedSaddles.length,
       backbone_confidence: confidence,
-      fallback_reason: 
+      fallback_reason:
         'Backbone estimated from longest parcel axis. ' +
         reason,
     },
