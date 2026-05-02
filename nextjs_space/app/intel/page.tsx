@@ -4539,6 +4539,11 @@ function DeerIntelContent() {
         const merged = mergeParcelPolygons(territoryParcelsRef.current);
         if (merged) {
           parcel = merged;
+          // ═══ SPINE ACCUMULATION FIX ═══
+          // Clear stale terrain data before re-setting parcelPolygon to prevent
+          // the useEffects from firing with old data still on the map.
+          setRidgeSpineData(null);
+          setTerrainFlowData(null);
           setParcelPolygon(merged);
           console.log('[INTEL-DIAG] TERRITORY RE-ALIGN — re-merged', territoryParcelsRef.current.length, 'parcels');
         } else {
@@ -5383,6 +5388,11 @@ function DeerIntelContent() {
       return;
     }
 
+    // AbortController prevents stale fetches from accumulating spines
+    // when parcelPolygon changes rapidly (e.g. Analyze Territory → Re-Align)
+    const abortController = new AbortController();
+    let cancelled = false;
+
     const generateRidgeData = async () => {
       try {
         // Extract parcel ID for API call
@@ -5398,6 +5408,12 @@ function DeerIntelContent() {
           parcel_id: parcelId,
           bufferMeters: 300, // Smaller buffer for ridge extraction
         });
+
+        // Bail out if this effect was superseded by a newer parcelPolygon
+        if (cancelled) {
+          console.log('[Backbone] Fetch completed but effect was superseded — discarding stale result');
+          return;
+        }
 
         if (result.success && result.data) {
           const primaryCount = result.data.ridges_primary.features.length;
@@ -5463,6 +5479,7 @@ function DeerIntelContent() {
             },
           });
         } else {
+          if (cancelled) return;
           console.warn('[Backbone] Ridge spine generation failed, using empty fallback');
           // Generate synthetic as fallback
           const synthetic = generateSyntheticRidgeSpines(parcelPolygon, nhdWaterBodiesRef.current?.length ? nhdWaterBodiesRef.current : undefined);
@@ -5483,11 +5500,18 @@ function DeerIntelContent() {
           });
         }
       } catch (err) {
+        if (cancelled) return; // Suppress errors from superseded fetches
         console.error('[Backbone] Error during terrain spine generation:', err);
       }
     };
 
     generateRidgeData();
+
+    // Cleanup: mark this effect as superseded when parcelPolygon changes
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
   }, [parcelPolygon]);
 
   // ========== UPDATE RIDGE SPINE MAP SOURCES ==========
@@ -5710,6 +5734,9 @@ function DeerIntelContent() {
       return;
     }
 
+    // AbortController prevents stale flow fetches from accumulating
+    let cancelled = false;
+
     const generateFlowData = async () => {
       setTerrainFlowLoading(true);
       try {
@@ -5742,6 +5769,12 @@ function DeerIntelContent() {
           parcel_id: parcelId,
           bufferMeters: 1000, // 1km buffer for landscape context
         });
+
+        // Bail out if this effect was superseded by a newer parcelPolygon
+        if (cancelled) {
+          console.log('[TerrainFlow] Fetch completed but effect was superseded — discarding stale result');
+          return;
+        }
 
         if (result.success && result.data) {
           const primaryCount = result.data.flow_primary.features.length;
@@ -5788,6 +5821,7 @@ function DeerIntelContent() {
           setTerrainStory(story);
           console.log('[TerrainStory] Generated:', story.headline);
         } else {
+          if (cancelled) return;
           console.warn('[TerrainFlow] Flow generation failed, using terrain-driven fallback');
           const synthetic = generateSyntheticTerrainFlow(parcelPolygon);
           setTerrainFlowData({
@@ -5818,13 +5852,19 @@ function DeerIntelContent() {
           console.log('[TerrainStory] Generated (synthetic):', syntheticStory.headline);
         }
       } catch (err) {
+        if (cancelled) return; // Suppress errors from superseded fetches
         console.error('[TerrainFlow] Error during flow generation:', err);
       } finally {
-        setTerrainFlowLoading(false);
+        if (!cancelled) setTerrainFlowLoading(false);
       }
     };
 
     generateFlowData();
+
+    // Cleanup: mark this effect as superseded when parcelPolygon changes
+    return () => {
+      cancelled = true;
+    };
   }, [parcelPolygon]);
 
   // ========== COMPUTE TERRAIN RATING (BROKER SCORE) ==========
@@ -11623,6 +11663,31 @@ function DeerIntelContent() {
                   const centerLat = (bounds[1] + bounds[3]) / 2;
                   const centerLng = (bounds[0] + bounds[2]) / 2;
                   const totalAcres = String(totalTerritoryAcreage);
+
+                  // ═══ SPINE ACCUMULATION FIX ═══
+                  // Clear stale ridge/flow data BEFORE setting parcelPolygon.
+                  // This prevents old spines from lingering on the map while the
+                  // new territory fetch runs (8s+). The useEffect cleanup will
+                  // also cancel any in-flight fetches via the AbortController.
+                  setRidgeSpineData(null);
+                  setTerrainFlowData(null);
+                  setLegacySyntheticData(null);
+                  setTerrainStory(null);
+                  // Also clear the Mapbox sources immediately so old geometry
+                  // doesn't persist during the loading period.
+                  const _map = mapRef.current;
+                  if (_map && overlaySourcesCreated.current) {
+                    try {
+                      const rp = _map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
+                      if (rp) rp.setData(EMPTY_FC);
+                      const rs = _map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
+                      if (rs) rs.setData(EMPTY_FC);
+                      const sn = _map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
+                      if (sn) sn.setData(EMPTY_FC);
+                      console.log('[Territory] Cleared stale ridge/saddle map sources');
+                    } catch (_e) { /* non-fatal */ }
+                  }
+
                   setParcelPolygon(merged);
                   setActiveLat(centerLat);
                   setActiveLng(centerLng);
