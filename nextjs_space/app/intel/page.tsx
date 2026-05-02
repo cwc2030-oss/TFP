@@ -52,6 +52,7 @@ import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extr
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
+import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
@@ -3377,6 +3378,67 @@ function DeerIntelContent() {
 
     // Update stability anchor for next re-analysis
     previousStandsRef.current = aligned;
+
+    // ═══ STAND SELECTION DEBUG PAYLOAD ═══
+    // Comprehensive diagnostic: every sub-score for every candidate, plus
+    // rejection reasons and model weight diagnosis. Emitted to console as
+    // a single structured object for Clark's analysis.
+    try {
+      const selectedRanks = new Set(aligned.map(s => s.rank));
+      // Collect parcel rings for boundary distance calculation
+      let parcelRings: number[][][] | null = null;
+      if (parcelPolygon?.geometry) {
+        const geom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        if (geom.type === 'Polygon') {
+          parcelRings = [geom.coordinates[0]];
+        } else {
+          parcelRings = geom.coordinates.map(p => p[0]);
+        }
+      }
+      const standDebug = buildStandSelectionDebug({
+        allScored: allScored.map(s => ({
+          rank: s.rank,
+          name: s.name,
+          coords: s.coords,
+          props: s.props,
+          inputs: s.inputs,
+          alignment: s.alignment,
+          resilience: s.resilience,
+        })),
+        selectedRanks,
+        rejections: [], // Parcel-safe rejections are logged separately above
+        windDirection: windDirection,
+        season: season,
+        ridgeSpineData: ridgeSpineData,
+        beddingPolygons: layers?.beddingPolygons,
+        parcelRings,
+      });
+      console.log('[StandSelectionDebug] === STAND SELECTION DEBUG PAYLOAD ===');
+      console.log('[StandSelectionDebug]', JSON.stringify(standDebug, null, 2));
+      // Summary table for quick scanning
+      console.table(standDebug.candidates.slice(0, 10).map(c => ({
+        '#': c.rank,
+        name: c.name,
+        sel: c.selected ? '✓' : '·',
+        final: c.final_score,
+        wind: (c.wind_score * 100).toFixed(0) + '%',
+        flow: (c.deer_flow_score * 100).toFixed(0) + '%',
+        ridge: (c.ridge_alignment_score * 100).toFixed(0) + '%',
+        saddle: (c.saddle_score * 100).toFixed(0) + '%',
+        bedding: (c.bedding_edge_score * 100).toFixed(0) + '%',
+        access: (c.access_score * 100).toFixed(0) + '%',
+        safety: (c.parcel_safety_score * 100).toFixed(0) + '%',
+        cover: c.cover_score.toFixed(2),
+      })));
+      if (standDebug.diagnosis.deer_flow_dominance) {
+        console.warn('[StandSelectionDebug] ⚠️ DEER FLOW DOMINANCE DETECTED — movement_corridor contributes',
+          standDebug.diagnosis.top_factor_pct + '% of top stand score. Consider rebalancing weights.');
+      }
+      console.log('[StandSelectionDebug] Diagnosis:', standDebug.diagnosis);
+    } catch (debugErr) {
+      console.error('[StandSelectionDebug] Debug payload build failed (non-fatal):', debugErr);
+    }
+    // ═══ END STAND SELECTION DEBUG ═══
 
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
