@@ -45,6 +45,13 @@ const COLLINEARITY_THRESHOLD_DEG = 15;    // Strict bearing alignment for mergin
 const SADDLE_DROP_MIN_FT = 25;            // Only very pronounced saddles
 const MIN_BACKBONE_CONFIDENCE = 0.6;      // Confidence threshold - below this, show nothing
 
+// ========== SADDLE QUALITY GUARDRAILS ==========
+const SADDLE_MIN_SPACING_M = 300;          // Minimum distance between retained saddles
+const SADDLE_MIN_PROMINENCE_FT = 20;       // Must have meaningful elevation drop
+const SADDLE_MAX_DIST_FROM_RIDGE_M = 150;  // Must be near a ridge spine
+const SADDLE_MAX_PER_KM_RIDGE = 1.5;       // Density cap: saddles per km of total ridge length
+const SADDLE_MIN_CONFIDENCE = 0.3;         // Confidence threshold (if provided by Modal)
+
 // ========== API CLIENT ==========
 
 const RIDGE_API_URL = '/api/ridge-spines';
@@ -64,6 +71,7 @@ export interface RidgeFetchResult {
   durationMs: number;
   isSynthetic: boolean;
   terrainDebug?: Record<string, unknown>;
+  saddleDebug?: SaddleDebugPayload;
 }
 
 /**
@@ -142,12 +150,27 @@ export async function fetchRidgeSpines(
     console.log('[Backbone] Post-filter:', filtered.ridges_primary.features.length, 'P +',
       filtered.ridges_secondary.features.length, 'S (from', rawPrimaryCount, 'P +', rawSecondaryCount, 'S raw)');
     
+    // ─── Saddle quality filter: spacing, prominence, proximity, density cap ───
+    const rawSaddleCount = filtered.saddle_nodes?.features?.length ?? 0;
+    const { filtered: filteredSaddles, debug: saddleDebug } = filterSaddlesByQuality(
+      filtered.saddle_nodes ?? { type: 'FeatureCollection', features: [] },
+      filtered.ridges_primary,
+      filtered.ridges_secondary,
+    );
+    filtered.saddle_nodes = filteredSaddles as any;
+    filtered.metadata.saddle_count = filteredSaddles.features.length;
+    console.log(`[Backbone] Saddle filter: ${rawSaddleCount} raw → ${filteredSaddles.features.length} kept`);
+    if (saddleDebug.raw_saddle_candidates > 0) {
+      console.log('[SaddleDebug]', JSON.stringify(saddleDebug));
+    }
+    
     return {
       success: true,
       data: filtered,
       durationMs,
       isSynthetic,
       terrainDebug: data.terrain_debug,
+      saddleDebug,
     };
     
   } catch (err) {
@@ -828,6 +851,269 @@ export function filterSpinesByQuality(
   };
 
   return { filtered, dropped };
+}
+
+// ========== SADDLE QUALITY FILTER ==========
+
+export interface SaddleDebugPayload {
+  raw_saddle_candidates: number;
+  post_prominence_filter: number;
+  post_ridge_proximity_filter: number;
+  post_spacing_filter: number;
+  post_density_cap: number;
+  final_saddles: number;
+  min_spacing_m: number;
+  total_ridge_length_km: number;
+  density_cap_per_km: number;
+  candidates: Array<{
+    id: string;
+    elevationM: number;
+    ridgeDropFt: number;
+    dist_to_nearest_ridge_m: number;
+    nearest_ridge_id: string;
+    confidence?: number;
+    kept: boolean;
+    drop_reason: string | null;
+  }>;
+}
+
+/** Perpendicular distance from point to line segment (metres) */
+function pointToSegmentDistM(p: [number, number], a: [number, number], b: [number, number]): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  if (dx === 0 && dy === 0) return distanceMeters(p, a);
+  let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy);
+  t = Math.max(0, Math.min(1, t));
+  const proj: [number, number] = [a[0] + t * dx, a[1] + t * dy];
+  return distanceMeters(p, proj);
+}
+
+/**
+ * Filter saddle nodes by quality criteria:
+ * 1. Prominence: ridgeDropFt >= threshold
+ * 2. Ridge proximity: must be near an actual ridge spine
+ * 3. Spacing: enforce minimum distance between retained saddles
+ * 4. Density cap: max saddles per km of total ridge length
+ *
+ * Returns filtered saddle FC + debug payload for [SaddleDebug] console emission.
+ */
+export function filterSaddlesByQuality(
+  saddleFC: GeoJSON.FeatureCollection,
+  ridgePrimary: GeoJSON.FeatureCollection,
+  ridgeSecondary: GeoJSON.FeatureCollection,
+  opts?: {
+    minSpacingM?: number;
+    minProminenceFt?: number;
+    maxDistFromRidgeM?: number;
+    maxPerKmRidge?: number;
+    minConfidence?: number;
+  }
+): { filtered: GeoJSON.FeatureCollection; debug: SaddleDebugPayload } {
+  const minSpacing = opts?.minSpacingM ?? SADDLE_MIN_SPACING_M;
+  const minProm = opts?.minProminenceFt ?? SADDLE_MIN_PROMINENCE_FT;
+  const maxRidgeDist = opts?.maxDistFromRidgeM ?? SADDLE_MAX_DIST_FROM_RIDGE_M;
+  const maxPerKm = opts?.maxPerKmRidge ?? SADDLE_MAX_PER_KM_RIDGE;
+  const minConf = opts?.minConfidence ?? SADDLE_MIN_CONFIDENCE;
+
+  // Collect all ridge line geometries for proximity checks
+  const ridgeLines: { id: string; coords: number[][] }[] = [];
+  for (const fc of [ridgePrimary, ridgeSecondary]) {
+    for (const f of fc.features) {
+      if (f.geometry?.type === 'LineString') {
+        ridgeLines.push({
+          id: (f.properties as any)?.id || 'unknown',
+          coords: f.geometry.coordinates,
+        });
+      }
+    }
+  }
+
+  // Total ridge length for density cap
+  const totalRidgeLengthM = ridgeLines.reduce((sum, rl) => {
+    return sum + lineLength(rl.coords as [number, number][]);
+  }, 0);
+  const totalRidgeLengthKm = totalRidgeLengthM / 1000;
+  const densityCap = Math.max(1, Math.ceil(totalRidgeLengthKm * maxPerKm));
+
+  const rawCount = saddleFC.features.length;
+
+  // Build candidate diagnostics
+  const candidates: SaddleDebugPayload['candidates'] = [];
+
+  // ── Step 1: compute per-saddle metrics ──
+  type SaddleCandidate = {
+    feature: GeoJSON.Feature;
+    pt: [number, number];
+    ridgeDropFt: number;
+    confidence: number;
+    distToRidgeM: number;
+    nearestRidgeId: string;
+    sortScore: number;
+  };
+  const scored: SaddleCandidate[] = [];
+
+  for (const f of saddleFC.features) {
+    if (f.geometry?.type !== 'Point') continue;
+    const pt = f.geometry.coordinates as [number, number];
+    const props = f.properties as Record<string, any>;
+    const ridgeDropFt = props?.ridgeDropFt ?? 0;
+    const confidence = props?.confidence ?? 1.0;
+    const id = props?.id ?? 'unknown';
+
+    // Find nearest ridge
+    let minRidgeDist = Infinity;
+    let nearestRidgeId = 'none';
+    for (const rl of ridgeLines) {
+      for (let i = 0; i < rl.coords.length - 1; i++) {
+        const d = pointToSegmentDistM(pt, rl.coords[i] as [number, number], rl.coords[i + 1] as [number, number]);
+        if (d < minRidgeDist) {
+          minRidgeDist = d;
+          nearestRidgeId = rl.id;
+        }
+      }
+    }
+
+    // Composite score for greedy-pick ordering: higher = better saddle
+    // Prominence weight is dominant — a real pass has high drop
+    const promNorm = Math.min(1, ridgeDropFt / 60); // 60ft = perfect
+    const proxNorm = Math.max(0, 1 - minRidgeDist / maxRidgeDist); // closer to ridge = better
+    const sortScore = promNorm * 0.6 + proxNorm * 0.3 + confidence * 0.1;
+
+    scored.push({ feature: f, pt, ridgeDropFt, confidence, distToRidgeM: minRidgeDist, nearestRidgeId, sortScore });
+  }
+
+  // ── Step 2: Prominence filter ──
+  let pool = scored.filter(s => {
+    const pass = s.ridgeDropFt >= minProm;
+    if (!pass) {
+      candidates.push({
+        id: (s.feature.properties as any)?.id ?? 'unknown',
+        elevationM: (s.feature.properties as any)?.elevationM ?? 0,
+        ridgeDropFt: s.ridgeDropFt,
+        dist_to_nearest_ridge_m: Math.round(s.distToRidgeM),
+        nearest_ridge_id: s.nearestRidgeId,
+        confidence: s.confidence,
+        kept: false,
+        drop_reason: `prominence_too_low (${s.ridgeDropFt}ft < ${minProm}ft)`,
+      });
+    }
+    return pass;
+  });
+  const postProminence = pool.length;
+
+  // ── Step 3: Ridge proximity filter ──
+  pool = pool.filter(s => {
+    const pass = s.distToRidgeM <= maxRidgeDist;
+    if (!pass) {
+      candidates.push({
+        id: (s.feature.properties as any)?.id ?? 'unknown',
+        elevationM: (s.feature.properties as any)?.elevationM ?? 0,
+        ridgeDropFt: s.ridgeDropFt,
+        dist_to_nearest_ridge_m: Math.round(s.distToRidgeM),
+        nearest_ridge_id: s.nearestRidgeId,
+        confidence: s.confidence,
+        kept: false,
+        drop_reason: `too_far_from_ridge (${Math.round(s.distToRidgeM)}m > ${maxRidgeDist}m)`,
+      });
+    }
+    return pass;
+  });
+  const postRidgeProximity = pool.length;
+
+  // ── Step 4: Confidence filter (if Modal provides confidence) ──
+  pool = pool.filter(s => {
+    if (s.confidence < minConf) {
+      candidates.push({
+        id: (s.feature.properties as any)?.id ?? 'unknown',
+        elevationM: (s.feature.properties as any)?.elevationM ?? 0,
+        ridgeDropFt: s.ridgeDropFt,
+        dist_to_nearest_ridge_m: Math.round(s.distToRidgeM),
+        nearest_ridge_id: s.nearestRidgeId,
+        confidence: s.confidence,
+        kept: false,
+        drop_reason: `confidence_too_low (${s.confidence.toFixed(2)} < ${minConf})`,
+      });
+      return false;
+    }
+    return true;
+  });
+
+  // ── Step 5: Spacing filter (greedy pick — best saddles first) ──
+  pool.sort((a, b) => b.sortScore - a.sortScore);
+  const spacingKept: SaddleCandidate[] = [];
+  for (const s of pool) {
+    const tooClose = spacingKept.some(k => distanceMeters(s.pt, k.pt) < minSpacing);
+    if (tooClose) {
+      candidates.push({
+        id: (s.feature.properties as any)?.id ?? 'unknown',
+        elevationM: (s.feature.properties as any)?.elevationM ?? 0,
+        ridgeDropFt: s.ridgeDropFt,
+        dist_to_nearest_ridge_m: Math.round(s.distToRidgeM),
+        nearest_ridge_id: s.nearestRidgeId,
+        confidence: s.confidence,
+        kept: false,
+        drop_reason: `too_close_to_better_saddle (< ${minSpacing}m)`,
+      });
+    } else {
+      spacingKept.push(s);
+    }
+  }
+  const postSpacing = spacingKept.length;
+
+  // ── Step 6: Density cap ──
+  let finalPool = spacingKept;
+  if (finalPool.length > densityCap) {
+    // Already sorted by quality — trim the tail
+    const trimmed = finalPool.slice(densityCap);
+    finalPool = finalPool.slice(0, densityCap);
+    for (const s of trimmed) {
+      candidates.push({
+        id: (s.feature.properties as any)?.id ?? 'unknown',
+        elevationM: (s.feature.properties as any)?.elevationM ?? 0,
+        ridgeDropFt: s.ridgeDropFt,
+        dist_to_nearest_ridge_m: Math.round(s.distToRidgeM),
+        nearest_ridge_id: s.nearestRidgeId,
+        confidence: s.confidence,
+        kept: false,
+        drop_reason: `density_cap_exceeded (${densityCap} max for ${totalRidgeLengthKm.toFixed(1)}km ridge)`,
+      });
+    }
+  }
+  const postDensity = finalPool.length;
+
+  // Add kept candidates to debug
+  for (const s of finalPool) {
+    candidates.push({
+      id: (s.feature.properties as any)?.id ?? 'unknown',
+      elevationM: (s.feature.properties as any)?.elevationM ?? 0,
+      ridgeDropFt: s.ridgeDropFt,
+      dist_to_nearest_ridge_m: Math.round(s.distToRidgeM),
+      nearest_ridge_id: s.nearestRidgeId,
+      confidence: s.confidence,
+      kept: true,
+      drop_reason: null,
+    });
+  }
+
+  const debug: SaddleDebugPayload = {
+    raw_saddle_candidates: rawCount,
+    post_prominence_filter: postProminence,
+    post_ridge_proximity_filter: postRidgeProximity,
+    post_spacing_filter: postSpacing,
+    post_density_cap: postDensity,
+    final_saddles: finalPool.length,
+    min_spacing_m: minSpacing,
+    total_ridge_length_km: Math.round(totalRidgeLengthKm * 10) / 10,
+    density_cap_per_km: maxPerKm,
+    candidates,
+  };
+
+  const filteredFC: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: finalPool.map(s => s.feature),
+  };
+
+  return { filtered: filteredFC, debug };
 }
 
 /**

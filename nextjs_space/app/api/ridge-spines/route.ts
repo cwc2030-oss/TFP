@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generateSyntheticRidgeSpines, filterSpinesByQuality } from '@/lib/ridge-extraction';
+import { generateSyntheticRidgeSpines, filterSpinesByQuality, filterSaddlesByQuality } from '@/lib/ridge-extraction';
 import type { RidgeSpineResponse } from '@/types/terrain';
 
 const RIDGE_API_URL = process.env.RIDGE_API_URL || 
@@ -215,6 +215,31 @@ export async function POST(request: NextRequest) {
     
     terrainDebug.post_filter_ridges_primary = ridgeData.ridges_primary.features.length;
     terrainDebug.post_filter_ridges_secondary = ridgeData.ridges_secondary.features.length;
+
+    // ─── Step 4: Saddle quality filter — spacing, prominence, proximity, density cap ───
+    const preSaddleCount = ridgeData.saddle_nodes?.features?.length ?? 0;
+    const { filtered: filteredSaddles, debug: saddleDebug } = filterSaddlesByQuality(
+      ridgeData.saddle_nodes ?? { type: 'FeatureCollection', features: [] },
+      ridgeData.ridges_primary,
+      ridgeData.ridges_secondary,
+    );
+    ridgeData.saddle_nodes = filteredSaddles as any;
+    ridgeData.metadata.saddle_count = filteredSaddles.features.length;
+    terrainDebug.post_filter_saddles = filteredSaddles.features.length;
+    terrainDebug.pipeline_steps.saddle_filter = {
+      raw: preSaddleCount,
+      post_prominence: saddleDebug.post_prominence_filter,
+      post_ridge_proximity: saddleDebug.post_ridge_proximity_filter,
+      post_spacing: saddleDebug.post_spacing_filter,
+      post_density_cap: saddleDebug.post_density_cap,
+      final: saddleDebug.final_saddles,
+      total_ridge_km: saddleDebug.total_ridge_length_km,
+      density_cap_per_km: saddleDebug.density_cap_per_km,
+      min_spacing_m: saddleDebug.min_spacing_m,
+    };
+    if (preSaddleCount !== filteredSaddles.features.length) {
+      console.log(`[RidgeSpines] Saddle filter: ${preSaddleCount} → ${filteredSaddles.features.length} (dropped ${preSaddleCount - filteredSaddles.features.length})`);
+    }
 
     console.log('[RidgeSpines] Complete:', {
       terrain_source: terrainDebug.terrain_source,

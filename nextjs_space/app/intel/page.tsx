@@ -5537,6 +5537,25 @@ function DeerIntelContent() {
           if (result.terrainDebug) {
             console.log('[Backbone] terrain_debug:', JSON.stringify(result.terrainDebug));
           }
+          // Saddle debug payload — full diagnostic for saddle over-fire diagnosis
+          if (result.saddleDebug) {
+            const sd = result.saddleDebug;
+            console.log(`%c[SaddleDebug] ${sd.raw_saddle_candidates} raw → ${sd.final_saddles} kept (${sd.total_ridge_length_km}km ridge, cap ${sd.density_cap_per_km}/km)`, 'color: #f97316; font-weight: bold');
+            console.log('[SaddleDebug]', JSON.stringify(sd, null, 2));
+            if (sd.candidates.length > 0) {
+              console.table(sd.candidates.map(c => ({
+                id: c.id,
+                kept: c.kept ? '✓' : '✗',
+                dropFt: c.ridgeDropFt,
+                distRidge: c.dist_to_nearest_ridge_m + 'm',
+                nearestRidge: c.nearest_ridge_id,
+                reason: c.drop_reason || '—',
+              })));
+            }
+            if (sd.raw_saddle_candidates > 0 && sd.final_saddles === 0) {
+              console.warn('[SaddleDebug] ⚠️ ALL saddles filtered out — check if Modal is sending low-quality candidates');
+            }
+          }
 
           // Post-process: strip any spine coordinates that fall inside NHD water bodies
           let filteredPrimary = result.data.ridges_primary;
