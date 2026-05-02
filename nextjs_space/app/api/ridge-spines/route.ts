@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
+import { generateSyntheticRidgeSpines, filterSpinesByQuality } from '@/lib/ridge-extraction';
 import type { RidgeSpineResponse } from '@/types/terrain';
 
 const RIDGE_API_URL = process.env.RIDGE_API_URL || 
@@ -107,8 +107,8 @@ export async function POST(request: NextRequest) {
           bufferMeters,
           options: {
             dem_source: 'SRTMGL1',
-            min_prominence_ft: 8,
-            min_length_m: 60,
+            min_prominence_ft: 25,     // Real ridges need meaningful drop on both sides
+            min_length_m: 150,         // No fragments — ridge must be continuous
             output_format: 'geojson',
           },
         }),
@@ -193,6 +193,28 @@ export async function POST(request: NextRequest) {
     if (!useRealDEM) {
       ridgeData.metadata.fallback_reason = terrainDebug.fallback_reason;
     }
+
+    // ─── Step 3: Quality filter — drop scribbles, stubs, incoherent spines ───
+    const preFilterPrimary = ridgeData.ridges_primary.features.length;
+    const preFilterSecondary = ridgeData.ridges_secondary.features.length;
+    const { filtered: filteredData, dropped } = filterSpinesByQuality(ridgeData);
+    ridgeData = filteredData;
+    
+    if (dropped.length > 0) {
+      terrainDebug.pipeline_steps.quality_filter = {
+        dropped_count: dropped.length,
+        dropped,
+        pre_filter: { primary: preFilterPrimary, secondary: preFilterSecondary },
+        post_filter: {
+          primary: ridgeData.ridges_primary.features.length,
+          secondary: ridgeData.ridges_secondary.features.length,
+        },
+      };
+      console.log('[RidgeSpines] Quality filter dropped', dropped.length, 'spine(s):', dropped.map(d => d.reason).join('; '));
+    }
+    
+    terrainDebug.post_filter_ridges_primary = ridgeData.ridges_primary.features.length;
+    terrainDebug.post_filter_ridges_secondary = ridgeData.ridges_secondary.features.length;
 
     console.log('[RidgeSpines] Complete:', {
       terrain_source: terrainDebug.terrain_source,

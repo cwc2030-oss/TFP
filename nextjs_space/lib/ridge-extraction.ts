@@ -112,17 +112,17 @@ export async function fetchRidgeSpines(
     }
     
     const data = await response.json();
-    const primaryCount = data.ridges_primary?.features?.length || 0;
-    const secondaryCount = data.ridges_secondary?.features?.length || 0;
+    const rawPrimaryCount = data.ridges_primary?.features?.length || 0;
+    const rawSecondaryCount = data.ridges_secondary?.features?.length || 0;
     
     // Use server-reported mode — NOT blind assumption
     const serverMode = data.mode || 'unknown';
     const isSynthetic = serverMode !== 'real_dem';
     
-    console.log('[Backbone] Response received:', {
+    console.log('[Backbone] Raw response:', {
       duration: durationMs + 'ms',
-      primary: primaryCount,
-      secondary: secondaryCount,
+      primary: rawPrimaryCount,
+      secondary: rawSecondaryCount,
       dem_source: data.metadata?.dem_source || 'unknown',
       mode: serverMode,
       isSynthetic,
@@ -134,9 +134,17 @@ export async function fetchRidgeSpines(
       console.log('[Backbone] terrain_debug:', JSON.stringify(data.terrain_debug, null, 2));
     }
     
+    // ─── Quality filter: drop scribbles, stubs, incoherent spines ───
+    const { filtered, dropped } = filterSpinesByQuality(data as RidgeSpineResponse);
+    if (dropped.length > 0) {
+      console.log('[Backbone] Quality filter dropped', dropped.length, 'spine(s):', dropped);
+    }
+    console.log('[Backbone] Post-filter:', filtered.ridges_primary.features.length, 'P +',
+      filtered.ridges_secondary.features.length, 'S (from', rawPrimaryCount, 'P +', rawSecondaryCount, 'S raw)');
+    
     return {
       success: true,
-      data: data as RidgeSpineResponse,
+      data: filtered,
       durationMs,
       isSynthetic,
       terrainDebug: data.terrain_debug,
@@ -344,22 +352,17 @@ function computeBackboneConfidence(
 }
 
 /**
- * Generate backbone data for parcels — SCALES WITH PARCEL SIZE
+ * Generate backbone data for parcels — TERRAIN-DRIVEN, NOT QUOTA-DRIVEN
  *
  * Strategy:
  * 1. Find the primary axis (longest-distance pair of boundary vertices)
- * 2. Generate a primary ridge along that axis with gentle curvature
- * 3. For large parcels (>200ac): generate ADDITIONAL primary ridges offset
- *    perpendicular to the main axis, roughly 1 extra per 400 acres
- * 4. For each primary ridge: generate 1-3 secondary spurs proportional to length
- * 5. Place saddle nodes at spur junctions and curvature maxima
+ * 2. Generate ONE primary ridge along that axis with gentle curvature
+ * 3. Generate 1-2 secondary spurs off that primary IF they meet length thresholds
+ * 4. Place saddle nodes at spur junctions and curvature maxima
  *
- * Scaling table:
- *   <60ac   → 1 primary, 1 secondary, 1 saddle
- *   60-200  → 1 primary, 2 secondaries, 1-2 saddles
- *   200-600 → 2 primaries, 3-5 secondaries, 3-5 saddles
- *   600-1500 → 3 primaries, 5-8 secondaries, 4-7 saddles
- *   1500+   → 4-6 primaries, 8-15 secondaries, 6-12 saddles
+ * CRITICAL RULE: Do NOT scale spine count by acreage. One honest primary
+ * ridge is infinitely better than three forced geometries. Additional spines
+ * are ONLY added by the real DEM pipeline when the terrain justifies them.
  */
 export function generateSyntheticRidgeSpines(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
@@ -438,11 +441,14 @@ export function generateSyntheticRidgeSpines(
   const axisBearing = calculateBearing(axisStart, axisEnd);
   const perpBearing = (axisBearing + 90) % 360;
 
-  // ===== DETERMINE FEATURE COUNTS BASED ON ACREAGE =====
-  const numPrimary = Math.max(1, Math.min(6, Math.floor(parcelAcres / 400) + 1));
-  const spursPerPrimary = parcelAcres < 60 ? 1 : parcelAcres < 200 ? 2 : 3;
+  // ===== TERRAIN-DRIVEN COUNTS — NO ACREAGE QUOTA =====
+  // Synthetic can only produce ONE primary (the longest axis). Additional primaries
+  // require real DEM validation — we refuse to fabricate them from geometry alone.
+  const numPrimary = 1;
+  // Spurs: max 2, but only if the primary is long enough to justify them
+  const spursPerPrimary = parcelAcres < 60 ? 1 : 2;
 
-  console.log('[Backbone] Generating', numPrimary, 'primaries,', spursPerPrimary, 'spurs each for ~', Math.round(parcelAcres), 'ac');
+  console.log('[Backbone] Generating', numPrimary, 'primary (terrain-honest),', spursPerPrimary, 'max spurs for ~', Math.round(parcelAcres), 'ac');
 
   const primaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
   const secondaryFeatures: GeoJSON.Feature<GeoJSON.LineString, RidgeSpineProperties>[] = [];
@@ -527,14 +533,14 @@ export function generateSyntheticRidgeSpines(
     }
     if (currentSeg.length >= 2) segments.push(currentSeg);
 
-    // Use adaptive min length: relax for large territories
-    const effectiveMinPrimary = parcelAcres > 500 ? MIN_LENGTH_M_PRIMARY * 0.5 : MIN_LENGTH_M_PRIMARY;
+    // Strict min length — no relaxation for large territories.
+    // If the segment doesn't meet the threshold, it's not a defensible ridge.
 
     // Add each qualifying segment as a feature
     let addedPrimary = false;
     for (const seg of segments) {
       const segLength = lineLength(seg);
-      if (segLength < effectiveMinPrimary) continue;
+      if (segLength < MIN_LENGTH_M_PRIMARY) continue;
 
       const ridgeId = `ridge_primary_${pIdx}${segments.length > 1 ? `_s${segments.indexOf(seg)}` : ''}`;
       primaryFeatures.push({
@@ -589,8 +595,7 @@ export function generateSyntheticRidgeSpines(
       if (spurCoords.length < 2) continue;
 
       const spurLength = lineLength(spurCoords);
-      const effectiveMinSecondary = parcelAcres > 500 ? MIN_LENGTH_M_SECONDARY * 0.5 : MIN_LENGTH_M_SECONDARY;
-      if (spurLength < effectiveMinSecondary) continue;
+      if (spurLength < MIN_LENGTH_M_SECONDARY) continue;
 
       const spurId = `ridge_secondary_${primaryFeatures.length - 1}_${sIdx}`;
       secondaryFeatures.push({
@@ -688,6 +693,141 @@ export function generateSyntheticRidgeSpines(
         reason,
     },
   };
+}
+
+// ========== POST-FETCH QUALITY FILTER ==========
+// Runs on ALL spine data (real DEM or synthetic) before it reaches the map.
+// Drops spines that fail coherence checks — scribbles, fragments, etc.
+
+/** How much a line "scribbles" — total bearing change / length ratio */
+function computeCurvatureIncoherence(coords: [number, number][]): number {
+  if (coords.length < 3) return 0;
+  let totalBearingChange = 0;
+  for (let i = 1; i < coords.length - 1; i++) {
+    const b1 = calculateBearing(coords[i - 1], coords[i]);
+    const b2 = calculateBearing(coords[i], coords[i + 1]);
+    totalBearingChange += bearingDiff(b1, b2);
+  }
+  const length = lineLength(coords);
+  // Normalize: degrees of bearing change per 100m of line
+  return length > 0 ? (totalBearingChange / length) * 100 : 999;
+}
+
+/**
+ * Filter spine FeatureCollections by quality criteria.
+ * Drops individual features that fail coherence, length, or confidence checks.
+ * Returns filtered data + summary of what was dropped.
+ */
+export function filterSpinesByQuality(
+  data: RidgeSpineResponse,
+  opts?: {
+    /** Max curvature incoherence (°/100m). Default 40. Ridge spine should not zig-zag. */
+    maxIncoherence?: number;
+    /** Min length for primary spines (m). Default uses module constant. */
+    minPrimaryLengthM?: number;
+    /** Min length for secondary spines (m). Default uses module constant. */
+    minSecondaryLengthM?: number;
+    /** Min coordinate count — drop stubs. Default 3. */
+    minCoordCount?: number;
+    /** Max spines total (primary+secondary combined). 0 = no cap. Default 0. */
+    maxSpinesTotal?: number;
+  }
+): { filtered: RidgeSpineResponse; dropped: { id: string; reason: string }[] } {
+  const maxIncoherence = opts?.maxIncoherence ?? 40;
+  const minPrimaryLen = opts?.minPrimaryLengthM ?? MIN_LENGTH_M_PRIMARY;
+  const minSecondaryLen = opts?.minSecondaryLengthM ?? MIN_LENGTH_M_SECONDARY;
+  const minCoords = opts?.minCoordCount ?? 3;
+  const maxTotal = opts?.maxSpinesTotal ?? 0;
+
+  const dropped: { id: string; reason: string }[] = [];
+
+  function filterFC(
+    fc: GeoJSON.FeatureCollection,
+    tier: 'primary' | 'secondary'
+  ): GeoJSON.FeatureCollection {
+    const minLen = tier === 'primary' ? minPrimaryLen : minSecondaryLen;
+
+    const passing = fc.features.filter(f => {
+      const id = (f.properties as any)?.id || 'unknown';
+      const coords = f.geometry?.type === 'LineString'
+        ? f.geometry.coordinates as [number, number][]
+        : null;
+
+      if (!coords || coords.length < minCoords) {
+        dropped.push({ id, reason: `Too few coordinates (${coords?.length ?? 0} < ${minCoords})` });
+        return false;
+      }
+
+      const len = lineLength(coords);
+      if (len < minLen) {
+        dropped.push({ id, reason: `Too short (${Math.round(len)}m < ${minLen}m)` });
+        return false;
+      }
+
+      const incoherence = computeCurvatureIncoherence(coords);
+      if (incoherence > maxIncoherence) {
+        dropped.push({ id, reason: `Scribble detected — curvature incoherence ${incoherence.toFixed(1)}°/100m > ${maxIncoherence}°/100m threshold` });
+        return false;
+      }
+
+      return true;
+    });
+
+    return { ...fc, features: passing };
+  }
+
+  let filteredPrimary = filterFC(data.ridges_primary, 'primary');
+  let filteredSecondary = filterFC(data.ridges_secondary, 'secondary');
+
+  // Optional total cap — keep highest-quality (longest) spines first
+  if (maxTotal > 0) {
+    const all = [
+      ...filteredPrimary.features.map(f => ({ f, tier: 'primary' as const })),
+      ...filteredSecondary.features.map(f => ({ f, tier: 'secondary' as const })),
+    ];
+    if (all.length > maxTotal) {
+      // Sort by length descending, keep top N
+      all.sort((a, b) => {
+        const lenA = (a.f.properties as any)?.lengthMeters ?? lineLength(
+          a.f.geometry?.type === 'LineString' ? a.f.geometry.coordinates as [number, number][] : []
+        );
+        const lenB = (b.f.properties as any)?.lengthMeters ?? lineLength(
+          b.f.geometry?.type === 'LineString' ? b.f.geometry.coordinates as [number, number][] : []
+        );
+        return lenB - lenA;
+      });
+      const kept = all.slice(0, maxTotal);
+      const trimmed = all.slice(maxTotal);
+      for (const t of trimmed) {
+        dropped.push({
+          id: (t.f.properties as any)?.id || 'unknown',
+          reason: `Exceeded max spine cap (${maxTotal})`,
+        });
+      }
+      filteredPrimary = {
+        ...filteredPrimary,
+        features: kept.filter(k => k.tier === 'primary').map(k => k.f),
+      };
+      filteredSecondary = {
+        ...filteredSecondary,
+        features: kept.filter(k => k.tier === 'secondary').map(k => k.f),
+      };
+    }
+  }
+
+  // Update metadata counts
+  const filtered: RidgeSpineResponse = {
+    ...data,
+    ridges_primary: filteredPrimary as any,
+    ridges_secondary: filteredSecondary as any,
+    metadata: {
+      ...data.metadata,
+      ridge_count_primary: filteredPrimary.features.length,
+      ridge_count_secondary: filteredSecondary.features.length,
+    },
+  };
+
+  return { filtered, dropped };
 }
 
 /**
