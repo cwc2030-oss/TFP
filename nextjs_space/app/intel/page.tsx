@@ -47,7 +47,7 @@ import type {
   RidgeSpineResponse,
 } from '@/types/terrain';
 import { adaptV1Response } from '@/types/terrain';
-import { tierCorridorData, generateSyntheticTieredCorridors } from '@/lib/corridor-tiering';
+import { tierCorridorData, generateSyntheticTieredCorridors, enrichCorridorsWithRidgeAlignment } from '@/lib/corridor-tiering';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
@@ -3970,6 +3970,11 @@ function DeerIntelContent() {
         hardFunnelCount: tieredCorridorData?.funnels_hard?.features?.length ?? 0,
         slightFunnelCount: tieredCorridorData?.funnels_slight?.features?.length ?? 0,
         parcelCoverage: tieredCorridorData?.metadata?.parcel_coverage_pct ?? 0,
+        // Ridge-alignment enrichment: count of corridors confirmed by independent ridge pipeline
+        ridgeAlignedCount: tieredCorridorData ? [
+          ...(tieredCorridorData.corridors_primary?.features ?? []),
+          ...(tieredCorridorData.corridors_possible?.features ?? []),
+        ].filter(f => (f.properties as any)?.ridgeAligned === true).length : 0,
       },
       savedPropertyId: reportSavedPropertyId,
       seasonScores: {
@@ -5380,6 +5385,45 @@ function DeerIntelContent() {
       console.error('[MAP] Error updating tiered corridor sources (non-fatal):', err);
     }
   }, [tieredCorridorData, mapReady]);
+
+  // ========== RIDGE-ALIGNMENT ENRICHMENT ==========
+  // When BOTH tieredCorridorData and ridgeSpineData are available, cross-reference
+  // them to detect corridors that align with ridge spines from the independent
+  // ridge extraction pipeline. This does NOT change tiers — it enriches properties.
+  useEffect(() => {
+    if (!tieredCorridorData || !ridgeSpineData) return;
+
+    // Loop guard: if corridors already have ridgeAligned property, skip enrichment.
+    // This prevents infinite setTieredCorridorData → re-render → re-enrich loops.
+    const firstCorridor = tieredCorridorData.corridors_primary?.features?.[0]
+      ?? tieredCorridorData.corridors_possible?.features?.[0]
+      ?? tieredCorridorData.corridors_exploratory?.features?.[0];
+    if (firstCorridor?.properties && 'ridgeAligned' in (firstCorridor.properties as any)) {
+      return; // Already enriched
+    }
+
+    try {
+      const { enrichedData, alignmentSummary } = enrichCorridorsWithRidgeAlignment(
+        tieredCorridorData,
+        ridgeSpineData.ridges_primary,
+        ridgeSpineData.ridges_secondary,
+        ridgeSpineData.isSynthetic ?? true,
+      );
+
+      // Only update if we actually found alignments (avoid unnecessary re-renders)
+      if (alignmentSummary.ridgeAlignedCount > 0) {
+        console.log('[RidgeAlignment] Corridor↔Ridge cross-reference:', alignmentSummary);
+        setTieredCorridorData(enrichedData as typeof tieredCorridorData);
+      } else {
+        console.log('[RidgeAlignment] No corridor↔ridge alignments found (' +
+          alignmentSummary.totalCorridors + ' corridors checked)');
+      }
+    } catch (err) {
+      console.error('[RidgeAlignment] Enrichment error (non-fatal):', err);
+    }
+  // Depends on both — but enrichment is idempotent (checks for existing ridgeAligned
+  // property to avoid infinite loops when setTieredCorridorData triggers re-render).
+  }, [ridgeSpineData, tieredCorridorData]);
 
   // ========== GENERATE RIDGE SPINE DATA (Structure-First, DEM-Only) ==========
   useEffect(() => {
@@ -9112,6 +9156,36 @@ function DeerIntelContent() {
         // Register flow click handlers
         map.on('click', 'tfp-flow-primary', (e) => handleFlowSegmentClick(e, 'primary'));
         map.on('click', 'tfp-flow-secondary', (e) => handleFlowSegmentClick(e, 'secondary'));
+
+        // v4.1: Tiered corridor click handler — surfaces ridge-alignment reason
+        const handleCorridorClick = (e: mapboxgl.MapLayerMouseEvent) => {
+          if (!e.features || !e.features[0]) return;
+          const feature = e.features[0];
+          const props = feature.properties || {};
+          // Parse ridgeAlignmentReason — Mapbox serializes nested objects as strings
+          let ridgeAlignmentReason = props.ridgeAlignmentReason;
+          if (typeof ridgeAlignmentReason === 'string' && ridgeAlignmentReason.startsWith('"')) {
+            try { ridgeAlignmentReason = JSON.parse(ridgeAlignmentReason); } catch (_) {}
+          }
+          window.dispatchEvent(new CustomEvent('tfp-flow-segment-click', {
+            detail: {
+              segmentId: `corridor_${props.tier}_${Date.now()}`,
+              coordinates: (feature.geometry as GeoJSON.LineString).coordinates,
+              tier: props.tier || 'possible',
+              likelihood: props.corridorScore || 0.5,
+              // Pass ridge-alignment properties for the reasons panel
+              ridgeAligned: props.ridgeAligned === true || props.ridgeAligned === 'true',
+              ridgeAlignmentScore: parseFloat(props.ridgeAlignmentScore) || 0,
+              ridgeConfidenceBoost: parseFloat(props.ridgeConfidenceBoost) || 0,
+              ridgeAlignmentReason: ridgeAlignmentReason || null,
+              source: props.source || 'unknown',
+              screenX: e.point.x,
+              screenY: e.point.y,
+            }
+          }));
+        };
+        map.on('click', 'tfp-corridors-primary', handleCorridorClick);
+        map.on('click', 'tfp-corridors-possible', handleCorridorClick);
         
         // v3.6.1: Bedding probability click handler (for terrain reasons)
         const handleBeddingClick = (e: mapboxgl.MapLayerMouseEvent) => {
@@ -10797,16 +10871,22 @@ function DeerIntelContent() {
     // Handle corridor clicks for terrain reasons
     const handleCorridorReasons = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      // Corridors don't have detailed breakdown in current implementation
-      // We'll create a simple summary based on likelihood
+      // Build props object — includes ridge-alignment data when available
       const reasons = extractCorridorReasons(
         {
           likelihood: detail.likelihood,
+          corridorScore: detail.likelihood,
           bench_likelihood: detail.likelihood * 0.6,
           slope_preference: detail.likelihood * 0.5,
           saddle_proximity: detail.likelihood * 0.3,
           terrain_convergence: detail.likelihood * 0.4,
           spine_proximity: detail.likelihood * 0.5,
+          // Ridge-alignment properties (from enrichment pipeline)
+          ridgeAligned: detail.ridgeAligned || false,
+          ridgeAlignmentScore: detail.ridgeAlignmentScore || 0,
+          ridgeConfidenceBoost: detail.ridgeConfidenceBoost || 0,
+          ridgeAlignmentReason: detail.ridgeAlignmentReason || null,
+          source: detail.source || 'unknown',
         },
         { lng: 0, lat: 0 }
       );

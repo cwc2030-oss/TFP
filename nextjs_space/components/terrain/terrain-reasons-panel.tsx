@@ -55,6 +55,7 @@ const REASON_ICONS: Record<string, React.ElementType> = {
   ridge_wrap_pinch: Navigation,
   leeward_setup: Wind,
   ridge_distance: MapPin,
+  ridge_alignment: Mountain,  // Dual-pipeline confirmation
   slope_suitability: Compass,
   terrain_shelter: TreePine,
   corridor_offset: Target,
@@ -69,6 +70,7 @@ const REASON_COLORS: Record<string, string> = {
   ridge_wrap_pinch: '#ec4899',      // Pink
   leeward_setup: '#10b981',         // Emerald
   ridge_distance: '#6366f1',        // Indigo
+  ridge_alignment: '#c9a84c',       // Gold — dual-pipeline confirmation
   slope_suitability: '#84cc16',     // Lime
   terrain_shelter: '#22c55e',       // Green
   corridor_offset: '#f59e0b',       // Amber
@@ -321,9 +323,23 @@ export function extractCorridorReasons(
     });
   }
 
+  // Ridge-alignment confirmation (independent pipeline agreement)
+  if (props.ridgeAligned) {
+    reasons.push({
+      key: 'ridge_alignment',
+      label: 'Ridge-Aligned Seam',
+      value: Math.min(1, (props.ridgeAlignmentScore || 0.5) + (props.ridgeConfidenceBoost || 0)),
+      description: props.ridgeAlignmentReason
+        || 'Ridge-aligned movement seam — both elevation spine and corridor model agree.',
+    });
+  }
+
   const sortedReasons = [...reasons].sort((a, b) => b.value - a.value);
   let summary = 'Terrain structure supports deer travel along this path.';
-  if (sortedReasons.length >= 1 && sortedReasons[0].value >= 0.3) {
+  // Ridge-aligned corridors get a stronger summary
+  if (props.ridgeAligned && props.source === 'real_dem') {
+    summary = 'Independent DEM pipelines confirm this as a terrain movement seam.';
+  } else if (sortedReasons.length >= 1 && sortedReasons[0].value >= 0.3) {
     summary = `Primarily driven by ${sortedReasons[0].label.toLowerCase()}.`;
   }
 

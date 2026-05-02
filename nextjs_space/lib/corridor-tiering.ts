@@ -616,3 +616,243 @@ function createSyntheticFunnel(
     },
   };
 }
+
+
+// ========== RIDGE-ALIGNMENT ENRICHMENT ==========
+// Cross-references corridor centerlines with ridge spines from the independent
+// ridge extraction pipeline. When both DEM analyses agree on a terrain feature,
+// this constitutes independent confirmation — surfaced as a "movement seam".
+
+/** Distance in meters between two [lng, lat] points (Haversine) */
+function haversineM(a: [number, number], b: [number, number]): number {
+  const R = 6_371_000;
+  const dLat = (b[1] - a[1]) * Math.PI / 180;
+  const dLng = (b[0] - a[0]) * Math.PI / 180;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat +
+    Math.cos(a[1] * Math.PI / 180) * Math.cos(b[1] * Math.PI / 180) * sinLng * sinLng;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/** Bearing (0-360°) from a → b */
+function bearingDeg(a: [number, number], b: [number, number]): number {
+  const dLng = (b[0] - a[0]) * Math.PI / 180;
+  const lat1 = a[1] * Math.PI / 180;
+  const lat2 = b[1] * Math.PI / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+/** Angular difference between two bearings, 0-90° (treats line as undirected) */
+function bearingDiff(a: number, b: number): number {
+  let d = Math.abs(a - b) % 360;
+  if (d > 180) d = 360 - d;
+  if (d > 90) d = 180 - d;
+  return d;
+}
+
+/** Compute overall bearing of a LineString (first coord → last coord) */
+function lineBearing(coords: [number, number][]): number {
+  if (coords.length < 2) return 0;
+  return bearingDeg(coords[0], coords[coords.length - 1]);
+}
+
+/** Minimum distance from a point to the nearest segment of a line */
+function pointToLineMinDist(
+  pt: [number, number],
+  line: [number, number][]
+): number {
+  let minD = Infinity;
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i];
+    const b = line[i + 1];
+    // Project pt onto segment a→b
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    let t = len2 === 0 ? 0 : ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const proj: [number, number] = [a[0] + t * dx, a[1] + t * dy];
+    const d = haversineM(pt, proj);
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
+
+export interface RidgeAlignmentResult {
+  /** true if this corridor aligns with an independent ridge spine */
+  ridgeAligned: boolean;
+  /** 0–1: how strongly the corridor aligns (proximity × bearing match) */
+  ridgeAlignmentScore: number;
+  /** Confidence boost when both pipelines agree (0–0.15 range) */
+  ridgeConfidenceBoost: number;
+  /** Human-readable explanation */
+  ridgeAlignmentReason: string | null;
+  /** Which pipeline produced the corridor data */
+  source: 'real_dem' | 'synthetic' | 'unknown';
+}
+
+// Alignment thresholds
+const ALIGNMENT_PROXIMITY_M = 120;  // Corridor must pass within 120m of ridge
+const ALIGNMENT_BEARING_DEG = 30;   // Bearing must agree within ±30°
+const ALIGNMENT_SAMPLE_STEP = 3;    // Sample every Nth corridor point
+
+/**
+ * Check if a single corridor feature aligns with any ridge spine.
+ * Alignment = proximity (corridor points close to ridge) + bearing agreement.
+ */
+function checkSingleCorridorAlignment(
+  corridorCoords: [number, number][],
+  ridgeLines: [number, number][][],
+): { aligned: boolean; score: number; nearestDist: number; bearingDiff: number } {
+  if (corridorCoords.length < 2 || ridgeLines.length === 0) {
+    return { aligned: false, score: 0, nearestDist: Infinity, bearingDiff: 90 };
+  }
+
+  const corridorBrg = lineBearing(corridorCoords);
+
+  let bestScore = 0;
+  let bestDist = Infinity;
+  let bestBrgDiff = 90;
+
+  for (const ridgeCoords of ridgeLines) {
+    if (ridgeCoords.length < 2) continue;
+
+    // Check bearing similarity (undirected)
+    const ridgeBrg = lineBearing(ridgeCoords);
+    const brgDiff = bearingDiff(corridorBrg, ridgeBrg);
+    if (brgDiff > ALIGNMENT_BEARING_DEG) continue; // Bearings too different
+
+    // Sample corridor points and check proximity to this ridge
+    let closeCount = 0;
+    let totalSampled = 0;
+    let minDist = Infinity;
+
+    for (let i = 0; i < corridorCoords.length; i += ALIGNMENT_SAMPLE_STEP) {
+      totalSampled++;
+      const d = pointToLineMinDist(corridorCoords[i], ridgeCoords);
+      if (d < minDist) minDist = d;
+      if (d <= ALIGNMENT_PROXIMITY_M) closeCount++;
+    }
+
+    if (totalSampled === 0) continue;
+    const proximityRatio = closeCount / totalSampled;
+
+    // Score = proximity ratio × bearing match quality
+    const brgMatch = 1 - (brgDiff / ALIGNMENT_BEARING_DEG);
+    const score = proximityRatio * brgMatch;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestDist = minDist;
+      bestBrgDiff = brgDiff;
+    }
+  }
+
+  // Threshold: at least 30% of corridor points must be within range AND bearing must match
+  const aligned = bestScore >= 0.3;
+  return { aligned, score: bestScore, nearestDist: bestDist, bearingDiff: bestBrgDiff };
+}
+
+/**
+ * Enrich all corridors in a tiered corridor response with ridge-alignment data.
+ * 
+ * This is a pure function — it returns NEW FeatureCollections with enriched
+ * properties. It does NOT mutate the input. The tier assignment is preserved;
+ * alignment only adds metadata + a small confidence boost.
+ */
+export function enrichCorridorsWithRidgeAlignment(
+  tieredData: Record<string, any>,
+  ridgePrimary: GeoJSON.FeatureCollection,
+  ridgeSecondary: GeoJSON.FeatureCollection,
+  ridgeIsSynthetic: boolean,
+): {
+  enrichedData: Record<string, any>;
+  alignmentSummary: {
+    totalCorridors: number;
+    ridgeAlignedCount: number;
+    avgAlignmentScore: number;
+  };
+} {
+  // Collect all ridge spine coordinates
+  const ridgeLines: [number, number][][] = [];
+  for (const fc of [ridgePrimary, ridgeSecondary]) {
+    for (const f of fc.features) {
+      if (f.geometry?.type === 'LineString') {
+        ridgeLines.push(f.geometry.coordinates as [number, number][]);
+      } else if (f.geometry?.type === 'MultiLineString') {
+        for (const line of (f.geometry as GeoJSON.MultiLineString).coordinates) {
+          ridgeLines.push(line as [number, number][]);
+        }
+      }
+    }
+  }
+
+  const source = ridgeIsSynthetic ? 'synthetic' : 'real_dem';
+
+  let totalCorridors = 0;
+  let ridgeAlignedCount = 0;
+  let sumAlignmentScore = 0;
+
+  // Enrich a single FeatureCollection
+  const enrichFC = (fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection => {
+    return {
+      ...fc,
+      features: fc.features.map(f => {
+        if (f.geometry?.type !== 'LineString') return f;
+        totalCorridors++;
+
+        const coords = f.geometry.coordinates as [number, number][];
+        const check = checkSingleCorridorAlignment(coords, ridgeLines);
+
+        if (check.aligned) {
+          ridgeAlignedCount++;
+          sumAlignmentScore += check.score;
+        }
+
+        const alignment: RidgeAlignmentResult = {
+          ridgeAligned: check.aligned,
+          ridgeAlignmentScore: Math.round(check.score * 100) / 100,
+          ridgeConfidenceBoost: check.aligned && source === 'real_dem'
+            ? Math.round(Math.min(0.15, check.score * 0.15) * 100) / 100
+            : 0,
+          ridgeAlignmentReason: check.aligned
+            ? `Ridge-aligned movement seam — both elevation spine and corridor model agree (${Math.round(check.nearestDist)}m proximity, ${Math.round(check.bearingDiff)}° bearing match).`
+            : null,
+          source: source as 'real_dem' | 'synthetic' | 'unknown',
+        };
+
+        return {
+          ...f,
+          properties: {
+            ...f.properties,
+            ...alignment,
+          },
+        };
+      }),
+    };
+  };
+
+  const enrichedData: Record<string, any> = {
+    ...tieredData,
+    corridors_primary: enrichFC(tieredData.corridors_primary),
+    corridors_possible: enrichFC(tieredData.corridors_possible),
+    corridors_exploratory: enrichFC(tieredData.corridors_exploratory),
+    corridors_context_primary: enrichFC(tieredData.corridors_context_primary),
+    corridors_context_possible: enrichFC(tieredData.corridors_context_possible),
+    // funnels, intrusion_overlay, metadata pass through unchanged
+  };
+
+  return {
+    enrichedData,
+    alignmentSummary: {
+      totalCorridors,
+      ridgeAlignedCount,
+      avgAlignmentScore: ridgeAlignedCount > 0
+        ? Math.round((sumAlignmentScore / ridgeAlignedCount) * 100) / 100
+        : 0,
+    },
+  };
+}
