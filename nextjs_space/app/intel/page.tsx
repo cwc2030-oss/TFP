@@ -6661,10 +6661,11 @@ function DeerIntelContent() {
     // 1. Corridors dim smoothly (600ms ease) to push attention toward the highlight
     // 2. Nearest corridor highlight fades in after a 200ms delay for a deliberate reveal
     const selecting = selectedStand !== null;
+    // v3.8.1: Dim opacities match new hierarchy (primary demoted, possible elevated)
     const corridorDimLayers = [
-      { id: 'tfp-corridors-primary', dimOpacity: 0.25, fullOpacity: 0.78 },
-      { id: 'tfp-corridors-primary-casing', dimOpacity: 0.05, fullOpacity: 0.15 },
-      { id: 'tfp-corridors-possible', dimOpacity: 0.12, fullOpacity: 0.42 },
+      { id: 'tfp-corridors-primary', dimOpacity: 0.12, fullOpacity: 0.35 },
+      { id: 'tfp-corridors-primary-casing', dimOpacity: 0.02, fullOpacity: 0.06 },
+      { id: 'tfp-corridors-possible', dimOpacity: 0.18, fullOpacity: 0.55 },
       { id: 'tfp-corridors-exploratory', dimOpacity: 0.04, fullOpacity: 0.22 },
       { id: 'tfp-corridors-context-primary', dimOpacity: 0.06, fullOpacity: 0.28 },
       { id: 'tfp-corridors-context-possible', dimOpacity: 0.03, fullOpacity: 0.15 },
@@ -6715,10 +6716,10 @@ function DeerIntelContent() {
         const funnelVisible = visibility.draws || visibility.saddles || visibility.corridors;
         map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
       }
-      // Saddle node markers (real terrain passes from ridge pipeline) — smooth fade
+      // v3.8.1: Saddle pass markers — tight dots, subtle glow
       fadeToggleLayers(map, visibility.saddles, [
-        { id: 'tfp-saddle-nodes', targetOpacity: 0.85, opacityProp: 'circle-opacity' },
-        { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.4, opacityProp: 'circle-stroke-opacity' },
+        { id: 'tfp-saddle-nodes', targetOpacity: 0.90, opacityProp: 'circle-opacity' },
+        { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.08, opacityProp: 'circle-opacity' },
       ], FADE_IN);
       // v3.8: Funnel saddle polygons (legacy corridor-derived saddle zones) — only show
       // when saddle_nodes layer has NO data. Prevents noisy duplicate saddle visualization.
@@ -6729,10 +6730,11 @@ function DeerIntelContent() {
       ], FADE_IN);
       
       // V4 Step 11b: Staggered corridor reveal — cascading "drawing on" effect
+      // v3.8.1: Primary demoted, possible elevated as main readable signal
       staggeredFadeToggle(map, visibility.corridors, [
-        { id: 'tfp-corridors-primary-casing', targetOpacity: 0.15 },
-        { id: 'tfp-corridors-primary', targetOpacity: 0.78 },
-        { id: 'tfp-corridors-possible', targetOpacity: 0.42 },
+        { id: 'tfp-corridors-primary-casing', targetOpacity: 0.06 },
+        { id: 'tfp-corridors-primary', targetOpacity: 0.35 },
+        { id: 'tfp-corridors-possible', targetOpacity: 0.55 },
         { id: 'tfp-corridors-exploratory', targetOpacity: 0.22 },
         { id: 'tfp-corridors-context-primary', targetOpacity: 0.28 },
         { id: 'tfp-corridors-context-possible', targetOpacity: 0.15 },
@@ -7329,10 +7331,14 @@ function DeerIntelContent() {
         // ALL HIDDEN in Terrain Work Mode (deer interpretation)
         // V4 Step 10: Premium casing, zoom-responsive widths, cleaner hierarchy
         
-        // Primary corridors: Top band — PREMIUM with casing glow
+        // v3.8.1: Visual hierarchy swap — Secondary (possible) is the primary readable layer.
+        // Primary corridors demoted to faint support — high model confidence but visually
+        // overwhelming on large parcels. Secondary dashed flows read better as terrain seams.
+        
+        // Primary corridors: DEMOTED — thin, low-opacity support layer
         if (!map.getSource('tfp-corridors-primary')) {
           map.addSource('tfp-corridors-primary', { type: 'geojson', data: EMPTY_FC });
-          // Casing layer: soft diffuse glow behind primary corridor
+          // Casing layer: very faint glow — barely visible
           map.addLayer({
             id: 'tfp-corridors-primary-casing',
             type: 'line',
@@ -7340,12 +7346,12 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPrimary,
-              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 7, 14, 10, 17, 14],
-              'line-opacity': 0.15,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 17, 8],
+              'line-opacity': 0.06,
               'line-blur': 3,
             },
           });
-          // Core line: zoom-responsive width (v3.9.1: dasharray for subtle animation)
+          // Core line: thinner, lower opacity — context, not focal point
           map.addLayer({
             id: 'tfp-corridors-primary',
             type: 'line',
@@ -7353,14 +7359,14 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPrimary,
-              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 14, 3.5, 17, 5],
-              'line-opacity': 0.78,
-              'line-dasharray': [8, 3],
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 14, 2.2, 17, 3],
+              'line-opacity': 0.35,
+              'line-dasharray': [10, 4],
             },
           });
         }
         
-        // Possible corridors — subtle, zoom-responsive
+        // Secondary (possible) corridors — ELEVATED as main readable deer flow
         if (!map.getSource('tfp-corridors-possible')) {
           map.addSource('tfp-corridors-possible', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -7370,8 +7376,8 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'line-color': LAYER_COLORS.corridorPossible,
-              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 14, 2.5, 17, 3.5],
-              'line-opacity': 0.42,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2, 14, 3, 17, 4],
+              'line-opacity': 0.55,
               'line-dasharray': [6, 3],
             },
           });
@@ -7512,31 +7518,36 @@ function DeerIntelContent() {
           map.addSource('tfp-ridges-secondary', { type: 'geojson', data: EMPTY_FC });
         }
         
-        // Saddle nodes: Prominent amber markers at terrain saddle points
+        // v3.8.1: Saddle nodes — tight pass markers, NOT donuts.
+        // Single small filled dot represents a localized terrain pass / neck-down.
+        // No outer halo ring — reads as a pinch point, not a zone.
         if (!map.getSource('tfp-saddle-nodes')) {
           map.addSource('tfp-saddle-nodes', { type: 'geojson', data: EMPTY_FC });
+          // Core marker: small, sharp, high-contrast
           map.addLayer({
             id: 'tfp-saddle-nodes',
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 7,
-              'circle-color': '#f59e0b',
-              'circle-opacity': 0.85,
-              'circle-stroke-color': '#ffffff',
-              'circle-stroke-width': 2,
-              'circle-stroke-opacity': 0.9,
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 15, 5, 17, 6],
+              'circle-color': '#d97706',       // Amber-600 — earthy, not neon
+              'circle-opacity': 0.90,
+              'circle-stroke-color': '#451a03', // Amber-950 — dark rim for contrast on satellite
+              'circle-stroke-width': 1.5,
+              'circle-stroke-opacity': 0.8,
             },
           });
+          // Subtle outer pulse (replaces old donut) — very faint, only visible at high zoom
           map.addLayer({
             id: 'tfp-saddle-nodes-outline',
             type: 'circle',
             source: 'tfp-saddle-nodes',
             paint: {
-              'circle-radius': 12,
-              'circle-color': 'transparent',
-              'circle-stroke-color': '#f59e0b',
-              'circle-stroke-width': 1.5,
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 15, 8, 17, 10],
+              'circle-color': '#d97706',
+              'circle-opacity': 0.08,          // Almost invisible — just a gentle glow
+              'circle-stroke-color': '#d97706',
+              'circle-stroke-width': 0.5,
               'circle-stroke-opacity': 0.4,
             },
           });
