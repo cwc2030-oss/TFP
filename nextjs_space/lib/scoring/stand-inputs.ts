@@ -52,7 +52,7 @@ export function windOverlapFromDelta(deltaDeg: number) {
  * Stable across parcels: movement = exp(-dist / falloffM)
  * Typical falloff: 120–180m.
  */
-export function movementFromCorridorDistanceMeters(distanceM?: number, falloffM = 150) {
+export function movementFromCorridorDistanceMeters(distanceM?: number, falloffM = 200) {
   if (distanceM == null || !Number.isFinite(distanceM)) return 0.5; // conservative default
   const d = Math.max(0, distanceM);
   const m = Math.exp(-d / falloffM);
@@ -144,7 +144,7 @@ export function buildStandInputs(
   // movement: corridor proximity
   const movement = movementFromCorridorDistanceMeters(
     stand?.distToCorridorMeters ?? stand?.corridorDistanceM ?? stand?.corridor_distance_m ?? stand?.corridorDistM,
-    ctx.falloffM ?? 150
+    ctx.falloffM ?? 200
   );
 
   // intrusion: approach risk label or numeric if you already have it

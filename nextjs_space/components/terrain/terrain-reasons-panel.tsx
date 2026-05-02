@@ -424,12 +424,13 @@ export function extractBeddingReasons(
 ): TerrainReasonData {
   const reasons: TerrainReason[] = [];
   
-  if (props.upperSlope > 0.1) {
+  const ridgePos = props.ridge_position ?? props.upperSlope ?? 0;
+  if (ridgePos > 0.1) {
     reasons.push({
-      key: 'ridge_distance',
-      label: 'Upper-Slope Position',
-      value: props.upperSlope,
-      description: 'Elevated position with good vantage—deer prefer bedding high.',
+      key: 'ridge_position',
+      label: 'Ridge-Shoulder Position',
+      value: ridgePos,
+      description: 'Just below ridgeline—deer prefer bedding in this defensible band.',
     });
   }
   

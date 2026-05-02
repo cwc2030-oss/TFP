@@ -1355,10 +1355,10 @@ function buildStandDirectionFeatures(
   // Divide cone into angular slices, score each by terrain signal density,
   // pick best contiguous pair → narrow high-probability wedge
   const KILL_ZONE_SLICES = 7;       // divide cone arc into 7 angular bins
-  const KILL_ZONE_SCAN_RADIUS = 60; // metres — sample radius for terrain signals
-  const CORRIDOR_WEIGHT = 0.40;
+  const KILL_ZONE_SCAN_RADIUS = 80; // metres — v3.8: widened from 60 to reduce corridor dominance
+  const CORRIDOR_WEIGHT = 0.30;     // v3.8: reduced from 0.40 — corridors were triple-dipping
   const SADDLE_WEIGHT = 0.25;
-  const CONVERGENCE_WEIGHT = 0.25;
+  const CONVERGENCE_WEIGHT = 0.35;  // v3.8: increased from 0.25 — convergence zones are terrain-confirmed
   const EDGE_WEIGHT = 0.10;         // light edge proximity per safety constraints
 
   function scoreSlice(
@@ -6715,12 +6715,17 @@ function DeerIntelContent() {
         const funnelVisible = visibility.draws || visibility.saddles || visibility.corridors;
         map.setLayoutProperty('tfp-funnels-lines', 'visibility', funnelVisible ? 'visible' : 'none');
       }
-      // Saddle polygons + saddle node markers — smooth fade
+      // Saddle node markers (real terrain passes from ridge pipeline) — smooth fade
       fadeToggleLayers(map, visibility.saddles, [
-        { id: 'tfp-funnels-polys-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
-        { id: 'tfp-funnels-polys-outline', targetOpacity: 1.0 },
         { id: 'tfp-saddle-nodes', targetOpacity: 0.85, opacityProp: 'circle-opacity' },
         { id: 'tfp-saddle-nodes-outline', targetOpacity: 0.4, opacityProp: 'circle-stroke-opacity' },
+      ], FADE_IN);
+      // v3.8: Funnel saddle polygons (legacy corridor-derived saddle zones) — only show
+      // when saddle_nodes layer has NO data. Prevents noisy duplicate saddle visualization.
+      const hasSaddleNodes = (ridgeSpineData?.saddle_nodes?.features?.length ?? 0) > 0;
+      fadeToggleLayers(map, visibility.saddles && !hasSaddleNodes, [
+        { id: 'tfp-funnels-polys-fill', targetOpacity: 0.2, opacityProp: 'fill-opacity' },
+        { id: 'tfp-funnels-polys-outline', targetOpacity: 1.0 },
       ], FADE_IN);
       
       // V4 Step 11b: Staggered corridor reveal — cascading "drawing on" effect

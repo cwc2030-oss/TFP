@@ -44,10 +44,13 @@ export function computeStandScore(input: Partial<StandInputs>): StandScore {
   const intrusion_fit = clamp(1 - safeInput.intrusion);
 
   // Weighted deterministic alignment
+  // v3.8: Reduced movement (corridor proximity) from 0.30→0.25
+  //        Increased intrusion (access safety) from 0.20→0.25
+  //        Prevents corridor triple-dipping from dominating stand selection
   const raw =
     0.35 * wind_fit +
-    0.30 * clamp(safeInput.movement) +
-    0.20 * intrusion_fit +
+    0.25 * clamp(safeInput.movement) +
+    0.25 * intrusion_fit +
     0.10 * clamp(safeInput.time_fit) +
     0.05 * clamp(safeInput.season_fit);
 

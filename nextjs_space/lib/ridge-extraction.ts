@@ -635,46 +635,27 @@ export function generateSyntheticRidgeSpines(
         geometry: { type: 'LineString', coordinates: spurCoords },
       });
 
-      // Saddle at spur junction
-      saddleFeatures.push({
-        type: 'Feature',
-        properties: {
-          id: `saddle_jct_${pIdx}_${sIdx}`,
-          elevationM: Math.round(285 - pIdx * 8),
-          ridgeDropFt: Math.round(25 + sIdx * 5),
-          adjacentRidgeIds: [ridgeId, spurId],
-        },
-        geometry: { type: 'Point', coordinates: spurStart },
-      });
-    }
-
-    // ===== CURVATURE-BASED SADDLES along this primary =====
-    if (filtered.length >= 4) {
-      // Find top 1-2 curvature maxima
-      const curvatures: { idx: number; curve: number }[] = [];
-      for (let i = 1; i < filtered.length - 1; i++) {
-        const b1 = calculateBearing(filtered[i - 1], filtered[i]);
-        const b2 = calculateBearing(filtered[i], filtered[i + 1]);
-        curvatures.push({ idx: i, curve: bearingDiff(b1, b2) });
-      }
-      curvatures.sort((a, b) => b.curve - a.curve);
-
-      const numCurvSaddles = parcelAcres > 400 ? 2 : 1;
-      for (let ci = 0; ci < Math.min(numCurvSaddles, curvatures.length); ci++) {
-        if (curvatures[ci].curve < 3) continue; // Skip if almost straight
-        const pt = filtered[curvatures[ci].idx];
+      // v3.8: Only create spur-junction saddle if spur is meaningful (>400m)
+      // Set ridgeDropFt to 15 (below 20ft quality filter threshold) so synthetic
+      // saddles do NOT pass as real terrain passes unless Modal provides real data.
+      if (spurLength >= 400) {
         saddleFeatures.push({
           type: 'Feature',
           properties: {
-            id: `saddle_curv_${pIdx}_${ci}`,
-            elevationM: Math.round(282 - pIdx * 10),
-            ridgeDropFt: Math.round(30 + ci * 8),
-            adjacentRidgeIds: [ridgeId],
+            id: `saddle_jct_${pIdx}_${sIdx}`,
+            elevationM: Math.round(285 - pIdx * 8),
+            ridgeDropFt: 15, // Below quality filter threshold — honest synthetic
+            adjacentRidgeIds: [ridgeId, spurId],
           },
-          geometry: { type: 'Point', coordinates: pt },
+          geometry: { type: 'Point', coordinates: spurStart },
         });
       }
     }
+
+    // v3.8: REMOVED curvature-based synthetic saddles.
+    // Curvature maxima along a synthetic ridge are NOT real topographic passes.
+    // They were stamped at every bend, producing dozens of fake saddle icons.
+    // Only real DEM data (from Modal) should produce curvature-detected saddles.
   }
 
   // ===== CLIP SADDLES to parcel =====

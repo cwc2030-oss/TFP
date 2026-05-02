@@ -217,13 +217,16 @@ export interface BeddingZone {
   radiusM: number;
   beddingType: BeddingType; // v3.7: classified by dominant factor profile
   factors: {
-    upperSlope: number;      // 0-1 upper-slope preference
+    ridge_position: number;   // 0-1 ridge-shoulder band (v3.8 collapsed)
     solarAspect: number;     // 0-1 south/SE aspect thermal warmth
-    ridgeDistance: number;    // 0-1 ridge-distance band (just below crest)
     slopeSuitability: number; // 0-1 moderate slope
     terrainShelter: number;  // 0-1 concave terrain shelter
     corridorOffset: number;  // 0-1 offset from primary corridors
     humanPressure: number;   // 0-1 distance from structures
+    /** @deprecated kept for backward compat in GeoJSON props */
+    upperSlope?: number;
+    /** @deprecated kept for backward compat in GeoJSON props */
+    ridgeDistance?: number;
   };
 }
 
@@ -1539,26 +1542,27 @@ function convergenceNodesToGeoJSON(nodes: ConvergenceNode[]): GeoJSON.FeatureCol
 
 // v3.6.1: Bedding Probability v2 — Tightened weights
 // v3.7 — 7-factor bedding model: solar aspect replaces leeward, adds human pressure
+// v3.8 — Collapsed redundant ridgeDistance + upperSlope into ridge_position (0.25)
+//         Freed weight redistributed to terrainShelter and corridorOffset
 const BEDDING_WEIGHTS = {
-  upperSlope: 0.18,        // Upper-slope elevation position
+  ridge_position: 0.25,    // v3.8: Collapsed upperSlope + ridgeDistance (was 0.38 combined)
   solarAspect: 0.16,       // South/SE facing = thermal warmth (MO November)
-  ridgeDistance: 0.20,     // Ridge-shoulder band
   slopeSuitability: 0.10,  // Moderate slope (8-25%)
-  terrainShelter: 0.18,    // Concave terrain pocket
-  corridorOffset: 0.10,    // Not on movement lanes
-  humanPressure: 0.08,     // Distance from structures (barns, houses)
+  terrainShelter: 0.22,    // v3.8: Increased from 0.18 — real shelter matters more
+  corridorOffset: 0.15,    // v3.8: Increased from 0.10 — bedding far from movement lanes
+  humanPressure: 0.12,     // v3.8: Increased from 0.08 — pressure avoidance matters
 };
 
 // v3.6.1: Bedding detection thresholds — tightened for fewer, better pockets
 const BEDDING_CONFIG = {
-  minProbability: 0.55,    // Raised threshold: "likely" vs "capable"
+  minProbability: 0.62,    // v3.8: Raised from 0.55 — only high-confidence bedding
   prominenceThreshold: 0.08, // v2: zone must exceed neighbors by this amount
   patchQualityThreshold: 0.35, // v2: surrounding cells must average above this
-  maxZones: 8,             // Reduced from 12: target 3-6 actual
+  maxZones: 5,             // v3.8: Reduced from 8 — fewer, more defensible zones
   radiusM: 28,             // Tighter, more compact pockets (was 35)
   minZoneSpacingCells: 5,  // Increased spacing (was 3): avoid scatter
   corridorOffsetMinM: 50,  // Raised minimum from 40m
-  corridorOffsetHardGateM: 40, // v2: below this, shelter must be exceptional
+  corridorOffsetHardGateM: 30, // v3.8: Reduced from 40 — hard zero below 30m
   corridorOffsetMaxM: 150, // Maximum (too far is less ideal)
 };
 
@@ -1569,7 +1573,8 @@ function computeBeddingProbability(
   grid: HuntabilityGrid, 
   corridors: Corridor[],
   waterBodies?: Array<{ coordinates: number[][][] }>,
-  structurePoints?: [number, number][]
+  structurePoints?: [number, number][],
+  ridgeSpines?: GeoJSON.FeatureCollection | null
 ): void {
   // Build a quick lookup for corridor cells
   const corridorCells = new Set<string>();
@@ -1578,6 +1583,28 @@ function computeBeddingProbability(
       c.cells.forEach(cell => corridorCells.add(`${cell.row},${cell.col}`));
     }
   });
+
+  // v3.8: Pre-extract spine coordinates for proximity gate
+  // When real DEM ridge spines exist, bedding must be within 200m of a spine
+  const SPINE_GATE_M = 200;
+  const spineCoords: Array<[number, number]> = [];
+  if (ridgeSpines?.features?.length) {
+    for (const f of ridgeSpines.features) {
+      const geom = f.geometry;
+      if (geom.type === 'LineString') {
+        for (const coord of (geom as GeoJSON.LineString).coordinates) {
+          spineCoords.push([coord[0], coord[1]]);
+        }
+      } else if (geom.type === 'MultiLineString') {
+        for (const line of (geom as GeoJSON.MultiLineString).coordinates) {
+          for (const coord of line) {
+            spineCoords.push([coord[0], coord[1]]);
+          }
+        }
+      }
+    }
+  }
+  const hasSpines = spineCoords.length > 0;
   
   for (let r = 1; r < grid.rows - 1; r++) {
     for (let c = 1; c < grid.cols - 1; c++) {
@@ -1589,22 +1616,42 @@ function computeBeddingProbability(
         (cell as any).bedding_factors = null;
         continue;
       }
+
+      // v3.8: Spine proximity gate — when real spines exist, require bedding
+      // within 200m of a ridge spine. Prevents phantom bedding in flat areas.
+      if (hasSpines) {
+        let minSpineDistM = Infinity;
+        for (const sp of spineCoords) {
+          const dLat = (cell.lat - sp[1]) * 111320;
+          const dLng = (cell.lng - sp[0]) * 111320 * Math.cos(cell.lat * Math.PI / 180);
+          const d = Math.sqrt(dLat * dLat + dLng * dLng);
+          if (d < minSpineDistM) {
+            minSpineDistM = d;
+            if (d < SPINE_GATE_M) break; // Early exit — close enough
+          }
+        }
+        if (minSpineDistM > SPINE_GATE_M) {
+          (cell as any).bedding_probability = 0;
+          (cell as any).bedding_factors = null;
+          continue;
+        }
+      }
       
-      // v3.6.1: Tightened upper-slope scoring
-      // Sweet spot narrowed to 0.45-0.70 (ridge-shoulder focus)
-      let upperSlope = 0;
-      if (cell.ridge_prox >= 0.50 && cell.ridge_prox <= 0.70) {
-        upperSlope = 0.95; // Optimal ridge-shoulder band
-      } else if (cell.ridge_prox >= 0.45 && cell.ridge_prox < 0.50) {
-        upperSlope = 0.75; // Good
+      // v3.8: Collapsed ridge_position — single signal for ridge-shoulder band
+      // Replaces redundant upperSlope + ridgeDistance (were nearly identical)
+      let ridge_position = 0;
+      if (cell.ridge_prox >= 0.55 && cell.ridge_prox <= 0.70) {
+        ridge_position = 1.0; // Perfect ridge-shoulder
+      } else if (cell.ridge_prox >= 0.50 && cell.ridge_prox < 0.55) {
+        ridge_position = 0.80;
       } else if (cell.ridge_prox > 0.70 && cell.ridge_prox <= 0.78) {
-        upperSlope = 0.55; // Getting close to crest
+        ridge_position = 0.50; // Getting close to crest — exposed
+      } else if (cell.ridge_prox >= 0.40 && cell.ridge_prox < 0.50) {
+        ridge_position = 0.35; // Mid-slope, acceptable with shelter
       } else if (cell.ridge_prox > 0.78) {
-        upperSlope = 0.15; // Too exposed on ridge crest
-      } else if (cell.ridge_prox >= 0.35) {
-        upperSlope = 0.35; // Mid-slope, acceptable with other factors
+        ridge_position = 0.10; // Too exposed on ridge crest
       } else {
-        upperSlope = 0.10; // Valley/low terrain — deer don't bed here
+        ridge_position = 0.05; // Valley/low terrain — deer don't bed here
       }
       
       // 2. Solar aspect — south/SE facing holds thermal warmth in MO November
@@ -1619,21 +1666,6 @@ function computeBeddingProbability(
         if (southSignal > 0.03) return 0.45;
         return 0.10;
       })();
-      
-      // v3.6.1: Ridge-distance band tightened (optimal: 0.55-0.70)
-      // This is the "ridge-shoulder" — just below crest, sheltered
-      let ridgeDistance = 0;
-      if (cell.ridge_prox >= 0.55 && cell.ridge_prox <= 0.70) {
-        ridgeDistance = 1.0; // Perfect ridge-shoulder
-      } else if (cell.ridge_prox >= 0.50 && cell.ridge_prox < 0.55) {
-        ridgeDistance = 0.75;
-      } else if (cell.ridge_prox > 0.70 && cell.ridge_prox <= 0.78) {
-        ridgeDistance = 0.50; // Higher on ridge, less sheltered
-      } else if (cell.ridge_prox >= 0.40 && cell.ridge_prox < 0.50) {
-        ridgeDistance = 0.35;
-      } else {
-        ridgeDistance = 0.10; // Valley or exposed crest
-      }
       
       // 4. Moderate slope suitability
       let slopeSuitability = 0;
@@ -1688,14 +1720,14 @@ function computeBeddingProbability(
         } else if (distM > BEDDING_CONFIG.corridorOffsetMaxM) {
           // Far from corridors — still okay
           corridorOffset = 0.50;
-        } else if (distM >= BEDDING_CONFIG.corridorOffsetHardGateM) {
+        } else if (distM >= BEDDING_CONFIG.corridorOffsetMinM * 0.8) {
           // 40-50m: acceptable only with exceptional shelter
           corridorOffset = terrainShelter >= 0.70 ? 0.55 : 0.20;
-        } else if (distM >= 25) {
-          // 25-40m: very close — only exceptional shelter saves it
+        } else if (distM >= BEDDING_CONFIG.corridorOffsetHardGateM) {
+          // 30-40m: very close — only exceptional shelter saves it
           corridorOffset = terrainShelter >= 0.90 ? 0.30 : 0.05;
         } else {
-          // < 25m: too close, essentially on the movement lane
+          // < 30m: too close, essentially on the movement lane — zero out
           corridorOffset = 0.0;
         }
       }
@@ -1716,26 +1748,24 @@ function computeBeddingProbability(
         return 0.95;
       })();
 
-      // Store factors in cell (for inspection)
+      // Store factors in cell (for inspection) — v3.8 collapsed model
       (cell as any).bedding_factors = {
-        upperSlope,
+        ridge_position,
         solarAspect,
-        ridgeDistance,
         slopeSuitability,
         terrainShelter,
         corridorOffset,
         humanPressure,
       };
       
-      // Weighted combination (7-factor v3.7)
+      // Weighted combination (6-factor v3.8)
       (cell as any).bedding_probability = 
-        upperSlope      * BEDDING_WEIGHTS.upperSlope +
-        solarAspect     * BEDDING_WEIGHTS.solarAspect +
-        ridgeDistance    * BEDDING_WEIGHTS.ridgeDistance +
+        ridge_position   * BEDDING_WEIGHTS.ridge_position +
+        solarAspect      * BEDDING_WEIGHTS.solarAspect +
         slopeSuitability * BEDDING_WEIGHTS.slopeSuitability +
-        terrainShelter  * BEDDING_WEIGHTS.terrainShelter +
-        corridorOffset  * BEDDING_WEIGHTS.corridorOffset +
-        humanPressure   * BEDDING_WEIGHTS.humanPressure;
+        terrainShelter   * BEDDING_WEIGHTS.terrainShelter +
+        corridorOffset   * BEDDING_WEIGHTS.corridorOffset +
+        humanPressure    * BEDDING_WEIGHTS.humanPressure;
     }
   }
 }
@@ -1807,9 +1837,8 @@ function extractBeddingZones(grid: HuntabilityGrid, waterBodies?: Array<{ coordi
         prominence,
         patchQuality,
         factors: (cell as any).bedding_factors || {
-          upperSlope: 0,
+          ridge_position: 0,
           solarAspect: 0,
-          ridgeDistance: 0,
           slopeSuitability: 0,
           terrainShelter: 0,
           corridorOffset: 0,
@@ -1864,10 +1893,10 @@ function extractBeddingZones(grid: HuntabilityGrid, waterBodies?: Array<{ coordi
     const beddingType: BeddingType = (() => {
       const f = cand.factors;
       if (!f) return 'thermal';
-      if (f.humanPressure >= 0.85 && f.ridgeDistance >= 0.75) return 'sanctuary';
+      if (f.humanPressure >= 0.85 && f.ridge_position >= 0.75) return 'sanctuary';
       if (f.solarAspect >= 0.60 && f.terrainShelter >= 0.60) return 'thermal';
       if (f.corridorOffset >= 0.80 && f.humanPressure >= 0.60) return 'staging';
-      if (f.upperSlope >= 0.75 && f.ridgeDistance >= 0.50) return 'escape';
+      if (f.ridge_position >= 0.75) return 'escape';
       return 'thermal';
     })();
     
@@ -1897,14 +1926,16 @@ function beddingZonesToGeoJSON(zones: BeddingZone[]): GeoJSON.FeatureCollection 
       beddingScore: zone.probability,
       beddingType: zone.beddingType || 'thermal',
       radiusM: zone.radiusM,
-      // Expose factors for terrain reasons panel
-      upperSlope: zone.factors.upperSlope,
+      // Expose factors for terrain reasons panel (v3.8)
+      ridge_position: zone.factors.ridge_position,
       solarAspect: zone.factors.solarAspect,
-      ridgeDistance: zone.factors.ridgeDistance,
       slopeSuitability: zone.factors.slopeSuitability,
       terrainShelter: zone.factors.terrainShelter,
       corridorOffset: zone.factors.corridorOffset,
       humanPressure: zone.factors.humanPressure,
+      // Backward compat aliases
+      upperSlope: zone.factors.ridge_position,
+      ridgeDistance: zone.factors.ridge_position,
     },
     geometry: {
       type: 'Point' as const,
@@ -1969,7 +2000,7 @@ export function buildTerrainHuntability(input: HuntabilityInput): HuntabilityRes
   console.log('[Huntability] Score computed:', { overall: score.overall, grade: score.grade });
   
   // Step 6 (v3.6.0): Compute bedding probability zones
-  computeBeddingProbability(grid, corridors, input.waterBodies, input.structurePoints);
+  computeBeddingProbability(grid, corridors, input.waterBodies, input.structurePoints, input.ridgeData?.ridges_primary);
   const beddingZones = extractBeddingZones(grid, input.waterBodies);
   console.log('[Huntability] Bedding zones extracted:', beddingZones.length);
   
