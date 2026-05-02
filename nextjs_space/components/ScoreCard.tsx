@@ -9,7 +9,8 @@ interface ScoreCardProps {
   primaryMovement: string;
   funnelCount: number;
   standCount: number;
-  bedAcres: number;
+  bedAcres: number; // v3.8.2: kept for prop compat, now unused
+  ridgeCount?: number;
   onClose: () => void;
 }
 
@@ -22,6 +23,7 @@ export default function ScoreCard({
   funnelCount,
   standCount,
   bedAcres,
+  ridgeCount,
   onClose
 }: ScoreCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -196,7 +198,7 @@ export default function ScoreCard({
           {[
             { label: 'FUNNELS', value: funnelCount },
             { label: 'STANDS', value: standCount },
-            { label: 'BED AC', value: bedAcres },
+            { label: 'RIDGES', value: ridgeCount ?? 0 },
             { label: 'SCORE', value: score }
           ].map(stat => (
             <div key={stat.label} style={{

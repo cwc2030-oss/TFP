@@ -2247,7 +2247,7 @@ function DeerIntelContent() {
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Deer interpretation - HIDE in Terrain Work Mode
-    bedding: !TERRAIN_WORK_MODE,   // Bedding circles = deer interpretation
+    bedding: false,                 // v3.8.2: DEMOTED — speculative context only, controlled by showBeddingProbability
     stands: true,                   // Stand markers always visible
     corridors: !TERRAIN_WORK_MODE,  // Corridor lines = deer interpretation
     // Physical terrain structure - SHOW in Terrain Work Mode
@@ -2881,7 +2881,7 @@ function DeerIntelContent() {
     // Simple deterministic naming based on rank + features
     if (nearCorridor && isLowRisk) return `Corridor ${rank === 1 ? 'Prime' : 'Point'}`;
     if (isHighElevation) return `Ridge ${rank === 1 ? 'Overlook' : 'Stand'}`;
-    if (props.distToBeddingMeters < 80) return `Bedding Edge`;
+    // v3.8.2: Bedding Edge label removed — bedding is speculative, not stand-naming quality
     
     // Fallback to pool
     return STAND_NAME_POOL[(rank - 1) % STAND_NAME_POOL.length];
@@ -3029,7 +3029,7 @@ function DeerIntelContent() {
       // Classify by TPI: positive = ridge/hilltop, near-zero = flat/bench, negative = valley/draw
       if (p.tpiLocal > 1.5) return 'ridge';
       if (p.tpiLocal < -1.5) return 'draw';
-      if (p.distToBeddingMeters < 80) return 'bedding_edge';
+      // v3.8.2: bedding_edge context removed — bedding is speculative
       return 'bench';
     }
 
@@ -6860,11 +6860,15 @@ function DeerIntelContent() {
           fadeLayerOut(map, 'tfp-flow-convergence-pulse', 'circle-opacity', FADE_OUT);
         }
       }
-      // v3.6.0: Bedding Zones visibility — polygon layers + inert circle stubs
+      // v3.8.2: Bedding Zones — DEMOTED to low-confidence context layer.
+      // Visible only when user opts-in via toggle. Subdued opacity — supporting context, not signal.
       fadeToggleLayers(map, showBeddingProbability, [
-        // Polygon bedding zones (the actual visible layers)
-        { id: 'tfp-bedding-fill', targetOpacity: 0.18, opacityProp: 'fill-opacity' },
-        { id: 'tfp-bedding-outline', targetOpacity: 0.6 },
+        // Polygon bedding zones — whisper-level opacity (context, not decision)
+        { id: 'tfp-bedding-fill', targetOpacity: 0.08, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.30 },
+        // Ghost bedding edge zones — follows same toggle
+        { id: 'tfp-edge-ghost-fill', targetOpacity: 0.08, opacityProp: 'fill-opacity' },
+        { id: 'tfp-edge-ghost-outline', targetOpacity: 0.20 },
         // Probability circles disabled — kept at 0 so toggle doesn't throw
         { id: 'tfp-bedding-probability-glow', targetOpacity: 0, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-fill', targetOpacity: 0, opacityProp: 'circle-opacity' },
@@ -8586,7 +8590,7 @@ function DeerIntelContent() {
           });
         }
         
-        // Ghost bedding silhouettes
+        // Ghost bedding silhouettes — v3.8.2: starts hidden (bedding = speculative context)
         if (!map.getSource('tfp-edge-ghost')) {
           map.addSource('tfp-edge-ghost', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -8596,7 +8600,7 @@ function DeerIntelContent() {
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
               'fill-color': LAYER_COLORS.edgeGhostBedding,
-              'fill-opacity': 0.15,
+              'fill-opacity': 0,  // v3.8.2: hidden by default — toggled with bedding
             },
           });
           map.addLayer({
@@ -8607,7 +8611,7 @@ function DeerIntelContent() {
             paint: {
               'line-color': LAYER_COLORS.edgeGhostBedding,
               'line-width': 2,
-              'line-opacity': 0.4,
+              'line-opacity': 0,  // v3.8.2: hidden by default — toggled with bedding
               'line-dasharray': [4, 2],
             },
           });
@@ -12755,19 +12759,17 @@ function DeerIntelContent() {
                         {(() => {
                           const stands = alignedStands.length;
                           const score = summary.topStandScore;
-                          const beds = summary.totalBeddingAcres;
                           const funnels = summary.funnelCount;
                           const acres = acreageParam || summary.analysisAreaAcres?.toFixed(0) || '—';
 
-                          // Build a natural sentence
+                          // v3.8.2: Bedding removed from narrative — speculative, not decision-grade
                           const quality = score >= 80 ? 'excellent' : score >= 65 ? 'strong' : score >= 50 ? 'moderate' : 'limited';
                           const standPhrase = stands > 0 
                             ? `We identified ${stands} stand placement${stands > 1 ? 's' : ''} with ${quality} alignment to the terrain` 
                             : 'No stand placements met our quality threshold on this parcel';
-                          const beddingPhrase = beds > 3 ? `, ${beds.toFixed(1)} acres of bedding cover` : beds > 0 ? ` and some bedding cover` : '';
                           const funnelPhrase = funnels > 2 ? `, and ${funnels} natural funnels that concentrate movement` : funnels > 0 ? ` with ${funnels} natural funnel${funnels > 1 ? 's' : ''}` : '';
 
-                          return `${standPhrase}${beddingPhrase}${funnelPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
+                          return `${standPhrase}${funnelPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
                         })()}
                       </p>
                     </div>
@@ -12799,8 +12801,7 @@ function DeerIntelContent() {
                     </div>
                     {/* Character description derived from data */}
                     <p className="text-[10px] text-white/70 leading-relaxed">
-                      {summary.totalBeddingAcres > 5 ? 'Strong bedding cover' : summary.totalBeddingAcres > 2 ? 'Moderate bedding cover' : 'Limited bedding cover'}
-                      {summary.funnelCount > 3 ? ' with heavy funnel density' : summary.funnelCount > 1 ? ' with natural funneling' : ''}
+                      {summary.funnelCount > 3 ? 'Heavy funnel density' : summary.funnelCount > 1 ? 'Natural funneling present' : 'Limited funneling'}
                       {summary.topStandScore >= 80 ? ' — premium stand opportunities.' : summary.topStandScore >= 60 ? ' — solid stand potential.' : ' — marginal stand options.'}
                     </p>
                   </div>
@@ -12822,8 +12823,8 @@ function DeerIntelContent() {
                   {/* ── Key Metrics Row ── */}
                   <div className="grid grid-cols-4 gap-1 mb-2">
                     <div className="text-center">
-                      <p className="text-sm text-white font-bold">{summary.totalBeddingAcres.toFixed(1)}</p>
-                      <p className="text-[8px] text-stone-500/70 uppercase">Bed ac</p>
+                      <p className="text-sm text-white font-bold">{ridgeSpineData?.ridges_primary?.features?.length ?? 0}</p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Ridges</p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-white font-bold">{summary.funnelCount}</p>
@@ -13229,7 +13230,7 @@ function DeerIntelContent() {
               <div className="p-3 border-b border-white/[0.06]">
                 <div className="space-y-1">
                   
-                  {/* v3.7: Bedding Zone Toggle with type legend */}
+                  {/* v3.8.2: Bedding Zone Toggle — DEMOTED to speculative context */}
                   {(() => {
                     const beddingCount = huntabilityData?.metadata?.beddingZoneCount || 0;
                     const hasData = beddingCount > 0;
@@ -13240,23 +13241,18 @@ function DeerIntelContent() {
                           onClick={() => setShowBeddingProbability(v => !v)}
                           className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
                             !huntabilityData ? 'opacity-40 cursor-not-allowed' :
-                            showBeddingProbability ? 'bg-emerald-900/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                            showBeddingProbability ? 'bg-stone-800/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                           }`}
                         >
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#52b788', opacity: showBeddingProbability ? 1 : 0.4 }} />
-                          <span className={`flex-1 text-left ${showBeddingProbability ? 'text-white' : 'text-stone-500'}`}>Bedding Zones</span>
-                          {hasData ? (
-                            <span className="text-[9px] text-emerald-300 px-1.5 py-0.5 bg-emerald-800/40 rounded">
-                              {beddingCount}
-                            </span>
-                          ) : (
-                            <span className="text-[8px] text-emerald-400/60 px-1 py-0.5 bg-emerald-900/30 rounded uppercase tracking-wider">
-                              v3
-                            </span>
-                          )}
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#52b788', opacity: showBeddingProbability ? 0.6 : 0.25 }} />
+                          <span className={`flex-1 text-left ${showBeddingProbability ? 'text-stone-400' : 'text-stone-600'}`}>Bedding Zones</span>
+                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800/40 rounded uppercase tracking-wider">
+                            speculative
+                          </span>
                         </button>
                         {showBeddingProbability && hasData && (
                           <div className="ml-5 mt-1 space-y-0.5">
+                            <div className="text-[8px] text-stone-600 italic mb-1">Low-confidence context — do not use for stand decisions</div>
                             {[
                               { type: 'Sanctuary', color: '#1a5c2a', desc: 'Remote ridge pocket' },
                               { type: 'Thermal', color: '#52b788', desc: 'South-facing warmth' },
@@ -13264,9 +13260,9 @@ function DeerIntelContent() {
                               { type: 'Escape', color: '#74c69d', desc: 'High ridge cover' },
                             ].map(b => (
                               <div key={b.type} className="flex items-center gap-1.5 text-[9px]">
-                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
-                                <span className="text-stone-400">{b.type}</span>
-                                <span className="text-stone-600">— {b.desc}</span>
+                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color, opacity: 0.5 }} />
+                                <span className="text-stone-500">{b.type}</span>
+                                <span className="text-stone-700">— {b.desc}</span>
                               </div>
                             ))}
                           </div>
@@ -14292,6 +14288,7 @@ function DeerIntelContent() {
           funnelCount={summary.funnelCount || 0}
           standCount={alignedStands?.length || 0}
           bedAcres={Math.round((summary.totalBeddingAcres || 0) * 10) / 10}
+          ridgeCount={ridgeSpineData?.ridges_primary?.features?.length ?? 0}
           onClose={() => setShowScoreCard(false)}
         />
       )}
@@ -14467,8 +14464,8 @@ function DeerIntelContent() {
               {/* Key stats */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
                 <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{summary?.totalBeddingAcres?.toFixed(1) ?? '0'}</div>
-                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Bedding Acres</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{ridgeSpineData?.ridges_primary?.features?.length ?? 0}</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Ridge Spines</div>
                 </div>
                 <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
                   <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{tieredCorridorData?.corridors_primary?.features?.length ?? 0}</div>
@@ -14589,12 +14586,6 @@ function DeerIntelContent() {
                             {stand.props?.distToCorridorMeters ? Math.round(stand.props.distToCorridorMeters * 1.0936) : '—'} yds
                           </div>
                           <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>To Corridor</div>
-                        </div>
-                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                            {stand.props?.distToBeddingMeters ? Math.round(stand.props.distToBeddingMeters * 1.0936) : '—'} yds
-                          </div>
-                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>To Bedding</div>
                         </div>
                         <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
                           <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
