@@ -5204,11 +5204,44 @@ function DeerIntelContent() {
             setTimeout(() => {
               const postStyle = map.getStyle();
               if (postStyle?.layers) {
+                // ═══ BUG-1 FIX: Reconcile visibility gate ═══
+                // Before fading a layer back in, check its intended visibility
+                // against the same state the dedicated visibility effect uses.
+                // Without this, the reconcile's fadeLayerIn overrides fadeLayerOut
+                // from the visibility effect (race condition — reconcile fires at
+                // 200ms, before fadeLayerOut's post-animation visibility:'none').
+                const _fv = flowVisibilityRef.current; // latest via ref — stale-proof
+                const _pm = _fv.pressureHeatmap === true; // isPressureMode
+                const shouldHide = (id: string): boolean => {
+                  // Heatmap layers — always hidden (L6899-6905)
+                  if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
+                  if (id === 'tfp-pressure-heatmap' && !_pm) return true;
+                  // Flow primary family — gated on isPressureMode && flowPrimary
+                  if (id === 'tfp-flow-primary' || id === 'tfp-flow-primary-glow' ||
+                      id === 'tfp-flow-nearest-highlight' || id === 'tfp-flow-direction-chevrons') {
+                    return !(_pm && _fv.flowPrimary);
+                  }
+                  // Flow secondary
+                  if (id === 'tfp-flow-secondary') return !(_pm && _fv.flowSecondary);
+                  // Convergence zones
+                  if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
+                    return !(_pm && _fv.convergenceZones);
+                  }
+                  // Bedding layers — gated on showBeddingProbability
+                  if (id === 'tfp-bedding-fill' || id === 'tfp-bedding-outline' ||
+                      id === 'tfp-edge-ghost-fill' || id === 'tfp-edge-ghost-outline' ||
+                      id === 'tfp-bedding-probability-glow' || id === 'tfp-bedding-probability-fill' ||
+                      id === 'tfp-bedding-probability-outline') {
+                    return !showBeddingProbability;
+                  }
+                  return false; // all other layers: reconcile as before
+                };
                 for (const layer of postStyle.layers) {
                   if (!layer.id.startsWith('tfp-')) continue;
                   if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
                   if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
                   if (layer.layout?.visibility === 'none') continue;
+                  if (shouldHide(layer.id)) continue; // BUG-1 FIX: respect intended visibility
                   const prop = fadeProps[(layer as any).type] || 'line-opacity';
                   fadeLayerIn(map, layer.id, 0.85, prop, 800);
                 }
