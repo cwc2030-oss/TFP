@@ -5110,8 +5110,11 @@ function DeerIntelContent() {
       // reconcileVisibility controller to restore every tfp-* layer to its correct
       // state based on current toggles. This replaces the manual per-group restore
       // from v4-fix8 with one unified pass.
+      let didReconcileOrFade = false;
+
       if (needsVisibilityRestore.current) {
         needsVisibilityRestore.current = false;
+        didReconcileOrFade = true;
 
         // Build flat toggles map from refs (latest values without dep coupling)
         const vis = visibilityRef.current;
@@ -5136,129 +5139,134 @@ function DeerIntelContent() {
         };
 
         reconcileVisibility(map, reconcileState);
+      }
 
-        // ═══ BUG-1 FIX (shared): Reconcile visibility gate ═══
-        // Reads latest flowVisibility + showBeddingProbability via refs so
-        // the 200-400ms setTimeout closures always check current state.
-        // Defined ONCE and used by BOTH territory fade-in (Path A) and
-        // re-align crossfade (Path B) to prevent fadeLayerIn from
-        // overriding the dedicated visibility effect's fadeLayerOut.
-        const shouldReconcileHide = (): ((id: string) => boolean) => {
-          const _fv = flowVisibilityRef.current;
-          const _bp = showBeddingProbRef.current;
-          const _pm = _fv.pressureHeatmap === true; // isPressureMode
-          return (id: string): boolean => {
-            // Heatmap layers — always hidden
-            if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
-            if (id === 'tfp-pressure-heatmap' && !_pm) return true;
-            // Flow primary family — gated on isPressureMode && flowPrimary
-            if (id === 'tfp-flow-primary' || id === 'tfp-flow-primary-glow' ||
-                id === 'tfp-flow-nearest-highlight' || id === 'tfp-flow-direction-chevrons') {
-              return !(_pm && _fv.flowPrimary);
-            }
-            // Flow secondary
-            if (id === 'tfp-flow-secondary') return !(_pm && _fv.flowSecondary);
-            // Convergence zones
-            if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
-              return !(_pm && _fv.convergenceZones);
-            }
-            // Bedding layers — gated on showBeddingProbability
-            if (id === 'tfp-bedding-fill' || id === 'tfp-bedding-outline' ||
-                id === 'tfp-edge-ghost-fill' || id === 'tfp-edge-ghost-outline' ||
-                id === 'tfp-bedding-probability-glow' || id === 'tfp-bedding-probability-fill' ||
-                id === 'tfp-bedding-probability-outline') {
-              return !_bp;
-            }
-            return false; // all other layers: reconcile as before
-          };
+      // ═══ BUG-1 v2 FIX: shouldReconcileHide + Path A/B + epoch bump ═══
+      // MOVED OUTSIDE needsVisibilityRestore block.  On territory-add the
+      // prefetched-parcel path skips clearAllOverlaySources(), so
+      // needsVisibilityRestore stays false.  Path A (territoryFadeInPending)
+      // must still fire to zero layers and apply the shouldHide gate,
+      // otherwise flow lines leak through with their creation-time opacity.
+      const shouldReconcileHide = (): ((id: string) => boolean) => {
+        const _fv = flowVisibilityRef.current;
+        const _bp = showBeddingProbRef.current;
+        const _pm = _fv.pressureHeatmap === true; // isPressureMode
+        return (id: string): boolean => {
+          // Heatmap layers — always hidden
+          if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
+          if (id === 'tfp-pressure-heatmap' && !_pm) return true;
+          // Flow primary family — gated on isPressureMode && flowPrimary
+          if (id === 'tfp-flow-primary' || id === 'tfp-flow-primary-glow' ||
+              id === 'tfp-flow-nearest-highlight' || id === 'tfp-flow-direction-chevrons') {
+            return !(_pm && _fv.flowPrimary);
+          }
+          // Flow secondary
+          if (id === 'tfp-flow-secondary') return !(_pm && _fv.flowSecondary);
+          // Convergence zones
+          if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
+            return !(_pm && _fv.convergenceZones);
+          }
+          // Bedding layers — gated on showBeddingProbability
+          if (id === 'tfp-bedding-fill' || id === 'tfp-bedding-outline' ||
+              id === 'tfp-edge-ghost-fill' || id === 'tfp-edge-ghost-outline' ||
+              id === 'tfp-bedding-probability-glow' || id === 'tfp-bedding-probability-fill' ||
+              id === 'tfp-bedding-probability-outline') {
+            return !_bp;
+          }
+          return false; // all other layers: reconcile as before
         };
+      };
 
-        // Territory fade-in: if territory analysis just delivered new data,
-        // fade layers in over 1 s instead of snapping to full opacity.
-        if (territoryFadeInPending.current) {
-          territoryFadeInPending.current = false;
-          console.log('[TERRITORY] Fade-in pending — animating new analysis results');
-          const propMapFade: Record<string, string> = {
-            line: 'line-opacity', fill: 'fill-opacity',
-            circle: 'circle-opacity', heatmap: 'heatmap-opacity',
-            symbol: 'icon-opacity',
-          };
-          const fadePrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
-          const currentStyle = map.getStyle();
-          if (currentStyle?.layers) {
-            for (const layer of currentStyle.layers) {
+      // Territory fade-in: if territory analysis just delivered new data,
+      // fade layers in over 1 s instead of snapping to full opacity.
+      if (territoryFadeInPending.current) {
+        territoryFadeInPending.current = false;
+        didReconcileOrFade = true;
+        console.log('[TERRITORY] Fade-in pending — animating new analysis results');
+        const propMapFade: Record<string, string> = {
+          line: 'line-opacity', fill: 'fill-opacity',
+          circle: 'circle-opacity', heatmap: 'heatmap-opacity',
+          symbol: 'icon-opacity',
+        };
+        const fadePrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
+        const currentStyle = map.getStyle();
+        if (currentStyle?.layers) {
+          for (const layer of currentStyle.layers) {
+            if (!layer.id.startsWith('tfp-')) continue;
+            if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
+            if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
+            const prop = propMapFade[(layer as any).type] || 'line-opacity';
+            // Start at 0, animate up to reconciled target
+            try {
+              map.setPaintProperty(layer.id, prop, clampOpacity(0));
+            } catch { /* ignore */ }
+          }
+        }
+        // After a brief 400 ms pause, fade everything back in over 1 s
+        setTimeout(() => {
+          const shouldHide = shouldReconcileHide(); // snapshot latest state inside timeout
+          const postStyle = map.getStyle();
+          if (postStyle?.layers) {
+            for (const layer of postStyle.layers) {
               if (!layer.id.startsWith('tfp-')) continue;
               if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
               if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
+              if (shouldHide(layer.id)) continue; // BUG-1 FIX Path A: respect intended visibility
               const prop = propMapFade[(layer as any).type] || 'line-opacity';
-              // Start at 0, animate up to reconciled target
-              try {
-                map.setPaintProperty(layer.id, prop, clampOpacity(0));
-              } catch { /* ignore */ }
+              fadeLayerIn(map, layer.id, 0.8, prop, 1000);
             }
+            console.log('[TERRITORY] Fade-in started: 1000ms');
           }
-          // After a brief 400 ms pause, fade everything back in over 1 s
+        }, 400);
+      }
+
+      // RE-ALIGN FIX: Smooth crossfade — new data was just painted into the
+      // still-dimmed (0.4) sources. Animate layers back to full opacity.
+      if (reAlignFadeInPending.current) {
+        reAlignFadeInPending.current = false;
+        didReconcileOrFade = true;
+        const fadeProps: Record<string, string> = {
+          line: 'line-opacity', fill: 'fill-opacity',
+          circle: 'circle-opacity', heatmap: 'heatmap-opacity',
+          symbol: 'icon-opacity',
+        };
+        const skipPrefixes = ['tfp-parcel-', 'tfp-territory-'];
+        const curStyle = map.getStyle();
+        if (curStyle?.layers) {
+          for (const layer of curStyle.layers) {
+            if (!layer.id.startsWith('tfp-')) continue;
+            if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
+            if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
+            if (layer.layout?.visibility === 'none') continue;
+            const prop = fadeProps[(layer as any).type] || 'line-opacity';
+            try {
+              // Set to 0 first so reconcileVisibility's snap doesn't flash,
+              // then animate up to full target opacity
+              map.setPaintProperty(layer.id, prop, clampOpacity(0));
+            } catch { /* noop */ }
+          }
           setTimeout(() => {
             const shouldHide = shouldReconcileHide(); // snapshot latest state inside timeout
             const postStyle = map.getStyle();
             if (postStyle?.layers) {
               for (const layer of postStyle.layers) {
                 if (!layer.id.startsWith('tfp-')) continue;
-                if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
+                if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
                 if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
-                if (shouldHide(layer.id)) continue; // BUG-1 FIX Path A: respect intended visibility
-                const prop = propMapFade[(layer as any).type] || 'line-opacity';
-                fadeLayerIn(map, layer.id, 0.8, prop, 1000);
+                if (layer.layout?.visibility === 'none') continue;
+                if (shouldHide(layer.id)) continue; // BUG-1 FIX Path B: respect intended visibility
+                const prop = fadeProps[(layer as any).type] || 'line-opacity';
+                fadeLayerIn(map, layer.id, 0.85, prop, 800);
               }
-              console.log('[TERRITORY] Fade-in started: 1000ms');
             }
-          }, 400);
+          }, 200);
         }
+      }
 
-        // RE-ALIGN FIX: Smooth crossfade — new data was just painted into the
-        // still-dimmed (0.4) sources. Animate layers back to full opacity.
-        if (reAlignFadeInPending.current) {
-          reAlignFadeInPending.current = false;
-          const fadeProps: Record<string, string> = {
-            line: 'line-opacity', fill: 'fill-opacity',
-            circle: 'circle-opacity', heatmap: 'heatmap-opacity',
-            symbol: 'icon-opacity',
-          };
-          const skipPrefixes = ['tfp-parcel-', 'tfp-territory-'];
-          const curStyle = map.getStyle();
-          if (curStyle?.layers) {
-            for (const layer of curStyle.layers) {
-              if (!layer.id.startsWith('tfp-')) continue;
-              if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
-              if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
-              if (layer.layout?.visibility === 'none') continue;
-              const prop = fadeProps[(layer as any).type] || 'line-opacity';
-              try {
-                // Set to 0 first so reconcileVisibility's snap doesn't flash,
-                // then animate up to full target opacity
-                map.setPaintProperty(layer.id, prop, clampOpacity(0));
-              } catch { /* noop */ }
-            }
-            setTimeout(() => {
-              const shouldHide = shouldReconcileHide(); // snapshot latest state inside timeout
-              const postStyle = map.getStyle();
-              if (postStyle?.layers) {
-                for (const layer of postStyle.layers) {
-                  if (!layer.id.startsWith('tfp-')) continue;
-                  if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
-                  if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
-                  if (layer.layout?.visibility === 'none') continue;
-                  if (shouldHide(layer.id)) continue; // BUG-1 FIX Path B: respect intended visibility
-                  const prop = fadeProps[(layer as any).type] || 'line-opacity';
-                  fadeLayerIn(map, layer.id, 0.85, prop, 800);
-                }
-              }
-            }, 200);
-          }
-        }
-
-        // Bump epoch to trigger specialized effects for 'complex' layers
-        // (flow-primary with data-driven expressions, nearest-highlight, etc.)
+      // Bump epoch to trigger specialized effects for 'complex' layers
+      // (flow-primary with data-driven expressions, nearest-highlight, etc.)
+      // Only bump when something material happened to avoid wasteful re-runs.
+      if (didReconcileOrFade) {
         setVisibilityEpoch(e => e + 1);
       }
     } catch (err) {
