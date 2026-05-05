@@ -2246,24 +2246,24 @@ function DeerIntelContent() {
   const TERRAIN_WORK_MODE = false;
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
-    // Deer interpretation - HIDE in Terrain Work Mode
-    bedding: false,                 // v3.8.2: DEMOTED — speculative context only, controlled by showBeddingProbability
+    // Phase 1: Clean map = stands + terrain features that justify them
+    bedding: false,                 // v3.8.2: DEMOTED — speculative context, opt-in only
     stands: true,                   // Stand markers always visible
     corridors: !TERRAIN_WORK_MODE,  // Corridor lines = deer interpretation
-    // Physical terrain structure - SHOW in Terrain Work Mode
-    funnels: true,    // Legacy combined key (kept for compat)
-    saddles: true,    // Independent saddle visibility
+    // Terrain anatomy — visible by default
+    funnels: true,    // Pinch points / funnels
+    saddles: true,    // Saddle features
     draws: false,     // DEFAULT OFF — blue dashed draw lines are noisy; user opts-in via toggle
-    // Always show terrain anatomy
-    ridgeSpines: true,
+    ridgeSpines: true, // Ridge spines
   });
   
   // Terrain Flow visibility (separate from main visibility for cleaner control)
+  // Phase 1 cleanup: all flow/interpretation layers default OFF — terrain features justify stands on their own
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
-    pressureHeatmap: true,  // PRIMARY: Terrain pressure heat map (the main visual)
-    flowPrimary: true,      // Primary flow corridors (active when Deer Flow enabled)
-    flowSecondary: true,    // Secondary feeder lines (active when Deer Flow enabled)
-    convergenceZones: true, // Convergence zone markers (active when Deer Flow enabled)
+    pressureHeatmap: false,  // PRIMARY: Terrain pressure heat map — opt-in
+    flowPrimary: false,      // Primary flow corridors — opt-in
+    flowSecondary: false,    // Secondary feeder lines — opt-in
+    convergenceZones: false, // Convergence zone markers — opt-in
   });
   
   // Derived: true when the Pressure Map master toggle is ON
