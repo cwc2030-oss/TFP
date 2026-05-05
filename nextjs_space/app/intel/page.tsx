@@ -31,7 +31,7 @@ import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
-import { StandAlignmentPanel, type AlignedStand } from '@/components/intel/StandAlignmentPanel';
+import { StandAlignmentPanel, type AlignedStand, type TerrainAnchor } from '@/components/intel/StandAlignmentPanel';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -2892,6 +2892,8 @@ function DeerIntelContent() {
   const [parcelStrength, setParcelStrength] = useState<number>(0);
   const [mostAlignedHint, setMostAlignedHint] = useState<{ standRank: number; name: string } | null>(null);
   const [alignmentPanelExpanded, setAlignmentPanelExpanded] = useState(false); // Collapsed by default
+  /** Phase 2: true when terrain anchor gate rejects ALL candidates — parcel lacks defensible terrain. */
+  const [noAnchoredStands, setNoAnchoredStands] = useState(false);
   const [userHasInteracted, setUserHasInteracted] = useState(false);
   const mostAlignedDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hintFadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -3019,11 +3021,141 @@ function DeerIntelContent() {
     // Greedy selection: pick best, then for each subsequent pick, apply a
     // proximity penalty and terrain-similarity penalty so #2 and #3 represent
     // genuinely different hunting options rather than minor variations of #1.
-    const MIN_STAND_SEPARATION_M = 150; // minimum metres between any two selected stands
+    const MIN_STAND_SEPARATION_M = 300; // Phase 2: bumped from 150 — honest spacing over artificial density
     const PROXIMITY_PENALTY_FACTOR = 0.35; // score penalty per stand within penalty radius
     const TERRAIN_SIMILARITY_PENALTY = 0.12; // penalty when dominant terrain context matches
-    const PENALTY_RADIUS_M = 250; // distance within which proximity penalty applies (smooth decay)
+    const PENALTY_RADIUS_M = 400; // distance within which proximity penalty applies (smooth decay) — scaled with separation
     const TARGET_COUNT = 3;
+
+    // ═══ Phase 2: TERRAIN ANCHOR GATE ═══
+    // Every stand must be within proximity of at least one real terrain feature.
+    // Anchor types: ridge spine (150m), saddle node (100m), funnel polygon (inside or 75m).
+    const RIDGE_ANCHOR_M = 150;
+    const SADDLE_ANCHOR_M = 100;
+    const FUNNEL_ANCHOR_M = 75;
+
+    // Pre-extract terrain feature geometries for anchor computation
+    const anchorRidgeLines: { coords: [number, number][]; id?: string }[] = [];
+    if (ridgeSpineData?.ridges_primary?.features) {
+      for (const f of ridgeSpineData.ridges_primary.features) {
+        if (f.geometry?.type === 'LineString') {
+          anchorRidgeLines.push({ coords: (f.geometry as GeoJSON.LineString).coordinates as [number, number][], id: f.properties?.id || 'ridge-p' });
+        }
+      }
+    }
+    if (ridgeSpineData?.ridges_secondary?.features) {
+      for (const f of ridgeSpineData.ridges_secondary.features) {
+        if (f.geometry?.type === 'LineString') {
+          anchorRidgeLines.push({ coords: (f.geometry as GeoJSON.LineString).coordinates as [number, number][], id: f.properties?.id || 'ridge-s' });
+        }
+      }
+    }
+
+    const anchorSaddlePoints: { coords: [number, number]; id?: string }[] = [];
+    if (ridgeSpineData?.saddle_nodes?.features) {
+      for (const f of ridgeSpineData.saddle_nodes.features) {
+        if (f.geometry?.type === 'Point') {
+          anchorSaddlePoints.push({ coords: (f.geometry as GeoJSON.Point).coordinates as [number, number], id: f.properties?.id || 'saddle' });
+        }
+      }
+    }
+
+    const anchorFunnelPolys: { ring: number[][]; id?: string; centroid: [number, number] }[] = [];
+    const extractFunnelPolys = (fc: GeoJSON.FeatureCollection | undefined, prefix: string) => {
+      if (!fc?.features) return;
+      for (const f of fc.features) {
+        if (f.geometry?.type === 'Polygon') {
+          const ring = (f.geometry as GeoJSON.Polygon).coordinates[0] as number[][];
+          const cx = ring.reduce((s, c) => s + c[0], 0) / ring.length;
+          const cy = ring.reduce((s, c) => s + c[1], 0) / ring.length;
+          anchorFunnelPolys.push({ ring, id: f.properties?.id || prefix, centroid: [cx, cy] });
+        }
+      }
+    };
+    extractFunnelPolys(tieredCorridorData?.funnels_hard, 'funnel-hard');
+    extractFunnelPolys(tieredCorridorData?.funnels_slight, 'funnel-slight');
+
+    /** Find the closest qualifying terrain anchor for a candidate position. Returns null if none within thresholds. */
+    function findTerrainAnchor(coords: [number, number]): TerrainAnchor | null {
+      let best: TerrainAnchor | null = null;
+      let bestDist = Infinity;
+
+      // 1. Ridge spines — within 150m
+      for (const ridge of anchorRidgeLines) {
+        if (ridge.coords.length < 2) continue;
+        const result = closestPointOnLineString(coords, ridge.coords);
+        const dMeters = distanceMeters(coords, result.point);
+        if (dMeters <= RIDGE_ANCHOR_M && dMeters < bestDist) {
+          bestDist = dMeters;
+          best = { type: 'ridge', distanceM: Math.round(dMeters), featureId: ridge.id };
+        }
+      }
+
+      // 2. Saddle nodes — within 100m
+      for (const saddle of anchorSaddlePoints) {
+        const dMeters = distanceMeters(coords, saddle.coords);
+        if (dMeters <= SADDLE_ANCHOR_M && dMeters < bestDist) {
+          bestDist = dMeters;
+          best = { type: 'saddle', distanceM: Math.round(dMeters), featureId: saddle.id };
+        }
+      }
+
+      // 3. Funnel / pinch polygons — inside polygon (0m) or within 75m of centroid
+      for (const funnel of anchorFunnelPolys) {
+        if (pointInPolygon(coords, funnel.ring)) {
+          // Inside polygon — best possible anchor (0m)
+          if (0 < bestDist) {
+            bestDist = 0;
+            best = { type: 'funnel', distanceM: 0, featureId: funnel.id };
+          }
+        } else {
+          // Check distance to centroid
+          const dMeters = distanceMeters(coords, funnel.centroid);
+          if (dMeters <= FUNNEL_ANCHOR_M && dMeters < bestDist) {
+            bestDist = dMeters;
+            best = { type: 'funnel', distanceM: Math.round(dMeters), featureId: funnel.id };
+          }
+        }
+      }
+
+      return best;
+    }
+
+    // ═══ Phase 2: Pre-filter — attach anchor or reject ═══
+    // Apply terrain anchor gate to ALL candidates before diversity selection.
+    const anchoredPool: (typeof allScored[0] & { anchorFeature: TerrainAnchor })[] = [];
+    const anchorRejected: { rank: number; name: string; coords: [number, number] }[] = [];
+
+    for (const candidate of allScored) {
+      const anchor = findTerrainAnchor(candidate.coords);
+      if (anchor) {
+        anchoredPool.push({ ...candidate, anchorFeature: anchor });
+      } else {
+        anchorRejected.push({ rank: candidate.rank, name: candidate.name, coords: candidate.coords });
+      }
+    }
+
+    // Diagnostic logging for anchor gate
+    console.log(`[TERRAIN-ANCHOR] ${anchoredPool.length}/${allScored.length} candidates passed anchor gate (ridges=${anchorRidgeLines.length}, saddles=${anchorSaddlePoints.length}, funnels=${anchorFunnelPolys.length})`);
+    if (anchorRejected.length > 0) {
+      console.log(`[TERRAIN-ANCHOR] Rejected ${anchorRejected.length}: ${anchorRejected.map(r => `"${r.name}"`).join(', ')}`);
+    }
+    anchoredPool.slice(0, 5).forEach(s => {
+      console.log(`[TERRAIN-ANCHOR] ✓ "${s.name}" → ${s.anchorFeature.type} (${s.anchorFeature.distanceM}m)`);
+    });
+
+    // Handle 0 anchored candidates
+    if (anchoredPool.length === 0) {
+      console.warn('[TERRAIN-ANCHOR] No candidates passed anchor gate — parcel lacks defensible terrain features');
+      setNoAnchoredStands(true);
+      setAlignedStands([]);
+      setExceptionalIndex(ei);
+      setParcelStrength(ps);
+      setMostAlignedHint(null);
+      previousStandsRef.current = [];
+      return;
+    }
+    setNoAnchoredStands(false);
 
     function dominantTerrainContext(p: StandPointProperties): string {
       // Classify by TPI: positive = ridge/hilltop, near-zero = flat/bench, negative = valley/draw
@@ -3033,12 +3165,12 @@ function DeerIntelContent() {
       return 'bench';
     }
 
-    const diverseStands: typeof allScored = [];
-    const remainingPool = [...allScored];
+    const diverseStands: typeof anchoredPool = [];
+    const remainingPool = [...anchoredPool];
 
     for (let pick = 0; pick < TARGET_COUNT && remainingPool.length > 0; pick++) {
       if (pick === 0) {
-        // First pick: always the highest-scoring stand
+        // First pick: always the highest-scoring anchored stand
         diverseStands.push(remainingPool.shift()!);
         continue;
       }
@@ -3138,11 +3270,11 @@ function DeerIntelContent() {
       console.log(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
 
       // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
-      // but the engine DID return candidates, show the raw top-3 scored stands
+      // but the engine DID return anchored candidates, show the raw top-3 anchored stands
       // with an "unverified" flag so the user still sees actionable data.
-      // Snap outside coords toward parcel interior (not raw edge).
-      if (aligned.length === 0 && allScored.length > 0) {
-        console.warn(`[STAND-DIAG] OPTION-B FALLBACK: all ${allScored.length} candidates rejected by parcel-safe. Falling back to raw top-3 with unverified flag.`);
+      // Phase 2: Uses anchoredPool instead of allScored to respect terrain anchor gate.
+      if (aligned.length === 0 && anchoredPool.length > 0) {
+        console.warn(`[STAND-DIAG] OPTION-B FALLBACK: all ${anchoredPool.length} anchored candidates rejected by parcel-safe. Falling back to raw top-3 with unverified flag.`);
         const fallbackInset = computeParcelInset(geom);
         // Compute centroid for interior snap
         const fbRings = getParcelRings(geom);
@@ -3151,7 +3283,7 @@ function DeerIntelContent() {
         fbCx /= fbN; fbCy /= fbN;
         const fbCentroid: [number, number] = [fbCx, fbCy];
 
-        aligned = allScored.slice(0, 3).map(s => {
+        aligned = anchoredPool.slice(0, 3).map(s => {
           const sd = signedDistanceToParcel(s.coords, geom);
           if (sd.distance >= fallbackInset) return { ...s, unverified: true };
           // Move toward centroid until inside with buffer
@@ -3203,8 +3335,9 @@ function DeerIntelContent() {
     // ═══ PAD TO TOP 3 — when partial alignment succeeded (1 or 2 verified stands),
     // fill remaining slots from allScored remainder with unverified flag so the
     // report always shows 3 actionable intercept points.
+    // Phase 2: DISABLED — do NOT pad with unanchored stands. Honest count is the goal.
     // Snap toward parcel interior (not raw edge).
-    if (aligned.length > 0 && aligned.length < 3 && allScored.length > aligned.length) {
+    if (false && aligned.length > 0 && aligned.length < 3 && allScored.length > aligned.length) {
       const usedKeys = new Set(aligned.map(a => `${a.coords[0].toFixed(8)},${a.coords[1].toFixed(8)}`));
       const padGeom = parcelPolygon?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
       const padding = allScored
@@ -3481,7 +3614,7 @@ function DeerIntelContent() {
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stability invalidation: when the user explicitly cycles
   // wind direction or season, the stability anchor should
@@ -11467,6 +11600,11 @@ function DeerIntelContent() {
     const popupIndicatorsHTML = explain ? renderKeyIndicatorsHTML(explain.keyIndicators) : '';
     const popupBarsHTML = explain ? renderQualityBarsHTML(explain.qualityBars) : '';
     const popupExplanation = explain ? explain.selectionExplanation : '';
+
+    // Phase 2: Terrain anchor label for popup
+    const anchorLabel = standData?.anchorFeature
+      ? `Anchored to: ${standData.anchorFeature.type === 'ridge' ? 'Ridge Spine' : standData.anchorFeature.type === 'saddle' ? 'Saddle' : 'Funnel'} (${standData.anchorFeature.distanceM === 0 ? 'inside' : standData.anchorFeature.distanceM + 'm'})`
+      : null;
     
     const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '340px', offset: 12, className: 'intel-popup' })
       .setLngLat(coords)
@@ -11484,6 +11622,12 @@ function DeerIntelContent() {
             ">${popupBadgeLabel}</span>
             <span style="font-weight: 700; font-size: 16px;">${props.score}<span style="font-size: 11px; color: #6b7280;">/100</span></span>
           </div>
+
+          ${anchorLabel ? `
+          <div style="margin: 2px 0 4px; font-size: 9px; color: #5eead4; font-weight: 500;">
+            ⛰ ${anchorLabel}
+          </div>
+          ` : ''}
 
           ${popupExplanation ? `
           <p style="margin: 4px 0 8px; font-size: 10px; color: #9ca3af; line-height: 1.4;">
@@ -13999,6 +14143,20 @@ function DeerIntelContent() {
                 );
               })()}
               {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
+              {/* Phase 2: No anchored stands message */}
+              {!TERRAIN_WORK_MODE && noAnchoredStands && alignedStands.length === 0 && (
+                <div className="border-b border-white/10 px-3 py-3">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-amber-400 text-sm">⚠</span>
+                    <span className="text-white text-sm font-medium">No Anchored Stands</span>
+                  </div>
+                  <p className="text-[10px] text-stone-400 leading-relaxed">
+                    This parcel lacks strong terrain anchors — no high-confidence stands available. 
+                    Ridges, saddles, and pinch points provide defensible terrain for stand placement. 
+                    Without them, stand positions cannot be justified from terrain alone.
+                  </p>
+                </div>
+              )}
               {!TERRAIN_WORK_MODE && (
                <div className="relative">
                 <StandAlignmentPanel

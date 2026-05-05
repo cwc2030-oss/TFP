@@ -5,6 +5,14 @@ import type { StandPointProperties } from '@/types/terrain';
 import type { StandInputs, StandScore } from '@/lib/scoring/stand-alignment';
 import { getStandExplainability, type ReasonChip, type QualityBar, type KeyIndicator } from '@/lib/scoring/stand-explainability';
 
+/** Terrain feature that anchors a stand to defensible ground. */
+export type TerrainAnchor = {
+  type: 'ridge' | 'saddle' | 'funnel';
+  /** Distance in metres to nearest qualifying feature. 0 = inside polygon. */
+  distanceM: number;
+  featureId?: string;
+};
+
 export type AlignedStand = {
   rank: number;
   name: string;
@@ -14,6 +22,8 @@ export type AlignedStand = {
   coords: [number, number];
   /** True when stand was placed by the engine but could not be verified inside the parcel boundary. */
   unverified?: boolean;
+  /** Phase 2: terrain anchor — the closest qualifying terrain feature justifying this stand. */
+  anchorFeature?: TerrainAnchor;
   resilience?: {
     score: number;
     corridorCount: number;
@@ -187,6 +197,20 @@ export function StandAlignmentPanel({
                       <span className="text-white text-[13px] font-bold font-mono">{stand.alignment.score}</span>
                     </div>
                   </div>
+
+                  {/* Row 1b: Terrain anchor */}
+                  {stand.anchorFeature && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-[8px] text-stone-500">Anchored to:</span>
+                      <span className="text-[8px] font-medium text-teal-400">
+                        {stand.anchorFeature.type === 'ridge' ? 'Ridge Spine' :
+                         stand.anchorFeature.type === 'saddle' ? 'Saddle' :
+                         'Funnel'}
+                        {' '}
+                        ({stand.anchorFeature.distanceM === 0 ? 'inside' : `${stand.anchorFeature.distanceM}m`})
+                      </span>
+                    </div>
+                  )}
 
                   {/* Row 2: Key Indicators — 3 small badges */}
                   <div className="flex gap-1 mt-1.5">
