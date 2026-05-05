@@ -5137,6 +5137,42 @@ function DeerIntelContent() {
 
         reconcileVisibility(map, reconcileState);
 
+        // ═══ BUG-1 FIX (shared): Reconcile visibility gate ═══
+        // Reads latest flowVisibility + showBeddingProbability via refs so
+        // the 200-400ms setTimeout closures always check current state.
+        // Defined ONCE and used by BOTH territory fade-in (Path A) and
+        // re-align crossfade (Path B) to prevent fadeLayerIn from
+        // overriding the dedicated visibility effect's fadeLayerOut.
+        const shouldReconcileHide = (): ((id: string) => boolean) => {
+          const _fv = flowVisibilityRef.current;
+          const _bp = showBeddingProbRef.current;
+          const _pm = _fv.pressureHeatmap === true; // isPressureMode
+          return (id: string): boolean => {
+            // Heatmap layers — always hidden
+            if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
+            if (id === 'tfp-pressure-heatmap' && !_pm) return true;
+            // Flow primary family — gated on isPressureMode && flowPrimary
+            if (id === 'tfp-flow-primary' || id === 'tfp-flow-primary-glow' ||
+                id === 'tfp-flow-nearest-highlight' || id === 'tfp-flow-direction-chevrons') {
+              return !(_pm && _fv.flowPrimary);
+            }
+            // Flow secondary
+            if (id === 'tfp-flow-secondary') return !(_pm && _fv.flowSecondary);
+            // Convergence zones
+            if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
+              return !(_pm && _fv.convergenceZones);
+            }
+            // Bedding layers — gated on showBeddingProbability
+            if (id === 'tfp-bedding-fill' || id === 'tfp-bedding-outline' ||
+                id === 'tfp-edge-ghost-fill' || id === 'tfp-edge-ghost-outline' ||
+                id === 'tfp-bedding-probability-glow' || id === 'tfp-bedding-probability-fill' ||
+                id === 'tfp-bedding-probability-outline') {
+              return !_bp;
+            }
+            return false; // all other layers: reconcile as before
+          };
+        };
+
         // Territory fade-in: if territory analysis just delivered new data,
         // fade layers in over 1 s instead of snapping to full opacity.
         if (territoryFadeInPending.current) {
@@ -5163,12 +5199,14 @@ function DeerIntelContent() {
           }
           // After a brief 400 ms pause, fade everything back in over 1 s
           setTimeout(() => {
+            const shouldHide = shouldReconcileHide(); // snapshot latest state inside timeout
             const postStyle = map.getStyle();
             if (postStyle?.layers) {
               for (const layer of postStyle.layers) {
                 if (!layer.id.startsWith('tfp-')) continue;
                 if (fadePrefixes.some(p => layer.id.startsWith(p))) continue;
                 if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
+                if (shouldHide(layer.id)) continue; // BUG-1 FIX Path A: respect intended visibility
                 const prop = propMapFade[(layer as any).type] || 'line-opacity';
                 fadeLayerIn(map, layer.id, 0.8, prop, 1000);
               }
@@ -5202,46 +5240,15 @@ function DeerIntelContent() {
               } catch { /* noop */ }
             }
             setTimeout(() => {
+              const shouldHide = shouldReconcileHide(); // snapshot latest state inside timeout
               const postStyle = map.getStyle();
               if (postStyle?.layers) {
-                // ═══ BUG-1 FIX: Reconcile visibility gate ═══
-                // Before fading a layer back in, check its intended visibility
-                // against the same state the dedicated visibility effect uses.
-                // Without this, the reconcile's fadeLayerIn overrides fadeLayerOut
-                // from the visibility effect (race condition — reconcile fires at
-                // 200ms, before fadeLayerOut's post-animation visibility:'none').
-                const _fv = flowVisibilityRef.current; // latest via ref — stale-proof
-                const _pm = _fv.pressureHeatmap === true; // isPressureMode
-                const shouldHide = (id: string): boolean => {
-                  // Heatmap layers — always hidden (L6899-6905)
-                  if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
-                  if (id === 'tfp-pressure-heatmap' && !_pm) return true;
-                  // Flow primary family — gated on isPressureMode && flowPrimary
-                  if (id === 'tfp-flow-primary' || id === 'tfp-flow-primary-glow' ||
-                      id === 'tfp-flow-nearest-highlight' || id === 'tfp-flow-direction-chevrons') {
-                    return !(_pm && _fv.flowPrimary);
-                  }
-                  // Flow secondary
-                  if (id === 'tfp-flow-secondary') return !(_pm && _fv.flowSecondary);
-                  // Convergence zones
-                  if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
-                    return !(_pm && _fv.convergenceZones);
-                  }
-                  // Bedding layers — gated on showBeddingProbability
-                  if (id === 'tfp-bedding-fill' || id === 'tfp-bedding-outline' ||
-                      id === 'tfp-edge-ghost-fill' || id === 'tfp-edge-ghost-outline' ||
-                      id === 'tfp-bedding-probability-glow' || id === 'tfp-bedding-probability-fill' ||
-                      id === 'tfp-bedding-probability-outline') {
-                    return !showBeddingProbability;
-                  }
-                  return false; // all other layers: reconcile as before
-                };
                 for (const layer of postStyle.layers) {
                   if (!layer.id.startsWith('tfp-')) continue;
                   if (skipPrefixes.some(p => layer.id.startsWith(p))) continue;
                   if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
                   if (layer.layout?.visibility === 'none') continue;
-                  if (shouldHide(layer.id)) continue; // BUG-1 FIX: respect intended visibility
+                  if (shouldHide(layer.id)) continue; // BUG-1 FIX Path B: respect intended visibility
                   const prop = fadeProps[(layer as any).type] || 'line-opacity';
                   fadeLayerIn(map, layer.id, 0.85, prop, 800);
                 }
