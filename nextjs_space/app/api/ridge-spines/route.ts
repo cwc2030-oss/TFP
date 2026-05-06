@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
           parcel_id,
           bufferMeters,
           options: {
-            dem_source: 'SRTMGL1',
+            dem_source: 'USGS3DEP1m',
             min_prominence_ft: 25,     // Real ridges need meaningful drop on both sides
             min_length_m: 150,         // No fragments — ridge must be continuous
             output_format: 'geojson',

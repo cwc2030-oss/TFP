@@ -260,7 +260,7 @@ export async function POST(request: NextRequest) {
           parcel_id: parcel_id + '_buffered',
           bufferMeters: effectiveBuffer,
           options: {
-            dem_source: 'SRTMGL1',
+            dem_source: 'USGS3DEP1m',
             min_prominence_ft: 8,
             min_length_m: 60,
           },
