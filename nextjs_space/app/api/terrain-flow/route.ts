@@ -217,7 +217,7 @@ export async function POST(request: NextRequest) {
         const corridorCount = corridorData.corridors?.features?.length || corridorData.features?.length || 0;
         terrainDebug.corridor_count = corridorCount;
         
-        if (corridorData.success && corridorCount > 0) {
+        if (corridorCount > 0) {
           usedRealDEM = true;
           terrainDebug.pipeline_steps.corridor_call = 'success';
           console.log('[TerrainFlow] Got corridor data from Modal:', corridorCount);
@@ -274,21 +274,21 @@ export async function POST(request: NextRequest) {
       terrainDebug.ridge_modal_status = ridgeResponse.status;
       try {
         ridgeData = await ridgeResponse.json();
-        if (ridgeData.success) {
-          const rp = ridgeData.ridges_primary?.features?.length || 0;
-          const rs = ridgeData.ridges_secondary?.features?.length || 0;
-          terrainDebug.ridge_count_primary = rp;
-          terrainDebug.ridge_count_secondary = rs;
-          terrainDebug.pipeline_steps.ridge_call = rp + rs > 0 ? 'success' : 'success_but_empty';
-          
-          if (rp + rs > 0) usedRealDEM = true;
-          
+        const rp = ridgeData.ridges_primary?.features?.length || 0;
+        const rs = ridgeData.ridges_secondary?.features?.length || 0;
+        terrainDebug.ridge_count_primary = rp;
+        terrainDebug.ridge_count_secondary = rs;
+        
+        if (rp + rs > 0) {
+          terrainDebug.pipeline_steps.ridge_call = 'success';
+          usedRealDEM = true;
           const rSaddles = ridgeData.saddle_nodes?.features?.length || 0;
           terrainDebug.ridge_saddle_count = rSaddles;
           console.log('[TerrainFlow] Got ridge data:', rp, 'P +', rs, 'S +', rSaddles, 'saddles');
         } else {
-          terrainDebug.pipeline_steps.ridge_call = 'success_but_failed';
-          terrainDebug.ridge_modal_error = ridgeData.metadata?.error || 'success=false';
+          terrainDebug.pipeline_steps.ridge_call = 'success_but_empty';
+          terrainDebug.ridge_modal_error = ridgeData.metadata?.error || 'No ridge features found';
+          console.log('[TerrainFlow] Ridge modal returned 0 features, dem_source:', ridgeData.metadata?.dem_source || 'unknown');
           ridgeData = null;
         }
       } catch (parseErr) {

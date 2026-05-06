@@ -876,6 +876,7 @@ function deriveBenchPointsFromRidges(ridgeData: any): GeoJSON.FeatureCollection 
     }
   }
   
+  console.log('[TerrainFlow] Generated %d bench proxy points from %d ridges', features.length, allRidges.length);
   return { type: 'FeatureCollection', features };
 }
 
