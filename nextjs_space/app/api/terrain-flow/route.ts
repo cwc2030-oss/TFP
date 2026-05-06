@@ -283,7 +283,9 @@ export async function POST(request: NextRequest) {
           
           if (rp + rs > 0) usedRealDEM = true;
           
-          console.log('[TerrainFlow] Got ridge data:', rp, 'P +', rs, 'S');
+          const rSaddles = ridgeData.saddle_nodes?.features?.length || 0;
+          terrainDebug.ridge_saddle_count = rSaddles;
+          console.log('[TerrainFlow] Got ridge data:', rp, 'P +', rs, 'S +', rSaddles, 'saddles');
         } else {
           terrainDebug.pipeline_steps.ridge_call = 'success_but_failed';
           terrainDebug.ridge_modal_error = ridgeData.metadata?.error || 'success=false';

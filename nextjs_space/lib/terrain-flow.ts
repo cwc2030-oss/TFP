@@ -452,7 +452,8 @@ export function generateTerrainDrivenFlow(
   if (!hasCorridorData) {
     console.log('[TerrainFlow] No corridor data available, generating from parcel terrain indicators');
     // Generate flow based on terrain indicators without corridor data
-    return generateTerrainIndicatorFlow(parcel, coords, parcelBbox, bufferedBbox, parcelScale);
+    // FIX 1+3: Pass ridgeData so saddle_nodes and bench-derived polygons reach V3
+    return generateTerrainIndicatorFlow(parcel, coords, parcelBbox, bufferedBbox, parcelScale, ridgeData);
   }
   
   console.log('[TerrainFlow] Computing component rasters from corridor data');
@@ -746,23 +747,136 @@ function generateTerrainIndicatorFlow(
   coords: number[][],
   parcelBbox: [number, number, number, number],
   bufferedBbox: [number, number, number, number],
-  parcelScale?: ParcelScaleMetrics
+  parcelScale?: ParcelScaleMetrics,
+  ridgeData?: any
 ): TerrainFlowResponse {
   console.log('[TerrainFlow:Indicator] Using V3 pattern-based generation (no X-bias)');
   
-  // Delegate to V3 pattern-based generator
-  // This will classify the parcel and generate appropriate flow pattern
-  const v3Result = generateTerrainFlowV3(parcel, null, null);
+  // FIX 3: Derive bench-approximate points from ridge flanks when no corridor data exists.
+  // Benches form on moderate-slope flanks of ridges. We generate lateral offset points
+  // perpendicular to ridge lines where slope is in bench-favorable range (3-15°).
+  let beddingPolygons: GeoJSON.FeatureCollection | undefined;
+  if (ridgeData) {
+    beddingPolygons = deriveBenchPointsFromRidges(ridgeData);
+    if (beddingPolygons.features.length > 0) {
+      console.log('[TerrainFlow:Indicator] Derived %d bench-proxy points from ridge flanks', beddingPolygons.features.length);
+    }
+  }
+  
+  // FIX 1: Pass ridgeData (with saddle_nodes) and bench-proxy points to V3
+  const v3Result = generateTerrainFlowV3(parcel, null, ridgeData || null, beddingPolygons);
   
   // Update metadata to reflect this was indicator-based
-  v3Result.metadata.dem_source = 'TERRAIN_INDICATORS_V3';
-  v3Result.metadata.fallback_reason = 'Pattern-inferred from parcel geometry (no corridor data)';
+  v3Result.metadata.dem_source = ridgeData ? 'RIDGE_DERIVED_V3' : 'TERRAIN_INDICATORS_V3';
+  v3Result.metadata.fallback_reason = ridgeData 
+    ? 'Ridge-derived flow (no corridor data, real ridges available)'
+    : 'Pattern-inferred from parcel geometry (no corridor data)';
   v3Result.metadata.analysis_extent = {
     parcel_bbox: parcelBbox,
     buffered_bbox: bufferedBbox,
   };
   
   return v3Result;
+}
+
+/**
+ * FIX 3: Derive bench-approximate Point features from ridge geometry.
+ * Benches are flat-to-moderate slope areas on ridge flanks. Since we don't have
+ * corridor data or raw DEM in the no-corridor path, we estimate bench locations
+ * by generating lateral offset points perpendicular to ridge lines.
+ * 
+ * Logic:
+ *  - For each ridge LineString, sample points along the line
+ *  - At each sample, compute perpendicular direction (both sides)
+ *  - Generate offset points at ~60-100m from the ridge (typical bench distance)
+ *  - Score by ridge slope: lower avgSlopeDeg → higher bench probability
+ *  - Filter to only include points where flank slope suggests bench terrain
+ *  
+ * Returns a FeatureCollection<Point> compatible with V3's proximityScore.
+ */
+function deriveBenchPointsFromRidges(ridgeData: any): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+  const allRidges = [
+    ...(ridgeData?.ridges_primary?.features || []),
+    ...(ridgeData?.ridges_secondary?.features || []),
+  ];
+  
+  if (allRidges.length === 0) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  
+  const BENCH_OFFSET_M = 80;    // Lateral offset from ridge line
+  const SAMPLE_INTERVAL_M = 120; // Sample every 120m along ridge
+  const DEG_PER_M_LAT = 1 / 111320;
+  
+  for (const ridge of allRidges) {
+    if (ridge.geometry?.type !== 'LineString') continue;
+    const coords: number[][] = ridge.geometry.coordinates;
+    if (coords.length < 2) continue;
+    
+    const avgSlope = ridge.properties?.avgSlopeDeg ?? 15;
+    // Bench probability: optimal at 5-12° slope, drops off outside
+    let benchProb: number;
+    if (avgSlope >= 5 && avgSlope <= 12) {
+      benchProb = 0.7;  // Prime bench terrain
+    } else if (avgSlope >= 3 && avgSlope <= 18) {
+      benchProb = 0.45; // Acceptable
+    } else if (avgSlope > 18) {
+      benchProb = 0.15; // Too steep — unlikely bench
+    } else {
+      benchProb = 0.25; // Very flat — could be bottom, not bench
+    }
+    
+    // Walk along the ridge sampling at intervals
+    let accDist = 0;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const p1: [number, number] = [coords[i][0], coords[i][1]];
+      const p2: [number, number] = [coords[i + 1][0], coords[i + 1][1]];
+      const segDist = distanceMeters(p1, p2);
+      
+      if (segDist < 5) continue; // Skip micro-segments
+      
+      accDist += segDist;
+      if (accDist < SAMPLE_INTERVAL_M) continue;
+      accDist = 0;
+      
+      // Compute perpendicular direction
+      const dLng = p2[0] - p1[0];
+      const dLat = p2[1] - p1[1];
+      const len = Math.sqrt(dLng * dLng + dLat * dLat);
+      if (len === 0) continue;
+      
+      // Perpendicular unit vector (rotated 90°)
+      const perpLat = -dLng / len;
+      const perpLng = dLat / len;
+      
+      // Midpoint of segment
+      const mid: [number, number] = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+      const cosLat = Math.cos(mid[1] * Math.PI / 180);
+      const degPerMLng = DEG_PER_M_LAT / (cosLat || 0.001);
+      
+      // Generate offset points on both sides of the ridge
+      for (const sign of [-1, 1]) {
+        const offsetLng = mid[0] + sign * perpLng * BENCH_OFFSET_M * degPerMLng;
+        const offsetLat = mid[1] + sign * perpLat * BENCH_OFFSET_M * DEG_PER_M_LAT;
+        
+        features.push({
+          type: 'Feature',
+          properties: {
+            benchProbability: benchProb,
+            sourceRidgeId: ridge.properties?.id || 'unknown',
+            offsetSide: sign > 0 ? 'right' : 'left',
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [offsetLng, offsetLat],
+          },
+        });
+      }
+    }
+  }
+  
+  return { type: 'FeatureCollection', features };
 }
 
 /**
