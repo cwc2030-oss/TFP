@@ -38,8 +38,8 @@ import { pointInAnyWaterBody } from './terrain-raster';
 // Higher thresholds = fewer but more confident ridges
 const MIN_PROMINENCE_FT_PRIMARY = 45;     // Major drop on BOTH sides for primary backbone
 const MIN_PROMINENCE_FT_SECONDARY = 35;   // Secondary still requires significant drop
-const MIN_LENGTH_M_PRIMARY = 400;         // Long, continuous backbone (not short fragments)
-const MIN_LENGTH_M_SECONDARY = 250;       // Secondary ridges also need length
+const MIN_LENGTH_M_PRIMARY = 200;         // Relaxed for Ozark-style shorter sinuous ridges (was 400)
+const MIN_LENGTH_M_SECONDARY = 120;       // Relaxed — secondary ridges in hilly terrain are shorter (was 250)
 const MAX_SEGMENT_GAP_M = 30;             // Tight gap tolerance for merging
 const COLLINEARITY_THRESHOLD_DEG = 15;    // Strict bearing alignment for merging
 const SADDLE_DROP_MIN_FT = 25;            // Only very pronounced saddles
@@ -120,17 +120,19 @@ export async function fetchRidgeSpines(
     }
     
     const data = await response.json();
-    const rawPrimaryCount = data.ridges_primary?.features?.length || 0;
-    const rawSecondaryCount = data.ridges_secondary?.features?.length || 0;
+    const primaryCount = data.ridges_primary?.features?.length || 0;
+    const secondaryCount = data.ridges_secondary?.features?.length || 0;
+    const saddleCount = data.saddle_nodes?.features?.length ?? 0;
     
     // Use server-reported mode — NOT blind assumption
     const serverMode = data.mode || 'unknown';
     const isSynthetic = serverMode !== 'real_dem';
     
-    console.log('[Backbone] Raw response:', {
+    console.log('[Backbone] Response (server-filtered):', {
       duration: durationMs + 'ms',
-      primary: rawPrimaryCount,
-      secondary: rawSecondaryCount,
+      primary: primaryCount,
+      secondary: secondaryCount,
+      saddles: saddleCount,
       dem_source: data.metadata?.dem_source || 'unknown',
       mode: serverMode,
       isSynthetic,
@@ -142,31 +144,30 @@ export async function fetchRidgeSpines(
       console.log('[Backbone] terrain_debug:', JSON.stringify(data.terrain_debug, null, 2));
     }
     
-    // ─── Quality filter: drop scribbles, stubs, incoherent spines ───
-    const { filtered, dropped } = filterSpinesByQuality(data as RidgeSpineResponse);
-    if (dropped.length > 0) {
-      console.log('[Backbone] Quality filter dropped', dropped.length, 'spine(s):', dropped);
-    }
-    console.log('[Backbone] Post-filter:', filtered.ridges_primary.features.length, 'P +',
-      filtered.ridges_secondary.features.length, 'S (from', rawPrimaryCount, 'P +', rawSecondaryCount, 'S raw)');
+    // NOTE: Quality filters (spine + saddle) already applied server-side in /api/ridge-spines.
+    // Previously these were double-applied here, causing a cascade where the client-side
+    // saddle filter used doubly-filtered ridges (fewer ridges → all saddles rejected).
+    // The server now handles all filtering with correct unfiltered-ridge context for saddles.
     
-    // ─── Saddle quality filter: spacing, prominence, proximity, density cap ───
-    const rawSaddleCount = filtered.saddle_nodes?.features?.length ?? 0;
-    const { filtered: filteredSaddles, debug: saddleDebug } = filterSaddlesByQuality(
-      filtered.saddle_nodes ?? { type: 'FeatureCollection', features: [] },
-      filtered.ridges_primary,
-      filtered.ridges_secondary,
-    );
-    filtered.saddle_nodes = filteredSaddles as any;
-    filtered.metadata.saddle_count = filteredSaddles.features.length;
-    console.log(`[Backbone] Saddle filter: ${rawSaddleCount} raw → ${filteredSaddles.features.length} kept`);
-    if (saddleDebug.raw_saddle_candidates > 0) {
-      console.log('[SaddleDebug]', JSON.stringify(saddleDebug));
-    }
+    // Extract saddle debug from server terrain_debug if available
+    const saddleDebug = data.terrain_debug?.pipeline_steps?.saddle_filter
+      ? {
+          raw_saddle_candidates: data.terrain_debug.pipeline_steps.saddle_filter.raw ?? 0,
+          post_prominence_filter: data.terrain_debug.pipeline_steps.saddle_filter.post_prominence ?? 0,
+          post_ridge_proximity_filter: data.terrain_debug.pipeline_steps.saddle_filter.post_ridge_proximity ?? 0,
+          post_spacing_filter: data.terrain_debug.pipeline_steps.saddle_filter.post_spacing ?? 0,
+          post_density_cap: data.terrain_debug.pipeline_steps.saddle_filter.post_density_cap ?? 0,
+          final_saddles: data.terrain_debug.pipeline_steps.saddle_filter.final ?? saddleCount,
+          total_ridge_length_km: data.terrain_debug.pipeline_steps.saddle_filter.total_ridge_km ?? 0,
+          density_cap_per_km: data.terrain_debug.pipeline_steps.saddle_filter.density_cap_per_km ?? 1.5,
+          min_spacing_m: data.terrain_debug.pipeline_steps.saddle_filter.min_spacing_m ?? 300,
+          candidates: [],
+        } as SaddleDebugPayload
+      : undefined;
     
     return {
       success: true,
-      data: filtered,
+      data: data as RidgeSpineResponse,
       durationMs,
       isSynthetic,
       terrainDebug: data.terrain_debug,
@@ -725,7 +726,7 @@ function computeCurvatureIncoherence(coords: [number, number][]): number {
 export function filterSpinesByQuality(
   data: RidgeSpineResponse,
   opts?: {
-    /** Max curvature incoherence (°/100m). Default 40. Ridge spine should not zig-zag. */
+    /** Max curvature incoherence (°/100m). Default 65. Ridge spine should not zig-zag. */
     maxIncoherence?: number;
     /** Min length for primary spines (m). Default uses module constant. */
     minPrimaryLengthM?: number;
@@ -737,7 +738,7 @@ export function filterSpinesByQuality(
     maxSpinesTotal?: number;
   }
 ): { filtered: RidgeSpineResponse; dropped: { id: string; reason: string }[] } {
-  const maxIncoherence = opts?.maxIncoherence ?? 40;
+  const maxIncoherence = opts?.maxIncoherence ?? 65; // Relaxed from 40 — Ozark ridges are more sinuous
   const minPrimaryLen = opts?.minPrimaryLengthM ?? MIN_LENGTH_M_PRIMARY;
   const minSecondaryLen = opts?.minSecondaryLengthM ?? MIN_LENGTH_M_SECONDARY;
   const minCoords = opts?.minCoordCount ?? 3;

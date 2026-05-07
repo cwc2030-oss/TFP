@@ -3100,7 +3100,7 @@ function DeerIntelContent() {
         }
       }
 
-      // 3. Funnel / pinch polygons — inside polygon (0m) or within 75m of centroid
+      // 3. Funnel / pinch polygons — inside polygon (0m) or within 75m of polygon EDGE
       for (const funnel of anchorFunnelPolys) {
         if (pointInPolygon(coords, funnel.ring)) {
           // Inside polygon — best possible anchor (0m)
@@ -3109,8 +3109,9 @@ function DeerIntelContent() {
             best = { type: 'funnel', distanceM: 0, featureId: funnel.id };
           }
         } else {
-          // Check distance to centroid
-          const dMeters = distanceMeters(coords, funnel.centroid);
+          // Distance to nearest edge of funnel polygon (not centroid — fixes elongated polygon bias)
+          const edgeResult = closestPointOnLineString(coords, funnel.ring as [number, number][]);
+          const dMeters = edgeResult.dist;
           if (dMeters <= FUNNEL_ANCHOR_M && dMeters < bestDist) {
             bestDist = dMeters;
             best = { type: 'funnel', distanceM: Math.round(dMeters), featureId: funnel.id };
@@ -3135,10 +3136,32 @@ function DeerIntelContent() {
       }
     }
 
-    // Diagnostic logging for anchor gate
+    // Diagnostic logging for anchor gate — includes per-candidate closest distances
     console.log(`[TERRAIN-ANCHOR] ${anchoredPool.length}/${allScored.length} candidates passed anchor gate (ridges=${anchorRidgeLines.length}, saddles=${anchorSaddlePoints.length}, funnels=${anchorFunnelPolys.length})`);
     if (anchorRejected.length > 0) {
       console.log(`[TERRAIN-ANCHOR] Rejected ${anchorRejected.length}: ${anchorRejected.map(r => `"${r.name}"`).join(', ')}`);
+      // Per-rejected-candidate distance analysis for debugging
+      for (const rej of anchorRejected) {
+        let closestRidgeM = Infinity;
+        for (const ridge of anchorRidgeLines) {
+          if (ridge.coords.length < 2) continue;
+          const result = closestPointOnLineString(rej.coords, ridge.coords);
+          const d = distanceMeters(rej.coords, result.point);
+          if (d < closestRidgeM) closestRidgeM = d;
+        }
+        let closestSaddleM = Infinity;
+        for (const saddle of anchorSaddlePoints) {
+          const d = distanceMeters(rej.coords, saddle.coords);
+          if (d < closestSaddleM) closestSaddleM = d;
+        }
+        let closestFunnelM = Infinity;
+        for (const funnel of anchorFunnelPolys) {
+          if (pointInPolygon(rej.coords, funnel.ring)) { closestFunnelM = 0; break; }
+          const edgeResult = closestPointOnLineString(rej.coords, funnel.ring as [number, number][]);
+          if (edgeResult.dist < closestFunnelM) closestFunnelM = edgeResult.dist;
+        }
+        console.log(`[TERRAIN-ANCHOR] ✗ "${rej.name}" closest: ridge=${Math.round(closestRidgeM)}m (limit ${RIDGE_ANCHOR_M}m), saddle=${Math.round(closestSaddleM)}m (limit ${SADDLE_ANCHOR_M}m), funnel=${Math.round(closestFunnelM)}m (limit ${FUNNEL_ANCHOR_M}m)`);
+      }
     }
     anchoredPool.slice(0, 5).forEach(s => {
       console.log(`[TERRAIN-ANCHOR] ✓ "${s.name}" → ${s.anchorFeature.type} (${s.anchorFeature.distanceM}m)`);
