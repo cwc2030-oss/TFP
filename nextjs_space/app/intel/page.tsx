@@ -3029,8 +3029,8 @@ function DeerIntelContent() {
 
     // ═══ Phase 2: TERRAIN ANCHOR GATE ═══
     // Every stand must be within proximity of at least one real terrain feature.
-    // Anchor types: ridge spine (150m), saddle node (100m), funnel polygon (inside or 75m), convergence zone (100m).
-    const RIDGE_ANCHOR_M = 150;
+    // Anchor types: ridge spine (175m), saddle node (100m), funnel polygon (inside or 75m), convergence zone (100m).
+    const RIDGE_ANCHOR_M = 175;
     const SADDLE_ANCHOR_M = 100;
     const FUNNEL_ANCHOR_M = 75;
     const CONVERGENCE_ANCHOR_M = 100;
