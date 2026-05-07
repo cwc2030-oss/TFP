@@ -4795,6 +4795,10 @@ function DeerIntelContent() {
           // the useEffects from firing with old data still on the map.
           setRidgeSpineData(null);
           setTerrainFlowData(null);
+          console.log('[GrayFilm] runAnalysis territory branch', {
+            territoryCount: territoryParcelsRef.current.length,
+            mergedSet: !!merged,
+          });
           setParcelPolygon(merged);
           console.log('[INTEL-DIAG] TERRITORY RE-ALIGN — re-merged', territoryParcelsRef.current.length, 'parcels');
         } else {
@@ -6321,6 +6325,10 @@ function DeerIntelContent() {
   // ========== FETCH ADJACENT PARCELS ==========
   const adjacentFetchRef = useRef<AbortController | null>(null);
   useEffect(() => {
+    console.log('[GrayFilm] Fetch adjacent triggered', {
+      parcelPolygonSet: !!parcelPolygon,
+      territoryCount: territoryParcelsRef.current.length,
+    });
     if (!parcelPolygon || !mapReady) {
       setAdjacentParcels([]);
       return;
@@ -6422,10 +6430,23 @@ function DeerIntelContent() {
     if (map.getLayer('tfp-adjacent-parcels-outline')) {
       map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', visibility);
     }
+    console.log('[GrayFilm] Effect C', {
+      adjacentCount: fc.features.length,
+      territoryCount: territoryParcels.length,
+      inTerritory,
+      showAdjacentParcels,
+      visibility,
+      fillLayerExists: !!map.getLayer('tfp-adjacent-parcels-fill'),
+      outlineLayerExists: !!map.getLayer('tfp-adjacent-parcels-outline'),
+    });
   }, [adjacentParcels, showAdjacentParcels, mapReady, territoryParcels]);
 
   // ========== UPDATE TERRITORY PARCELS MAP SOURCE ==========
   useEffect(() => {
+    console.log('[GrayFilm] Territory effect', {
+      territoryCount: territoryParcels.length,
+      branch: territoryParcels.length > 0 ? 'hide' : 'restore',
+    });
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
