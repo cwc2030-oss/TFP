@@ -7,7 +7,7 @@ import { getStandExplainability, type ReasonChip, type QualityBar, type KeyIndic
 
 /** Terrain feature that anchors a stand to defensible ground. */
 export type TerrainAnchor = {
-  type: 'ridge' | 'saddle' | 'funnel';
+  type: 'ridge' | 'saddle' | 'funnel' | 'convergence';
   /** Distance in metres to nearest qualifying feature. 0 = inside polygon. */
   distanceM: number;
   featureId?: string;
@@ -205,6 +205,7 @@ export function StandAlignmentPanel({
                       <span className="text-[8px] font-medium text-teal-400">
                         {stand.anchorFeature.type === 'ridge' ? 'Ridge Spine' :
                          stand.anchorFeature.type === 'saddle' ? 'Saddle' :
+                         stand.anchorFeature.type === 'convergence' ? 'Convergence Zone' :
                          'Funnel'}
                         {' '}
                         ({stand.anchorFeature.distanceM === 0 ? 'inside' : `${stand.anchorFeature.distanceM}m`})

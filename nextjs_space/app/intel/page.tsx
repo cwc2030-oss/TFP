@@ -3029,10 +3029,11 @@ function DeerIntelContent() {
 
     // ═══ Phase 2: TERRAIN ANCHOR GATE ═══
     // Every stand must be within proximity of at least one real terrain feature.
-    // Anchor types: ridge spine (150m), saddle node (100m), funnel polygon (inside or 75m).
+    // Anchor types: ridge spine (150m), saddle node (100m), funnel polygon (inside or 75m), convergence zone (100m).
     const RIDGE_ANCHOR_M = 150;
     const SADDLE_ANCHOR_M = 100;
     const FUNNEL_ANCHOR_M = 75;
+    const CONVERGENCE_ANCHOR_M = 100;
 
     // Pre-extract terrain feature geometries for anchor computation
     const anchorRidgeLines: { coords: [number, number][]; id?: string }[] = [];
@@ -3074,6 +3075,19 @@ function DeerIntelContent() {
     };
     extractFunnelPolys(tieredCorridorData?.funnels_hard, 'funnel-hard');
     extractFunnelPolys(tieredCorridorData?.funnels_slight, 'funnel-slight');
+
+    // 4. Convergence zone points — from terrain-flow pipeline
+    const anchorConvergencePoints: { coords: [number, number]; id?: string }[] = [];
+    if (terrainFlowData?.convergence_zones?.features) {
+      for (const f of terrainFlowData.convergence_zones.features) {
+        if (f.geometry?.type === 'Point') {
+          anchorConvergencePoints.push({
+            coords: (f.geometry as GeoJSON.Point).coordinates as [number, number],
+            id: f.properties?.id || 'convergence',
+          });
+        }
+      }
+    }
 
     /** Find the closest qualifying terrain anchor for a candidate position. Returns null if none within thresholds. */
     function findTerrainAnchor(coords: [number, number]): TerrainAnchor | null {
@@ -3119,6 +3133,15 @@ function DeerIntelContent() {
         }
       }
 
+      // 4. Convergence zone points — within 100m (terrain-flow pipeline)
+      for (const cz of anchorConvergencePoints) {
+        const dMeters = distanceMeters(coords, cz.coords);
+        if (dMeters <= CONVERGENCE_ANCHOR_M && dMeters < bestDist) {
+          bestDist = dMeters;
+          best = { type: 'convergence', distanceM: Math.round(dMeters), featureId: cz.id };
+        }
+      }
+
       return best;
     }
 
@@ -3137,7 +3160,7 @@ function DeerIntelContent() {
     }
 
     // Diagnostic logging for anchor gate — includes per-candidate closest distances
-    console.log(`[TERRAIN-ANCHOR] ${anchoredPool.length}/${allScored.length} candidates passed anchor gate (ridges=${anchorRidgeLines.length}, saddles=${anchorSaddlePoints.length}, funnels=${anchorFunnelPolys.length})`);
+    console.log(`[TERRAIN-ANCHOR] ${anchoredPool.length}/${allScored.length} candidates passed anchor gate (ridges=${anchorRidgeLines.length}, saddles=${anchorSaddlePoints.length}, funnels=${anchorFunnelPolys.length}, convergence=${anchorConvergencePoints.length})`);
     if (anchorRejected.length > 0) {
       console.log(`[TERRAIN-ANCHOR] Rejected ${anchorRejected.length}: ${anchorRejected.map(r => `"${r.name}"`).join(', ')}`);
       // Per-rejected-candidate distance analysis for debugging
@@ -3160,7 +3183,12 @@ function DeerIntelContent() {
           const edgeResult = closestPointOnLineString(rej.coords, funnel.ring as [number, number][]);
           if (edgeResult.dist < closestFunnelM) closestFunnelM = edgeResult.dist;
         }
-        console.log(`[TERRAIN-ANCHOR] ✗ "${rej.name}" closest: ridge=${Math.round(closestRidgeM)}m (limit ${RIDGE_ANCHOR_M}m), saddle=${Math.round(closestSaddleM)}m (limit ${SADDLE_ANCHOR_M}m), funnel=${Math.round(closestFunnelM)}m (limit ${FUNNEL_ANCHOR_M}m)`);
+        let closestConvergenceM = Infinity;
+        for (const cz of anchorConvergencePoints) {
+          const d = distanceMeters(rej.coords, cz.coords);
+          if (d < closestConvergenceM) closestConvergenceM = d;
+        }
+        console.log(`[TERRAIN-ANCHOR] ✗ "${rej.name}" closest: ridge=${Math.round(closestRidgeM)}m, saddle=${Math.round(closestSaddleM)}m, funnel=${Math.round(closestFunnelM)}m, convergence=${Math.round(closestConvergenceM)}m`);
       }
     }
     anchoredPool.slice(0, 5).forEach(s => {
@@ -3637,7 +3665,7 @@ function DeerIntelContent() {
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData, terrainFlowData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stability invalidation: when the user explicitly cycles
   // wind direction or season, the stability anchor should
@@ -11674,7 +11702,7 @@ function DeerIntelContent() {
 
     // Phase 2: Terrain anchor label for popup
     const anchorLabel = standData?.anchorFeature
-      ? `Anchored to: ${standData.anchorFeature.type === 'ridge' ? 'Ridge Spine' : standData.anchorFeature.type === 'saddle' ? 'Saddle' : 'Funnel'} (${standData.anchorFeature.distanceM === 0 ? 'inside' : standData.anchorFeature.distanceM + 'm'})`
+      ? `Anchored to: ${standData.anchorFeature.type === 'ridge' ? 'Ridge Spine' : standData.anchorFeature.type === 'saddle' ? 'Saddle' : standData.anchorFeature.type === 'convergence' ? 'Convergence Zone' : 'Funnel'} (${standData.anchorFeature.distanceM === 0 ? 'inside' : standData.anchorFeature.distanceM + 'm'})`
       : null;
     
     const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '340px', offset: 12, className: 'intel-popup' })
