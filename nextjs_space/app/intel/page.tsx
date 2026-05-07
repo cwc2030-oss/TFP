@@ -6408,7 +6408,21 @@ function DeerIntelContent() {
 
     source.setData(fc);
     console.log('[Adjacent] Updated map source with', fc.features.length, 'parcels');
-  }, [adjacentParcels, showAdjacentParcels, mapReady]);
+
+    // POST-FETCH VISIBILITY AUTHORITY: After pushing fresh data into the source,
+    // enforce visibility based on current territory state. This prevents the
+    // gray-film race where an async adjacent-parcels re-fetch (triggered by
+    // parcelPolygon changing during Re-Align) repopulates the source AFTER the
+    // territory useEffect already hid these layers.
+    const inTerritory = territoryParcels.length > 0;
+    const visibility = (inTerritory || !showAdjacentParcels) ? 'none' as const : 'visible' as const;
+    if (map.getLayer('tfp-adjacent-parcels-fill')) {
+      map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', visibility);
+    }
+    if (map.getLayer('tfp-adjacent-parcels-outline')) {
+      map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', visibility);
+    }
+  }, [adjacentParcels, showAdjacentParcels, mapReady, territoryParcels]);
 
   // ========== UPDATE TERRITORY PARCELS MAP SOURCE ==========
   useEffect(() => {
