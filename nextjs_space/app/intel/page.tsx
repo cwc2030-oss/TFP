@@ -6393,6 +6393,17 @@ function DeerIntelContent() {
     const source = map.getSource('tfp-adjacent-parcels') as mapboxgl.GeoJSONSource;
     if (!source) return;
 
+    if (territoryParcelsRef.current.length > 0) {
+      source.setData({ type: 'FeatureCollection', features: [] });
+      if (map.getLayer('tfp-adjacent-parcels-fill')) {
+        map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
+      }
+      if (map.getLayer('tfp-adjacent-parcels-outline')) {
+        map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
+      }
+      return;
+    }
+
     if (!showAdjacentParcels || adjacentParcels.length === 0) {
       source.setData({ type: 'FeatureCollection', features: [] });
       return;
@@ -6439,7 +6450,7 @@ function DeerIntelContent() {
       fillLayerExists: !!map.getLayer('tfp-adjacent-parcels-fill'),
       outlineLayerExists: !!map.getLayer('tfp-adjacent-parcels-outline'),
     });
-  }, [adjacentParcels, showAdjacentParcels, mapReady]);
+  }, [adjacentParcels, showAdjacentParcels, mapReady, territoryParcels]);
 
   // ========== UPDATE TERRITORY PARCELS MAP SOURCE ==========
   useEffect(() => {
