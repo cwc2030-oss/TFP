@@ -4504,6 +4504,7 @@ function DeerIntelContent() {
           if (adjSrc) adjSrc.setData({ type: 'FeatureCollection', features: [] });
         } catch { /* layers may not exist yet */ }
       }
+      setAdjacentParcels([]);
 
       return updated;
     });
@@ -6383,7 +6384,7 @@ function DeerIntelContent() {
       });
 
     return () => controller.abort();
-  }, [parcelPolygon, mapReady]);
+  }, [parcelPolygon, mapReady, territoryParcels.length]);
 
   // ========== UPDATE ADJACENT PARCELS MAP SOURCE ==========
   useEffect(() => {
