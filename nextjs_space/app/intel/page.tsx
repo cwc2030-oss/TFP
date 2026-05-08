@@ -4697,7 +4697,7 @@ function DeerIntelContent() {
     // execute if explicitly invoked by "Analyze Territory" / "Re-Align Territory"
     // which always set prefetchedParcelRef first (or have >1 territory parcels).
     // Stale mount calls, setTimeout leftovers, and demo fallbacks must be blocked.
-    const isTerritoryRun = territoryParcelsRef.current.length > 1;
+    const isTerritoryRun = territoryParcelsRef.current.length >= 1;
     if (territoryModeRef.current && !prefetchedParcelRef.current && !isTerritoryRun) {
       console.log('[TRIGGER-DIAG] runAnalysis BLOCKED — territory mode active, no prefetched parcel, not a territory run');
       return;
@@ -6329,7 +6329,7 @@ function DeerIntelContent() {
       parcelPolygonSet: !!parcelPolygon,
       territoryCount: territoryParcelsRef.current.length,
     });
-    if (!parcelPolygon || !mapReady) {
+    if (!parcelPolygon || !mapReady || territoryParcelsRef.current.length > 0) {
       setAdjacentParcels([]);
       return;
     }
@@ -8998,6 +8998,7 @@ function DeerIntelContent() {
             id: 'tfp-adjacent-parcels-fill',
             type: 'fill',
             source: 'tfp-adjacent-parcels',
+            layout: { visibility: 'none' },
             paint: {
               'fill-color': '#94a3b8', // slate-400
               'fill-opacity': 0.08,
