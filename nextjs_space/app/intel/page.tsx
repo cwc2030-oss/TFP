@@ -4494,15 +4494,15 @@ function DeerIntelContent() {
       territoryParcelsRef.current = updated;
       console.log('[TERRITORY-DIAG] PARCEL ADDED. new count:', updated.length);
 
-      // Safety catch: hide adjacent parcel layers on first territory parcel add
-      if (prev.length === 0) {
-        const map = mapRef.current;
-        if (map) {
-          try {
-            map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
-            map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
-          } catch { /* layers may not exist yet */ }
-        }
+      // Hide adjacent parcel layers on every territory parcel add
+      const map = mapRef.current;
+      if (map) {
+        try {
+          map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
+          map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
+          const adjSrc = map.getSource('tfp-adjacent-parcels') as mapboxgl.GeoJSONSource;
+          if (adjSrc) adjSrc.setData({ type: 'FeatureCollection', features: [] });
+        } catch { /* layers may not exist yet */ }
       }
 
       return updated;
