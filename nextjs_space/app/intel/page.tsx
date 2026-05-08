@@ -4504,10 +4504,10 @@ function DeerIntelContent() {
           if (adjSrc) adjSrc.setData({ type: 'FeatureCollection', features: [] });
         } catch { /* layers may not exist yet */ }
       }
-      setAdjacentParcels([]);
 
       return updated;
     });
+    setAdjacentParcels([]);
   }, []);
 
   const removeParcelFromTerritory = useCallback((parcelId: string) => {
