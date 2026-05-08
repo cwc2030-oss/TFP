@@ -6422,7 +6422,7 @@ function DeerIntelContent() {
     // gray-film race where an async adjacent-parcels re-fetch (triggered by
     // parcelPolygon changing during Re-Align) repopulates the source AFTER the
     // territory useEffect already hid these layers.
-    const inTerritory = territoryParcels.length > 0;
+    const inTerritory = territoryParcelsRef.current.length > 0;
     const visibility = (inTerritory || !showAdjacentParcels) ? 'none' as const : 'visible' as const;
     if (map.getLayer('tfp-adjacent-parcels-fill')) {
       map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', visibility);
@@ -6439,7 +6439,7 @@ function DeerIntelContent() {
       fillLayerExists: !!map.getLayer('tfp-adjacent-parcels-fill'),
       outlineLayerExists: !!map.getLayer('tfp-adjacent-parcels-outline'),
     });
-  }, [adjacentParcels, showAdjacentParcels, mapReady, territoryParcels]);
+  }, [adjacentParcels, showAdjacentParcels, mapReady]);
 
   // ========== UPDATE TERRITORY PARCELS MAP SOURCE ==========
   useEffect(() => {
