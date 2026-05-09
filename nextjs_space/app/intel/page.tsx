@@ -5290,7 +5290,7 @@ function DeerIntelContent() {
           circle: 'circle-opacity', heatmap: 'heatmap-opacity',
           symbol: 'icon-opacity',
         };
-        const skipPrefixes = ['tfp-parcel-', 'tfp-territory-'];
+        const skipPrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
         const curStyle = map.getStyle();
         if (curStyle?.layers) {
           for (const layer of curStyle.layers) {
