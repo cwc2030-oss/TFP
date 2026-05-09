@@ -187,3 +187,27 @@
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
 }
+
+/* v3.9.2 — Sit-pin popup (dark emerald) */
+.tfp-sit-pin-popup .mapboxgl-popup-content {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 8px;
+  overflow: visible;
+}
+.tfp-sit-pin-popup .mapboxgl-popup-tip {
+  border-top-color: #064e3b;
+}
+.tfp-sit-pin-popup .mapboxgl-popup-close-button {
+  color: #a7f3d0;
+  font-size: 16px;
+  padding: 2px 5px;
+  right: 2px;
+  top: 2px;
+  z-index: 2;
+}
+.tfp-sit-pin-popup .mapboxgl-popup-close-button:hover {
+  background: rgba(255,255,255,0.12);
+  border-radius: 4px;
+}

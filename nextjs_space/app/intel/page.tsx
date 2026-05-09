@@ -2082,6 +2082,10 @@ function DeerIntelContent() {
   // Loaded user pins for the *current* parcel
   interface SitPin { id: string; parcel_id: string; name: string; lng: number; lat: number; created_at: string; }
   const [sitPins, setSitPins] = useState<SitPin[]>([]);
+  const sitPinsRef = useRef<SitPin[]>([]);
+  useEffect(() => { sitPinsRef.current = sitPins; }, [sitPins]);
+  const deleteSitPinRef = useRef<(id: string) => void>(() => {});
+  const setJournalPinRef = useRef<(pin: { id: string; name: string }) => void>(() => {});
   // ========== Stand Journal (Pro feature) ==========
   // Opened by left-clicking an existing green Sit Pin marker.
   interface StandJournalEntry {
@@ -2454,6 +2458,29 @@ function DeerIntelContent() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sitPinModal, sitPinName, currentParcelKey, territoryMode, territoryParcels]);
+
+  // v3.9.2 — Delete a sit pin by ID (called from popup delete button)
+  const deleteSitPin = useCallback(async (pinId: string) => {
+    try {
+      const res = await fetch(`/api/sit-pins/${pinId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data?.error || 'Could not delete pin');
+        console.warn('[SitPin] delete failed:', res.status, data);
+        return;
+      }
+      setSitPins((prev) => prev.filter((p) => p.id !== pinId));
+      toast.success('Sit pin removed');
+      console.log('[SitPin] Deleted:', pinId);
+    } catch (err) {
+      console.error('[SitPin] delete error:', err);
+      toast.error('Network error — could not delete pin');
+    }
+  }, []);
+
+  // v3.9.2 — Keep refs in sync for delegated DOM listeners
+  useEffect(() => { deleteSitPinRef.current = deleteSitPin; });
+  useEffect(() => { setJournalPinRef.current = setJournalPin; });
 
   // v3.9.0 — Keep the map's sit-pin source in sync with React state
   useEffect(() => {
@@ -9829,22 +9856,84 @@ function DeerIntelContent() {
         map.on('mouseenter', 'tfp-user-sit-pins-icon', onSitPinEnter);
         map.on('mouseleave', 'tfp-user-sit-pins-icon', onSitPinLeave);
 
-        // Left-click an existing green Sit Pin → open Stand Journal modal.
-        // Layer-specific click fires before the map-wide click handler that
-        // clears the right-click context menu, so the two don't interfere.
+        // v3.9.2 — Left-click a Sit Pin → persistent popup with Journal + Delete buttons
+        const sitPinClickPopup = new mapboxgl.Popup({
+          closeButton: true,
+          closeOnClick: true,
+          offset: [0, -32],
+          className: 'tfp-sit-pin-popup',
+          maxWidth: '220px',
+        });
+
         map.on('click', 'tfp-user-sit-pins-icon', (e: mapboxgl.MapLayerMouseEvent) => {
           const f = e.features && e.features[0];
           const id = String((f?.properties as any)?.id || '');
           const name = String((f?.properties as any)?.name || '');
           if (!id || !name) return;
-          // Tier gate — Stand Journal is Pro-only
-          if (!isProRef.current) {
-            toast('Upgrade to Pro to access Stand Journal');
+          // Hide the hover popup so it doesn't overlap
+          sitPinHoverPopup.remove();
+          const geom = f?.geometry as GeoJSON.Point | undefined;
+          const coords = geom?.coordinates as [number, number] | undefined;
+          if (!coords) return;
+          const safeName = name.replace(/[<>&"']/g, (c) =>
+            ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] || c)
+          );
+          const popupHtml = `
+            <div style="
+              font-family: system-ui, -apple-system, sans-serif;
+              background: #064e3b;
+              color: #ecfdf5;
+              border-radius: 8px;
+              padding: 8px 10px 6px;
+              min-width: 140px;
+              box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+            ">
+              <div style="font-size:13px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ${safeName}</div>
+              <div style="display:flex;gap:6px;">
+                <button data-tfp-sit-journal="${id}" data-tfp-sit-name="${safeName}" style="
+                  flex:1;background:#059669;color:#fff;border:none;border-radius:4px;
+                  padding:4px 0;font-size:11px;font-weight:600;cursor:pointer;
+                ">📓 Journal</button>
+                <button data-tfp-sit-delete="${id}" style="
+                  width:30px;background:#7f1d1d;color:#fca5a5;border:none;border-radius:4px;
+                  font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+                ">✕</button>
+              </div>
+            </div>`;
+          sitPinClickPopup
+            .setLngLat(coords as [number, number])
+            .setHTML(popupHtml)
+            .addTo(map);
+        });
+
+        // v3.9.2 — Delegated listener for sit-pin popup buttons
+        const mapContainer = (map as any).getContainer() as HTMLElement;
+        const sitPinPopupHandler = (ev: MouseEvent) => {
+          const target = ev.target as HTMLElement;
+          // Delete button
+          const delId = target.closest<HTMLElement>('[data-tfp-sit-delete]')?.getAttribute('data-tfp-sit-delete');
+          if (delId) {
+            ev.stopPropagation();
+            sitPinClickPopup.remove();
+            deleteSitPinRef.current(delId);
             return;
           }
-          console.log('[StandJournal] Pin clicked:', id, name);
-          setJournalPin({ id, name });
-        });
+          // Journal button
+          const journalBtn = target.closest<HTMLElement>('[data-tfp-sit-journal]');
+          const journalId = journalBtn?.getAttribute('data-tfp-sit-journal');
+          const journalName = journalBtn?.getAttribute('data-tfp-sit-name');
+          if (journalId && journalName) {
+            ev.stopPropagation();
+            sitPinClickPopup.remove();
+            if (!isProRef.current) {
+              toast('Upgrade to Pro to access Stand Journal');
+              return;
+            }
+            console.log('[StandJournal] Pin clicked:', journalId, journalName);
+            setJournalPinRef.current({ id: journalId, name: journalName });
+          }
+        };
+        mapContainer.addEventListener('click', sitPinPopupHandler);
       } catch (sitPinLayerErr) {
         console.warn('[SitPin] layer setup failed:', sitPinLayerErr);
       }
