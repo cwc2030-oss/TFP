@@ -2169,9 +2169,11 @@ function DeerIntelContent() {
   const activeLatRef = useRef(activeLat);
   const activeLngRef = useRef(activeLng);
   const activeAcreageRef = useRef(activeAcreage);
+  const activeAddressRef = useRef(activeAddress);
   useEffect(() => { activeLatRef.current = activeLat; }, [activeLat]);
   useEffect(() => { activeLngRef.current = activeLng; }, [activeLng]);
   useEffect(() => { activeAcreageRef.current = activeAcreage; }, [activeAcreage]);
+  useEffect(() => { activeAddressRef.current = activeAddress; }, [activeAddress]);
 
   // Pre-fetched parcel geometry ref.  Pick Parcel / Explore flows populate this
   // BEFORE calling runAnalysis so the analyzer can skip the redundant Regrid lookup
@@ -2283,6 +2285,8 @@ function DeerIntelContent() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null>(null);
+  const parcelPolygonRef = useRef(parcelPolygon);
+  useEffect(() => { parcelPolygonRef.current = parcelPolygon; }, [parcelPolygon]);
 
   // v3.9.0 — Stable parcel key used to group sit pins per parcel.
   // Prefers Regrid-style parcelId; falls back to rounded lat/lng (~0.1 m precision).
@@ -2334,6 +2338,10 @@ function DeerIntelContent() {
   const territoryFadeInPending = useRef(false);
   // RE-ALIGN FIX: Flag to fade new terrain data in smoothly after re-analysis.
   const reAlignFadeInPending = useRef(false);
+  // PRE-TERRITORY SNAPSHOT: saves the original single-parcel state before
+  // territory mode overwrites activeLat/Lng/Address/Acreage/parcelPolygon.
+  // Restored by clearTerritory so the user returns to their original parcel.
+  const preTerritoryStateRef = useRef<{lat: number, lng: number, address: string, acreage: string | number, polygon: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null} | null>(null);
 
   // Raster grid state — persisted so the compare card can sample nearby cells
   const [rasterGrid, setRasterGrid] = useState<RasterGrid | null>(null);
@@ -4451,6 +4459,18 @@ function DeerIntelContent() {
 
   const addParcelToTerritory = useCallback((parcel: TerritoryParcel, opts?: { bypassCap?: boolean }) => {
     console.log('[TERRITORY-DIAG] addParcelToTerritory called. id:', parcel.id, 'address:', parcel.address, 'acreage:', parcel.acreage);
+    // PRE-TERRITORY SNAPSHOT: capture the original single-parcel state before
+    // territory mode overwrites activeLat/Lng/Address/Acreage/parcelPolygon.
+    if (territoryParcelsRef.current.length === 0) {
+      preTerritoryStateRef.current = {
+        lat: activeLatRef.current,
+        lng: activeLngRef.current,
+        address: activeAddressRef.current,
+        acreage: activeAcreageRef.current || '0',
+        polygon: parcelPolygonRef.current,
+      };
+      console.log('[TERRITORY] Snapshot saved:', preTerritoryStateRef.current?.address);
+    }
     setTerritoryParcels(prev => {
       console.log('[TERRITORY-DIAG] setTerritoryParcels updater. prev.length:', prev.length, 'prev IDs:', prev.map(p => p.id));
       // Duplicate guard
@@ -4529,6 +4549,25 @@ function DeerIntelContent() {
     setTerritoryName('My Territory');
     // SHARED-TERRITORY FIX: reset the shared-view flag when territory is cleared
     setIsViewingSharedTerritory(false);
+
+    // PRE-TERRITORY SNAPSHOT RESTORE: put the user back on the original parcel
+    // so Regrid lookups don't hit the territory center (which could land on a
+    // random neighboring parcel instead of the one they started on).
+    if (preTerritoryStateRef.current) {
+      const snap = preTerritoryStateRef.current;
+      setActiveLat(snap.lat);
+      setActiveLng(snap.lng);
+      setActiveAddress(snap.address);
+      setActiveAcreage(String(snap.acreage));
+      setParcelPolygon(snap.polygon);
+      activeLatRef.current = snap.lat;
+      activeLngRef.current = snap.lng;
+      activeAcreageRef.current = String(snap.acreage);
+      activeAddressRef.current = snap.address;
+      parcelPolygonRef.current = snap.polygon;
+      console.log('[TERRITORY] Snapshot restored:', snap.address);
+      preTerritoryStateRef.current = null;
+    }
 
     // Restore adjacent parcel layers hidden during territory mode
     const map = mapRef.current;
