@@ -6500,7 +6500,11 @@ function DeerIntelContent() {
         map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.95));
         map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
         map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.35));
-        // Hide adjacent parcel layers to prevent grey film overlay on territory parcels
+        // Clear adjacent source data AND hide layers to prevent grey film overlay.
+        // Hiding alone is insufficient — stale geometry stays loaded in the source
+        // and repaints instantly if any code path re-triggers visibility.
+        const adjSrc = map.getSource('tfp-adjacent-parcels') as mapboxgl.GeoJSONSource;
+        if (adjSrc) adjSrc.setData({ type: 'FeatureCollection', features: [] });
         map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
         map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'none');
       } catch { /* layers may not exist yet */ }
