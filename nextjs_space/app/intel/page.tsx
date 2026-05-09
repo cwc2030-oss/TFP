@@ -4463,10 +4463,10 @@ function DeerIntelContent() {
     // territory mode overwrites activeLat/Lng/Address/Acreage/parcelPolygon.
     if (territoryParcelsRef.current.length === 0) {
       preTerritoryStateRef.current = {
-        lat: activeLatRef.current,
-        lng: activeLngRef.current,
-        address: activeAddressRef.current,
-        acreage: activeAcreageRef.current || '0',
+        lat: parcel.lat,
+        lng: parcel.lng,
+        address: parcel.address,
+        acreage: String(parcel.acreage),
         polygon: parcelPolygonRef.current,
       };
       console.log('[TERRITORY] Snapshot saved:', preTerritoryStateRef.current?.address);
