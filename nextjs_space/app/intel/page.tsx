@@ -4516,11 +4516,15 @@ function DeerIntelContent() {
       territoryParcelsRef.current = updated;
       return updated;
     });
+    if (territoryParcelsRef.current.length === 0) {
+      prefetchedParcelRef.current = null;
+    }
   }, []);
 
   const clearTerritory = useCallback(() => {
     setTerritoryParcels([]);
     territoryParcelsRef.current = [];
+    prefetchedParcelRef.current = null;
     setTerritoryMode(false);
     setTerritoryName('My Territory');
     // SHARED-TERRITORY FIX: reset the shared-view flag when territory is cleared
