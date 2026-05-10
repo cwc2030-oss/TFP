@@ -10749,6 +10749,10 @@ function DeerIntelContent() {
       setLastSavedPropertyId(null);
       setSelectedStand(null);
       setHuntabilityData(null);
+      // v3.9.3: Reset decision card state on parcel change
+      setDecisionCardIdx(0);
+      setHuntLockedStand(null);
+      setVisibleStandRanks(new Set());
       // vNext: Clear stand GeoJSON + popup
       if (mapRef.current?.getSource('tfp-stands')) {
         (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
@@ -10947,6 +10951,10 @@ function DeerIntelContent() {
     setLastSavedPropertyId(null);
     setSelectedStand(null);
     setHuntabilityData(null);
+    // v3.9.3: Reset decision card state on parcel change
+    setDecisionCardIdx(0);
+    setHuntLockedStand(null);
+    setVisibleStandRanks(new Set());
     // vNext: Clear stand GeoJSON + popup
     if (mapRef.current?.getSource('tfp-stands')) {
       (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
@@ -13316,7 +13324,40 @@ function DeerIntelContent() {
                 </div>
               )}
 
-              {/* ═══ STAND DECISION CARD (left panel, v3.9.2) ═══ */}
+              {/* ═══ STAND DECISION CARD (left panel, v3.9.3) ═══ */}
+              {/* Loading skeleton — shows while terrain analysis is running */}
+              {alignedStands.length === 0 && isLoading && (
+                <div className="px-3 pt-2 pb-3 border-t border-white/[0.04]">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <Target className="h-3 w-3 text-amber-500/70" />
+                    <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Stand Decision</span>
+                    <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-amber-500/20 bg-gray-900/60 animate-pulse">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[#1a3a2a]">
+                      <div>
+                        <div className="h-2 w-16 bg-amber-500/20 rounded mb-1.5" />
+                        <div className="h-4 w-28 bg-white/10 rounded" />
+                      </div>
+                      <div className="h-8 w-12 bg-white/10 rounded" />
+                    </div>
+                    <div className="p-3 space-y-2.5">
+                      <div className="h-3 w-32 bg-white/5 rounded" />
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="h-8 bg-white/5 rounded" />
+                        <div className="h-8 bg-white/5 rounded" />
+                        <div className="h-8 bg-white/5 rounded" />
+                      </div>
+                      <div className="h-3 w-full bg-white/5 rounded" />
+                      <div className="flex gap-2">
+                        <div className="flex-1 h-8 bg-amber-600/20 rounded-md" />
+                        <div className="h-8 w-16 bg-white/5 rounded-md" />
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-stone-500/60 text-center mt-2">Analyzing terrain — locking stand positions…</p>
+                </div>
+              )}
               {alignedStands.length > 0 && (() => {
                 const top3 = alignedStands.slice(0, 3);
                 const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand'];
