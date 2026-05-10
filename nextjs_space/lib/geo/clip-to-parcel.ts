@@ -207,7 +207,7 @@ export function clipLinesToParcel(
       }
     }
 
-    // --- DIAGNOSTIC: count output vertices ---
+    // --- DIAGNOSTIC: count output vertices (pre-simplify) ---
     if (debugLabel) {
       let outputVertexCount = 0;
       let outputLineCount = 0;
@@ -220,15 +220,40 @@ export function clipLinesToParcel(
       const dropped = inputLineCount - outputLineCount;
       const vertDelta = outputVertexCount - inputVertexCount;
       console.log(
-        `[CLIP-DIAG:${debugLabel}] OUTPUT — lineStringFeatures=${outputLineCount} (${dropped >= 0 ? '-' : '+'}${Math.abs(dropped)} features), ` +
-        `totalOutputVertices=${outputVertexCount} (${vertDelta >= 0 ? '+' : ''}${vertDelta} vs input), ` +
+        `[CLIP-DIAG:${debugLabel}] CLIPPED (pre-simplify) — lineStringFeatures=${outputLineCount} (${dropped >= 0 ? '-' : '+'}${Math.abs(dropped)} features), ` +
+        `totalClippedVertices=${outputVertexCount} (${vertDelta >= 0 ? '+' : ''}${vertDelta} vs input), ` +
         `totalClippedFeatures=${clippedFeatures.length}`
+      );
+    }
+
+    // --- Simplify pass: smooth out micro-jitter from binary-search crossing points ---
+    const SIMPLIFY_TOLERANCE = 0.00003; // ~3m at mid-latitudes — removes sub-pixel jitter
+    const simplifiedFeatures = clippedFeatures.map((f) => {
+      if (f.geometry?.type === 'LineString' || f.geometry?.type === 'MultiLineString') {
+        return turf.simplify(f as any, { tolerance: SIMPLIFY_TOLERANCE, highQuality: true }) as GeoJSON.Feature;
+      }
+      return f;
+    });
+
+    // --- DIAGNOSTIC: count output vertices (post-simplify) ---
+    if (debugLabel) {
+      let simplifiedVertexCount = 0;
+      let simplifiedLineCount = 0;
+      for (const f of simplifiedFeatures) {
+        if (f.geometry?.type === 'LineString') {
+          simplifiedLineCount++;
+          simplifiedVertexCount += (f.geometry.coordinates as any[]).length;
+        }
+      }
+      console.log(
+        `[CLIP-DIAG:${debugLabel}] SIMPLIFIED — lineStringFeatures=${simplifiedLineCount}, ` +
+        `totalSimplifiedVertices=${simplifiedVertexCount}, tolerance=${SIMPLIFY_TOLERANCE}`
       );
     }
 
     return {
       type: 'FeatureCollection',
-      features: clippedFeatures,
+      features: simplifiedFeatures,
     };
   } catch (err) {
     console.error('[clipLinesToParcel] Clipping failed (non-fatal), returning unclipped:', err);
