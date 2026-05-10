@@ -2931,12 +2931,14 @@ function DeerIntelContent() {
     return STAND_NAME_POOL[(rank - 1) % STAND_NAME_POOL.length];
   };
   const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
-  // Show Today's stand pin once alignedStands populate (one pin at a time)
+  // Keep map pin in sync with active decision card (one pin at a time)
+  // Single source of truth: visible rank == decisionCardIdx, clamped to available stands.
   useEffect(() => {
-    if (alignedStands.length > 0 && visibleStandRanks.size === 0) {
-      setVisibleStandRanks(new Set([0]));
+    if (alignedStands.length > 0) {
+      const want = Math.min(decisionCardIdx, alignedStands.length - 1);
+      setVisibleStandRanks(new Set([want]));
     }
-  }, [alignedStands.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [alignedStands.length, decisionCardIdx]);
   const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
   const [exceptionalIndex, setExceptionalIndex] = useState<number | null>(null);
   const [parcelStrength, setParcelStrength] = useState<number>(0);
@@ -11508,7 +11510,10 @@ function DeerIntelContent() {
       // v3.9.2: Only show stand ranks that are in visibleStandRanks (default: Today's Sit only)
       const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
       const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
-      const activeRanks = visibleStandRanksRef.current;
+      // v3.9.3: Read fresh state directly (deps array includes visibleStandRanks).
+      const activeRanks = visibleStandRanks.size > 0
+        ? visibleStandRanks
+        : (standsToShow.length > 0 ? new Set<number>([0]) : new Set<number>());
       const features = standsToShow
         .filter((_, idx) => activeRanks.has(idx))
         .map((stand, _fi, _arr) => {
