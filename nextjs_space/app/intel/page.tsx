@@ -2231,9 +2231,9 @@ function DeerIntelContent() {
   const [decisionCardIdx, setDecisionCardIdx] = useState(0); // 0=Today, 1=Alternate, 2=Backup
   const [huntLockedStand, setHuntLockedStand] = useState<{ standName: string; confidence: number } | null>(null);
   const [huntLocking, setHuntLocking] = useState(false);
-  // Track which stand ranks are visible on the map (by default only Today's Sit = rank 0)
-  const [visibleStandRanks, setVisibleStandRanks] = useState<Set<number>>(new Set([0]));
-  const visibleStandRanksRef = useRef<Set<number>>(new Set([0]));
+  // Track which stand rank is visible on the map — always exactly ONE pin at a time
+  const [visibleStandRanks, setVisibleStandRanks] = useState<Set<number>>(new Set());
+  const visibleStandRanksRef = useRef<Set<number>>(new Set());
   useEffect(() => { visibleStandRanksRef.current = visibleStandRanks; }, [visibleStandRanks]);
 
   // ========== STAND COMPARE STATE (v1.2) ==========
@@ -2931,6 +2931,12 @@ function DeerIntelContent() {
     return STAND_NAME_POOL[(rank - 1) % STAND_NAME_POOL.length];
   };
   const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
+  // Show Today's stand pin once alignedStands populate (one pin at a time)
+  useEffect(() => {
+    if (alignedStands.length > 0 && visibleStandRanks.size === 0) {
+      setVisibleStandRanks(new Set([0]));
+    }
+  }, [alignedStands.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
   const [exceptionalIndex, setExceptionalIndex] = useState<number | null>(null);
   const [parcelStrength, setParcelStrength] = useState<number>(0);
@@ -11522,11 +11528,12 @@ function DeerIntelContent() {
         (map.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(fc);
       }
 
-      // Top-stand emphasis glow
+      // Top-stand emphasis glow — follows active card pin
       if (map.getSource('tfp-stand-emphasis')) {
-        const top = alignedStands[0];
+        const activeIdx = Array.from(activeRanks)[0] ?? 0;
+        const emphStand = standsToShow[activeIdx] ?? standsToShow[0];
         (map.getSource('tfp-stand-emphasis') as mapboxgl.GeoJSONSource).setData(
-          top ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: top.coords }, properties: {} }] } : EMPTY_FC
+          emphStand ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: emphStand.coords }, properties: {} }] } : EMPTY_FC
         );
       }
 
@@ -13381,32 +13388,36 @@ function DeerIntelContent() {
                           <button
                             disabled={huntLocking || isThisStandLocked}
                             onClick={async () => {
+                              console.log('[HuntThis] clicked — stand:', JSON.stringify({ standName, coords: stand.coords, score: s, movementType, cardIdx, rank: stand.rank }));
                               if (!session?.user) { toast('Sign in to lock a stand'); return; }
                               setHuntLocking(true);
                               try {
+                                const payload = {
+                                  parcelId: currentParcelKey || 'unknown',
+                                  standLng: stand.coords[0],
+                                  standLat: stand.coords[1],
+                                  standName,
+                                  terrainFeature: movementType,
+                                  confidence: s,
+                                  windDirection,
+                                  groundMoisture: isSoft ? 'Soft' : 'Firm',
+                                  seasonPhase: season,
+                                };
+                                console.log('[HuntThis] POST /api/stand-selection payload:', JSON.stringify(payload));
                                 const res = await fetch('/api/stand-selection', {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    parcelId: currentParcelKey || 'unknown',
-                                    standLng: stand.coords[0],
-                                    standLat: stand.coords[1],
-                                    standName,
-                                    terrainFeature: movementType,
-                                    confidence: s,
-                                    windDirection,
-                                    groundMoisture: isSoft ? 'Soft' : 'Firm',
-                                    seasonPhase: season,
-                                  }),
+                                  body: JSON.stringify(payload),
                                 });
                                 if (res.ok) {
                                   setHuntLockedStand({ standName, confidence: s });
                                   toast.success(`Locked "${standName}" for today`);
                                 } else {
                                   const d = await res.json().catch(() => ({}));
+                                  console.error('[HuntThis] error response:', d);
                                   toast.error(d?.error || 'Could not lock stand');
                                 }
-                              } catch { toast.error('Network error'); } finally { setHuntLocking(false); }
+                              } catch (err) { console.error('[HuntThis] network error:', err); toast.error('Network error'); } finally { setHuntLocking(false); }
                             }}
                             className={`flex-1 px-3 py-2 text-[11px] font-bold rounded-md transition-colors ${
                               isThisStandLocked
@@ -13420,8 +13431,10 @@ function DeerIntelContent() {
                             <button
                               onClick={() => {
                                 const nextIdx = (cardIdx + 1) % top3.length;
+                                console.log('[StandDecision] Next →', { from: cardIdx, to: nextIdx, stand: JSON.stringify({ name: top3[nextIdx]?.name, coords: top3[nextIdx]?.coords, score: top3[nextIdx]?.alignment?.score }) });
                                 setDecisionCardIdx(nextIdx);
-                                setVisibleStandRanks(prev => { const n = new Set(prev); n.add(nextIdx); return n; });
+                                // One pin at a time — replace, don't accumulate
+                                setVisibleStandRanks(new Set([nextIdx]));
                                 setSelectedStand(top3[nextIdx]?.rank ?? null);
                               }}
                               className="px-3 py-2 text-[11px] font-semibold rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-stone-300 border border-white/[0.08]"
@@ -13437,7 +13450,8 @@ function DeerIntelContent() {
                                 key={di}
                                 onClick={() => {
                                   setDecisionCardIdx(di);
-                                  setVisibleStandRanks(prev => { const n = new Set(prev); n.add(di); return n; });
+                                  // One pin at a time
+                                  setVisibleStandRanks(new Set([di]));
                                   setSelectedStand(top3[di]?.rank ?? null);
                                 }}
                                 className="w-2 h-2 rounded-full transition-colors"
@@ -15247,14 +15261,10 @@ function DeerIntelContent() {
                           <button
                             onClick={() => {
                               const nextIdx = (cardIdx + 1) % top3.length;
+                              console.log('[StandDecision/Modal] Next →', { from: cardIdx, to: nextIdx, stand: JSON.stringify({ name: top3[nextIdx]?.name, coords: top3[nextIdx]?.coords, score: top3[nextIdx]?.alignment?.score }) });
                               setDecisionCardIdx(nextIdx);
-                              // Reveal this stand on the map
-                              setVisibleStandRanks(prev => {
-                                const next = new Set(prev);
-                                next.add(nextIdx);
-                                return next;
-                              });
-                              // Also select the stand on the map
+                              // One pin at a time
+                              setVisibleStandRanks(new Set([nextIdx]));
                               setSelectedStand(top3[nextIdx]?.rank ?? null);
                             }}
                             style={{
@@ -15283,7 +15293,7 @@ function DeerIntelContent() {
                               cursor: 'pointer',
                             }} onClick={() => {
                               setDecisionCardIdx(di);
-                              setVisibleStandRanks(prev => { const n = new Set(prev); n.add(di); return n; });
+                              setVisibleStandRanks(new Set([di]));
                               setSelectedStand(top3[di]?.rank ?? null);
                             }} />
                           ))}
