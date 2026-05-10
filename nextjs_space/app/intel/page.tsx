@@ -5748,7 +5748,7 @@ function DeerIntelContent() {
       // Update primary corridors source (clipped)
       const primarySource = map.getSource('tfp-corridors-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(clipLinesToParcel(tieredCorridorData.corridors_primary, clipGeom, 50));
+        primarySource.setData(clipLinesToParcel(tieredCorridorData.corridors_primary, clipGeom, 50, 'tfp-corridors-primary'));
       }
 
       // Update possible corridors source (clipped)
@@ -6832,7 +6832,7 @@ function DeerIntelContent() {
       // Update primary flow source (filter + clip to parcel display boundary)
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_primary || emptyFC), clipGeom, 50));
+        primarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_primary || emptyFC), clipGeom, 50, 'tfp-flow-primary'));
       }
 
       // Update secondary flow source (filter + clip to parcel display boundary)

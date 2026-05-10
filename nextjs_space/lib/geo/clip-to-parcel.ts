@@ -108,11 +108,35 @@ function clipLineCoords(
 export function clipLinesToParcel(
   fc: GeoJSON.FeatureCollection,
   parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon | null | undefined,
-  bufferMeters: number = DEFAULT_DISPLAY_BUFFER_M
+  bufferMeters: number = DEFAULT_DISPLAY_BUFFER_M,
+  debugLabel?: string
 ): GeoJSON.FeatureCollection {
   // If no parcel geometry, return unmodified
-  if (!parcelGeometry) return fc;
-  if (!fc?.features?.length) return fc;
+  if (!parcelGeometry) {
+    if (debugLabel) console.log(`[CLIP-DIAG:${debugLabel}] No parcel geometry — returning unclipped`);
+    return fc;
+  }
+  if (!fc?.features?.length) {
+    if (debugLabel) console.log(`[CLIP-DIAG:${debugLabel}] Empty FeatureCollection (0 features) — returning as-is`);
+    return fc;
+  }
+
+  // --- DIAGNOSTIC: count input vertices ---
+  let inputVertexCount = 0;
+  let inputLineCount = 0;
+  if (debugLabel) {
+    for (const f of fc.features) {
+      if (f.geometry?.type === 'LineString') {
+        inputLineCount++;
+        inputVertexCount += (f.geometry.coordinates as any[]).length;
+      }
+    }
+    console.log(
+      `[CLIP-DIAG:${debugLabel}] INPUT — geomType=${parcelGeometry.type}, ` +
+      `totalFeatures=${fc.features.length}, lineStringFeatures=${inputLineCount}, ` +
+      `totalInputVertices=${inputVertexCount}, buffer=${bufferMeters}m`
+    );
+  }
 
   try {
     // Build the clip polygon: parcel + buffer.
@@ -134,13 +158,31 @@ export function clipLinesToParcel(
           }
           parcelFeature = merged;
         }
+        if (debugLabel) {
+          console.log(`[CLIP-DIAG:${debugLabel}] MultiPolygon union → merged ${polys.length} polygons → ${parcelFeature.geometry.type}`);
+        }
       } catch (unionErr) {
         console.warn('[clipLinesToParcel] MultiPolygon union failed, falling back to raw geometry:', unionErr);
         parcelFeature = turf.feature(parcelGeometry);
       }
     }
     const buffered = turf.buffer(parcelFeature, bufferMeters / 1000, { units: 'kilometers' });
-    if (!buffered) return fc;
+    if (!buffered) {
+      if (debugLabel) console.warn(`[CLIP-DIAG:${debugLabel}] turf.buffer returned null — returning unclipped`);
+      return fc;
+    }
+
+    if (debugLabel) {
+      // Log the buffered polygon vertex count so we know the clip boundary complexity
+      const buffGeom = buffered.geometry;
+      let buffVerts = 0;
+      if (buffGeom.type === 'Polygon') {
+        buffVerts = buffGeom.coordinates.reduce((s, ring) => s + ring.length, 0);
+      } else if (buffGeom.type === 'MultiPolygon') {
+        buffVerts = buffGeom.coordinates.reduce((s, poly) => s + poly.reduce((s2, ring) => s2 + ring.length, 0), 0);
+      }
+      console.log(`[CLIP-DIAG:${debugLabel}] Buffered clip polygon: type=${buffGeom.type}, vertices=${buffVerts}`);
+    }
 
     const clippedFeatures: GeoJSON.Feature[] = [];
 
@@ -163,6 +205,25 @@ export function clipLinesToParcel(
           },
         });
       }
+    }
+
+    // --- DIAGNOSTIC: count output vertices ---
+    if (debugLabel) {
+      let outputVertexCount = 0;
+      let outputLineCount = 0;
+      for (const f of clippedFeatures) {
+        if (f.geometry?.type === 'LineString') {
+          outputLineCount++;
+          outputVertexCount += (f.geometry.coordinates as any[]).length;
+        }
+      }
+      const dropped = inputLineCount - outputLineCount;
+      const vertDelta = outputVertexCount - inputVertexCount;
+      console.log(
+        `[CLIP-DIAG:${debugLabel}] OUTPUT — lineStringFeatures=${outputLineCount} (${dropped >= 0 ? '-' : '+'}${Math.abs(dropped)} features), ` +
+        `totalOutputVertices=${outputVertexCount} (${vertDelta >= 0 ? '+' : ''}${vertDelta} vs input), ` +
+        `totalClippedFeatures=${clippedFeatures.length}`
+      );
     }
 
     return {
