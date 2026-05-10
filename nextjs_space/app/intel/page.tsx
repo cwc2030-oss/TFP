@@ -8653,6 +8653,7 @@ function DeerIntelContent() {
                 'match', ['get', 'rank'], 0, 0.18, 1, 0.12, 0.08
               ],
               'circle-blur': 0.9,
+              'circle-translate': [0, -10] as [number, number],
             },
           });
 
@@ -8673,6 +8674,7 @@ function DeerIntelContent() {
               ],
               'circle-stroke-color': ['get', 'strokeColor'],
               'circle-stroke-opacity': 0.7,
+              'circle-translate': [0, -10] as [number, number],
             },
           });
 
@@ -8690,6 +8692,7 @@ function DeerIntelContent() {
               'circle-stroke-width': 0.7,
               'circle-stroke-color': 'rgba(255,255,255,0.3)',
               'circle-stroke-opacity': 1,
+              'circle-translate': [0, -10] as [number, number],
             },
           });
 
@@ -8702,6 +8705,7 @@ function DeerIntelContent() {
               'circle-radius': 1.2,
               'circle-color': 'rgba(255,255,255,0.5)',
               'circle-opacity': 1,
+              'circle-translate': [0, -10] as [number, number],
             },
           });
 
@@ -8731,6 +8735,7 @@ function DeerIntelContent() {
               'text-opacity': [
                 'match', ['get', 'rank'], 0, 0.95, 0.78
               ],
+              'text-translate': [0, -10] as [number, number],
             },
           });
 
@@ -8754,6 +8759,7 @@ function DeerIntelContent() {
               'text-color': '#ffffff',
               'text-halo-color': 'rgba(0,0,0,0.2)',
               'text-halo-width': 0.6,
+              'text-translate': [0, -10] as [number, number],
             },
           });
         }
@@ -8772,6 +8778,7 @@ function DeerIntelContent() {
               'circle-color': LAYER_COLORS.standEmphasisGlow,
               'circle-opacity': 0.05,        // v3.8.5: subtler
               'circle-blur': 0.95,
+              'circle-translate': [0, -10] as [number, number],
             },
           });
         }
