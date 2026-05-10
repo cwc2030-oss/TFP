@@ -13309,6 +13309,151 @@ function DeerIntelContent() {
                 </div>
               )}
 
+              {/* ═══ STAND DECISION CARD (left panel, v3.9.2) ═══ */}
+              {alignedStands.length > 0 && (() => {
+                const top3 = alignedStands.slice(0, 3);
+                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand'];
+                const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
+                const stand = top3[cardIdx];
+                if (!stand) return null;
+                const s = stand.alignment?.score ?? 0;
+                const sColor = s >= 70 ? '#2d6a4f' : s >= 40 ? '#d4a017' : '#c0392b';
+                const movementType = terrainStory?.primaryDriver?.label
+                  ?? (stand.anchorFeature?.type === 'ridge' ? 'Ridge Spine Travel'
+                    : stand.anchorFeature?.type === 'saddle' ? 'Saddle Crossing'
+                    : stand.anchorFeature?.type === 'convergence' ? 'Convergence Zone'
+                    : stand.anchorFeature?.type === 'funnel' ? 'Draw Funneling'
+                    : 'Terrain Feature');
+                const windAligned = (stand.props?.windOk ?? []).includes(windDirection);
+                const hasDraws = (stand.anchorFeature?.type === 'funnel') || (stand.props?.coverType === 'draw');
+                const isSoft = season === 'late' || hasDraws;
+                const seasonLabel = season === 'early' ? 'Early' : season === 'rut' ? 'Rut' : 'Late';
+                const reasonText = stand.props?.reasoning ?? '';
+                const standName = stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`;
+                const isLocked = huntLockedStand !== null;
+                const isThisStandLocked = isLocked && huntLockedStand?.standName === standName;
+                return (
+                  <div className="px-3 pt-2 pb-3 border-t border-white/[0.04]">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Target className="h-3 w-3 text-amber-500/70" />
+                      <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Stand Decision</span>
+                      <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
+                    </div>
+                    <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-gray-900/60">
+                      {/* Header */}
+                      <div className="flex items-center justify-between px-3 py-2 bg-[#1a3a2a]">
+                        <div>
+                          <div className="text-[8px] tracking-[0.2em] uppercase text-amber-400 font-semibold">
+                            {STAND_TITLES[cardIdx] ?? `Stand #${cardIdx + 1}`}
+                          </div>
+                          <div className="text-sm font-bold text-white leading-tight">{standName}</div>
+                        </div>
+                        <div className="px-2.5 py-1 rounded text-white text-base font-bold min-w-[52px] text-center" style={{ background: sColor }}>
+                          {s}%
+                        </div>
+                      </div>
+                      {/* Body */}
+                      <div className="p-3 space-y-2.5">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[9px] text-stone-500 uppercase tracking-wider">Movement</span>
+                          <span className="text-[11px] text-amber-300 font-semibold">{movementType}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <div className={`rounded p-1.5 text-center border ${windAligned ? 'bg-emerald-900/40 border-emerald-700/40' : 'bg-amber-900/30 border-amber-700/40'}`}>
+                            <div className={`text-[10px] font-bold ${windAligned ? 'text-emerald-300' : 'text-amber-300'}`}>{windDirection} {windAligned ? '✓' : '⚠'}</div>
+                            <div className="text-[8px] text-stone-500 uppercase">Wind</div>
+                          </div>
+                          <div className={`rounded p-1.5 text-center border ${isSoft ? 'bg-amber-900/30 border-amber-700/40' : 'bg-emerald-900/40 border-emerald-700/40'}`}>
+                            <div className={`text-[10px] font-bold ${isSoft ? 'text-amber-300' : 'text-emerald-300'}`}>{isSoft ? 'Soft ⚠' : 'Firm ✓'}</div>
+                            <div className="text-[8px] text-stone-500 uppercase">Ground</div>
+                          </div>
+                          <div className="rounded p-1.5 text-center border bg-stone-800/40 border-stone-700/40">
+                            <div className="text-[10px] font-bold text-white">{seasonLabel}</div>
+                            <div className="text-[8px] text-stone-500 uppercase">Phase</div>
+                          </div>
+                        </div>
+                        {reasonText && (
+                          <p className="text-[10px] text-stone-300 italic leading-relaxed border-l-2 border-amber-600/50 pl-2">
+                            &ldquo;{reasonText}&rdquo;
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            disabled={huntLocking || isThisStandLocked}
+                            onClick={async () => {
+                              if (!session?.user) { toast('Sign in to lock a stand'); return; }
+                              setHuntLocking(true);
+                              try {
+                                const res = await fetch('/api/stand-selection', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    parcelId: currentParcelKey || 'unknown',
+                                    standLng: stand.coords[0],
+                                    standLat: stand.coords[1],
+                                    standName,
+                                    terrainFeature: movementType,
+                                    confidence: s,
+                                    windDirection,
+                                    groundMoisture: isSoft ? 'Soft' : 'Firm',
+                                    seasonPhase: season,
+                                  }),
+                                });
+                                if (res.ok) {
+                                  setHuntLockedStand({ standName, confidence: s });
+                                  toast.success(`Locked "${standName}" for today`);
+                                } else {
+                                  const d = await res.json().catch(() => ({}));
+                                  toast.error(d?.error || 'Could not lock stand');
+                                }
+                              } catch { toast.error('Network error'); } finally { setHuntLocking(false); }
+                            }}
+                            className={`flex-1 px-3 py-2 text-[11px] font-bold rounded-md transition-colors ${
+                              isThisStandLocked
+                                ? 'bg-emerald-700 text-white cursor-default'
+                                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/30'
+                            } disabled:opacity-60`}
+                          >
+                            {isThisStandLocked ? 'Hunting Today ✓' : huntLocking ? 'Locking…' : 'Hunt This'}
+                          </button>
+                          {top3.length > 1 && (
+                            <button
+                              onClick={() => {
+                                const nextIdx = (cardIdx + 1) % top3.length;
+                                setDecisionCardIdx(nextIdx);
+                                setVisibleStandRanks(prev => { const n = new Set(prev); n.add(nextIdx); return n; });
+                                setSelectedStand(top3[nextIdx]?.rank ?? null);
+                              }}
+                              className="px-3 py-2 text-[11px] font-semibold rounded-md bg-white/[0.08] hover:bg-white/[0.14] text-stone-300 border border-white/[0.08]"
+                            >
+                              Next →
+                            </button>
+                          )}
+                        </div>
+                        {top3.length > 1 && (
+                          <div className="flex justify-center gap-1.5 pt-1">
+                            {top3.map((_, di) => (
+                              <button
+                                key={di}
+                                onClick={() => {
+                                  setDecisionCardIdx(di);
+                                  setVisibleStandRanks(prev => { const n = new Set(prev); n.add(di); return n; });
+                                  setSelectedStand(top3[di]?.rank ?? null);
+                                }}
+                                className="w-2 h-2 rounded-full transition-colors"
+                                style={{ background: di === cardIdx ? '#c9a84c' : '#444' }}
+                                aria-label={`Stand ${di + 1}`}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+
               {/* ═══ CHAPTER 4 — REFINE (single-parcel only) ═══ */}
               {!territoryMode && (
               <div className="p-3 border-t border-white/[0.06] mt-auto">
