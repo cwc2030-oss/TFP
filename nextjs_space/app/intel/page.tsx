@@ -48,6 +48,7 @@ import type {
 } from '@/types/terrain';
 import { adaptV1Response } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors, enrichCorridorsWithRidgeAlignment } from '@/lib/corridor-tiering';
+import { clipLinesToParcel } from '@/lib/geo/clip-to-parcel';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
@@ -5723,33 +5724,36 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current || !tieredCorridorData) return;
 
     try {
-      // Update primary corridors source
+      // v3.9.3: Clip corridor display lines to parcel + 50m buffer
+      const clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+
+      // Update primary corridors source (clipped)
       const primarySource = map.getSource('tfp-corridors-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(tieredCorridorData.corridors_primary);
+        primarySource.setData(clipLinesToParcel(tieredCorridorData.corridors_primary, clipGeom, 50));
       }
 
-      // Update possible corridors source
+      // Update possible corridors source (clipped)
       const possibleSource = map.getSource('tfp-corridors-possible') as mapboxgl.GeoJSONSource;
       if (possibleSource) {
-        possibleSource.setData(tieredCorridorData.corridors_possible);
+        possibleSource.setData(clipLinesToParcel(tieredCorridorData.corridors_possible, clipGeom, 50));
       }
 
-      // Update exploratory corridors source
+      // Update exploratory corridors source (clipped)
       const exploratorySource = map.getSource('tfp-corridors-exploratory') as mapboxgl.GeoJSONSource;
       if (exploratorySource) {
-        exploratorySource.setData(tieredCorridorData.corridors_exploratory);
+        exploratorySource.setData(clipLinesToParcel(tieredCorridorData.corridors_exploratory, clipGeom, 50));
       }
 
-      // Update context corridors sources
+      // Update context corridors sources (clipped)
       const contextPrimarySource = map.getSource('tfp-corridors-context-primary') as mapboxgl.GeoJSONSource;
       if (contextPrimarySource) {
-        contextPrimarySource.setData(tieredCorridorData.corridors_context_primary);
+        contextPrimarySource.setData(clipLinesToParcel(tieredCorridorData.corridors_context_primary, clipGeom, 50));
       }
 
       const contextPossibleSource = map.getSource('tfp-corridors-context-possible') as mapboxgl.GeoJSONSource;
       if (contextPossibleSource) {
-        contextPossibleSource.setData(tieredCorridorData.corridors_context_possible);
+        contextPossibleSource.setData(clipLinesToParcel(tieredCorridorData.corridors_context_possible, clipGeom, 50));
       }
 
       // Update hard funnels source
@@ -6134,10 +6138,11 @@ function DeerIntelContent() {
         corridorZoneSource.setData(huntabilityData.corridorZones);
       }
 
-      // Update huntability corridor spine source
+      // Update huntability corridor spine source (clipped to parcel + 50m)
       const corridorSource = map.getSource('tfp-huntability-corridors') as mapboxgl.GeoJSONSource;
       if (corridorSource) {
-        corridorSource.setData(huntabilityData.corridorLines);
+        const hClipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+        corridorSource.setData(clipLinesToParcel(huntabilityData.corridorLines, hClipGeom, 50));
       }
 
       // Update huntability convergence source
@@ -6803,16 +6808,19 @@ function DeerIntelContent() {
         };
       };
 
-      // Update primary flow source (filter lines through water bodies)
+      // v3.9.3: Clip display lines to parcel + 50m buffer (terrain brain still uses full 800m context)
+      const clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+
+      // Update primary flow source (filter + clip to parcel display boundary)
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(filterFlowLines(flowData?.flow_primary || emptyFC));
+        primarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_primary || emptyFC), clipGeom, 50));
       }
 
-      // Update secondary flow source (filter lines through water bodies)
+      // Update secondary flow source (filter + clip to parcel display boundary)
       const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(filterFlowLines(flowData?.flow_secondary || emptyFC));
+        secondarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_secondary || emptyFC), clipGeom, 50));
       }
 
       // Update convergence zones source (filter points inside water bodies)
