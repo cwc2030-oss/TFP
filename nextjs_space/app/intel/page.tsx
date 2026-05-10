@@ -3078,7 +3078,11 @@ function DeerIntelContent() {
     const PROXIMITY_PENALTY_FACTOR = 0.35; // score penalty per stand within penalty radius
     const TERRAIN_SIMILARITY_PENALTY = 0.12; // penalty when dominant terrain context matches
     const PENALTY_RADIUS_M = 400; // distance within which proximity penalty applies (smooth decay) — scaled with separation
-    const TARGET_COUNT = 3;
+    // v3.9.4: Wind hard gate — stands with wind_overlap > 0.60 cannot be Today's Stand
+    const WIND_OVERLAP_HARD_GATE = 0.60;
+    // v3.9.4: Acreage-based stand count (replaces hardcoded 3)
+    const acres = parseFloat(acreageParam || '0');
+    const TARGET_COUNT = acres >= 150 ? 5 : acres >= 100 ? 4 : acres >= 50 ? 3 : 2;
 
     // ═══ Phase 2: TERRAIN ANCHOR GATE ═══
     // Every stand must be within proximity of at least one real terrain feature.
@@ -3274,8 +3278,22 @@ function DeerIntelContent() {
 
     for (let pick = 0; pick < TARGET_COUNT && remainingPool.length > 0; pick++) {
       if (pick === 0) {
-        // First pick: always the highest-scoring anchored stand
-        diverseStands.push(remainingPool.shift()!);
+        // v3.9.4: Wind hard gate — Today's Stand must have wind_overlap ≤ 0.60.
+        // Skip stands with bad wind for the #1 slot; they remain eligible for #2/#3+.
+        let firstIdx = 0;
+        while (firstIdx < remainingPool.length && remainingPool[firstIdx].inputs.wind_overlap > WIND_OVERLAP_HARD_GATE) {
+          firstIdx++;
+        }
+        if (firstIdx < remainingPool.length) {
+          diverseStands.push(remainingPool.splice(firstIdx, 1)[0]);
+          if (firstIdx > 0) {
+            console.log(`[WIND-GATE] Skipped ${firstIdx} stand(s) with wind_overlap > ${WIND_OVERLAP_HARD_GATE} for Today's Stand slot`);
+          }
+        } else {
+          // All stands have bad wind — fall back to highest-scoring anyway (better than nothing)
+          console.warn('[WIND-GATE] All candidates exceed wind_overlap threshold — using best available for Today');
+          diverseStands.push(remainingPool.shift()!);
+        }
         continue;
       }
 
@@ -3387,7 +3405,7 @@ function DeerIntelContent() {
         fbCx /= fbN; fbCy /= fbN;
         const fbCentroid: [number, number] = [fbCx, fbCy];
 
-        aligned = anchoredPool.slice(0, 3).map(s => {
+        aligned = anchoredPool.slice(0, TARGET_COUNT).map(s => {
           const sd = signedDistanceToParcel(s.coords, geom);
           if (sd.distance >= fallbackInset) return { ...s, unverified: true };
           // Move toward centroid until inside with buffer
@@ -3430,11 +3448,11 @@ function DeerIntelContent() {
       }
     }
 
-    // Cap to Top 3 — diversity selection already picked the best 3; parcel-safe
-    // enforcement may have let extras through from the remaining pool.
-    // All downstream consumers (GeoJSON layers, StandAlignmentPanel, popups, compare
-    // dropdowns) expect at most 3 stands. This is the single enforcement point.
-    aligned = aligned.slice(0, 3);
+    // v3.9.4: Cap to acreage-based TARGET_COUNT (was hardcoded 3). Diversity selection
+    // already picked the best N; parcel-safe enforcement may have let extras through.
+    // This is the single enforcement point for downstream consumers.
+    aligned = aligned.slice(0, TARGET_COUNT);
+    console.log(`[STAND-COUNT] Acreage=${acres.toFixed(0)}, TARGET_COUNT=${TARGET_COUNT}, aligned=${aligned.length}`);
 
     // ═══ PAD TO TOP 3 — when partial alignment succeeded (1 or 2 verified stands),
     // fill remaining slots from allScored remainder with unverified flag so the
@@ -4212,7 +4230,7 @@ function DeerIntelContent() {
 
   // ── Shared payload builder for Download + Share ──
   const buildReportPayload = useCallback(async () => {
-    const top3 = alignedStands.slice(0, 3);
+    const top3 = alignedStands; // already capped to TARGET_COUNT by alignment scorer
     const reportSavedPropertyId = await ensureSavedPropertyForListing();
     if (!reportSavedPropertyId) return null;
     const isTerritory = territoryParcelsRef.current.length > 1;
@@ -11517,7 +11535,7 @@ function DeerIntelContent() {
       // ── Populate tfp-stands GeoJSON source ──
       // v3.9.2: Only show stand ranks that are in visibleStandRanks (default: Today's Sit only)
       const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
-      const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
+      const standsToShow = alignedStands; // already capped to acreage-based TARGET_COUNT
       // v3.9.3: Read fresh state directly (deps array includes visibleStandRanks).
       const activeRanks = visibleStandRanks.size > 0
         ? visibleStandRanks
@@ -13372,8 +13390,8 @@ function DeerIntelContent() {
                 </div>
               )}
               {alignedStands.length > 0 && (() => {
-                const top3 = alignedStands.slice(0, 3);
-                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand'];
+                const top3 = alignedStands; // already capped to acreage-based TARGET_COUNT
+                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand', 'Stand #4', 'Stand #5'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
                 const stand = top3[cardIdx];
                 if (!stand) return null;
@@ -14977,7 +14995,7 @@ function DeerIntelContent() {
 
       {/* ========== REPORT PREVIEW MODAL (inline JSX — no API fetch) ========== */}
       {showReportPreview && (() => {
-        const top3 = alignedStands.slice(0, 3);
+        const top3 = alignedStands; // already capped to acreage-based TARGET_COUNT
         const topScore = summary?.topStandScore ?? 0;
         const _scoreColor = topScore >= 70 ? '#2d6a4f' : topScore >= 40 ? '#d4a017' : '#c0392b';
         const _scoreLabel = topScore >= 70 ? 'PRIME' : topScore >= 40 ? 'HUNTABLE' : 'MARGINAL';
@@ -15158,7 +15176,7 @@ function DeerIntelContent() {
 
               {/* ══ v3.9.2 — Stand Decision Card (cycles Today → Alternate → Backup) ══ */}
               {(() => {
-                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand'];
+                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand', 'Stand #4', 'Stand #5'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
                 const stand = top3[cardIdx];
                 if (!stand) return null;
