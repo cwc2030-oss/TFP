@@ -19,7 +19,7 @@ function findCrossingPoint(
   inside: [number, number],
   outside: [number, number],
   clipPoly: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
-  steps = 8
+  steps = 12
 ): [number, number] {
   let lo = 0;
   let hi = 1;
@@ -115,8 +115,30 @@ export function clipLinesToParcel(
   if (!fc?.features?.length) return fc;
 
   try {
-    // Build the clip polygon: parcel + buffer
-    const parcelFeature = turf.feature(parcelGeometry);
+    // Build the clip polygon: parcel + buffer.
+    // For MultiPolygon parcels, union all rings into a single polygon first so
+    // turf.buffer behaves correctly on complex shapes (avoids jagged boundaries).
+    let parcelFeature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> = turf.feature(parcelGeometry);
+    if (parcelGeometry.type === 'MultiPolygon') {
+      try {
+        const polys = parcelGeometry.coordinates.map((rings) =>
+          turf.polygon(rings)
+        );
+        if (polys.length === 1) {
+          parcelFeature = polys[0];
+        } else if (polys.length > 1) {
+          let merged: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> = polys[0];
+          for (let i = 1; i < polys.length; i++) {
+            const next = turf.union(merged as any, polys[i] as any);
+            if (next) merged = next as any;
+          }
+          parcelFeature = merged;
+        }
+      } catch (unionErr) {
+        console.warn('[clipLinesToParcel] MultiPolygon union failed, falling back to raw geometry:', unionErr);
+        parcelFeature = turf.feature(parcelGeometry);
+      }
+    }
     const buffered = turf.buffer(parcelFeature, bufferMeters / 1000, { units: 'kilometers' });
     if (!buffered) return fc;
 

@@ -3079,7 +3079,7 @@ function DeerIntelContent() {
     const TERRAIN_SIMILARITY_PENALTY = 0.12; // penalty when dominant terrain context matches
     const PENALTY_RADIUS_M = 400; // distance within which proximity penalty applies (smooth decay) — scaled with separation
     // v3.9.4: Wind hard gate — stands with wind_overlap > 0.60 cannot be Today's Stand
-    const WIND_OVERLAP_HARD_GATE = 0.60;
+    const WIND_OVERLAP_HARD_GATE = 0.35;
     // v3.9.4: Acreage-based stand count (replaces hardcoded 3)
     const acres = parseFloat(acreageParam || '0');
     const TARGET_COUNT = acres >= 150 ? 5 : acres >= 100 ? 4 : acres >= 50 ? 3 : 2;
