@@ -23,6 +23,7 @@ model User {
   parcelPurchases  ParcelPurchase[]
   listings         Listing[]
   huntingReports   HuntingReport[]
+  standSelections  StandSelection[]
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
@@ -315,4 +316,25 @@ model HuntingReport {
   createdAt   DateTime @default(now())
 
   @@index([ownerUserId])
+}
+
+// v3.9.2 — "Hunt This" stand selection for the day
+model StandSelection {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parcelId        String                    // Regrid parcel ID or territory key
+  standLng        Float
+  standLat        Float
+  standName       String
+  terrainFeature  String                    // e.g. "Terrain Pinch Point", "Saddle Crossing"
+  confidence      Int                       // 0-100 alignment score
+  windDirection   String                    // N, NE, E, ...
+  groundMoisture  String                    // "Firm" or "Soft"
+  seasonPhase     String                    // early, rut, late
+  huntDate        DateTime @db.Date         // calendar date of the hunt
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, huntDate])              // one selection per user per day
+  @@index([userId])
 }

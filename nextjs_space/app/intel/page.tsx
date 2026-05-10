@@ -2227,6 +2227,15 @@ function DeerIntelContent() {
   useEffect(() => { selectedStandRef.current = selectedStand; }, [selectedStand]);
   const [soloStandMode, setSoloStandMode] = useState(false);
 
+  // ========== v3.9.2 — STAND DECISION CARD STATE ==========
+  const [decisionCardIdx, setDecisionCardIdx] = useState(0); // 0=Today, 1=Alternate, 2=Backup
+  const [huntLockedStand, setHuntLockedStand] = useState<{ standName: string; confidence: number } | null>(null);
+  const [huntLocking, setHuntLocking] = useState(false);
+  // Track which stand ranks are visible on the map (by default only Today's Sit = rank 0)
+  const [visibleStandRanks, setVisibleStandRanks] = useState<Set<number>>(new Set([0]));
+  const visibleStandRanksRef = useRef<Set<number>>(new Set([0]));
+  useEffect(() => { visibleStandRanksRef.current = visibleStandRanks; }, [visibleStandRanks]);
+
   // ========== STAND COMPARE STATE (v1.2) ==========
   // Holds two stand selections for a future side-by-side comparison panel.
   // Each value is the stand's index in the alignedStands array, or null if
@@ -3662,6 +3671,10 @@ function DeerIntelContent() {
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
     setParcelStrength(ps);
+    // v3.9.2 — Reset decision card to Today's Stand when stands re-score
+    setDecisionCardIdx(0);
+    setVisibleStandRanks(new Set([0]));
+    setHuntLockedStand(null);
 
     // ── Stand-state cleanup after re-scoring ──
     // If the currently-selected stand rank no longer exists in the new list,
@@ -11478,9 +11491,14 @@ function DeerIntelContent() {
       }
 
       // ── Populate tfp-stands GeoJSON source ──
+      // v3.9.2: Only show stand ranks that are in visibleStandRanks (default: Today's Sit only)
       const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
       const standsToShow = alignedStands.slice(0, Math.min(alignedStands.length, 3));
-      const features = standsToShow.map((stand, idx) => {
+      const activeRanks = visibleStandRanksRef.current;
+      const features = standsToShow
+        .filter((_, idx) => activeRanks.has(idx))
+        .map((stand, _fi, _arr) => {
+        const idx = standsToShow.indexOf(stand);
         const isTop = idx === 0;
         const isSec = idx === 1;
         const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
@@ -11647,7 +11665,7 @@ function DeerIntelContent() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData, terrainFlowData, parcelUnlocked, isPro]); // eslint-disable-line
+  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData, terrainFlowData, parcelUnlocked, isPro, visibleStandRanks]); // eslint-disable-line
 
   // vNext: Stand visibility toggle — uses map layer visibility instead of HTML opacity.
   // Solo mode uses a GeoJSON filter expression instead of per-marker DOM manipulation.
@@ -12265,63 +12283,34 @@ function DeerIntelContent() {
 
               <button
                 onClick={() => {
+                  // v3.9.2 — Re-Align now only re-centers the map and redraws the boundary.
+                  // No terrain brain API call, no runAnalysis(), no spinner.
                   const merged = mergeParcelPolygons(territoryParcels);
                   if (!merged) return;
                   const bounds = getTerritoryBounds(territoryParcels);
                   const centerLat = (bounds[1] + bounds[3]) / 2;
                   const centerLng = (bounds[0] + bounds[2]) / 2;
-                  const totalAcres = String(totalTerritoryAcreage);
 
-                  // ═══ SPINE ACCUMULATION FIX ═══
-                  // Clear stale ridge/flow data BEFORE setting parcelPolygon.
-                  // This prevents old spines from lingering on the map while the
-                  // new territory fetch runs (8s+). The useEffect cleanup will
-                  // also cancel any in-flight fetches via the AbortController.
-                  setRidgeSpineData(null);
-                  setTerrainFlowData(null);
-                  setLegacySyntheticData(null);
-                  setTerrainStory(null);
-                  // Also clear the Mapbox sources immediately so old geometry
-                  // doesn't persist during the loading period.
-                  const _map = mapRef.current;
-                  if (_map && overlaySourcesCreated.current) {
-                    try {
-                      const rp = _map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
-                      if (rp) rp.setData(EMPTY_FC);
-                      const rs = _map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
-                      if (rs) rs.setData(EMPTY_FC);
-                      const sn = _map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
-                      if (sn) sn.setData(EMPTY_FC);
-                      console.log('[Territory] Cleared stale ridge/saddle map sources');
-                    } catch (_e) { /* non-fatal */ }
-                  }
-
+                  // Update the polygon boundary on the map
                   setParcelPolygon(merged);
                   setActiveLat(centerLat);
                   setActiveLng(centerLng);
-                  setActiveAcreage(totalAcres);
-                  setActiveAddress(territoryName);
                   activeLatRef.current = centerLat;
                   activeLngRef.current = centerLng;
-                  activeAcreageRef.current = totalAcres;
-                  // Pass the merged MultiPolygon as prefetched parcel so
-                  // runAnalysis() skips the Regrid re-fetch (which would
-                  // return a single wrong parcel at the center point) and
-                  // uses the full territory geometry for terrain analysis.
-                  // This also prevents clearAllOverlaySources() from firing
-                  // and keeps backgroundAnalysis=true (no full-screen overlay).
-                  prefetchedParcelRef.current = merged;
-                  // Clear the stability anchor so computeAlignmentScores()
-                  // distributes stands across the full (expanded) territory
-                  // instead of pinning them to old positions.
-                  previousStandsRef.current = [];
-                  // Signal the data-painting useEffect to fade new results in
-                  // instead of snapping them to full opacity.
-                  territoryFadeInPending.current = true;
-                  setTimeout(() => runAnalysis(), 100);
-                  // Disable further parcel picks while analysis runs,
-                  // but keep territoryMode=true so the Builder panel stays visible.
-                  setParcelPickMode(false);
+
+                  // Fly the map to the territory bounds
+                  const _map = mapRef.current;
+                  if (_map) {
+                    try {
+                      _map.fitBounds(
+                        [[bounds[0], bounds[1]], [bounds[2], bounds[3]]] as any,
+                        { padding: 60, duration: 1200 }
+                      );
+                    } catch (e) {
+                      console.warn('[Territory] fitBounds failed:', e);
+                    }
+                  }
+                  console.log('[Territory] Re-Align: map re-centered, boundary redrawn. No analysis triggered.');
                 }}
                 style={{
                   width: '100%',
@@ -13331,52 +13320,25 @@ function DeerIntelContent() {
                   </div>
                 )}
                 <button
-                  onClick={runAnalysis}
-                  disabled={isLoading}
-                  className={`
-                    group relative w-full overflow-hidden rounded-xl px-4 py-3.5 
-                    font-semibold text-sm tracking-wide
-                    transition-all duration-300 ease-out
-                    focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:ring-offset-2 focus:ring-offset-gray-950
-                    ${isLoading
-                      ? 'bg-amber-900/30 border border-amber-700/30 cursor-wait text-amber-300/70'
-                      : 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-500 hover:from-amber-500 hover:via-amber-400 hover:to-orange-400 text-white shadow-lg shadow-amber-900/30 hover:shadow-amber-800/40 hover:shadow-xl active:scale-[0.98] border border-amber-500/20'}
-                  `}
+                  onClick={() => {
+                    // v3.9.2 — Re-Align only re-centers map on parcel, no terrain brain API call
+                    const _map = mapRef.current;
+                    if (_map && lat && lng) {
+                      _map.flyTo({ center: [lng, lat], zoom: 15, duration: 1200 });
+                    }
+                    console.log('[ReAlign] Map re-centered on parcel. No analysis triggered.');
+                  }}
+                  className="group relative w-full overflow-hidden rounded-xl px-4 py-3.5 font-semibold text-sm tracking-wide transition-all duration-300 ease-out focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:ring-offset-2 focus:ring-offset-gray-950 bg-gradient-to-r from-amber-600 via-amber-500 to-orange-500 hover:from-amber-500 hover:via-amber-400 hover:to-orange-400 text-white shadow-lg shadow-amber-900/30 hover:shadow-amber-800/40 hover:shadow-xl active:scale-[0.98] border border-amber-500/20"
                 >
-                  {/* Animated shimmer on hover */}
-                  {!isLoading && (
-                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out" />
-                    </div>
-                  )}
-                  {/* Loading progress bar embedded in button */}
-                  {isLoading && (
-                    <div className="absolute bottom-0 left-0 h-[2px] bg-gradient-to-r from-amber-500 via-amber-400 to-orange-400 transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
-                  )}
                   <div className="relative flex items-center justify-center gap-2.5">
-                    {isLoading ? (
-                      <>
-                        <div className="relative">
-                          <RefreshCw className="h-4 w-4 animate-spin" style={{ animationDuration: '2s' }} />
-                          <div className="absolute inset-0 animate-ping opacity-20">
-                            <RefreshCw className="h-4 w-4" />
-                          </div>
-                        </div>
-                        <span>Refining Terrain…</span>
-                        <span className="text-amber-400/60 text-xs font-mono">{progress}%</span>
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
-                        <span>Re-Align Terrain</span>
-                      </>
-                    )}
+                    <RefreshCw className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
+                    <span>Re-Align Terrain</span>
                   </div>
                 </button>
                 {/* Contextual hint */}
-                {!isLoading && !summary && (
+                {!summary && (
                   <p className="text-[10px] text-stone-500/60 text-center mt-2 leading-relaxed">
-                    Runs terrain analysis with current season &amp; wind settings
+                    Re-centers the map on the current parcel
                   </p>
                 )}
               </div>
@@ -14981,78 +14943,211 @@ function DeerIntelContent() {
                 );
               })()}
 
-              {/* Divider */}
-              <div style={{ background: '#1a3a2a', color: 'white', padding: '10px 16px', fontSize: '13px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '16px' }}>
-                Intercept Point Analysis
-              </div>
-
-              {/* Stand cards */}
-              {top3.map((stand, i) => {
+              {/* ══ v3.9.2 — Stand Decision Card (cycles Today → Alternate → Backup) ══ */}
+              {(() => {
+                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand'];
+                const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
+                const stand = top3[cardIdx];
+                if (!stand) return null;
                 const s = stand.alignment?.score ?? 0;
                 const sColor = s >= 70 ? '#2d6a4f' : s >= 40 ? '#d4a017' : '#c0392b';
-                const risk = stand.props?.approachRisk ?? 'medium';
+
+                // Primary movement type from terrain story or anchor feature
+                const movementType = terrainStory?.primaryDriver?.label
+                  ?? (stand.anchorFeature?.type === 'ridge' ? 'Ridge Spine Travel'
+                    : stand.anchorFeature?.type === 'saddle' ? 'Saddle Crossing'
+                    : stand.anchorFeature?.type === 'convergence' ? 'Convergence Zone'
+                    : stand.anchorFeature?.type === 'funnel' ? 'Draw Funneling'
+                    : 'Terrain Feature');
+
+                // Wind alignment check — current wind in windOk list = aligned
+                const windAligned = (stand.props?.windOk ?? []).includes(windDirection);
+                const windLabel = windAligned ? `${windDirection} — Aligned ✓` : `${windDirection} — Caution ⚠`;
+
+                // Ground moisture heuristic: season late + terrain draws = soft, otherwise firm
+                const hasDraws = (stand.anchorFeature?.type === 'funnel') || (stand.props?.coverType === 'draw');
+                const isSoft = season === 'late' || hasDraws;
+                const moistureLabel = isSoft ? 'Soft — scent pooling ⚠' : 'Firm — quiet approach ✓';
+
+                // Season phase label
+                const seasonLabel = season === 'early' ? 'Early Season' : season === 'rut' ? 'Rut' : 'Late Season';
+
+                // Existing terrain reason text
+                const reasonText = stand.props?.reasoning ?? '';
+
+                // Is this stand already locked today?
+                const isLocked = huntLockedStand !== null;
+                const isThisStandLocked = isLocked && huntLockedStand?.standName === (stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`);
+
                 return (
-                  <div key={i} style={{ border: '2px solid #1a3a2a', marginBottom: '16px' }}>
+                  <div style={{ border: '2px solid #1a3a2a', marginBottom: '16px' }}>
+                    {/* Header */}
                     <div style={{
-                      padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      background: i === 0 ? '#1a3a2a' : '#f8f6f0', color: i === 0 ? 'white' : '#1a1a1a'
+                      padding: '14px 16px',
+                      background: '#1a3a2a',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
                     }}>
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <div style={{ textAlign: 'center', marginRight: '12px' }}>
-                          <div style={{ fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', color: '#c9a84c' }}>INTERCEPT</div>
-                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#c9a84c' }}>#{i + 1}</div>
+                      <div>
+                        <div style={{ fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', color: '#c9a84c', marginBottom: '2px' }}>
+                          {STAND_TITLES[cardIdx] ?? `Stand #${cardIdx + 1}`}
                         </div>
-                        <div>
-                          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{stand.name ?? stand.props?.name ?? `Stand ${i + 1}`}</div>
-                          <div style={{ fontSize: '11px', letterSpacing: '2px', textTransform: 'uppercase', opacity: 0.8 }}>
-                            {stand.alignment?.label ?? 'Field Stone'} · {stand.resilience?.label ?? 'Unknown'}
-                          </div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>
+                          {stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`}
                         </div>
                       </div>
-                      <div style={{ padding: '8px 16px', fontSize: '20px', fontWeight: 'bold', color: 'white', background: sColor, minWidth: '70px', textAlign: 'center' }}>{s}</div>
+                      <div style={{
+                        padding: '8px 16px',
+                        fontSize: '20px',
+                        fontWeight: 'bold',
+                        color: 'white',
+                        background: sColor,
+                        minWidth: '70px',
+                        textAlign: 'center',
+                        borderRadius: '4px',
+                      }}>
+                        {s}%
+                      </div>
                     </div>
-                    <div style={{ padding: '16px', borderTop: '1px solid #ddd', background: '#f8f6f0' }}>
-                      {stand.props?.reasoning && (
-                        <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#333', fontStyle: 'italic', marginBottom: '12px' }}>
-                          &ldquo;{stand.props.reasoning}&rdquo;
+
+                    {/* Body */}
+                    <div style={{ padding: '16px', background: '#f8f6f0' }}>
+                      {/* Movement type */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', flexShrink: 0 }}>Movement</span>
+                        <span style={{ fontSize: '13px', fontWeight: '700', color: '#1a3a2a' }}>{movementType}</span>
+                      </div>
+
+                      {/* Wind + Moisture + Season row */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                        <div style={{ background: windAligned ? '#d4edda' : '#fff3cd', padding: '8px', textAlign: 'center', border: '1px solid #ddd', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 'bold', color: windAligned ? '#155724' : '#856404' }}>{windLabel}</div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Wind</div>
+                        </div>
+                        <div style={{ background: isSoft ? '#fff3cd' : '#d4edda', padding: '8px', textAlign: 'center', border: '1px solid #ddd', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 'bold', color: isSoft ? '#856404' : '#155724' }}>{moistureLabel}</div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Ground</div>
+                        </div>
+                        <div style={{ background: '#f8f6f0', padding: '8px', textAlign: 'center', border: '1px solid #ddd', borderRadius: '4px' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#1a3a2a' }}>{seasonLabel}</div>
+                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Phase</div>
+                        </div>
+                      </div>
+
+                      {/* Terrain reason text */}
+                      {reasonText && (
+                        <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#333', fontStyle: 'italic', marginBottom: '14px', borderLeft: '3px solid #c9a84c', paddingLeft: '10px' }}>
+                          &ldquo;{reasonText}&rdquo;
                         </div>
                       )}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: _riskColor(risk) }}>{risk.toUpperCase()}</div>
-                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Approach Risk</div>
-                        </div>
-                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                            {stand.props?.distToCorridorMeters ? Math.round(stand.props.distToCorridorMeters * 1.0936) : '—'} yds
-                          </div>
-                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>To Corridor</div>
-                        </div>
-                        <div style={{ textAlign: 'center', background: 'white', padding: '8px', border: '1px solid #ddd' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                            {stand.props?.elevation ? Math.round(stand.props.elevation * 3.281) : '—'}ft
-                          </div>
-                          <div style={{ fontSize: '9px', textTransform: 'uppercase', color: '#666' }}>Elevation</div>
-                        </div>
+
+                      {/* Action buttons */}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          disabled={huntLocking || isThisStandLocked}
+                          onClick={async () => {
+                            if (!session?.user) {
+                              toast('Sign in to lock a stand');
+                              return;
+                            }
+                            setHuntLocking(true);
+                            try {
+                              const standName = stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`;
+                              const res = await fetch('/api/stand-selection', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  parcelId: currentParcelKey || 'unknown',
+                                  standLng: stand.coords[0],
+                                  standLat: stand.coords[1],
+                                  standName,
+                                  terrainFeature: movementType,
+                                  confidence: s,
+                                  windDirection,
+                                  groundMoisture: isSoft ? 'Soft' : 'Firm',
+                                  seasonPhase: season,
+                                }),
+                              });
+                              if (res.ok) {
+                                setHuntLockedStand({ standName, confidence: s });
+                                toast.success(`Locked "${standName}" for today`);
+                              } else {
+                                const d = await res.json().catch(() => ({}));
+                                toast.error(d?.error || 'Could not lock stand');
+                              }
+                            } catch {
+                              toast.error('Network error');
+                            } finally {
+                              setHuntLocking(false);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '10px 0',
+                            background: isThisStandLocked ? '#2d6a4f' : '#1a3a2a',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 'bold',
+                            cursor: isThisStandLocked ? 'default' : 'pointer',
+                            opacity: huntLocking ? 0.6 : 1,
+                          }}
+                        >
+                          {isThisStandLocked ? 'Hunting Today ✓' : huntLocking ? 'Locking…' : 'Hunt This'}
+                        </button>
+                        {top3.length > 1 && (
+                          <button
+                            onClick={() => {
+                              const nextIdx = (cardIdx + 1) % top3.length;
+                              setDecisionCardIdx(nextIdx);
+                              // Reveal this stand on the map
+                              setVisibleStandRanks(prev => {
+                                const next = new Set(prev);
+                                next.add(nextIdx);
+                                return next;
+                              });
+                              // Also select the stand on the map
+                              setSelectedStand(top3[nextIdx]?.rank ?? null);
+                            }}
+                            style={{
+                              padding: '10px 16px',
+                              background: '#333',
+                              color: '#ccc',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Next →
+                          </button>
+                        )}
                       </div>
-                      {/* Wind alignment */}
-                      {((stand.props?.windOk?.length ?? 0) > 0 || (stand.props?.windBad?.length ?? 0) > 0) && (
-                        <div style={{ marginTop: '12px' }}>
-                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#666', marginBottom: '4px' }}>Wind Alignment</div>
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            {(stand.props?.windOk ?? []).map((w: string, wi: number) => (
-                              <span key={`ok-${wi}`} style={{ padding: '3px 8px', fontSize: '10px', borderRadius: '2px', fontWeight: 'bold', background: '#d4edda', color: '#155724' }}>✓ {w}</span>
-                            ))}
-                            {(stand.props?.windBad ?? []).map((w: string, wi: number) => (
-                              <span key={`bad-${wi}`} style={{ padding: '3px 8px', fontSize: '10px', borderRadius: '2px', fontWeight: 'bold', background: '#f8d7da', color: '#721c24' }}>✗ {w}</span>
-                            ))}
-                          </div>
+                      {/* Card position indicator */}
+                      {top3.length > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '10px' }}>
+                          {top3.map((_, di) => (
+                            <div key={di} style={{
+                              width: '8px', height: '8px', borderRadius: '50%',
+                              background: di === cardIdx ? '#c9a84c' : '#ccc',
+                              cursor: 'pointer',
+                            }} onClick={() => {
+                              setDecisionCardIdx(di);
+                              setVisibleStandRanks(prev => { const n = new Set(prev); n.add(di); return n; });
+                              setSelectedStand(top3[di]?.rank ?? null);
+                            }} />
+                          ))}
                         </div>
                       )}
                     </div>
                   </div>
                 );
-              })}
+              })()}
 
               {/* Hunt Certificate section */}
               <div style={{ border: '3px solid #c9a84c', padding: '36px 48px', textAlign: 'center', marginTop: '32px' }}>
