@@ -2061,7 +2061,7 @@ function DeerIntelContent() {
   // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
   const isPro = subStatus === 'pro' || subStatus === 'promax' || role === 'admin';
   const isProMax = subStatus === 'promax' || role === 'admin';
-  const TERRITORY_PARCEL_CAP = isProMax ? 10 : isPro ? 5 : 1;
+  const TERRITORY_PARCEL_CAP = isProMax ? 25 : isPro ? 5 : 1;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const [showScoreCard, setShowScoreCard] = useState(false);
@@ -4551,22 +4551,15 @@ function DeerIntelContent() {
       // shared via URL (?territory=true&...). Otherwise a free-tier recipient
       // would only see parcel #1 because their cap=1 silently drops 2-5.
       if (!opts?.bypassCap) {
-        // Tier-based parcel cap: free=1, pro=5, promax=10
-        const cap = isProMax ? 10 : isPro ? 5 : 1;
+        // Tier-based parcel cap: free=1, pro=5, promax=25
+        const cap = isProMax ? 25 : isPro ? 5 : 1;
         if (prev.length >= cap) {
           console.log('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
-          // Tailor the toast message to the user's situation:
-          //  - Pro Max users: they've hit the absolute top tier
-          //  - Pro users: upsell to Pro Max for larger territories
-          //  - Free users with an unlocked parcel ($19 buyer): explain that
-          //    the $19 unlock covers parcel intel, and multi-parcel territory
-          //    mode is a Pro-plan feature
-          //  - Pure Free users: simple upgrade prompt
           let message: string;
           if (isProMax) {
-            message = 'Territory limit reached (10 parcels max on Pro Max)';
+            message = `Territory limit reached — maximum ${cap} parcels`;
           } else if (isPro) {
-            message = 'Territory limit reached (5 parcels max on Pro). Upgrade to Pro Max for 10-parcel territories.';
+            message = `Territory limit reached (${cap} parcels max on Pro). Upgrade to Pro Max for 25-parcel territories.`;
           } else if (parcelUnlockedRef.current) {
             message = 'Upgrade to Pro to build multi-parcel territories';
           } else {
@@ -12352,7 +12345,7 @@ function DeerIntelContent() {
                     {Math.round(totalTerritoryAcreage)} total acres
                   </span>
                 ) : territoryParcels.length >= TERRITORY_PARCEL_CAP ? (
-                  <span style={{color:'#f59e0b',fontWeight:600,fontSize:12}}>✓ Territory full</span>
+                  <span style={{color:'#f59e0b',fontWeight:600,fontSize:12}}>Territory limit reached — maximum {TERRITORY_PARCEL_CAP} parcels</span>
                 ) : (
                   <span style={{color:'#52b788',fontWeight:'bold'}}>
                     {Math.round(totalTerritoryAcreage)} total acres
