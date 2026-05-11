@@ -50,7 +50,7 @@ import { adaptV1Response } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors, enrichCorridorsWithRidgeAlignment } from '@/lib/corridor-tiering';
 import { clipLinesToParcel } from '@/lib/geo/clip-to-parcel';
 import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
-import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow } from '@/lib/terrain-flow';
+import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow, tagSaddlesByCorridorProximity } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
@@ -5836,6 +5836,38 @@ function DeerIntelContent() {
   // Depends on both — but enrichment is idempotent (checks for existing ridgeAligned
   // property to avoid infinite loops when setTieredCorridorData triggers re-render).
   }, [ridgeSpineData, tieredCorridorData]);
+
+  // ========== POST-ROUTING SADDLE PROXIMITY TAGGING ==========
+  // After both corridor paths and saddle nodes are finalized, tag each saddle
+  // with corridor_saddle (true/false) based on proximity to nearest corridor line.
+  // This replaces saddle-as-routing-attractor with saddle-confirmed-by-proximity.
+  useEffect(() => {
+    if (!ridgeSpineData?.saddle_nodes?.features?.length || !tieredCorridorData) return;
+
+    // Guard: if saddle nodes already have corridor_saddle property, skip re-tagging
+    const firstSaddle = ridgeSpineData.saddle_nodes.features[0];
+    if (firstSaddle?.properties && 'corridor_saddle' in (firstSaddle.properties as any)) {
+      return; // Already tagged
+    }
+
+    // Collect all corridor LineString features for proximity check
+    const allCorridorLines: GeoJSON.Feature[] = [
+      ...(tieredCorridorData.corridors_primary?.features || []),
+      ...(tieredCorridorData.corridors_possible?.features || []),
+      ...(tieredCorridorData.corridors_exploratory?.features || []),
+    ];
+
+    if (allCorridorLines.length === 0) return;
+
+    const taggedSaddles = tagSaddlesByCorridorProximity(
+      ridgeSpineData.saddle_nodes,
+      allCorridorLines
+    );
+
+    // Update ridgeSpineData with tagged saddle nodes
+    setRidgeSpineData(prev => prev ? { ...prev, saddle_nodes: taggedSaddles } : prev);
+  }, [ridgeSpineData, tieredCorridorData]);
+
 
   // ========== GENERATE RIDGE SPINE DATA (Structure-First, DEM-Only) ==========
   useEffect(() => {

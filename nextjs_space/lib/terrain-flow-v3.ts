@@ -162,17 +162,16 @@ export function classifyFlowPattern(
   // Check for real corridor data
   const corridors = corridorData?.corridors?.features || corridorData?.features || [];
   const ridges = ridgeData?.ridges_primary?.features || [];
-  const saddles = ridgeData?.saddle_nodes?.features || [];
   
   const hasCorridors = corridors.length > 0;
   const hasRidges = ridges.length > 0;
-  const hasSaddles = saddles.length > 0;
   
   // Structure score: how much terrain evidence we have
+  // NOTE: saddles intentionally excluded — they must not influence routing or pattern classification.
+  // Saddles are re-confirmed by proximity AFTER corridor paths are finalized.
   let structureScore = 0;
-  if (hasCorridors) structureScore += 0.4;
-  if (hasRidges) structureScore += 0.3;
-  if (hasSaddles) structureScore += 0.2;
+  if (hasCorridors) structureScore += 0.5;
+  if (hasRidges) structureScore += 0.4;
   if (dominantDirs.length > 0) structureScore += 0.1;
   
   // If we have real corridor data, analyze its pattern
@@ -213,15 +212,28 @@ export function classifyFlowPattern(
     }
   }
   
-  // Check for funnel pattern: saddle with converging ridges
-  if (hasSaddles && hasRidges) {
-    return {
-      type: 'funnel',
-      confidence: 0.75,
-      dominantBearing: dominantDirs[0]?.bearing || 0,
-      structureScore,
-      explanation: 'Saddle with ridges suggests funnel/convergence pattern',
-    };
+  // Ridge-only funnel detection: converging ridges without saddle bias.
+  // Saddles intentionally excluded from pattern classification — they must not
+  // attract flow routing. Funnel pattern now requires ≥2 converging ridges.
+  if (hasRidges && ridges.length >= 2) {
+    const ridgeBearings = ridges.slice(0, 4).map((r: any) => {
+      const rCoords = r.geometry?.coordinates || [];
+      if (rCoords.length < 2) return null;
+      return calculateBearing(
+        [rCoords[0][0], rCoords[0][1]],
+        [rCoords[rCoords.length - 1][0], rCoords[rCoords.length - 1][1]]
+      );
+    }).filter((b: number | null): b is number => b !== null);
+    const ridgeSpread = ridgeBearings.length >= 2 ? computeBearingSpread(ridgeBearings) : 0;
+    if (ridgeSpread > 30) {
+      return {
+        type: 'funnel',
+        confidence: 0.65,
+        dominantBearing: dominantDirs[0]?.bearing || ridgeBearings[0] || 0,
+        structureScore,
+        explanation: `Converging ridges (spread ${Math.round(ridgeSpread)}°) suggest funnel/convergence`,
+      };
+    }
   }
   
   // Check for single ridge = LINEAR
@@ -940,10 +952,13 @@ function generateConvergenceFromFlows(
 }
 
 /**
- * Generate opportunity zones (stand sites) scored by 4-component terrain formula:
- *   stand_score = 0.35×bench_prox + 0.25×saddle_prox + 0.20×ridge_struct + 0.20×draw_conv
+ * Generate opportunity zones (stand sites) scored by terrain formula:
+ *   stand_score = 0.50×bench_prox + 0.40×ridge_struct + convergence_tie_breaker
  *
- * Candidate points: convergence zone centers, saddle nodes, flow intersections.
+ * NOTE: saddle_prox intentionally removed from scoring — saddles must NOT attract
+ * routing or stand placement. Saddles are tagged post-routing by proximity only.
+ *
+ * Candidate points: convergence zone centers, ridge-bench intersections, flow intersections.
  * Hard cap: 1-3 sites, min 80m separation.
  */
 function generateOpportunityZones(
@@ -957,6 +972,7 @@ function generateOpportunityZones(
   const MAX_ZONES = Math.min(3, scale.maxOpportunityZones);
 
   // v2.9 – Terrain-first candidate scoring.  Convergence is a tiny tie-breaker, NOT a primary signal.
+  // v3.10 – saddle_prox removed from scoring; saddles no longer attract stand placement.
   const candidates: { coord: [number, number]; benchProx: number; saddleProx: number; ridgeStruct: number; convergenceTB: number }[] = [];
 
   // Helper: score proximity to nearest feature in a collection
@@ -1006,17 +1022,17 @@ function generateOpportunityZones(
     return { coord, benchProx, saddleProx, ridgeStruct, convergenceTB };
   };
 
-  // Source 1 (was convergence zones – REMOVED in v2.9, terrain-only now)
-
-  // Source 1: saddle nodes (natural stand sites)
-  if (saddleNodes?.features?.length) {
-    for (const f of saddleNodes.features) {
-      if (f.geometry.type === 'Point') {
-        const coord = f.geometry.coordinates as [number, number];
+  // Source 1: convergence zone centers (terrain-derived pinch points)
+  if (convergenceZones.length > 0) {
+    for (const cz of convergenceZones) {
+      if (cz.geometry.type === 'Point') {
+        const coord = cz.geometry.coordinates as [number, number];
         candidates.push(scorePt(coord));
       }
     }
   }
+  // NOTE: saddle nodes intentionally NOT used as candidate sources.
+  // Saddles must not attract stand placement — they are tagged post-routing.
 
   // Source 3: ridge-bench intersections (where ridge meets bedding)
   if (allRidgesFC.features.length > 0 && beddingPolygons?.features?.length) {
@@ -1043,10 +1059,11 @@ function generateOpportunityZones(
     }
   }
 
-  // Score each candidate: 3-component terrain formula + convergence tie-breaker
+  // Score each candidate: 2-component terrain formula + convergence tie-breaker
+  // v3.10: saddle_prox zeroed out — saddles no longer attract stand placement
   const scored = candidates.map(c => ({
     ...c,
-    totalScore: 0.40 * c.benchProx + 0.30 * c.saddleProx + 0.30 * c.ridgeStruct + c.convergenceTB,
+    totalScore: 0.50 * c.benchProx + 0.00 * c.saddleProx + 0.40 * c.ridgeStruct + c.convergenceTB,
   }));
 
   // Sort by total score descending
@@ -1073,7 +1090,7 @@ function generateOpportunityZones(
       flowIntensity: s.convergenceTB,            // kept for layer compat; now tiny
       convergenceBonus: s.convergenceTB,
       benchBonus: s.benchProx * 0.40,
-      saddleBonus: s.saddleProx * 0.30,
+      saddleBonus: 0, // v3.10: saddle no longer contributes to stand scoring
       radiusM: scale.opportunityRadius,
     },
     geometry: { type: 'Point' as const, coordinates: s.coord },

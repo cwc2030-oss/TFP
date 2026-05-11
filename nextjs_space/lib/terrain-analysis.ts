@@ -45,12 +45,14 @@ export const ANALYSIS_BUFFER_M = 1000; // 1km default
 export const ANALYSIS_BUFFER_MAX_M = 2000; // 2km max
 
 // Component weights for terrain flow likelihood
+// NOTE: saddle_proximity zeroed — saddles must NOT attract flow routing.
+// Saddles are re-confirmed by proximity AFTER corridor paths are finalized.
 export const TERRAIN_FLOW_WEIGHTS = {
-  bench_likelihood: 0.28,       // Sidehill travel benches
-  saddle_proximity: 0.24,       // Terrain crossing approaches
-  spine_proximity: 0.20,        // Ridge-structured movement
-  terrain_convergence: 0.18,    // Natural pinch/funnel geometry
-  moderate_slope: 0.10,         // Energy-efficient travel slopes
+  bench_likelihood: 0.32,       // Sidehill travel benches (was 0.28)
+  saddle_proximity: 0.00,       // DISABLED — saddles confirmed post-routing only
+  spine_proximity: 0.28,        // Ridge-structured movement (was 0.20)
+  terrain_convergence: 0.24,    // Natural pinch/funnel geometry (was 0.18)
+  moderate_slope: 0.16,         // Energy-efficient travel slopes (was 0.10)
   // Penalties (subtracted)
   extreme_slope_penalty: 0.12,  // Steep terrain penalty
   cut_penalty: 0.08,            // Incised drainage penalty

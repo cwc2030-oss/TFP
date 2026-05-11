@@ -20,13 +20,13 @@
  * - ADDED: Debug layers for component surfaces
  * - ADDED: Before/after comparison toggle
  * 
- * V2 Weighted Formula (normalized 0-1 inputs):
+ * V3.10 Weighted Formula (normalized 0-1 inputs):
  * terrain_flow_likelihood =
- *   0.28 * bench_likelihood
- * + 0.24 * saddle_proximity
- * + 0.20 * spine_proximity
- * + 0.18 * terrain_convergence
- * + 0.10 * moderate_slope_preference
+ *   0.32 * bench_likelihood
+ * + 0.00 * saddle_proximity   ← ZEROED — saddles confirmed post-routing only
+ * + 0.28 * spine_proximity
+ * + 0.24 * terrain_convergence
+ * + 0.16 * moderate_slope_preference
  * - 0.12 * extreme_slope_penalty
  * - 0.08 * cut_penalty
  */
@@ -1350,4 +1350,76 @@ function emptyFlowResponse(reason: string): TerrainFlowResponse {
       fallback_reason: reason,
     },
   };
+}
+
+
+// ========== POST-ROUTING SADDLE PROXIMITY PASS ==========
+
+/**
+ * Capture distance for tagging saddles as corridor-associated.
+ * Uses the same 150m threshold established in ridge-extraction.ts
+ * (SADDLE_MAX_DIST_FROM_RIDGE_M = 150).
+ */
+export const SADDLE_CORRIDOR_CAPTURE_M = 150;
+
+/**
+ * Minimum distance from a point to the nearest point on a LineString (in meters).
+ */
+function pointToLineDistanceM(
+  point: [number, number],
+  lineCoords: number[][]
+): number {
+  let minDist = Infinity;
+  for (const c of lineCoords) {
+    const d = distanceMeters(point, [c[0], c[1]]);
+    if (d < minDist) minDist = d;
+  }
+  return minDist;
+}
+
+/**
+ * Post-routing pass: tag each saddle feature with `corridor_saddle` based on
+ * proximity to finalized corridor / flow line geometry.
+ *
+ * Does NOT alter any path geometry — only enriches saddle properties.
+ *
+ * @param saddleNodes   - Saddle node FeatureCollection (from ridge-extraction)
+ * @param corridorLines - All corridor LineString features (primary + possible + exploratory)
+ * @param captureM      - Max distance (meters) for a saddle to be tagged (default 150)
+ * @returns New FeatureCollection with corridor_saddle and corridor_distance_m added
+ */
+export function tagSaddlesByCorridorProximity(
+  saddleNodes: GeoJSON.FeatureCollection,
+  corridorLines: GeoJSON.Feature[],
+  captureM: number = SADDLE_CORRIDOR_CAPTURE_M
+): GeoJSON.FeatureCollection {
+  if (!saddleNodes?.features?.length) return saddleNodes;
+
+  const taggedFeatures = saddleNodes.features.map(f => {
+    if (f.geometry.type !== 'Point') return f;
+
+    const saddleCoord = f.geometry.coordinates as [number, number];
+    let minDist = Infinity;
+
+    for (const line of corridorLines) {
+      if (line.geometry.type !== 'LineString') continue;
+      const d = pointToLineDistanceM(saddleCoord, line.geometry.coordinates);
+      if (d < minDist) minDist = d;
+    }
+
+    return {
+      ...f,
+      properties: {
+        ...f.properties,
+        corridor_saddle: minDist <= captureM,
+        corridor_distance_m: Math.round(minDist),
+      },
+    };
+  });
+
+  const tagged = taggedFeatures.filter(f => (f.properties as any)?.corridor_saddle);
+  const total = taggedFeatures.length;
+  console.log('[SaddleProximity] %d/%d saddles within %dm of corridor lines', tagged.length, total, captureM);
+
+  return { type: 'FeatureCollection', features: taggedFeatures };
 }
