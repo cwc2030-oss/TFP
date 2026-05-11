@@ -318,6 +318,22 @@ model HuntingReport {
   @@index([ownerUserId])
 }
 
+// v4.0 — Per-parcel terrain analysis cache for Territory assembly
+model TerrainAnalysisCache {
+  id        String   @id @default(cuid())
+  parcelId  String   @unique          // Regrid ll_uuid or synthetic ID
+  lat       Float                     // Parcel centroid latitude
+  lng       Float                     // Parcel centroid longitude
+  acreage   Float    @default(0)
+  data      String   @db.Text         // JSON: { layers, tieredCorridorData, ridgeSpineData, terrainFlowData, summary, provenance }
+  version   Int      @default(1)      // Cache version for invalidation
+  createdAt DateTime @default(now())
+  expiresAt DateTime                  // TTL (e.g., 7 days)
+
+  @@index([lat, lng])
+  @@index([expiresAt])
+}
+
 // v3.9.2 — "Hunt This" stand selection for the day
 model StandSelection {
   id              String   @id @default(cuid())

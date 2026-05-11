@@ -54,6 +54,7 @@ import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySynthetic
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
+import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain } from '@/lib/territory-assembly';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
@@ -2346,6 +2347,11 @@ function DeerIntelContent() {
       setBackgroundAnalysis(false);
     }
   }, [territoryMode, error]);
+  // v4.0 — Territory Assembly: when true, ridge/flow useEffects skip to prevent re-analysis
+  const territoryAssemblyRef = useRef(false);
+  // v4.0 — Territory link features for cross-parcel connections
+  const [territoryLinks, setTerritoryLinks] = useState<GeoJSON.FeatureCollection | null>(null);
+
   // Flag: when true, the data-painting useEffect will fade terrain layers in
   // instead of snapping them to full opacity. Set before territory analysis,
   // consumed once after new data arrives.
@@ -4459,6 +4465,7 @@ function DeerIntelContent() {
     'tfp-killzone',
     'tfp-stand-tertiary',
     'tfp-stands',
+    'tfp-territory-links',
   ]);
 
   // ========== TERRITORY (MULTI-PARCEL) HELPERS ==========
@@ -4609,6 +4616,8 @@ function DeerIntelContent() {
     setTerritoryName('My Territory');
     // SHARED-TERRITORY FIX: reset the shared-view flag when territory is cleared
     setIsViewingSharedTerritory(false);
+    // v4.0: Clear territory link data
+    setTerritoryLinks(null);
 
     // PRE-TERRITORY SNAPSHOT RESTORE: put the user back on the original parcel
     // so Regrid lookups don't hit the territory center (which could land on a
@@ -5637,6 +5646,12 @@ function DeerIntelContent() {
       return;
     }
 
+    // v4.0 TERRITORY ASSEMBLY GATE: skip tiering when assembling from cache
+    if (territoryAssemblyRef.current) {
+      console.log('[TIERED] SKIPPED — territory assembly in progress, data injected directly');
+      return;
+    }
+
     try {
       // Extract parcel coordinates for tiering
       let parcelCoords: number[][] = [];
@@ -5791,6 +5806,30 @@ function DeerIntelContent() {
     }
   }, [tieredCorridorData, mapReady]);
 
+  // ========== UPDATE TERRITORY LINK MAP SOURCE ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+
+    const linkSource = map.getSource('tfp-territory-links') as mapboxgl.GeoJSONSource;
+    if (!linkSource) return;
+
+    if (territoryLinks && territoryLinks.features.length > 0) {
+      linkSource.setData(territoryLinks);
+      try {
+        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
+        map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
+      } catch { /* layers may not exist */ }
+      console.log('[MAP] Updated territory links source:', territoryLinks.features.length, 'links');
+    } else {
+      linkSource.setData(EMPTY_FC);
+      try {
+        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'none');
+        map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'none');
+      } catch { /* layers may not exist */ }
+    }
+  }, [territoryLinks, mapReady]);
+
   // ========== RIDGE-ALIGNMENT ENRICHMENT ==========
   // When BOTH tieredCorridorData and ridgeSpineData are available, cross-reference
   // them to detect corridors that align with ridge spines from the independent
@@ -5866,6 +5905,12 @@ function DeerIntelContent() {
   useEffect(() => {
     if (!parcelPolygon) {
       setRidgeSpineData(null);
+      return;
+    }
+
+    // v4.0 TERRITORY ASSEMBLY GATE: skip re-analysis when assembling from cache
+    if (territoryAssemblyRef.current) {
+      console.log('[Backbone] SKIPPED — territory assembly in progress, data injected directly');
       return;
     }
 
@@ -6235,6 +6280,12 @@ function DeerIntelContent() {
       return;
     }
 
+    // v4.0 TERRITORY ASSEMBLY GATE: skip re-analysis when assembling from cache
+    if (territoryAssemblyRef.current) {
+      console.log('[TerrainFlow] SKIPPED — territory assembly in progress, data injected directly');
+      return;
+    }
+
     // AbortController prevents stale flow fetches from accumulating
     let cancelled = false;
 
@@ -6367,6 +6418,43 @@ function DeerIntelContent() {
       cancelled = true;
     };
   }, [parcelPolygon]);
+
+  // ========== v4.0 TERRAIN CACHE WRITE (single-parcel only) ==========
+  // When all three pipelines finish for a single parcel, cache the results.
+  useEffect(() => {
+    // Only write cache for single-parcel analysis, not territory
+    if (territoryModeRef.current || territoryAssemblyRef.current) return;
+    // All three must be present
+    if (!layers || !tieredCorridorData || !ridgeSpineData || !terrainFlowData || !summary) return;
+    if (!parcelPolygon) return;
+
+    const parcelId = (parcelPolygon.properties as any)?.parcelId ||
+                     (parcelPolygon.properties as any)?.ll_uuid;
+    if (!parcelId) return; // Synthetic parcels don't get cached
+
+    const lat = (parcelPolygon.properties as any)?.lat || activeLatRef.current;
+    const lng = (parcelPolygon.properties as any)?.lng || activeLngRef.current;
+    const acreage = parseFloat((parcelPolygon.properties as any)?.ll_gisacre || activeAcreageRef.current || '0');
+
+    const cachePayload: CachedParcelTerrain = {
+      parcelId,
+      layers,
+      tieredCorridorData,
+      ridgeSpineData,
+      terrainFlowData,
+      summary,
+      provenance: null,
+    };
+
+    // Fire-and-forget cache write
+    writeCachedTerrain(parcelId, lat, lng, acreage, cachePayload).then(ok => {
+      if (ok) {
+        console.log('[TerrainCache] Wrote cache for parcel:', parcelId);
+      } else {
+        console.warn('[TerrainCache] Cache write failed for parcel:', parcelId);
+      }
+    });
+  }, [layers, tieredCorridorData, ridgeSpineData, terrainFlowData, summary, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== COMPUTE TERRAIN RATING (BROKER SCORE) ==========
   useEffect(() => {
@@ -9190,6 +9278,34 @@ function DeerIntelContent() {
           console.log('[MAP] Adjacent parcels source + layers created');
         }
         
+        // ========== TERRITORY LINK SOURCE + LAYERS ==========
+        if (!map.getSource('tfp-territory-links')) {
+          map.addSource('tfp-territory-links', { type: 'geojson', data: EMPTY_FC });
+          // Dashed gold line for cross-parcel connections
+          map.addLayer({
+            id: 'tfp-territory-links-casing',
+            type: 'line',
+            source: 'tfp-territory-links',
+            paint: {
+              'line-color': '#1a3a2a',
+              'line-width': 5,
+              'line-opacity': 0.4,
+            },
+          });
+          map.addLayer({
+            id: 'tfp-territory-links-line',
+            type: 'line',
+            source: 'tfp-territory-links',
+            paint: {
+              'line-color': '#c9a84c',
+              'line-width': 2.5,
+              'line-opacity': 0.85,
+              'line-dasharray': [6, 4],
+            },
+          });
+          console.log('[MAP] Territory link source + layers created');
+        }
+
         overlaySourcesCreated.current = true;
         console.log('[MAP] Native Mapbox sources created successfully');
         
@@ -12354,36 +12470,234 @@ function DeerIntelContent() {
               </div>
 
               <button
-                onClick={() => {
-                  // v3.9.2 — Re-Align now only re-centers the map and redraws the boundary.
-                  // No terrain brain API call, no runAnalysis(), no spinner.
-                  const merged = mergeParcelPolygons(territoryParcels);
-                  if (!merged) return;
-                  const bounds = getTerritoryBounds(territoryParcels);
-                  const centerLat = (bounds[1] + bounds[3]) / 2;
-                  const centerLng = (bounds[0] + bounds[2]) / 2;
+                onClick={async () => {
+                  // v4.0 — Cache-based Territory Assembly
+                  // Reads per-parcel terrain from cache, merges FCs, computes cross-parcel links.
+                  // Only runs individual parcel analysis for cache misses.
+                  if (analysisInFlightRef.current) return;
+                  analysisInFlightRef.current = true;
+                  territoryAssemblyRef.current = true;
 
-                  // Update the polygon boundary on the map
-                  setParcelPolygon(merged);
-                  setActiveLat(centerLat);
-                  setActiveLng(centerLng);
-                  activeLatRef.current = centerLat;
-                  activeLngRef.current = centerLng;
+                  setIsLoading(true);
+                  setBackgroundAnalysis(true);
+                  setError(null);
+                  setProgress(10);
+                  setProgressStep('Assembling territory from cache...');
 
-                  // Fly the map to the territory bounds
-                  const _map = mapRef.current;
-                  if (_map) {
-                    try {
-                      _map.fitBounds(
-                        [[bounds[0], bounds[1]], [bounds[2], bounds[3]]] as any,
-                        { padding: 60, duration: 1200 }
-                      );
-                    } catch (e) {
-                      console.warn('[Territory] fitBounds failed:', e);
+                  try {
+                    const parcels = territoryParcelsRef.current;
+                    if (!parcels.length) throw new Error('No parcels in territory');
+
+                    // Merge polygon for boundary display
+                    const merged = mergeParcelPolygons(parcels);
+                    if (!merged) throw new Error('Failed to merge parcel polygons');
+                    const bounds = getTerritoryBounds(parcels);
+                    const centerLat = (bounds[1] + bounds[3]) / 2;
+                    const centerLng = (bounds[0] + bounds[2]) / 2;
+
+                    // Update map boundary and camera
+                    setParcelPolygon(merged);
+                    setActiveLat(centerLat);
+                    setActiveLng(centerLng);
+                    activeLatRef.current = centerLat;
+                    activeLngRef.current = centerLng;
+                    const _map = mapRef.current;
+                    if (_map) {
+                      try {
+                        _map.fitBounds(
+                          [[bounds[0], bounds[1]], [bounds[2], bounds[3]]] as any,
+                          { padding: 60, duration: 1200 }
+                        );
+                      } catch (e) { console.warn('[Territory] fitBounds failed:', e); }
                     }
+
+                    setProgress(20);
+                    setProgressStep(`Looking up ${parcels.length} parcels in cache...`);
+
+                    // Step 1: Fetch cached terrain for all parcels
+                    const parcelIds = parcels.map(p => p.id).filter(Boolean);
+                    const cacheResult = await fetchCachedTerrain(parcelIds);
+                    console.log('[TerritoryAssembly] Cache lookup:', cacheResult.found.length, 'hits,', cacheResult.missing.length, 'misses');
+
+                    setProgress(30);
+
+                    // Step 2: For cache misses, run individual terrain analysis
+                    const allTerrain: CachedParcelTerrain[] = [];
+                    // Add cache hits
+                    for (const id of cacheResult.found) {
+                      allTerrain.push(cacheResult.results[id]);
+                    }
+
+                    if (cacheResult.missing.length > 0) {
+                      const { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } = await import('@/lib/terrain-client');
+                      const { fetchRidgeSpines: fetchRidges } = await import('@/lib/ridge-extraction');
+                      const { fetchTerrainFlow: fetchFlow } = await import('@/lib/terrain-flow');
+
+                      for (let mi = 0; mi < cacheResult.missing.length; mi++) {
+                        const missingId = cacheResult.missing[mi];
+                        const tp = parcels.find(p => p.id === missingId);
+                        if (!tp) continue;
+
+                        const pct = 30 + Math.round((mi / cacheResult.missing.length) * 50);
+                        setProgress(pct);
+                        setProgressStep(`Analyzing parcel ${mi + 1} of ${cacheResult.missing.length}...`);
+
+                        // Run full analysis for this single parcel
+                        const singleParcel = tp.polygon;
+                        const currentSeason = seasonRef.current;
+                        const currentWind = windDirectionRef.current;
+
+                        // Terrain analysis (corridors/stands/bedding)
+                        const analysisResult = await fetchTerrainAnalysis(
+                          { parcel: singleParcel, seasonProfile: currentSeason, prevailingWinds: [currentWind], bufferMeters: 800 },
+                          () => {},
+                          45_000
+                        );
+
+                        let parcelLayers: any = null;
+                        let parcelSummary: any = null;
+                        if (analysisResult.success && analysisResult.data) {
+                          const adapted = adaptV1Response(analysisResult.data);
+                          parcelLayers = adapted.layers;
+                          parcelSummary = adapted.summary;
+                        }
+
+                        // Compute tiered corridors for this parcel
+                        let parcelTiered: any = null;
+                        if (parcelLayers && singleParcel) {
+                          try {
+                            let parcelCoords: number[][] = [];
+                            const geom = singleParcel.geometry;
+                            if (geom.type === 'Polygon') {
+                              parcelCoords = geom.coordinates[0];
+                            } else if (geom.type === 'MultiPolygon') {
+                              let maxLen = 0;
+                              geom.coordinates.forEach((poly: any) => {
+                                if (poly[0].length > maxLen) { maxLen = poly[0].length; parcelCoords = poly[0]; }
+                              });
+                            }
+                            if (parcelCoords.length >= 3) {
+                              const corridorsFC = parcelLayers.funnels
+                                ? { type: 'FeatureCollection' as const, features: (parcelLayers.funnels.features || []).filter((f: any) => f.properties?.funnelType === 'corridor' && f.geometry?.type === 'LineString') }
+                                : { type: 'FeatureCollection' as const, features: [] };
+                              const funnelsFC = parcelLayers.funnels || { type: 'FeatureCollection' as const, features: [] };
+                              const lngs = parcelCoords.map((c: number[]) => c[0]);
+                              const lats = parcelCoords.map((c: number[]) => c[1]);
+                              const bbox: [number, number, number, number] = [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)];
+                              const tiered = tierCorridorData({ corridors: corridorsFC, funnels: funnelsFC, bbox }, parcelCoords);
+                              const intrusionFeatures: GeoJSON.Feature[] = [];
+                              [tiered.corridors_primary, tiered.corridors_possible].forEach(fc => {
+                                fc.features.forEach(f => { if (((f.properties as any)?.intrusion || 0) >= 0.5) intrusionFeatures.push(f); });
+                              });
+                              parcelTiered = {
+                                corridors_primary: tiered.corridors_primary,
+                                corridors_possible: tiered.corridors_possible,
+                                corridors_exploratory: tiered.corridors_exploratory,
+                                corridors_context_primary: tiered.corridors_context_primary,
+                                corridors_context_possible: tiered.corridors_context_possible,
+                                funnels_hard: tiered.funnels_hard,
+                                funnels_slight: tiered.funnels_slight,
+                                intrusion_overlay: { type: 'FeatureCollection', features: intrusionFeatures },
+                                metadata: tiered.metadata?.tiering,
+                              };
+                            }
+                          } catch (err) {
+                            console.warn('[TerritoryAssembly] Tiering failed for', missingId, err);
+                          }
+                        }
+
+                        // Ridge spines
+                        let parcelRidges: any = null;
+                        try {
+                          const ridgeResult = await fetchRidges({ parcel: singleParcel, parcel_id: missingId, bufferMeters: 300 });
+                          if (ridgeResult.success && ridgeResult.data) {
+                            parcelRidges = {
+                              ridges_primary: ridgeResult.data.ridges_primary,
+                              ridges_secondary: ridgeResult.data.ridges_secondary,
+                              saddle_nodes: ridgeResult.data.saddle_nodes,
+                              isSynthetic: ridgeResult.isSynthetic,
+                              metadata: ridgeResult.data.metadata,
+                            };
+                          }
+                        } catch (err) {
+                          console.warn('[TerritoryAssembly] Ridge fetch failed for', missingId, err);
+                        }
+
+                        // Terrain flow
+                        let parcelFlow: any = null;
+                        try {
+                          const flowResult = await fetchFlow({ parcel: singleParcel, parcel_id: missingId, bufferMeters: 1000 });
+                          if (flowResult.success && flowResult.data) {
+                            parcelFlow = {
+                              flow_primary: flowResult.data.flow_primary,
+                              flow_secondary: flowResult.data.flow_secondary,
+                              convergence_zones: flowResult.data.convergence_zones,
+                              opportunity_zones: flowResult.data.opportunity_zones,
+                              isSynthetic: flowResult.isSynthetic,
+                              metadata: {
+                                flow_count_primary: flowResult.data.metadata?.stats?.flow_count_primary || 0,
+                                flow_count_secondary: flowResult.data.metadata?.stats?.flow_count_secondary || 0,
+                                convergence_count: flowResult.data.metadata?.stats?.convergence_count || 0,
+                                total_flow_length_m: flowResult.data.metadata?.stats?.total_flow_length_m || 0,
+                                mode: flowResult.data.metadata?.mode,
+                                dem_source: flowResult.data.metadata?.dem_source,
+                              },
+                            };
+                          }
+                        } catch (err) {
+                          console.warn('[TerritoryAssembly] Flow fetch failed for', missingId, err);
+                        }
+
+                        const cached: CachedParcelTerrain = {
+                          parcelId: missingId,
+                          layers: parcelLayers || { beddingPolygons: { type: 'FeatureCollection', features: [] }, funnels: { type: 'FeatureCollection', features: [] }, standPoints: { type: 'FeatureCollection', features: [] } },
+                          tieredCorridorData: parcelTiered,
+                          ridgeSpineData: parcelRidges,
+                          terrainFlowData: parcelFlow,
+                          summary: parcelSummary,
+                          provenance: null,
+                        };
+                        allTerrain.push(cached);
+
+                        // Write to cache for future use
+                        writeCachedTerrain(missingId, tp.lat, tp.lng, tp.acreage, cached);
+                      }
+                    }
+
+                    setProgress(85);
+                    setProgressStep('Merging terrain features...');
+
+                    // Step 3: Assemble merged territory data
+                    const parcelPolygons = parcels.map(p => ({ id: p.id, lat: p.lat, lng: p.lng, polygon: p.polygon }));
+                    const assembled = assembleTerritory(allTerrain, parcelPolygons);
+
+                    // Step 4: Inject all assembled data directly into state
+                    setLayers(assembled.layers);
+                    setSummary(assembled.summary);
+                    setTieredCorridorData(assembled.tieredCorridorData);
+                    setRidgeSpineData(assembled.ridgeSpineData);
+                    setTerrainFlowData(assembled.terrainFlowData);
+                    setTerritoryLinks(assembled.territoryLinks);
+
+                    setProgress(100);
+                    setProgressStep(`Territory assembled — ${allTerrain.length} parcels, ${assembled.territoryLinks.features.length} links`);
+                    console.log('[TerritoryAssembly] COMPLETE:', allTerrain.length, 'parcels,', assembled.territoryLinks.features.length, 'cross-parcel links');
+
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : 'Territory assembly failed';
+                    console.error('[TerritoryAssembly] Error:', msg);
+                    if (!territoryModeRef.current) {
+                      setError(msg);
+                    }
+                  } finally {
+                    analysisInFlightRef.current = false;
+                    setIsLoading(false);
+                    setBackgroundAnalysis(false);
+                    // Release the assembly gate after a tick so useEffects don't re-fire
+                    setTimeout(() => { territoryAssemblyRef.current = false; }, 200);
                   }
-                  console.log('[Territory] Re-Align: map re-centered, boundary redrawn. No analysis triggered.');
                 }}
+                disabled={analysisInFlightRef.current}
                 style={{
                   width: '100%',
                   padding: '12px 0',
