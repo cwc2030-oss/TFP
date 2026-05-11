@@ -74,6 +74,7 @@ import TerrainStoryPanel, { TerrainStoryExportLegend, StructuralDriversGrid } fr
 import TerrainLoadingBar from '@/components/terrain/terrain-loading-bar';
 import { generateTerrainStory, computeStructuralDrivers, type TerrainStorySummary } from '@/lib/terrain-story';
 import HuntingPotentialCard, { computeHuntingPotential, type HuntingPotentialScore } from '@/components/terrain/hunting-potential-card';
+import HuntOutcomeCard, { HuntInProgressBanner } from '@/components/hunt-outcome-card';
 import { computeBrokerScore, type BrokerScoreResult, type BrokerScoreInput } from '@/lib/broker-scoring';
 import { 
   createGeometryTrace, 
@@ -2238,6 +2239,31 @@ function DeerIntelContent() {
   const visibleStandRanksRef = useRef<Set<number>>(new Set());
   useEffect(() => { visibleStandRanksRef.current = visibleStandRanks; }, [visibleStandRanks]);
 
+  // ========== v4.1 — HUNT SESSION OUTCOME STATE ==========
+  const [showOutcomeCard, setShowOutcomeCard] = useState(false);
+  const [activeHuntStandLabel, setActiveHuntStandLabel] = useState<string | null>(null);
+
+  // Auto-check on mount: if there's an active hunt session >=2 hours old, show outcome card
+  useEffect(() => {
+    const activeId = localStorage.getItem('active_hunt_session_id');
+    if (!activeId) return;
+    fetch(`/api/hunt-sessions?id=${activeId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { outcome: string | null; huntStartTime: string; standLabel: string } | null) => {
+        if (!data) return;
+        if (data.outcome) {
+          localStorage.removeItem('active_hunt_session_id');
+          return;
+        }
+        setActiveHuntStandLabel(data.standLabel);
+        const hoursSince = (Date.now() - new Date(data.huntStartTime).getTime()) / 36e5;
+        if (hoursSince >= 2) {
+          setShowOutcomeCard(true);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ========== STAND COMPARE STATE (v1.2) ==========
   // Holds two stand selections for a future side-by-side comparison panel.
   // Each value is the stand's index in the alignedStands array, or null if
@@ -2874,7 +2900,85 @@ function DeerIntelContent() {
     };
   } | null>(null);
   const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
-  
+
+  // ========== v4.1 — HUNT SESSION CREATOR ==========
+  const handleHuntThis = useCallback(async (standName: string, standCoords: [number, number], movementType: string, score: number, isSoft: boolean) => {
+    if (!session?.user) { toast('Sign in to lock a stand'); return; }
+    setHuntLocking(true);
+    try {
+      // Build terrain features snapshot for the intelligence payload
+      const terrainFeats = {
+        ridgeSpineCount: (ridgeSpineData?.ridges_primary?.features?.length ?? 0) + (ridgeSpineData?.ridges_secondary?.features?.length ?? 0),
+        saddleCount: ridgeSpineData?.saddle_nodes?.features?.length ?? 0,
+        primaryCorridorCount: tieredCorridorData?.corridors_primary?.features?.length ?? 0,
+        secondaryCorridorCount: tieredCorridorData?.corridors_possible?.features?.length ?? 0,
+        funnelCount: summary?.funnelCount ?? 0,
+        convergenceZoneCount: terrainFlowData?.convergence_zones?.features?.length ?? 0,
+        analysisAreaAcres: summary?.analysisAreaAcres ?? 0,
+        topStandScore: summary?.topStandScore ?? 0,
+      };
+
+      const seasonLabel = season === 'early' ? 'early' : season === 'rut' ? 'rut' : 'late';
+
+      // 1) Create hunt session
+      const sessionRes = await fetch('/api/hunt-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcelId: currentParcelKey || 'unknown',
+          standLabel: standName,
+          standCoordinates: { lng: standCoords[0], lat: standCoords[1] },
+          standType: movementType,
+          terrainFeatures: terrainFeats,
+          windDirection,
+          rutPhase: seasonLabel,
+          groundMoisture: isSoft ? 'Soft' : 'Firm',
+          moonPhase: null,
+        }),
+      });
+
+      if (sessionRes.ok) {
+        const data = await sessionRes.json();
+        // 2) Store in localStorage
+        localStorage.setItem('active_hunt_session_id', data.id);
+        // 3) Update local state
+        setHuntLockedStand({ standName, confidence: score });
+        setActiveHuntStandLabel(standName);
+        // 4) Dispatch event for the banner
+        window.dispatchEvent(new CustomEvent('hunt-session-started', { detail: { standLabel: standName } }));
+        toast.success(`Locked "${standName}" — hunt session started`);
+        console.log('[HuntSession] Created:', data.id, 'stand:', standName);
+      } else {
+        const d = await sessionRes.json().catch(() => ({}));
+        console.error('[HuntThis] error response:', d);
+        toast.error(d?.error || 'Could not start hunt session');
+      }
+
+      // 2b) Also fire existing stand-selection write (backward compat)
+      await fetch('/api/stand-selection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcelId: currentParcelKey || 'unknown',
+          standLng: standCoords[0],
+          standLat: standCoords[1],
+          standName,
+          terrainFeature: movementType,
+          confidence: score,
+          windDirection,
+          groundMoisture: isSoft ? 'Soft' : 'Firm',
+          seasonPhase: season,
+        }),
+      }).catch(() => {}); // fire-and-forget, may 404
+
+    } catch (err) {
+      console.error('[HuntThis] network error:', err);
+      toast.error('Network error');
+    } finally {
+      setHuntLocking(false);
+    }
+  }, [session, currentParcelKey, windDirection, season, ridgeSpineData, tieredCorridorData, terrainFlowData, summary]);
+
   // Terrain Flow Comparison State (before/after toggle)
   const [flowComparisonMode, setFlowComparisonMode] = useState(false);
   const [legacySyntheticData, setLegacySyntheticData] = useState<{
@@ -13359,6 +13463,9 @@ function DeerIntelContent() {
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
 
+              {/* ═══ v4.1 — HUNT IN PROGRESS BANNER ═══ */}
+              <HuntInProgressBanner onRecordOutcome={() => setShowOutcomeCard(true)} />
+
               {/* ═══ ONBOARDING — Demo welcome (dismissible) ═══ */}
               {/* ═══ HERO PARCEL SELECTOR — curated demo parcels ═══ */}
               {(demoMode || heroParcel) && (
@@ -13799,37 +13906,9 @@ function DeerIntelContent() {
                         <div className="flex gap-2">
                           <button
                             disabled={huntLocking || isThisStandLocked}
-                            onClick={async () => {
+                            onClick={() => {
                               console.log('[HuntThis] clicked — stand:', JSON.stringify({ standName, coords: stand.coords, score: s, movementType, cardIdx, rank: stand.rank }));
-                              if (!session?.user) { toast('Sign in to lock a stand'); return; }
-                              setHuntLocking(true);
-                              try {
-                                const payload = {
-                                  parcelId: currentParcelKey || 'unknown',
-                                  standLng: stand.coords[0],
-                                  standLat: stand.coords[1],
-                                  standName,
-                                  terrainFeature: movementType,
-                                  confidence: s,
-                                  windDirection,
-                                  groundMoisture: isSoft ? 'Soft' : 'Firm',
-                                  seasonPhase: season,
-                                };
-                                console.log('[HuntThis] POST /api/stand-selection payload:', JSON.stringify(payload));
-                                const res = await fetch('/api/stand-selection', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify(payload),
-                                });
-                                if (res.ok) {
-                                  setHuntLockedStand({ standName, confidence: s });
-                                  toast.success(`Locked "${standName}" for today`);
-                                } else {
-                                  const d = await res.json().catch(() => ({}));
-                                  console.error('[HuntThis] error response:', d);
-                                  toast.error(d?.error || 'Could not lock stand');
-                                }
-                              } catch (err) { console.error('[HuntThis] network error:', err); toast.error('Network error'); } finally { setHuntLocking(false); }
+                              handleHuntThis(standName, stand.coords as [number, number], movementType, s, isSoft);
                             }}
                             className={`flex-1 px-3 py-2 text-[11px] font-bold rounded-md transition-colors ${
                               isThisStandLocked
@@ -15618,41 +15697,9 @@ function DeerIntelContent() {
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button
                           disabled={huntLocking || isThisStandLocked}
-                          onClick={async () => {
-                            if (!session?.user) {
-                              toast('Sign in to lock a stand');
-                              return;
-                            }
-                            setHuntLocking(true);
-                            try {
-                              const standName = stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`;
-                              const res = await fetch('/api/stand-selection', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  parcelId: currentParcelKey || 'unknown',
-                                  standLng: stand.coords[0],
-                                  standLat: stand.coords[1],
-                                  standName,
-                                  terrainFeature: movementType,
-                                  confidence: s,
-                                  windDirection,
-                                  groundMoisture: isSoft ? 'Soft' : 'Firm',
-                                  seasonPhase: season,
-                                }),
-                              });
-                              if (res.ok) {
-                                setHuntLockedStand({ standName, confidence: s });
-                                toast.success(`Locked "${standName}" for today`);
-                              } else {
-                                const d = await res.json().catch(() => ({}));
-                                toast.error(d?.error || 'Could not lock stand');
-                              }
-                            } catch {
-                              toast.error('Network error');
-                            } finally {
-                              setHuntLocking(false);
-                            }
+                          onClick={() => {
+                            const sName = stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`;
+                            handleHuntThis(sName, stand.coords as [number, number], movementType, s, isSoft);
                           }}
                           style={{
                             flex: 1,
@@ -17285,6 +17332,19 @@ function DeerIntelContent() {
           </div>
         );
       })()}
+
+
+      {/* ═══ v4.1 — HUNT OUTCOME CARD (bottom sheet) ═══ */}
+      {showOutcomeCard && (
+        <HuntOutcomeCard
+          forceShow
+          onDismiss={() => {
+            setShowOutcomeCard(false);
+            setActiveHuntStandLabel(null);
+            window.dispatchEvent(new CustomEvent('hunt-session-cleared'));
+          }}
+        />
+      )}
 
 
     </div>

@@ -24,6 +24,7 @@ model User {
   listings         Listing[]
   huntingReports   HuntingReport[]
   standSelections  StandSelection[]
+  huntSessions     HuntSession[]
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
@@ -332,6 +333,30 @@ model TerrainAnalysisCache {
 
   @@index([lat, lng])
   @@index([expiresAt])
+}
+
+// v4.1 — Post-hunt outcome recording
+model HuntSession {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parcelId          String
+  standLabel        String
+  standCoordinates  Json                    // { lng, lat }
+  standType         String                  // e.g. "Ridge Stand", "Saddle Crossing"
+  terrainFeatures   Json                    // Full terrain context snapshot for ML
+  windDirection     String
+  rutPhase          String                  // early, rut, late
+  groundMoisture    String                  // "Firm" or "Soft"
+  moonPhase         String?
+  huntStartTime     DateTime  @default(now())
+  outcome           String?                 // saw_deer, harvested, scouted, no_activity
+  outcomeRecordedAt DateTime?
+  deerCount         Int?
+  createdAt         DateTime  @default(now())
+
+  @@index([userId])
+  @@index([parcelId])
 }
 
 // v3.9.2 — "Hunt This" stand selection for the day
