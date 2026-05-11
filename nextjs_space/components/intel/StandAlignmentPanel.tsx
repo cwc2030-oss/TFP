@@ -7,7 +7,7 @@ import { getStandExplainability, type ReasonChip, type QualityBar, type KeyIndic
 
 /** Terrain feature that anchors a stand to defensible ground. */
 export type TerrainAnchor = {
-  type: 'ridge' | 'saddle' | 'funnel' | 'convergence';
+  type: 'ridge' | 'saddle' | 'funnel' | 'convergence' | 'field_edge' | 'inside_corner' | 'field_saddle_combo';
   /** Distance in metres to nearest qualifying feature. 0 = inside polygon. */
   distanceM: number;
   featureId?: string;

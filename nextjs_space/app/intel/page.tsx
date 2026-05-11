@@ -469,6 +469,9 @@ const LAYER_COLORS = {
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
   edgePressureOutbound: '#f59e0b', // Amber for outbound pressure
   edgeBoundaryHighlight: '#f59e0b', // Amber — matches parcel boundary for consistent edge styling
+  // AG Field Edge / Inside Corner colors (CDL-derived)
+  agFieldEdge: '#c9a84c',         // TFP Gold — field/timber edge lines
+  agInsideCorner: '#c9a84c',      // TFP Gold — inside corner diamonds
   // Travel Corridor colors (structure-first, BOLD earth tones for skeleton feel)
   ridgePrimary: '#4E342E',        // Dark coffee brown - major spines (bold, visible)
   ridgeSecondary: '#6D4C41',      // Medium brown - secondary spines (distinct from primary)
@@ -3389,6 +3392,8 @@ function DeerIntelContent() {
     setNoAnchoredStands(false);
 
     function dominantTerrainContext(p: StandPointProperties): string {
+      // AG field edge stands get their own context to avoid similarity penalties with terrain stands
+      if (p.isEdgeStand && p.coverType === 'edge') return 'field_edge';
       // Classify by TPI: positive = ridge/hilltop, near-zero = flat/bench, negative = valley/draw
       if (p.tpiLocal > 1.5) return 'ridge';
       if (p.tpiLocal < -1.5) return 'draw';
@@ -4583,6 +4588,7 @@ function DeerIntelContent() {
     'tfp-stand-tertiary',
     'tfp-stands',
     'tfp-territory-links',
+    'tfp-ag-edges', 'tfp-inside-corners',
   ]);
 
   // ========== TERRITORY (MULTI-PARCEL) HELPERS ==========
@@ -6751,6 +6757,213 @@ function DeerIntelContent() {
 
     console.log('[CDL] Enriched inside corners with terrain distances:', enriched.length, 'corners');
   }, [ridgeSpineData, tieredCorridorData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ========== CDL MAP LAYER DATA UPDATE ==========
+  // Push agEdgeLines + insideCorners into their Mapbox sources when cdlData changes.
+  // Visibility is gated by showTerrainReasons.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+
+    try {
+      const edgeSrc = map.getSource('tfp-ag-edges') as mapboxgl.GeoJSONSource | undefined;
+      if (edgeSrc) {
+        edgeSrc.setData(cdlData?.agEdgeLines ?? EMPTY_FC);
+      }
+      const cornerSrc = map.getSource('tfp-inside-corners') as mapboxgl.GeoJSONSource | undefined;
+      if (cornerSrc) {
+        cornerSrc.setData(cdlData?.insideCorners ?? EMPTY_FC);
+      }
+      // Visibility follows showTerrainReasons
+      const vis = (cdlData && showTerrainReasons) ? 'visible' : 'none';
+      if (map.getLayer('tfp-ag-edge-lines')) map.setLayoutProperty('tfp-ag-edge-lines', 'visibility', vis);
+      if (map.getLayer('tfp-inside-corner-markers')) map.setLayoutProperty('tfp-inside-corner-markers', 'visibility', vis);
+      if (cdlData) {
+        console.log('[CDL-MAP] Updated AG layers:', cdlData.metadata.edgeSegments, 'edges,', cdlData.metadata.cornerCount, 'corners, vis:', vis);
+      }
+    } catch (err) {
+      console.warn('[CDL-MAP] Layer update failed (non-fatal):', err);
+    }
+  }, [cdlData, showTerrainReasons, mapReady]);
+
+  // ========== CDL AG STAND SCORING + MERGE ==========
+  // Score inside corners, build synthetic AlignedStand objects with AG stand types,
+  // and merge into the stand pool as a post-processing step.
+  const cdlStandsMergedRef = useRef(false);
+  // Reset merge flag when CDL data changes (new parcel)
+  useEffect(() => { cdlStandsMergedRef.current = false; }, [cdlData?.insideCorners]);
+  useEffect(() => {
+    if (!cdlData || !cdlData.insideCorners.features.length) return;
+    // Wait for terrain stands to be ready (or at least one scoring pass)
+    if (!alignedStands || alignedStands.length === 0) return;
+    // Guard against infinite loop: only merge once per CDL data change
+    if (cdlStandsMergedRef.current) return;
+
+    const agStands: AlignedStand[] = [];
+    const FIELD_SADDLE_COMBO_THRESHOLD_M = 300;
+    const now = new Date();
+    const month = now.getMonth(); // 0-indexed
+    const isRut = season === 'rut' || (month >= 9 && month <= 11); // Oct-Nov primary rut window
+    const isLate = season === 'late' || month >= 11;
+
+    for (const f of cdlData.insideCorners.features) {
+      if (!f.geometry || f.geometry.type !== 'Point') continue;
+      const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+      const p = f.properties || {} as Record<string, unknown>;
+      const cornerAngle = (p.angle as number) || 90;
+      const nearestSaddleDist = (p.nearestSaddleDistance as number) ?? Infinity;
+      const nearestDrawDist = (p.nearestDrawDistance as number) ?? Infinity;
+      const cropType = (p.dominantCrop as string) || 'AG';
+
+      // ── Determine AG stand type ──
+      let agType: 'inside_corner' | 'field_saddle_combo' | 'field_edge';
+      if (nearestSaddleDist < FIELD_SADDLE_COMBO_THRESHOLD_M) {
+        agType = 'field_saddle_combo';
+      } else {
+        agType = 'inside_corner';
+      }
+
+      // ── Score the corner ──
+      // Base score from corner sharpness (sharper = better funnel)
+      let score = 0;
+      const sharpness = Math.max(0, 160 - cornerAngle) / 70; // 90° → 1.0, 130° → 0.43, 160° → 0
+      score += sharpness * 35; // max 35 pts from angle
+
+      // Proximity to saddle bonus
+      if (nearestSaddleDist < 500) {
+        score += Math.max(0, (1 - nearestSaddleDist / 500)) * 25; // max 25 pts
+      }
+      // Proximity to draw bonus
+      if (nearestDrawDist < 400) {
+        score += Math.max(0, (1 - nearestDrawDist / 400)) * 15; // max 15 pts
+      }
+      // Soil drainage bonus
+      if (cdlData.soilFlags.travel_corridor) score += 10;
+      if (cdlData.soilFlags.bedding_candidate) score += 5;
+
+      // Season/rut bonus for field edge stands
+      if (isRut) score += 10; // rut cruising near fields is high-value
+
+      score = Math.min(100, Math.round(score));
+
+      // ── Build crop-aware narrative ──
+      let narrative = '';
+      const cropLabel = cropType === 'AG' ? 'agricultural field' : cropType.toLowerCase();
+      if (agType === 'field_saddle_combo') {
+        narrative = `Field/timber corner ${Math.round(nearestSaddleDist)}m from a saddle crossing — deer funneling through the saddle will follow the timber edge toward ${cropLabel}. `;
+        if (isRut) narrative += 'During rut, bucks cruise these edges checking does feeding in the field. ';
+        else if (isLate) narrative += 'Late season, deer stage in timber and move to feed in the field at last light. ';
+        else narrative += 'Early season movement follows the timber edge to and from the field. ';
+        narrative += 'Wind should blow from the field toward you in the timber.';
+      } else if (agType === 'inside_corner') {
+        narrative = `Inside corner where timber pushes into ${cropLabel} — natural pinch point that concentrates deer movement along the field edge. `;
+        if (isRut) narrative += 'Rutting bucks cruise inside corners because they can scent-check the field and timber simultaneously. ';
+        else if (isLate) narrative += 'Late season staging area — deer hold in the corner before committing to the field. ';
+        else narrative += 'Transitional funnel between bedding timber and feeding fields. ';
+        narrative += `Corner angle: ${Math.round(cornerAngle)}°.`;
+      }
+
+      // ── Build synthetic StandPointProperties ──
+      const standProps: StandPointProperties = {
+        rank: 100 + agStands.length, // high rank offset so terrain stands keep priority
+        score,
+        windOk: [], // Will be empty — AG stands don't have wind data from terrain engine
+        windBad: [],
+        approachRisk: 'medium' as const,
+        distToCorridorMeters: nearestDrawDist === Infinity ? 999 : nearestDrawDist,
+        distToBeddingMeters: 999,
+        elevation: 0,
+        tpiLocal: 0,
+        tpiLandscape: 0,
+        reasoning: narrative,
+        coverType: 'edge',
+        isEdgeStand: true,
+      };
+
+      const standInputs: StandInputs = {
+        wind_overlap: 0.5, // neutral — no wind info from CDL
+        movement: Math.min(1, score / 80), // derived from score
+        intrusion: 0.3, // field edges have moderate intrusion
+        time_fit: 0.6,
+        season_fit: isRut ? 0.9 : isLate ? 0.7 : 0.5,
+      };
+
+      const standScore: StandScore = {
+        score,
+        raw: score / 100,
+        label: score >= 70 ? 'Deep Moss' : score >= 40 ? 'Weathered Oak' : 'Field Stone',
+      };
+
+      const anchorType = agType as TerrainAnchor['type'];
+      const agStand: AlignedStand = {
+        rank: 100 + agStands.length,
+        name: agType === 'field_saddle_combo'
+          ? `Field-Saddle ${cropType}`
+          : `Corner ${cropType}`,
+        props: standProps,
+        inputs: standInputs,
+        alignment: standScore,
+        coords,
+        unverified: true, // AG stands aren't verified by Modal's engine
+        anchorFeature: {
+          type: anchorType,
+          distanceM: agType === 'field_saddle_combo' ? nearestSaddleDist : 0,
+        },
+      };
+
+      agStands.push(agStand);
+    }
+
+    if (agStands.length === 0) {
+      cdlStandsMergedRef.current = true;
+      return;
+    }
+
+    // ── Merge into stand pool ──
+    // Sort AG stands by score descending, then merge with terrain stands
+    agStands.sort((a, b) => b.alignment.score - a.alignment.score);
+
+    // Take top AG stands that don't overlap with existing terrain stands (300m separation)
+    const MIN_AG_SEPARATION_M = 300;
+    const mergedAg: AlignedStand[] = [];
+    for (const ag of agStands) {
+      let tooClose = false;
+      for (const existing of [...alignedStands, ...mergedAg]) {
+        if (distanceMeters(ag.coords, existing.coords) < MIN_AG_SEPARATION_M) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (!tooClose) mergedAg.push(ag);
+    }
+
+    if (mergedAg.length === 0) {
+      cdlStandsMergedRef.current = true;
+      console.log('[CDL-STANDS] No AG stands survived separation filter');
+      return;
+    }
+
+    // Merge: terrain stands keep their positions, AG stands are appended and re-ranked
+    const combined = [...alignedStands];
+    for (const ag of mergedAg) {
+      // Insert AG stand at the position where its score fits
+      let insertIdx = combined.length;
+      for (let i = 0; i < combined.length; i++) {
+        if (ag.alignment.score > combined[i].alignment.score) {
+          insertIdx = i;
+          break;
+        }
+      }
+      combined.splice(insertIdx, 0, ag);
+    }
+
+    // Re-rank all stands
+    const reRanked = combined.map((s, idx) => ({ ...s, rank: idx + 1 }));
+
+    cdlStandsMergedRef.current = true;
+    console.log('[CDL-STANDS] Merged', mergedAg.length, 'AG stands into pool. Total:', reRanked.length);
+    setAlignedStands(reRanked);
+  }, [cdlData?.insideCorners, season, alignedStands]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== COMPUTE TERRAIN RATING (BROKER SCORE) ==========
   useEffect(() => {
@@ -9601,6 +9814,41 @@ function DeerIntelContent() {
           });
           console.log('[MAP] Territory link source + layers created');
         }
+
+        // ========== CDL AG FIELD EDGE + INSIDE CORNER LAYERS ==========
+        if (!map.getSource('tfp-ag-edges')) {
+          map.addSource('tfp-ag-edges', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-ag-edge-lines',
+            type: 'line',
+            source: 'tfp-ag-edges',
+            paint: {
+              'line-color': LAYER_COLORS.agFieldEdge,
+              'line-width': 2.5,
+              'line-opacity': 0.85,
+              'line-dasharray': [4, 3],
+            },
+            layout: { visibility: 'none' },
+          });
+        }
+        if (!map.getSource('tfp-inside-corners')) {
+          map.addSource('tfp-inside-corners', { type: 'geojson', data: EMPTY_FC });
+          // Diamond marker via rotated square (circle with pitch-alignment)
+          map.addLayer({
+            id: 'tfp-inside-corner-markers',
+            type: 'circle',
+            source: 'tfp-inside-corners',
+            paint: {
+              'circle-radius': 6,
+              'circle-color': LAYER_COLORS.agInsideCorner,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#1a3a2a',
+              'circle-opacity': 0.9,
+            },
+            layout: { visibility: 'none' },
+          });
+        }
+        console.log('[MAP] AG edge + inside corner sources/layers created');
 
         overlaySourcesCreated.current = true;
         console.log('[MAP] Native Mapbox sources created successfully');
@@ -14042,6 +14290,9 @@ function DeerIntelContent() {
                     : stand.anchorFeature?.type === 'saddle' ? 'Saddle Crossing'
                     : stand.anchorFeature?.type === 'convergence' ? 'Convergence Zone'
                     : stand.anchorFeature?.type === 'funnel' ? 'Draw Funneling'
+                    : stand.anchorFeature?.type === 'field_edge' ? 'Field Edge Travel'
+                    : stand.anchorFeature?.type === 'inside_corner' ? 'Inside Corner Funnel'
+                    : stand.anchorFeature?.type === 'field_saddle_combo' ? 'Field-Saddle Convergence'
                     : 'Terrain Feature');
                 const windAligned = (stand.props?.windOk ?? []).includes(windDirection);
                 const hasDraws = (stand.anchorFeature?.type === 'funnel') || (stand.props?.coverType === 'draw');
@@ -14426,6 +14677,23 @@ function DeerIntelContent() {
                     <span className={`flex-1 text-left ${visibility.saddles ? 'text-white' : 'text-stone-500'}`}>
                       Saddles
                     </span>
+                  </button>
+                  {/* CDL Field Edge toggle */}
+                  <button
+                    onClick={() => setShowTerrainReasons(v => !v)}
+                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
+                      (showTerrainReasons && cdlData) ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                    }`}
+                  >
+                    <span className="w-3 h-[2px] rounded-full" style={{ background: LAYER_COLORS.agFieldEdge, opacity: (showTerrainReasons && cdlData) ? 1 : 0.4, borderStyle: 'dashed' }} />
+                    <span className={`flex-1 text-left ${(showTerrainReasons && cdlData) ? 'text-white' : 'text-stone-500'}`}>
+                      Field Edge
+                    </span>
+                    {cdlData && (
+                      <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/40 rounded">
+                        {cdlData.metadata.edgeSegments}
+                      </span>
+                    )}
                   </button>
                 </div>
               </div>
@@ -15801,6 +16069,9 @@ function DeerIntelContent() {
                     : stand.anchorFeature?.type === 'saddle' ? 'Saddle Crossing'
                     : stand.anchorFeature?.type === 'convergence' ? 'Convergence Zone'
                     : stand.anchorFeature?.type === 'funnel' ? 'Draw Funneling'
+                    : stand.anchorFeature?.type === 'field_edge' ? 'Field Edge Travel'
+                    : stand.anchorFeature?.type === 'inside_corner' ? 'Inside Corner Funnel'
+                    : stand.anchorFeature?.type === 'field_saddle_combo' ? 'Field-Saddle Convergence'
                     : 'Terrain Feature');
 
                 // Wind alignment check — current wind in windOk list = aligned
