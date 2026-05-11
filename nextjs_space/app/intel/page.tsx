@@ -3197,6 +3197,15 @@ function DeerIntelContent() {
     // ═══ Phase 2: TERRAIN ANCHOR GATE ═══
     // Every stand must be within proximity of at least one real terrain feature.
     // Anchor types: ridge spine (175m), saddle node (100m), funnel polygon (inside or 75m), convergence zone (100m).
+
+    // v4.1 FIX: If ALL terrain pipelines are still null (haven't completed yet),
+    // skip the anchor gate entirely — don't falsely flag "no anchored stands."
+    // The useEffect will re-fire once terrain data arrives and the callback recreates.
+    if (!ridgeSpineData && !tieredCorridorData && !terrainFlowData) {
+      console.log('[TERRAIN-ANCHOR] Skipped — terrain pipelines not yet complete, waiting for data');
+      return;
+    }
+
     const RIDGE_ANCHOR_M = 175;
     const SADDLE_ANCHOR_M = 100;
     const FUNNEL_ANCHOR_M = 75;
@@ -4713,6 +4722,10 @@ function DeerIntelContent() {
   }, []);
 
   const clearTerritory = useCallback(() => {
+    // v4.1 FIX: Synchronously kill the assembly gate FIRST so terrain useEffects
+    // triggered by the restored parcelPolygon below won't skip via the gate.
+    territoryAssemblyRef.current = false;
+
     setTerritoryParcels([]);
     territoryParcelsRef.current = [];
     prefetchedParcelRef.current = null;
@@ -4722,6 +4735,35 @@ function DeerIntelContent() {
     setIsViewingSharedTerritory(false);
     // v4.0: Clear territory link data
     setTerritoryLinks(null);
+
+    // v4.1 FIX: Comprehensive state reset — mirrors loadHeroParcel's cleanup
+    // so single-parcel terrain useEffects recompute from scratch.
+    clearAllOverlaySources();
+    setTieredCorridorData(null);
+    setRidgeSpineData(null);
+    setTerrainFlowData(null);
+    setLayers(null);
+    setSummary(null);
+    setAlignedStands([]);
+    setNoAnchoredStands(false);
+    setDecisionCardIdx(0);
+    setHuntLockedStand(null);
+    setVisibleStandRanks(new Set());
+    setError(null);
+    setTerrainStory(null);
+    setHuntabilityData(null);
+    setEdgeIntelData(null);
+    setSelectedStand(null);
+    previousStandsRef.current = [];
+    previousBeddingRef.current = EMPTY_FC;
+    previousSaddlePolysRef.current = EMPTY_FC;
+    previousSaddleNodesRef.current = EMPTY_FC;
+    previousKillZonesRef.current = EMPTY_FC;
+    // Clear stand GeoJSON + popup on map
+    if (mapRef.current?.getSource('tfp-stands')) {
+      (mapRef.current.getSource('tfp-stands') as mapboxgl.GeoJSONSource).setData(EMPTY_FC);
+    }
+    if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
 
     // PRE-TERRITORY SNAPSHOT RESTORE: put the user back on the original parcel
     // so Regrid lookups don't hit the territory center (which could land on a
@@ -4750,7 +4792,7 @@ function DeerIntelContent() {
         map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'visible');
       } catch { /* layers may not exist yet */ }
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalTerritoryAcreage = useMemo(() =>
     territoryParcels.reduce((sum, p) => sum + p.acreage, 0),
@@ -12484,7 +12526,7 @@ function DeerIntelContent() {
               Territory Builder
             </div>
             <button
-              onClick={clearTerritory}
+              onClick={() => { clearTerritory(); setTimeout(() => runAnalysis(), 0); }}
               style={{fontSize:11,color:'#888',background:'none',border:'none',cursor:'pointer'}}
             >
               Clear all
