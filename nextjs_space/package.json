@@ -100,6 +100,7 @@
     "embla-carousel-react": "8.3.0",
     "formik": "2.4.5",
     "framer-motion": "10.18.0",
+    "geotiff": "^3.0.5",
     "gray-matter": "4.0.3",
     "html2canvas": "^1.4.1",
     "input-otp": "1.2.4",

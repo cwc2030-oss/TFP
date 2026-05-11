@@ -56,6 +56,7 @@ import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
 import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain } from '@/lib/territory-assembly';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
+import type { CDLAnalysisResult } from '@/lib/cdl-analysis';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
 import FlowSegmentInspector from '@/components/terrain/flow-segment-inspector';
 // OpportunityZoneTooltip removed — convergence IS opportunity
@@ -2901,6 +2902,9 @@ function DeerIntelContent() {
   } | null>(null);
   const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
 
+  // ========== CDL (USDA Cropland Data Layer) ==========
+  const [cdlData, setCdlData] = useState<CDLAnalysisResult | null>(null);
+
   // ========== v4.1 — HUNT SESSION CREATOR ==========
   const handleHuntThis = useCallback(async (standName: string, standCoords: [number, number], movementType: string, score: number, isSoft: boolean) => {
     if (!session?.user) { toast('Sign in to lock a stand'); return; }
@@ -4754,6 +4758,7 @@ function DeerIntelContent() {
     setHuntabilityData(null);
     setEdgeIntelData(null);
     setSelectedStand(null);
+    setCdlData(null);
     previousStandsRef.current = [];
     previousBeddingRef.current = EMPTY_FC;
     previousSaddlePolysRef.current = EMPTY_FC;
@@ -6601,6 +6606,151 @@ function DeerIntelContent() {
       }
     });
   }, [layers, tieredCorridorData, ridgeSpineData, terrainFlowData, summary, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ========== CDL ANALYSIS (USDA Cropland Data Layer) ==========
+  // Fires in parallel with terrain pipelines when parcelPolygon is available.
+  // Non-blocking: CDL failure does not affect the rest of the analysis.
+  useEffect(() => {
+    if (!parcelPolygon) {
+      setCdlData(null);
+      return;
+    }
+
+    // Skip during territory assembly — CDL is single-parcel only
+    if (territoryAssemblyRef.current || territoryModeRef.current) return;
+
+    let cancelled = false;
+
+    const fetchCDL = async () => {
+      try {
+        // Extract bbox from parcel polygon
+        const geom = parcelPolygon.geometry;
+        let allCoords: number[][] = [];
+        if (geom.type === 'Polygon') {
+          allCoords = geom.coordinates[0] as number[][];
+        } else if (geom.type === 'MultiPolygon') {
+          for (const poly of geom.coordinates) {
+            allCoords.push(...(poly[0] as number[][]));
+          }
+        }
+
+        if (allCoords.length < 3) return;
+
+        const lngs = allCoords.map(c => c[0]);
+        const lats = allCoords.map(c => c[1]);
+        const bbox = [
+          Math.min(...lngs),
+          Math.min(...lats),
+          Math.max(...lngs),
+          Math.max(...lats),
+        ].join(',');
+
+        const lat = activeLatRef.current;
+        const lng = activeLngRef.current;
+
+        console.log('[CDL] Fetching CDL analysis for parcel bbox...');
+        const res = await fetch(`/api/cdl-analysis?bbox=${bbox}&lat=${lat}&lng=${lng}`, {
+          signal: AbortSignal.timeout(45000),
+        });
+
+        if (cancelled) return;
+
+        if (!res.ok) {
+          console.warn(`[CDL] API returned ${res.status}`);
+          return;
+        }
+
+        const result: CDLAnalysisResult = await res.json();
+        if (cancelled) return;
+
+        setCdlData(result);
+
+        // Verification console output
+        console.log('%c[CDL] ═══ USDA Cropland Data Layer Analysis ═══', 'color: #22c55e; font-weight: bold;');
+        console.log(`[CDL] Year: ${result.metadata.year}, Resolution: ${result.metadata.resolution}m/px`);
+        console.log(`[CDL] Pixels: ${result.metadata.agPixels} ag, ${result.metadata.timberPixels} timber, ${result.metadata.totalPixels} total`);
+        console.log(`[CDL] agEdgeLines:`, result.agEdgeLines);
+        console.log(`[CDL]   → ${result.agEdgeLines.features.length} edge polylines`);
+        if (result.agEdgeLines.features.length > 0) {
+          const totalLength = result.agEdgeLines.features.reduce((sum, f) => sum + ((f.properties as any)?.edgeLength || 0), 0);
+          const fieldTypes = [...new Set(result.agEdgeLines.features.map(f => (f.properties as any)?.fieldType))];
+          console.log(`[CDL]   → Total edge length: ${totalLength}m, Field types: ${fieldTypes.join(', ')}`);
+        }
+        console.log(`[CDL] insideCorners:`, result.insideCorners);
+        console.log(`[CDL]   → ${result.insideCorners.features.length} corner candidates`);
+        if (result.insideCorners.features.length > 0) {
+          console.table(result.insideCorners.features.slice(0, 10).map(f => ({
+            angle: (f.properties as any)?.interiorAngle,
+            edgeLength: (f.properties as any)?.edgeLength,
+            turn: (f.properties as any)?.turnDirection,
+            lng: (f.geometry as GeoJSON.Point).coordinates[0].toFixed(5),
+            lat: (f.geometry as GeoJSON.Point).coordinates[1].toFixed(5),
+          })));
+        }
+        console.log(`[CDL] Soil flags:`, result.soilFlags);
+        console.log(`[CDL]   → drainage: ${result.soilFlags.drainageClass}, bedding_candidate: ${result.soilFlags.bedding_candidate}, travel_corridor: ${result.soilFlags.travel_corridor}`);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('[CDL] Analysis failed (non-blocking):', (err as Error).message);
+        }
+      }
+    };
+
+    fetchCDL();
+    return () => { cancelled = true; };
+  }, [parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ========== CDL × TERRAIN CROSS-REFERENCE ==========
+  // Enrich insideCorners with nearest saddle/draw distances once terrain data is available.
+  useEffect(() => {
+    if (!cdlData || !cdlData.insideCorners.features.length) return;
+    if (!ridgeSpineData && !tieredCorridorData) return;
+
+    const enriched = cdlData.insideCorners.features.map(f => {
+      const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+      const props = { ...(f.properties || {}) };
+
+      // Nearest saddle distance
+      if (ridgeSpineData?.saddle_nodes?.features?.length) {
+        let minDist = Infinity;
+        for (const sf of ridgeSpineData.saddle_nodes.features) {
+          if (sf.geometry?.type !== 'Point') continue;
+          const sc = sf.geometry.coordinates as [number, number];
+          const d = distanceMeters(coords, sc);
+          if (d < minDist) minDist = d;
+        }
+        props.nearestSaddleDistance = minDist === Infinity ? null : Math.round(minDist);
+      }
+
+      // Nearest draw/funnel distance
+      if (tieredCorridorData?.funnels_hard?.features?.length || tieredCorridorData?.funnels_slight?.features?.length) {
+        let minDist = Infinity;
+        const funnels = [
+          ...(tieredCorridorData?.funnels_hard?.features || []),
+          ...(tieredCorridorData?.funnels_slight?.features || []),
+        ];
+        for (const ff of funnels) {
+          if (ff.geometry?.type === 'Polygon') {
+            const ring = (ff.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][];
+            const cx = ring.reduce((s, c) => s + c[0], 0) / ring.length;
+            const cy = ring.reduce((s, c) => s + c[1], 0) / ring.length;
+            const d = distanceMeters(coords, [cx, cy]);
+            if (d < minDist) minDist = d;
+          }
+        }
+        props.nearestDrawDistance = minDist === Infinity ? null : Math.round(minDist);
+      }
+
+      return { ...f, properties: props };
+    });
+
+    setCdlData(prev => prev ? {
+      ...prev,
+      insideCorners: { type: 'FeatureCollection' as const, features: enriched },
+    } : null);
+
+    console.log('[CDL] Enriched inside corners with terrain distances:', enriched.length, 'corners');
+  }, [ridgeSpineData, tieredCorridorData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== COMPUTE TERRAIN RATING (BROKER SCORE) ==========
   useEffect(() => {
@@ -11055,6 +11205,7 @@ function DeerIntelContent() {
       setTieredCorridorData(null);
       setRidgeSpineData(null);
       setEdgeIntelData(null);
+      setCdlData(null);
       setAlignedStands([]);
       previousStandsRef.current = []; // Reset stand stability anchor on parcel change
       previousBeddingRef.current = EMPTY_FC; // Reset bedding stability anchor on parcel change
