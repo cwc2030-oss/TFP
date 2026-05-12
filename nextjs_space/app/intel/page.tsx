@@ -9429,11 +9429,11 @@ function DeerIntelContent() {
             source: 'tfp-stands',
             paint: {
               'circle-radius': [
-                'match', ['get', 'rank'], 0, 14, 1, 12, 10
+                'match', ['get', 'rank'], 1, 14, 2, 12, 10
               ],
               'circle-color': ['get', 'color'],
               'circle-opacity': [
-                'match', ['get', 'rank'], 0, 0.18, 1, 0.12, 0.08
+                'match', ['get', 'rank'], 1, 0.18, 2, 0.12, 0.08
               ],
               'circle-blur': 0.9,
             },
@@ -9447,12 +9447,12 @@ function DeerIntelContent() {
             source: 'tfp-stands',
             paint: {
               'circle-radius': [
-                'match', ['get', 'rank'], 0, 9, 1, 7.5, 6
+                'match', ['get', 'rank'], 1, 9, 2, 7.5, 6
               ],
               'circle-color': ['get', 'color'],
               'circle-opacity': 1,
               'circle-stroke-width': [
-                'match', ['get', 'rank'], 0, 1.8, 1.5
+                'match', ['get', 'rank'], 1, 1.8, 1.5
               ],
               'circle-stroke-color': ['get', 'strokeColor'],
               'circle-stroke-opacity': 0.7,
@@ -9467,7 +9467,7 @@ function DeerIntelContent() {
             source: 'tfp-stands',
             paint: {
               'circle-radius': [
-                'match', ['get', 'rank'], 0, 4.5, 1, 3.8, 3
+                'match', ['get', 'rank'], 1, 4.5, 2, 3.8, 3
               ],
               'circle-color': 'transparent',
               'circle-stroke-width': 0.7,
@@ -9498,7 +9498,7 @@ function DeerIntelContent() {
               'text-field': ['get', 'label'],
               'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
               'text-size': [
-                'match', ['get', 'rank'], 0, 11, 1, 10, 9.5
+                'match', ['get', 'rank'], 1, 11, 2, 10, 9.5
               ],
               'text-offset': [0, 1.6],
               'text-anchor': 'top',
@@ -9512,7 +9512,7 @@ function DeerIntelContent() {
               'text-halo-width': 1.2,
               'text-halo-blur': 0.5,
               'text-opacity': [
-                'match', ['get', 'rank'], 0, 0.95, 0.78
+                'match', ['get', 'rank'], 1, 0.95, 0.78
               ],
             },
           });
@@ -9527,7 +9527,7 @@ function DeerIntelContent() {
               'text-field': ['get', 'rankLabel'],
               'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
               'text-size': [
-                'match', ['get', 'rank'], 0, 12, 1, 10.5, 9.5
+                'match', ['get', 'rank'], 1, 12, 2, 10.5, 9.5
               ],
               'text-anchor': 'center',
               'text-allow-overlap': true,
@@ -9537,6 +9537,25 @@ function DeerIntelContent() {
               'text-color': '#ffffff',
               'text-halo-color': 'rgba(0,0,0,0.2)',
               'text-halo-width': 0.6,
+            },
+          });
+
+          // 7. Rank number label (1-based) above stand disc
+          map.addLayer({
+            id: 'tfp-stand-rank-labels',
+            type: 'symbol',
+            source: 'tfp-stands',
+            layout: {
+              'text-field': ['to-string', ['get', 'rank']],
+              'text-size': 11,
+              'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+            },
+            paint: {
+              'text-color': '#ffffff',
+              'text-halo-color': '#000000',
+              'text-halo-width': 0.5,
             },
           });
         }
@@ -10110,6 +10129,7 @@ function DeerIntelContent() {
           'tfp-stands-center',
           'tfp-stands-label',
           'tfp-stands-rank',
+          'tfp-stand-rank-labels',
         ];
         
         // Move layers in order (later = higher z-index)
@@ -12350,6 +12370,7 @@ function DeerIntelContent() {
   const STAND_LAYER_IDS = [
     'tfp-stands-glow', 'tfp-stands-disc', 'tfp-stands-reticle',
     'tfp-stands-center', 'tfp-stands-label', 'tfp-stands-rank',
+    'tfp-stand-rank-labels',
   ] as const;
 
   useEffect(() => {
@@ -12406,7 +12427,7 @@ function DeerIntelContent() {
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: stand.coords },
           properties: {
-            rank: idx,
+            rank: idx + 1,
             label: SIT_LABELS[idx] || `Sit #${idx + 1}`,
             rankLabel: idx === 0 ? '★' : String(idx + 1),
             color: colors.fill,
