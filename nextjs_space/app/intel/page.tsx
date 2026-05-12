@@ -3297,10 +3297,10 @@ function DeerIntelContent() {
       return;
     }
 
-    const RIDGE_ANCHOR_M = 175;
-    const SADDLE_ANCHOR_M = 100;
-    const FUNNEL_ANCHOR_M = 75;
-    const CONVERGENCE_ANCHOR_M = 100;
+    const RIDGE_ANCHOR_M = 300;
+    const SADDLE_ANCHOR_M = 200;
+    const FUNNEL_ANCHOR_M = 150;
+    const CONVERGENCE_ANCHOR_M = 200;
 
     // Pre-extract terrain feature geometries for anchor computation
     const anchorRidgeLines: { coords: [number, number][]; id?: string }[] = [];
