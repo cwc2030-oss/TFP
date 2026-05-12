@@ -5224,37 +5224,86 @@ function DeerIntelContent() {
         setProgress(100);
         setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
 
-        // Fallback: populate standPoints from top3Stands / todaysSit if layers.standPoints is empty
+        // Generate stand candidates from terrain features if standPoints missing
         if (!adapted.layers?.standPoints?.features?.length) {
           const v1 = result.data!;
-          if (v1.top3Stands?.length) {
-            const fallbackPoints: GeoJSON.FeatureCollection = {
-              type: 'FeatureCollection',
-              features: v1.top3Stands.map((s: any) => ({
-                type: 'Feature' as const,
-                geometry: {
-                  type: 'Point' as const,
-                  coordinates: s.geometry?.coordinates ?? [s.coordinates?.lng ?? s.lng, s.coordinates?.lat ?? s.lat],
-                },
-                properties: { ...s },
-              })),
-            };
-            console.log('[INTEL-DIAG] standPoints empty — injected', fallbackPoints.features.length, 'from top3Stands (synthetic)');
-            setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
-          } else if (v1.todaysSit && !v1.todaysSit.isStub && v1.todaysSit.geometry?.coordinates) {
-            const fallbackPoints: GeoJSON.FeatureCollection = {
-              type: 'FeatureCollection',
-              features: [{
-                type: 'Feature' as const,
-                geometry: {
-                  type: 'Point' as const,
-                  coordinates: v1.todaysSit.geometry.coordinates,
-                },
-                properties: { ...v1.todaysSit },
-              }],
-            };
-            console.log('[INTEL-DIAG] standPoints empty — injected 1 from todaysSit (synthetic)');
-            setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
+          const candidates: GeoJSON.Feature[] = [];
+
+          // Saddle nodes — highest priority anchor
+          const saddles = (adapted.layers as any)?.saddleNodes ?? (adapted.layers as any)?.saddles;
+          if (saddles?.features?.length) {
+            saddles.features.forEach((f: any, i: number) => {
+              candidates.push({
+                type: 'Feature',
+                geometry: f.geometry,
+                properties: { source: 'saddle', priority: 1, id: `saddle-${i}` },
+              });
+            });
+          }
+
+          // Ridge spine vertices — sample every 3rd point to avoid clustering
+          const ridges = (adapted.layers as any)?.ridgeSpines ?? (adapted.layers as any)?.ridges;
+          if (ridges?.features?.length) {
+            ridges.features.forEach((f: any, ri: number) => {
+              const coords = f.geometry?.coordinates ?? [];
+              coords.forEach((c: any, ci: number) => {
+                if (ci % 3 === 0) {
+                  candidates.push({
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: c },
+                    properties: { source: 'ridge', priority: 2, id: `ridge-${ri}-${ci}` },
+                  });
+                }
+              });
+            });
+          }
+
+          // Funnel centroids
+          const funnels = (adapted.layers as any)?.funnelZones ?? adapted.layers?.funnels;
+          if (funnels?.features?.length) {
+            funnels.features.forEach((f: any, i: number) => {
+              const geom = f.geometry?.type === 'Point'
+                ? f.geometry
+                : { type: 'Point', coordinates: f.geometry?.coordinates?.[0]?.[0] ?? [] };
+              if (geom.coordinates?.length) {
+                candidates.push({
+                  type: 'Feature',
+                  geometry: geom,
+                  properties: { source: 'funnel', priority: 1, id: `funnel-${i}` },
+                });
+              }
+            });
+          }
+
+          // Convergence zone points
+          const convergence = (adapted.layers as any)?.convergenceZones ?? (adapted.layers as any)?.convergence;
+          if (convergence?.features?.length) {
+            convergence.features.forEach((f: any, i: number) => {
+              candidates.push({
+                type: 'Feature',
+                geometry: f.geometry?.type === 'Point' ? f.geometry : { type: 'Point', coordinates: f.geometry?.coordinates?.[0] },
+                properties: { source: 'convergence', priority: 1, id: `convergence-${i}` },
+              });
+            });
+          }
+
+          // Fall back to top3Stands only if terrain features also empty
+          if (candidates.length === 0 && v1.top3Stands?.length) {
+            v1.top3Stands.forEach((s: any, i: number) => {
+              candidates.push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: s.geometry?.coordinates ?? [s.coordinates?.lng ?? s.lng, s.coordinates?.lat ?? s.lat] },
+                properties: { ...s, source: 'modal-top3' },
+              });
+            });
+          }
+
+          if (candidates.length > 0) {
+            console.log(`[INTEL-DIAG] standPoints empty — generated ${candidates.length} candidates from terrain features (synthetic)`);
+            setLayers((prev: any) => ({
+              ...prev,
+              standPoints: { type: 'FeatureCollection', features: candidates },
+            }));
           }
         }
 
@@ -5307,37 +5356,86 @@ function DeerIntelContent() {
       setProgress(100);
       setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
 
-      // Fallback: populate standPoints from top3Stands / todaysSit if layers.standPoints is empty
+      // Generate stand candidates from terrain features if standPoints missing
       if (!adapted.layers?.standPoints?.features?.length) {
         const v1 = result.data!;
-        if (v1.top3Stands?.length) {
-          const fallbackPoints: GeoJSON.FeatureCollection = {
-            type: 'FeatureCollection',
-            features: v1.top3Stands.map((s: any) => ({
-              type: 'Feature' as const,
-              geometry: {
-                type: 'Point' as const,
-                coordinates: s.geometry?.coordinates ?? [s.coordinates?.lng ?? s.lng, s.coordinates?.lat ?? s.lat],
-              },
-              properties: { ...s },
-            })),
-          };
-          console.log('[INTEL-DIAG] standPoints empty — injected', fallbackPoints.features.length, 'from top3Stands');
-          setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
-        } else if (v1.todaysSit && !v1.todaysSit.isStub && v1.todaysSit.geometry?.coordinates) {
-          const fallbackPoints: GeoJSON.FeatureCollection = {
-            type: 'FeatureCollection',
-            features: [{
-              type: 'Feature' as const,
-              geometry: {
-                type: 'Point' as const,
-                coordinates: v1.todaysSit.geometry.coordinates,
-              },
-              properties: { ...v1.todaysSit },
-            }],
-          };
-          console.log('[INTEL-DIAG] standPoints empty — injected 1 from todaysSit');
-          setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
+        const candidates: GeoJSON.Feature[] = [];
+
+        // Saddle nodes — highest priority anchor
+        const saddles = (adapted.layers as any)?.saddleNodes ?? (adapted.layers as any)?.saddles;
+        if (saddles?.features?.length) {
+          saddles.features.forEach((f: any, i: number) => {
+            candidates.push({
+              type: 'Feature',
+              geometry: f.geometry,
+              properties: { source: 'saddle', priority: 1, id: `saddle-${i}` },
+            });
+          });
+        }
+
+        // Ridge spine vertices — sample every 3rd point to avoid clustering
+        const ridges = (adapted.layers as any)?.ridgeSpines ?? (adapted.layers as any)?.ridges;
+        if (ridges?.features?.length) {
+          ridges.features.forEach((f: any, ri: number) => {
+            const coords = f.geometry?.coordinates ?? [];
+            coords.forEach((c: any, ci: number) => {
+              if (ci % 3 === 0) {
+                candidates.push({
+                  type: 'Feature',
+                  geometry: { type: 'Point', coordinates: c },
+                  properties: { source: 'ridge', priority: 2, id: `ridge-${ri}-${ci}` },
+                });
+              }
+            });
+          });
+        }
+
+        // Funnel centroids
+        const funnels = (adapted.layers as any)?.funnelZones ?? adapted.layers?.funnels;
+        if (funnels?.features?.length) {
+          funnels.features.forEach((f: any, i: number) => {
+            const geom = f.geometry?.type === 'Point'
+              ? f.geometry
+              : { type: 'Point', coordinates: f.geometry?.coordinates?.[0]?.[0] ?? [] };
+            if (geom.coordinates?.length) {
+              candidates.push({
+                type: 'Feature',
+                geometry: geom,
+                properties: { source: 'funnel', priority: 1, id: `funnel-${i}` },
+              });
+            }
+          });
+        }
+
+        // Convergence zone points
+        const convergence = (adapted.layers as any)?.convergenceZones ?? (adapted.layers as any)?.convergence;
+        if (convergence?.features?.length) {
+          convergence.features.forEach((f: any, i: number) => {
+            candidates.push({
+              type: 'Feature',
+              geometry: f.geometry?.type === 'Point' ? f.geometry : { type: 'Point', coordinates: f.geometry?.coordinates?.[0] },
+              properties: { source: 'convergence', priority: 1, id: `convergence-${i}` },
+            });
+          });
+        }
+
+        // Fall back to top3Stands only if terrain features also empty
+        if (candidates.length === 0 && v1.top3Stands?.length) {
+          v1.top3Stands.forEach((s: any, i: number) => {
+            candidates.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: s.geometry?.coordinates ?? [s.coordinates?.lng ?? s.lng, s.coordinates?.lat ?? s.lat] },
+              properties: { ...s, source: 'modal-top3' },
+            });
+          });
+        }
+
+        if (candidates.length > 0) {
+          console.log(`[INTEL-DIAG] standPoints empty — generated ${candidates.length} candidates from terrain features`);
+          setLayers((prev: any) => ({
+            ...prev,
+            standPoints: { type: 'FeatureCollection', features: candidates },
+          }));
         }
       }
       
