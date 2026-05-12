@@ -31,7 +31,7 @@ import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
-import { StandAlignmentPanel, type AlignedStand, type TerrainAnchor } from '@/components/intel/StandAlignmentPanel';
+import { StandAlignmentPanel, type AlignedStand, type TerrainAnchor, type HunterType, type HunterStandType } from '@/components/intel/StandAlignmentPanel';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -452,6 +452,13 @@ const LAYER_COLORS = {
   standHigh: '#e2712a',            // alias for backward compat
   standGold: '#f09048',            // alias for backward compat
   standMed: '#c45d22',
+  // Hunter-type stand colors
+  bowStand: '#14b8a6',             // Teal-500 — bow stands (timber/corridor)
+  bowStandRing: '#2dd4bf',         // Teal-400 — bow stand ring
+  gunStand: '#ea580c',             // Orange-600 — gun stands (field edge/open)
+  gunStandRing: '#f97316',         // Orange-500 — gun stand ring
+  bothStand: '#c9a84c',            // TFP Gold — dual-qualifying stands
+  bothStandRing: '#d4b45e',        // TFP Gold lighter — dual ring
   standLow: '#6b7280',
   // v3.5.1 — Selected parcel boundary (gold/amber with glow)
   parcelBoundary: '#f59e0b',       // Amber-500 — gold/amber for clear visibility
@@ -2229,6 +2236,23 @@ function DeerIntelContent() {
   useEffect(() => { windDirectionRef.current = windDirection; }, [windDirection]);
   const [windLastUpdated, setWindLastUpdated] = useState<Date>(() => new Date(0));
   const [windMinAgo, setWindMinAgo] = useState(0);
+
+  // ========== HUNTER TYPE SELECTOR ==========
+  const [hunterType, setHunterType] = useState<HunterType>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('hunter_type');
+      if (stored === 'bow' || stored === 'gun' || stored === 'both') return stored;
+    }
+    return 'bow';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('hunter_type', hunterType);
+    }
+    // Reset decision card to first stand when switching hunter type
+    setDecisionCardIdx(0);
+  }, [hunterType]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
   const selectedStandRef = useRef<number | null>(null);
   useEffect(() => { selectedStandRef.current = selectedStand; }, [selectedStand]);
@@ -3049,14 +3073,44 @@ function DeerIntelContent() {
     return STAND_NAME_POOL[(rank - 1) % STAND_NAME_POOL.length];
   };
   const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
+
+  // ── Filtered stands by hunter type with per-type count caps ──
+  // bow cap = floor(timberAcres/20), gun cap = floor(fieldEdgeLength/150), combined = floor(totalAcres/15)
+  const filteredStands = useMemo(() => {
+    let stands = alignedStands;
+    if (hunterType !== 'both') {
+      stands = alignedStands.filter(s => {
+        const ht = s.hunterStandType || 'bow';
+        return ht === hunterType || ht === 'both';
+      });
+    }
+    // Apply hunter-type count caps when CDL data is available
+    if (cdlData) {
+      const res = cdlData.metadata.resolution;
+      const timberAcres = (cdlData.metadata.timberPixels * res * res) / 4046.86;
+      const fieldEdgeLen = cdlData.metadata.edgeSegments * res; // meters
+      const totalAcres = (cdlData.metadata.totalPixels * res * res) / 4046.86;
+      let cap: number;
+      if (hunterType === 'bow') {
+        cap = Math.max(2, Math.floor(timberAcres / 20));
+      } else if (hunterType === 'gun') {
+        cap = Math.max(1, Math.floor(fieldEdgeLen / 150));
+      } else {
+        cap = Math.max(3, Math.floor(totalAcres / 15));
+      }
+      if (stands.length > cap) stands = stands.slice(0, cap);
+    }
+    return stands;
+  }, [alignedStands, hunterType, cdlData]);
+
   // Keep map pin in sync with active decision card (one pin at a time)
   // Single source of truth: visible rank == decisionCardIdx, clamped to available stands.
   useEffect(() => {
-    if (alignedStands.length > 0) {
-      const want = Math.min(decisionCardIdx, alignedStands.length - 1);
+    if (filteredStands.length > 0) {
+      const want = Math.min(decisionCardIdx, filteredStands.length - 1);
       setVisibleStandRanks(new Set([want]));
     }
-  }, [alignedStands.length, decisionCardIdx]);
+  }, [filteredStands.length, decisionCardIdx]); // eslint-disable-line react-hooks/exhaustive-deps
   const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
   const [exceptionalIndex, setExceptionalIndex] = useState<number | null>(null);
   const [parcelStrength, setParcelStrength] = useState<number>(0);
@@ -3124,6 +3178,36 @@ function DeerIntelContent() {
   useEffect(() => { highlightedStandRankRef.current = highlightedStandRank; }, [highlightedStandRank]);
 
   // Compute alignment for all stands — depends ONLY on data + wind + season.
+  // ═══ HUNTER STAND TYPE CLASSIFICATION FUNCTION ═══
+  // Classifies a stand as bow, gun, or both based on terrain/anchor criteria.
+  // Bow: timber corridor stands near saddle/funnel/draw/convergence (close encounters 10-30yd)
+  // Gun: field edge / inside corner / pasture crossing (open lanes 60-150yd)
+  // Both: stands that satisfy both criteria (e.g. saddle adjacent to field edge)
+  function classifyHunterStandType(stand: AlignedStand): HunterStandType {
+    const anchor = stand.anchorFeature?.type;
+    const coverType = stand.props?.coverType;
+    const isEdge = stand.props?.isEdgeStand === true;
+    const distToCorridor = stand.props?.distToCorridorMeters ?? 999;
+
+    // AG-derived stands are gun stands by default
+    const isAgStand = anchor === 'field_edge' || anchor === 'inside_corner' || anchor === 'field_saddle_combo';
+
+    // Gun criteria: field edge, inside corner, or edge stand with open shooting lane
+    const isGun = isAgStand || isEdge || coverType === 'edge' || coverType === 'open';
+
+    // Bow criteria: timber corridor stand near pinch point (saddle/funnel/draw/convergence)
+    const isBow = (distToCorridor <= 150 && !isEdge && coverType !== 'open') ||
+                  anchor === 'ridge' || anchor === 'saddle' || anchor === 'funnel' || anchor === 'convergence';
+
+    // field_saddle_combo qualifies for both (saddle near field edge)
+    if (anchor === 'field_saddle_combo') return 'both';
+    // Saddle-adjacent edge stands also qualify as both
+    if (isBow && isGun) return 'both';
+    if (isGun) return 'gun';
+    if (isBow) return 'bow';
+    return 'bow'; // default to bow for unclassified timber stands
+  }
+
   // v1.2: removed highlightedStandRank from deps (reads via ref) and removed
   //        the prevWindDirection stability gate that could swallow compass clicks.
   const computeAlignmentScores = useCallback(() => {
@@ -3822,6 +3906,12 @@ function DeerIntelContent() {
       console.error('[StandSelectionDebug] Debug payload build failed (non-fatal):', debugErr);
     }
     // ═══ END STAND SELECTION DEBUG ═══
+
+    // ═══ HUNTER TYPE CLASSIFICATION ═══
+    // Classify each stand as bow, gun, or both based on terrain features
+    for (const s of aligned) {
+      s.hunterStandType = classifyHunterStandType(s);
+    }
 
     setAlignedStands(aligned);
     setExceptionalIndex(ei !== null ? aligned.findIndex((_, idx) => idx === ei) : null);
@@ -6911,6 +7001,7 @@ function DeerIntelContent() {
         },
       };
 
+      agStand.hunterStandType = classifyHunterStandType(agStand);
       agStands.push(agStand);
     }
 
@@ -12222,19 +12313,26 @@ function DeerIntelContent() {
       // ── Populate tfp-stands GeoJSON source ──
       // v3.9.2: Only show stand ranks that are in visibleStandRanks (default: Today's Sit only)
       const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
-      const standsToShow = alignedStands; // already capped to acreage-based TARGET_COUNT
+      const standsToShow = filteredStands; // filtered by hunter type
       // v3.9.3: Read fresh state directly (deps array includes visibleStandRanks).
       const activeRanks = visibleStandRanks.size > 0
         ? visibleStandRanks
         : (standsToShow.length > 0 ? new Set<number>([0]) : new Set<number>());
+
+      // Hunter-type-aware color function
+      const getStandColors = (stand: AlignedStand, idx: number): { fill: string; stroke: string } => {
+        const ht = stand.hunterStandType || 'bow';
+        if (ht === 'both') return { fill: LAYER_COLORS.bothStand, stroke: LAYER_COLORS.bothStandRing };
+        if (ht === 'gun') return { fill: LAYER_COLORS.gunStand, stroke: LAYER_COLORS.gunStandRing };
+        return { fill: LAYER_COLORS.bowStand, stroke: LAYER_COLORS.bowStandRing };
+      };
+
       const features = standsToShow
         .filter((_, idx) => activeRanks.has(idx))
         .map((stand, _fi, _arr) => {
         const idx = standsToShow.indexOf(stand);
-        const isTop = idx === 0;
-        const isSec = idx === 1;
-        const fillColor = isTop ? LAYER_COLORS.standPrimary : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
-        const strokeColor = isTop ? LAYER_COLORS.standPrimaryRing : isSec ? LAYER_COLORS.standSecondary : LAYER_COLORS.standTertiary;
+        const colors = getStandColors(stand, idx);
+        const ht = stand.hunterStandType || 'bow';
         return {
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: stand.coords },
@@ -12242,10 +12340,13 @@ function DeerIntelContent() {
             rank: idx,
             label: SIT_LABELS[idx] || `Sit #${idx + 1}`,
             rankLabel: idx === 0 ? '★' : String(idx + 1),
-            color: fillColor,
-            strokeColor,
+            color: colors.fill,
+            strokeColor: colors.stroke,
             score: stand.alignment.score,
             standIdx: idx,
+            hunterStandType: ht,
+            // Gun stands slightly larger for visibility at longer encounter distance
+            radiusScale: ht === 'gun' ? 1.15 : 1.0,
           },
         };
       });
@@ -12263,16 +12364,16 @@ function DeerIntelContent() {
         );
       }
 
-      // Hunt pocket halos for top 2 stands
+      // Hunt pocket halos for top 2 stands (filtered by hunter type)
       if (map.getSource('tfp-hunt-pockets')) {
-        const topStands = alignedStands.slice(0, 2);
+        const topStands = filteredStands.slice(0, 2);
         const pocketFC = buildHuntPocketFeatures(topStands, layers?.funnels, ridgeSpineData);
         (map.getSource('tfp-hunt-pockets') as mapboxgl.GeoJSONSource).setData(pocketFC);
       }
 
       // v1.1: Movement-axis wedges + kill zone sub-wedges for top 2 stands
       if (map.getSource('tfp-stand-direction')) {
-        const topStands = alignedStands.slice(0, 2);
+        const topStands = filteredStands.slice(0, 2);
         const { coneFC, killZoneFC } = buildStandDirectionFeatures(
           topStands,
           layers?.funnels,
@@ -12398,7 +12499,7 @@ function DeerIntelContent() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [alignedStands, mapReady, layers?.funnels, ridgeSpineData, terrainFlowData, parcelUnlocked, isPro, visibleStandRanks]); // eslint-disable-line
+  }, [alignedStands, filteredStands, hunterType, mapReady, layers?.funnels, ridgeSpineData, terrainFlowData, parcelUnlocked, isPro, visibleStandRanks]); // eslint-disable-line
 
   // vNext: Stand visibility toggle — uses map layer visibility instead of HTML opacity.
   // Solo mode uses a GeoJSON filter expression instead of per-marker DOM manipulation.
@@ -12876,8 +12977,8 @@ function DeerIntelContent() {
           className="absolute z-40 flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm px-5 py-3 rounded-full shadow-xl shadow-amber-900/40 transition-all hover:scale-105"
           style={{ bottom: '24px', left: '50%', transform: 'translateX(-50%)' }}
         >
-          {alignedStands.length > 0
-            ? `🎯 ${alignedStands.length} Stands Found — Unlock $19`
+          {filteredStands.length > 0
+            ? `🎯 ${filteredStands.length} Stands Found — Unlock $19`
             : '🎯 Get My Hunt Plan — $19'}
         </button>
       )}
@@ -14017,6 +14118,32 @@ function DeerIntelContent() {
                 )}
               </div>
 
+              {/* ═══ HUNTER TYPE SELECTOR ═══ */}
+              <div className="px-3 pt-3 pb-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Hunter Type</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
+                </div>
+                <div className="flex gap-1.5">
+                  {([['bow', '🏹', 'Bow', LAYER_COLORS.bowStand], ['gun', '🔴', 'Gun', LAYER_COLORS.gunStand], ['both', '👥', 'Both', LAYER_COLORS.bothStand]] as const).map(([val, icon, label, color]) => (
+                    <button
+                      key={val}
+                      onClick={() => setHunterType(val as HunterType)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] font-semibold transition-all duration-200 border"
+                      style={{
+                        background: hunterType === val ? `${color}22` : 'transparent',
+                        borderColor: hunterType === val ? `${color}66` : 'rgba(255,255,255,0.06)',
+                        color: hunterType === val ? color : '#888',
+                        boxShadow: hunterType === val ? `0 0 8px ${color}33` : 'none',
+                      }}
+                    >
+                      <span className="text-sm">{icon}</span>
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* ═══ CHAPTER 2 — CONDITIONS ═══ */}
               <div className="px-3 pt-2 pb-2 border-t border-white/[0.04]">
                 <div className="flex items-center gap-2 mb-2.5">
@@ -14107,7 +14234,7 @@ function DeerIntelContent() {
                       <p className="text-[10px] text-emerald-400/80 font-semibold uppercase tracking-wider mb-1">What We Found</p>
                       <p className="text-[11px] text-white/85 leading-relaxed">
                         {(() => {
-                          const stands = alignedStands.length;
+                          const stands = filteredStands.length;
                           const score = summary.topStandScore;
                           const funnels = summary.funnelCount;
                           const acres = acreageParam || summary.analysisAreaAcres?.toFixed(0) || '—';
@@ -14188,7 +14315,7 @@ function DeerIntelContent() {
                       <p className="text-[8px] text-stone-500/50 italic mt-0.5">Wind &amp; season adjusted</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-sm text-white font-bold">{alignedStands.length || '—'}</p>
+                      <p className="text-sm text-white font-bold">{filteredStands.length || '—'}</p>
                       <p className="text-[8px] text-stone-500/70 uppercase">Stands</p>
                     </div>
                   </div>
@@ -14277,8 +14404,8 @@ function DeerIntelContent() {
                   <p className="text-[9px] text-stone-500/60 text-center mt-2">Analyzing terrain — locking stand positions…</p>
                 </div>
               )}
-              {alignedStands.length > 0 && (() => {
-                const top3 = alignedStands; // already capped to acreage-based TARGET_COUNT
+              {filteredStands.length > 0 && (() => {
+                const top3 = filteredStands; // filtered by hunter type
                 const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand', 'Stand #4', 'Stand #5'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
                 const stand = top3[cardIdx];
@@ -14302,6 +14429,40 @@ function DeerIntelContent() {
                 const standName = stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`;
                 const isLocked = huntLockedStand !== null;
                 const isThisStandLocked = isLocked && huntLockedStand?.standName === standName;
+                const ht = stand.hunterStandType || 'bow';
+                const htLabel = ht === 'bow' ? '🏹 Bow' : ht === 'gun' ? '🔴 Gun' : '🏹🔴 Both';
+                const htColor = ht === 'bow' ? LAYER_COLORS.bowStand : ht === 'gun' ? LAYER_COLORS.gunStand : LAYER_COLORS.bothStand;
+
+                // ── Hunter-type-specific stand advice ──
+                const anchor = stand.anchorFeature?.type;
+                const fieldBearing = stand.props?.fieldBearing;
+                const bearingLabel = fieldBearing != null ? (['N','NE','E','SE','S','SW','W','NW'])[Math.round(fieldBearing / 45) % 8] : '';
+                const distToCorridor = stand.props?.distToCorridorMeters ?? 999;
+                let adviceText = reasonText; // fallback to existing reasoning
+                if (ht === 'bow' || (ht === 'both' && hunterType === 'bow')) {
+                  if (anchor === 'saddle') {
+                    adviceText = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
+                  } else if (anchor === 'funnel') {
+                    adviceText = `Set up at this draw intersection where trails converge. Thermal lift carries scent above the travel lane at first light. Multiple encounter opportunities. Come in from the field road in the dark.`;
+                  } else if (anchor === 'ridge') {
+                    adviceText = `Hang on the downwind lip of this ridge finger. Deer funneled off the bench have one route — right past your tree. 18-yard window. Wind in your face all morning.`;
+                  } else if (anchor === 'convergence') {
+                    adviceText = `Convergence zone where multiple travel lanes intersect. Hang at 22 feet where timber thickens — deer commit to a single lane within bow range. Plan two exit routes.`;
+                  } else if (distToCorridor <= 150) {
+                    adviceText = `Timber corridor stand ${Math.round(distToCorridor)}m from the primary travel lane. Hang at 20 feet in the largest available tree. Deer moving through this corridor pass within 25 yards.`;
+                  }
+                } else if (ht === 'gun' || (ht === 'both' && hunterType === 'gun')) {
+                  if (anchor === 'inside_corner') {
+                    adviceText = `Inside corner of the ${bearingLabel || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
+                  } else if (anchor === 'field_edge') {
+                    adviceText = `Timber edge overlooking the ${bearingLabel || 'open'} pasture. 100-150 yard shot across open ground to the far tree line. Opening weekend deer pushed from adjacent parcels cross here at first light. Position before 5:30 AM.`;
+                  } else if (anchor === 'field_saddle_combo') {
+                    adviceText = `Saddle crossing above the field edge — rut bucks funnel through here before hitting the pasture. Long shot available into the open or close shot in the timber. Best of both worlds.`;
+                  } else if (stand.props?.isEdgeStand) {
+                    adviceText = `Field edge stand with open shooting lanes. 60-150 yard encounter distance across the field. Set up in the timber edge with the field downwind. Early morning and last light are peak movement windows.`;
+                  }
+                }
+
                 return (
                   <div className="px-3 pt-2 pb-3 border-t border-white/[0.04]">
                     <div className="flex items-center gap-2 mb-2.5">
@@ -14313,8 +14474,13 @@ function DeerIntelContent() {
                       {/* Header */}
                       <div className="flex items-center justify-between px-3 py-2 bg-[#1a3a2a]">
                         <div>
-                          <div className="text-[8px] tracking-[0.2em] uppercase text-amber-400 font-semibold">
-                            {STAND_TITLES[cardIdx] ?? `Stand #${cardIdx + 1}`}
+                          <div className="flex items-center gap-2">
+                            <div className="text-[8px] tracking-[0.2em] uppercase text-amber-400 font-semibold">
+                              {STAND_TITLES[cardIdx] ?? `Stand #${cardIdx + 1}`}
+                            </div>
+                            <span className="text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider" style={{ background: `${htColor}33`, color: htColor, border: `1px solid ${htColor}55` }}>
+                              {htLabel}
+                            </span>
                           </div>
                           <div className="text-sm font-bold text-white leading-tight">{standName}</div>
                         </div>
@@ -14342,9 +14508,9 @@ function DeerIntelContent() {
                             <div className="text-[8px] text-stone-500 uppercase">Phase</div>
                           </div>
                         </div>
-                        {reasonText && (
-                          <p className="text-[10px] text-stone-300 italic leading-relaxed border-l-2 border-amber-600/50 pl-2">
-                            &ldquo;{reasonText}&rdquo;
+                        {adviceText && (
+                          <p className="text-[10px] text-stone-300 italic leading-relaxed border-l-2 pl-2" style={{ borderColor: `${htColor}88` }}>
+                            &ldquo;{adviceText}&rdquo;
                           </p>
                         )}
                         <div className="flex gap-2">
@@ -15102,8 +15268,8 @@ function DeerIntelContent() {
                         setSoloStandMode(next);
                         // When entering solo mode with no stand selected,
                         // auto-select the top stand so there's something visible.
-                        if (next && selectedStand === null && alignedStands.length > 0) {
-                          setSelectedStand(alignedStands[0].rank);
+                        if (next && selectedStand === null && filteredStands.length > 0) {
+                          setSelectedStand(filteredStands[0].rank);
                         }
                       }}
                       className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
@@ -15547,11 +15713,11 @@ function DeerIntelContent() {
                   }}
                 />
                 {/* PAYWALL BLUR OVERLAY — covers stand details for non-unlocked free users */}
-                {!parcelUnlocked && !isPro && alignedStands.length > 0 && (
+                {!parcelUnlocked && !isPro && filteredStands.length > 0 && (
                   <div className="absolute inset-0 z-10 backdrop-blur-[6px] bg-black/40 rounded-lg flex flex-col items-center justify-center gap-3 p-4">
                     <div className="text-amber-400 text-xl">🎯</div>
                     <p className="text-amber-300/90 text-xs font-bold tracking-wide uppercase text-center">
-                      {alignedStands.length} Stand Location{alignedStands.length !== 1 ? 's' : ''} Identified
+                      {filteredStands.length} Stand Location{filteredStands.length !== 1 ? 's' : ''} Identified
                     </p>
                     <p className="text-white text-sm font-semibold text-center">Unlock Your Hunt Plan</p>
                     <p className="text-white/50 text-xs text-center max-w-[200px]">Stand pins, approach routes & full intelligence hidden until unlocked</p>
@@ -15875,7 +16041,7 @@ function DeerIntelContent() {
 
       {/* ========== REPORT PREVIEW MODAL (inline JSX — no API fetch) ========== */}
       {showReportPreview && (() => {
-        const top3 = alignedStands; // already capped to acreage-based TARGET_COUNT
+        const top3 = filteredStands; // filtered by hunter type
         const topScore = summary?.topStandScore ?? 0;
         const _scoreColor = topScore >= 70 ? '#2d6a4f' : topScore >= 40 ? '#d4a017' : '#c0392b';
         const _scoreLabel = topScore >= 70 ? 'PRIME' : topScore >= 40 ? 'HUNTABLE' : 'MARGINAL';
@@ -16088,6 +16254,26 @@ function DeerIntelContent() {
 
                 // Existing terrain reason text
                 const reasonText = stand.props?.reasoning ?? '';
+                const ht2 = stand.hunterStandType || 'bow';
+                const htLabel2 = ht2 === 'bow' ? '🏹 Bow' : ht2 === 'gun' ? '🔴 Gun' : '🏹🔴 Both';
+                const htColor2 = ht2 === 'bow' ? LAYER_COLORS.bowStand : ht2 === 'gun' ? LAYER_COLORS.gunStand : LAYER_COLORS.bothStand;
+                const anchor2 = stand.anchorFeature?.type;
+                const fieldBearing2 = stand.props?.fieldBearing;
+                const bearingLabel2 = fieldBearing2 != null ? (['N','NE','E','SE','S','SW','W','NW'])[Math.round(fieldBearing2 / 45) % 8] : '';
+                const distToCorridor2 = stand.props?.distToCorridorMeters ?? 999;
+                let adviceText2 = reasonText;
+                if (ht2 === 'bow' || (ht2 === 'both' && hunterType === 'bow')) {
+                  if (anchor2 === 'saddle') adviceText2 = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
+                  else if (anchor2 === 'funnel') adviceText2 = `Set up at this draw intersection where trails converge. Thermal lift carries scent above the travel lane at first light. Multiple encounter opportunities. Come in from the field road in the dark.`;
+                  else if (anchor2 === 'ridge') adviceText2 = `Hang on the downwind lip of this ridge finger. Deer funneled off the bench have one route — right past your tree. 18-yard window. Wind in your face all morning.`;
+                  else if (anchor2 === 'convergence') adviceText2 = `Convergence zone where multiple travel lanes intersect. Hang at 22 feet where timber thickens — deer commit to a single lane within bow range. Plan two exit routes.`;
+                  else if (distToCorridor2 <= 150) adviceText2 = `Timber corridor stand ${Math.round(distToCorridor2)}m from the primary travel lane. Hang at 20 feet in the largest available tree. Deer moving through this corridor pass within 25 yards.`;
+                } else if (ht2 === 'gun' || (ht2 === 'both' && hunterType === 'gun')) {
+                  if (anchor2 === 'inside_corner') adviceText2 = `Inside corner of the ${bearingLabel2 || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
+                  else if (anchor2 === 'field_edge') adviceText2 = `Timber edge overlooking the ${bearingLabel2 || 'open'} pasture. 100-150 yard shot across open ground to the far tree line. Opening weekend deer pushed from adjacent parcels cross here at first light. Position before 5:30 AM.`;
+                  else if (anchor2 === 'field_saddle_combo') adviceText2 = `Saddle crossing above the field edge — rut bucks funnel through here before hitting the pasture. Long shot available into the open or close shot in the timber. Best of both worlds.`;
+                  else if (stand.props?.isEdgeStand) adviceText2 = `Field edge stand with open shooting lanes. 60-150 yard encounter distance across the field. Set up in the timber edge with the field downwind. Early morning and last light are peak movement windows.`;
+                }
 
                 // Is this stand already locked today?
                 const isLocked = huntLockedStand !== null;
@@ -16105,8 +16291,13 @@ function DeerIntelContent() {
                       justifyContent: 'space-between',
                     }}>
                       <div>
-                        <div style={{ fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', color: '#c9a84c', marginBottom: '2px' }}>
-                          {STAND_TITLES[cardIdx] ?? `Stand #${cardIdx + 1}`}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', color: '#c9a84c', marginBottom: '2px' }}>
+                            {STAND_TITLES[cardIdx] ?? `Stand #${cardIdx + 1}`}
+                          </div>
+                          <span style={{ fontSize: '8px', padding: '2px 6px', borderRadius: '999px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', background: `${htColor2}33`, color: htColor2, border: `1px solid ${htColor2}55` }}>
+                            {htLabel2}
+                          </span>
                         </div>
                         <div style={{ fontSize: '16px', fontWeight: 'bold' }}>
                           {stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`}
@@ -16150,10 +16341,10 @@ function DeerIntelContent() {
                         </div>
                       </div>
 
-                      {/* Terrain reason text */}
-                      {reasonText && (
-                        <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#333', fontStyle: 'italic', marginBottom: '14px', borderLeft: '3px solid #c9a84c', paddingLeft: '10px' }}>
-                          &ldquo;{reasonText}&rdquo;
+                      {/* Hunter-type stand advice */}
+                      {adviceText2 && (
+                        <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#333', fontStyle: 'italic', marginBottom: '14px', borderLeft: `3px solid ${htColor2}`, paddingLeft: '10px' }}>
+                          &ldquo;{adviceText2}&rdquo;
                         </div>
                       )}
 

@@ -13,6 +13,11 @@ export type TerrainAnchor = {
   featureId?: string;
 };
 
+export type HunterType = 'bow' | 'gun' | 'both';
+
+/** Classification of stand suitability by weapon type */
+export type HunterStandType = 'bow' | 'gun' | 'both';
+
 export type AlignedStand = {
   rank: number;
   name: string;
@@ -24,6 +29,8 @@ export type AlignedStand = {
   unverified?: boolean;
   /** Phase 2: terrain anchor — the closest qualifying terrain feature justifying this stand. */
   anchorFeature?: TerrainAnchor;
+  /** Weapon-type classification: bow (timber/corridor), gun (field edge/open), both */
+  hunterStandType?: HunterStandType;
   resilience?: {
     score: number;
     corridorCount: number;
