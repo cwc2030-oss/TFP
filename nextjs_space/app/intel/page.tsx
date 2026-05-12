@@ -3075,7 +3075,7 @@ function DeerIntelContent() {
   const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
 
   // ── Filtered stands by hunter type with per-type count caps ──
-  // bow cap = floor(timberAcres/20), gun cap = floor(fieldEdgeLength/150), combined = floor(totalAcres/15)
+  // bow cap = max(5, floor(timberAcres/20)), gun cap = max(4, floor(fieldEdgeLen/150)), combined = max(6, floor(totalAcres/15))
   const filteredStands = useMemo(() => {
     let stands = alignedStands;
     if (hunterType !== 'both') {
@@ -3092,11 +3092,11 @@ function DeerIntelContent() {
       const totalAcres = (cdlData.metadata.totalPixels * res * res) / 4046.86;
       let cap: number;
       if (hunterType === 'bow') {
-        cap = Math.max(2, Math.floor(timberAcres / 20));
+        cap = Math.max(5, Math.floor(timberAcres / 20));
       } else if (hunterType === 'gun') {
-        cap = Math.max(1, Math.floor(fieldEdgeLen / 150));
+        cap = Math.max(4, Math.floor(fieldEdgeLen / 150));
       } else {
-        cap = Math.max(3, Math.floor(totalAcres / 15));
+        cap = Math.max(6, Math.floor(totalAcres / 15));
       }
       if (stands.length > cap) stands = stands.slice(0, cap);
     }
@@ -3283,7 +3283,7 @@ function DeerIntelContent() {
     const WIND_OVERLAP_HARD_GATE = 0.35;
     // v3.9.4: Acreage-based stand count (replaces hardcoded 3)
     const acres = parseFloat(acreageParam || '0');
-    const TARGET_COUNT = acres >= 150 ? 5 : acres >= 100 ? 4 : acres >= 50 ? 3 : 2;
+    const TARGET_COUNT = acres >= 500 ? 12 : acres >= 300 ? 10 : acres >= 150 ? 8 : acres >= 100 ? 6 : acres >= 50 ? 4 : 3;
 
     // ═══ Phase 2: TERRAIN ANCHOR GATE ═══
     // Every stand must be within proximity of at least one real terrain feature.
