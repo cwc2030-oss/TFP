@@ -3275,7 +3275,7 @@ function DeerIntelContent() {
     // Greedy selection: pick best, then for each subsequent pick, apply a
     // proximity penalty and terrain-similarity penalty so #2 and #3 represent
     // genuinely different hunting options rather than minor variations of #1.
-    const MIN_STAND_SEPARATION_M = 300; // Phase 2: bumped from 150 — honest spacing over artificial density
+    const MIN_STAND_SEPARATION_M = 100; // v4.2: lowered from 300 — allow denser stand placement
     const PROXIMITY_PENALTY_FACTOR = 0.35; // score penalty per stand within penalty radius
     const TERRAIN_SIMILARITY_PENALTY = 0.12; // penalty when dominant terrain context matches
     const PENALTY_RADIUS_M = 400; // distance within which proximity penalty applies (smooth decay) — scaled with separation
@@ -7014,8 +7014,8 @@ function DeerIntelContent() {
     // Sort AG stands by score descending, then merge with terrain stands
     agStands.sort((a, b) => b.alignment.score - a.alignment.score);
 
-    // Take top AG stands that don't overlap with existing terrain stands (300m separation)
-    const MIN_AG_SEPARATION_M = 300;
+    // Take top AG stands that don't overlap with existing terrain stands (100m separation)
+    const MIN_AG_SEPARATION_M = 100;
     const mergedAg: AlignedStand[] = [];
     for (const ag of agStands) {
       let tooClose = false;
