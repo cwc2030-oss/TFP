@@ -5223,6 +5223,41 @@ function DeerIntelContent() {
         setProvenance(adapted.provenance);
         setProgress(100);
         setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
+
+        // Fallback: populate standPoints from top3Stands / todaysSit if layers.standPoints is empty
+        if (!adapted.layers?.standPoints?.features?.length) {
+          const v1 = result.data!;
+          if (v1.top3Stands?.length) {
+            const fallbackPoints: GeoJSON.FeatureCollection = {
+              type: 'FeatureCollection',
+              features: v1.top3Stands.map((s: any) => ({
+                type: 'Feature' as const,
+                geometry: {
+                  type: 'Point' as const,
+                  coordinates: s.geometry?.coordinates ?? [s.coordinates?.lng ?? s.lng, s.coordinates?.lat ?? s.lat],
+                },
+                properties: { ...s },
+              })),
+            };
+            console.log('[INTEL-DIAG] standPoints empty — injected', fallbackPoints.features.length, 'from top3Stands (synthetic)');
+            setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
+          } else if (v1.todaysSit && !v1.todaysSit.isStub && v1.todaysSit.geometry?.coordinates) {
+            const fallbackPoints: GeoJSON.FeatureCollection = {
+              type: 'FeatureCollection',
+              features: [{
+                type: 'Feature' as const,
+                geometry: {
+                  type: 'Point' as const,
+                  coordinates: v1.todaysSit.geometry.coordinates,
+                },
+                properties: { ...v1.todaysSit },
+              }],
+            };
+            console.log('[INTEL-DIAG] standPoints empty — injected 1 from todaysSit (synthetic)');
+            setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
+          }
+        }
+
         console.log('[INTEL-DIAG] Analysis complete (synthetic):', result.durationMs, 'ms');
         return;
       }
@@ -5271,6 +5306,40 @@ function DeerIntelContent() {
       setProvenance(adapted.provenance);
       setProgress(100);
       setProgressStep(`Complete in ${(result.durationMs / 1000).toFixed(1)}s`);
+
+      // Fallback: populate standPoints from top3Stands / todaysSit if layers.standPoints is empty
+      if (!adapted.layers?.standPoints?.features?.length) {
+        const v1 = result.data!;
+        if (v1.top3Stands?.length) {
+          const fallbackPoints: GeoJSON.FeatureCollection = {
+            type: 'FeatureCollection',
+            features: v1.top3Stands.map((s: any) => ({
+              type: 'Feature' as const,
+              geometry: {
+                type: 'Point' as const,
+                coordinates: s.geometry?.coordinates ?? [s.coordinates?.lng ?? s.lng, s.coordinates?.lat ?? s.lat],
+              },
+              properties: { ...s },
+            })),
+          };
+          console.log('[INTEL-DIAG] standPoints empty — injected', fallbackPoints.features.length, 'from top3Stands');
+          setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
+        } else if (v1.todaysSit && !v1.todaysSit.isStub && v1.todaysSit.geometry?.coordinates) {
+          const fallbackPoints: GeoJSON.FeatureCollection = {
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature' as const,
+              geometry: {
+                type: 'Point' as const,
+                coordinates: v1.todaysSit.geometry.coordinates,
+              },
+              properties: { ...v1.todaysSit },
+            }],
+          };
+          console.log('[INTEL-DIAG] standPoints empty — injected 1 from todaysSit');
+          setLayers((prev: any) => ({ ...prev, standPoints: fallbackPoints }));
+        }
+      }
       
       console.log('[INTEL-DIAG] === ANALYSIS COMPLETE ===');
 
