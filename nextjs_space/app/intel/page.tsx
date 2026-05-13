@@ -6948,7 +6948,7 @@ function DeerIntelContent() {
                               (parcelPolygon?.properties as any)?.acreage ||
                               undefined;
           const storyAddress = qaParcel?.address || address || undefined;
-          const story = generateTerrainStory(result.data, storyAcreage, storyAddress);
+          const story = generateTerrainStory(result.data, storyAcreage, storyAddress, ridgeSpineData);
           setTerrainStory(story);
           console.log('[TerrainStory] Generated:', story.headline);
         } else {
@@ -6978,7 +6978,7 @@ function DeerIntelContent() {
                               (parcelPolygon?.properties as any)?.acreage ||
                               undefined;
           const synthAddress = qaParcel?.address || address || undefined;
-          const syntheticStory = generateTerrainStory(synthetic, synthAcreage, synthAddress);
+          const syntheticStory = generateTerrainStory(synthetic, synthAcreage, synthAddress, ridgeSpineData);
           setTerrainStory(syntheticStory);
           console.log('[TerrainStory] Generated (synthetic):', syntheticStory.headline);
         }
@@ -14451,6 +14451,11 @@ function DeerIntelContent() {
           ) : (
             <div className="flex flex-col h-full overflow-y-auto">
 
+              {/* Territory Builder spacer — pushes left panel content below the
+                  absolutely-positioned Territory Builder panel (z-20) so Conditions
+                  and other controls remain accessible */}
+              {territoryMode && <div className="flex-shrink-0" style={{ height: 360 }} />}
+
               {/* ═══ v4.1 — HUNT IN PROGRESS BANNER ═══ */}
               <HuntInProgressBanner onRecordOutcome={() => setShowOutcomeCard(true)} />
 
@@ -15468,36 +15473,7 @@ function DeerIntelContent() {
                   </div>
                 )}
                 
-                {/* Before/After Comparison Toggle */}
-                {legacySyntheticData && (
-                  <div className="mb-2 p-2 bg-stone-800/40 rounded-lg">
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className={flowComparisonMode ? 'text-stone-500' : 'text-cyan-400 font-medium'}>
-                        Terrain-Driven (V2)
-                      </span>
-                      <button
-                        onClick={() => setFlowComparisonMode(!flowComparisonMode)}
-                        className={`relative w-10 h-5 rounded-full transition-colors ${
-                          flowComparisonMode ? 'bg-amber-700' : 'bg-cyan-700'
-                        }`}
-                        title="Toggle between terrain-driven (V2) and legacy synthetic flow"
-                      >
-                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                          flowComparisonMode ? 'translate-x-5' : 'translate-x-0.5'
-                        }`} />
-                      </button>
-                      <span className={flowComparisonMode ? 'text-amber-400 font-medium' : 'text-stone-500'}>
-                        Legacy (V1)
-                      </span>
-                    </div>
-                    {flowComparisonMode && (
-                      <div className="mt-1.5 text-[9px] text-amber-400/80 bg-amber-900/30 rounded p-1.5">
-                        <span className="font-medium">⚠️ LEGACY MODE:</span> Showing old parcel-axis-based flow for comparison. 
-                        Lines follow property shape, not terrain.
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Legacy V1/V2 toggle removed — V2 terrain-driven flow is permanent */}
                 <div className="space-y-1">
                   {/* HEAT MAP Toggle (PRIMARY) */}
                   <button

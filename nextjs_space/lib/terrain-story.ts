@@ -86,7 +86,16 @@ const MOVEMENT_DRIVER_LABELS: Record<MovementDriver, string> = {
  * Compute structural driver scores from terrain flow data
  */
 export function computeStructuralDrivers(
-  flowData: TerrainFlowResponse | null
+  flowData: TerrainFlowResponse | null,
+  ridgeSpineData?: {
+    saddle_nodes?: GeoJSON.FeatureCollection;
+    metadata?: {
+      saddle_count?: number;
+      ridge_count_primary?: number;
+      ridge_count_secondary?: number;
+      total_ridge_length_m?: number;
+    };
+  } | null
 ): StructuralDrivers {
   if (!flowData) {
     return getEmptyDrivers();
@@ -97,21 +106,25 @@ export function computeStructuralDrivers(
   // Extract weights used in analysis
   const weights = metadata.weights || {};
   
-  // Calculate bench support from opportunity zones
-  const benchScores = opportunity_zones.features.map(f => f.properties.benchBonus || 0);
-  const avgBench = benchScores.length > 0 
-    ? benchScores.reduce((a, b) => a + b, 0) / benchScores.length 
-    : 0;
-  const maxBench = Math.max(...benchScores, 0);
-  const benchSupport = Math.min(1, (avgBench * 0.6 + maxBench * 0.4) * 2.5);
+  // Calculate bench support — use bench_likelihood weight from flow metadata
+  // (the API doesn't return per-zone benchBonus, so derive from analysis weights
+  //  and ridge structure: parcels with multiple ridges tend to have side-hill benches)
+  const benchWeight = weights.bench_likelihood || 0;
+  const ridgeCount = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
+    (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0);
+  // More ridges → more bench terrain between them; weight contributes base signal
+  const benchSupport = Math.min(1, (
+    benchWeight * 2.0 +
+    (ridgeCount >= 4 ? 0.4 : ridgeCount >= 2 ? 0.25 : ridgeCount >= 1 ? 0.1 : 0)
+  ));
   
-  // Calculate saddle influence
-  const saddleScores = opportunity_zones.features.map(f => f.properties.saddleBonus || 0);
-  const avgSaddle = saddleScores.length > 0
-    ? saddleScores.reduce((a, b) => a + b, 0) / saddleScores.length
-    : 0;
-  const maxSaddle = Math.max(...saddleScores, 0);
-  const saddleInfluence = Math.min(1, (avgSaddle * 0.6 + maxSaddle * 0.4) * 2.5);
+  // Calculate saddle influence — use actual saddle count from ridge-spine pipeline
+  const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
+  const saddleWeight = weights.saddle_proximity || 0;
+  const saddleInfluence = Math.min(1, (
+    (saddleCount >= 5 ? 0.6 : saddleCount >= 3 ? 0.45 : saddleCount >= 1 ? 0.3 : 0) +
+    saddleWeight * 1.5
+  ));
   
   // Calculate ridge/spine support from flow metadata
   const spineWeight = weights.spine_proximity || 0.25;
@@ -173,13 +186,22 @@ export function computeStructuralDrivers(
 export function generateTerrainStory(
   flowData: TerrainFlowResponse | null,
   parcelAcreage?: number,
-  parcelAddress?: string
+  parcelAddress?: string,
+  ridgeSpineData?: {
+    saddle_nodes?: GeoJSON.FeatureCollection;
+    metadata?: {
+      saddle_count?: number;
+      ridge_count_primary?: number;
+      ridge_count_secondary?: number;
+      total_ridge_length_m?: number;
+    };
+  } | null
 ): TerrainStorySummary {
   if (!flowData) {
     return getEmptyStory();
   }
   
-  const drivers = computeStructuralDrivers(flowData);
+  const drivers = computeStructuralDrivers(flowData, ridgeSpineData);
   
   // Determine primary and secondary movement drivers
   const { primaryDriver, secondaryDriver } = determineMovementDrivers(drivers, flowData);
