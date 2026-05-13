@@ -7655,12 +7655,12 @@ function DeerIntelContent() {
       // so force them back here when parcels are present.
       try {
         if (territoryParcels.length > 1) {
-          // Multi-parcel territory: internal boundaries are thin/subtle,
+          // Multi-parcel territory: internal boundaries nearly invisible,
           // merged outer hull is bold orange
           map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-          map.setPaintProperty('tfp-territory-outline', 'line-width', 0.5);
+          map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
           map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
-          map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.25));
+          map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
           map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
 
           // Build merged hull from all territory parcels
@@ -13751,11 +13751,11 @@ function DeerIntelContent() {
                     const tMap = mapRef.current;
                     if (tMap && parcels.length > 1) {
                       try {
-                        // Internal parcel boundaries: thin gray
+                        // Internal parcel boundaries: whisper-visible, zoom-faded
                         if (tMap.getLayer('tfp-territory-outline')) {
-                          tMap.setPaintProperty('tfp-territory-outline', 'line-width', 0.5);
+                          tMap.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
                           tMap.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
-                          tMap.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.25);
+                          tMap.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
                         }
                         if (tMap.getLayer('tfp-territory-glow')) {
                           tMap.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
