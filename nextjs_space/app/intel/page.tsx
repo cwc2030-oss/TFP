@@ -5536,8 +5536,12 @@ function DeerIntelContent() {
 
         // Clip: keep only bedding polys whose centroid is inside the parcel boundary
         // Uses pointInParcelGeometry which handles both Polygon AND MultiPolygon (territory mode)
-        if (parcelPolygon?.geometry) {
-          const clipGeom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        // In territory mode with >1 parcels, use merged territory polygon as clip boundary
+        const beddingClipFeature = (territoryModeRef.current && territoryParcelsRef.current.length > 1)
+          ? mergeParcelPolygons(territoryParcelsRef.current)
+          : parcelPolygon;
+        if (beddingClipFeature?.geometry) {
+          const clipGeom = beddingClipFeature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
           const before = polygonsOnly.features.length;
           const clippedBed = polygonsOnly.features.filter(f => {
             const coords: number[][] = [];
@@ -5624,9 +5628,13 @@ function DeerIntelContent() {
 
         // Clip: keep only funnel polys whose centroid is inside the parcel boundary
         // Uses pointInParcelGeometry which handles both Polygon AND MultiPolygon (territory mode)
+        // In territory mode with >1 parcels, use merged territory polygon as clip boundary
         let polys = polysRaw;
-        if (parcelPolygon?.geometry) {
-          const fClipGeom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        const funnelClipFeature = (territoryModeRef.current && territoryParcelsRef.current.length > 1)
+          ? mergeParcelPolygons(territoryParcelsRef.current)
+          : parcelPolygon;
+        if (funnelClipFeature?.geometry) {
+          const fClipGeom = funnelClipFeature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
           const before = polysRaw.features.length;
           const clippedFeats = polysRaw.features.filter(f => {
             const coords: number[][] = [];
@@ -6166,7 +6174,14 @@ function DeerIntelContent() {
 
     try {
       // v3.9.3: Clip corridor display lines to parcel + 50m buffer
-      const clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      // In territory mode with >1 parcels, use merged territory polygon as clip boundary
+      let clipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
+        const merged = mergeParcelPolygons(territoryParcelsRef.current);
+        clipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      } else {
+        clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      }
 
       // Update primary corridors source (clipped)
       const primarySource = map.getSource('tfp-corridors-primary') as mapboxgl.GeoJSONSource;
@@ -6642,9 +6657,16 @@ function DeerIntelContent() {
       }
 
       // Update huntability corridor spine source (clipped to parcel + 50m)
+      // In territory mode with >1 parcels, use merged territory polygon as clip boundary
       const corridorSource = map.getSource('tfp-huntability-corridors') as mapboxgl.GeoJSONSource;
       if (corridorSource) {
-        const hClipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+        let hClipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+        if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
+          const merged = mergeParcelPolygons(territoryParcelsRef.current);
+          hClipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+        } else {
+          hClipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+        }
         corridorSource.setData(clipLinesToParcel(huntabilityData.corridorLines, hClipGeom, 50));
       }
 
@@ -7735,7 +7757,14 @@ function DeerIntelContent() {
       };
 
       // v3.9.3: Clip display lines to parcel + 50m buffer (terrain brain still uses full 800m context)
-      const clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      // In territory mode with >1 parcels, use merged territory polygon as clip boundary
+      let clipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
+        const merged = mergeParcelPolygons(territoryParcelsRef.current);
+        clipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      } else {
+        clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      }
 
       // Update primary flow source (filter + clip to parcel display boundary)
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
