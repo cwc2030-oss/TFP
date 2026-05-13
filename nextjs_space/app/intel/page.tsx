@@ -3016,6 +3016,8 @@ function DeerIntelContent() {
     };
   } | null>(null);
   const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
+  // Ref to hold raw flow API response for terrain story re-generation
+  const terrainFlowRawRef = useRef<any>(null);
 
   // ========== CDL (USDA Cropland Data Layer) ==========
   const [cdlData, setCdlData] = useState<CDLAnalysisResult | null>(null);
@@ -3603,6 +3605,71 @@ function DeerIntelContent() {
         setMostAlignedHint(null);
         previousStandsRef.current = [];
         return;
+      }
+    }
+
+    // ═══ Sidehill Bench Classification ═══
+    // Stands NOT near a ridge spine (>120m), NOT near a draw/flow (>80m),
+    // but on a parcel with terrain relief get a sidehill bench bonus.
+    const SIDEHILL_RIDGE_THRESHOLD_M = 120;
+    const SIDEHILL_DRAW_THRESHOLD_M = 80;
+    const SIDEHILL_SCORE_BONUS = 0.12;
+    const hasTerrainRelief = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
+      (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0) >= 1;
+
+    if (hasTerrainRelief && ridgeSpineData) {
+      // Collect all ridge lines for distance checks
+      const allRidgeLines: [number, number][][] = [];
+      for (const fc of [ridgeSpineData.ridges_primary, ridgeSpineData.ridges_secondary]) {
+        if (fc?.features) {
+          for (const f of fc.features) {
+            if (f.geometry?.type === 'LineString') {
+              allRidgeLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+            }
+          }
+        }
+      }
+      // Collect all draw/flow lines for distance checks
+      const allDrawLines: [number, number][][] = [];
+      if (terrainFlowData?.flow_primary?.features) {
+        for (const f of terrainFlowData.flow_primary.features) {
+          if (f.geometry?.type === 'LineString') {
+            allDrawLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+          }
+        }
+      }
+
+      let sidehillCount = 0;
+      for (const candidate of anchoredPool) {
+        // Check distance to nearest ridge spine
+        let minRidgeDist = Infinity;
+        for (const line of allRidgeLines) {
+          const cp = closestPointOnLineString(candidate.coords, line);
+          const d = distanceMeters(candidate.coords, cp.point);
+          if (d < minRidgeDist) minRidgeDist = d;
+        }
+        // Check distance to nearest draw/flow
+        let minDrawDist = Infinity;
+        for (const line of allDrawLines) {
+          const cp = closestPointOnLineString(candidate.coords, line);
+          const d = distanceMeters(candidate.coords, cp.point);
+          if (d < minDrawDist) minDrawDist = d;
+        }
+
+        const notNearRidge = minRidgeDist > SIDEHILL_RIDGE_THRESHOLD_M;
+        const notNearDraw = minDrawDist > SIDEHILL_DRAW_THRESHOLD_M;
+
+        if (notNearRidge && notNearDraw) {
+          (candidate as any).isSidehillBench = true;
+          candidate.alignment.score = Math.min(1, candidate.alignment.score + SIDEHILL_SCORE_BONUS);
+          sidehillCount++;
+        }
+      }
+
+      if (sidehillCount > 0) {
+        // Re-sort pool by updated scores
+        anchoredPool.sort((a, b) => b.alignment.score - a.alignment.score);
+        console.log(`[SIDEHILL-BENCH] ${sidehillCount}/${anchoredPool.length} candidates tagged as sidehill bench (+${SIDEHILL_SCORE_BONUS} bonus)`);
       }
     }
 
@@ -6856,6 +6923,7 @@ function DeerIntelContent() {
       setTerrainFlowData(null);
       setLegacySyntheticData(null);
       setTerrainStory(null);
+      terrainFlowRawRef.current = null;
       return;
     }
 
@@ -6942,6 +7010,8 @@ function DeerIntelContent() {
               fallback_reason: result.data.metadata.fallback_reason,
             },
           });
+          // Store raw flow response for potential re-generation when ridgeSpineData arrives late
+          terrainFlowRawRef.current = result.data;
           // Generate terrain story from flow data
           const storyAcreage = qaParcel?.acreage || 
                               (parcelPolygon?.properties as any)?.ll_gisacre ||
@@ -6972,6 +7042,8 @@ function DeerIntelContent() {
               fallback_reason: synthetic.metadata.fallback_reason,
             },
           });
+          // Store raw synthetic data for potential re-generation
+          terrainFlowRawRef.current = synthetic;
           // Generate terrain story from synthetic data
           const synthAcreage = qaParcel?.acreage || 
                               (parcelPolygon?.properties as any)?.ll_gisacre ||
@@ -6997,6 +7069,28 @@ function DeerIntelContent() {
       cancelled = true;
     };
   }, [parcelPolygon]);
+
+  // ========== TERRAIN STORY RE-GENERATION when ridgeSpineData arrives late ==========
+  // The main terrain flow effect captures ridgeSpineData as a closure value.
+  // If ridge data arrives AFTER flow data, bench/saddle scores stay 0%.
+  // This secondary effect re-generates the terrain story using the raw flow ref.
+  useEffect(() => {
+    if (!ridgeSpineData || !terrainFlowRawRef.current || !parcelPolygon) return;
+    // Only re-generate if we already have a story (meaning flow effect ran first)
+    if (!terrainStory) return;
+    // Skip if ridge data was already present when story was first generated
+    if (terrainStory.drivers.benchSupport.score > 0 || terrainStory.drivers.saddleInfluence.score > 0) return;
+
+    console.log('[TerrainStory] Ridge data arrived late — re-generating with bench/saddle scores');
+    const storyAcreage = qaParcel?.acreage || 
+                        (parcelPolygon?.properties as any)?.ll_gisacre ||
+                        (parcelPolygon?.properties as any)?.acreage ||
+                        undefined;
+    const storyAddress = qaParcel?.address || address || undefined;
+    const updatedStory = generateTerrainStory(terrainFlowRawRef.current, storyAcreage, storyAddress, ridgeSpineData);
+    setTerrainStory(updatedStory);
+    console.log('[TerrainStory] Re-generated with ridge data — bench:', updatedStory.drivers.benchSupport.score.toFixed(2), 'saddle:', updatedStory.drivers.saddleInfluence.score.toFixed(2));
+  }, [ridgeSpineData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== v4.0 TERRAIN CACHE WRITE (single-parcel only) ==========
   // When all three pipelines finish for a single parcel, cache the results.
@@ -14922,7 +15016,9 @@ function DeerIntelContent() {
                 const distToCorridor = stand.props?.distToCorridorMeters ?? 999;
                 let adviceText = reasonText; // fallback to existing reasoning
                 if (ht === 'bow' || (ht === 'both' && hunterType === 'bow')) {
-                  if (anchor === 'saddle') {
+                  if (stand.isSidehillBench) {
+                    adviceText = `Sidehill bench — flat shelf between the ridge and the draw. Hang 20 feet in the biggest white oak on the downhill edge. Deer traversing the slope funnel along this bench to avoid skylining. 15-yard chip shot. Approach from below, stay tight to the contour.`;
+                  } else if (anchor === 'saddle') {
                     adviceText = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
                   } else if (anchor === 'funnel') {
                     adviceText = `Set up at this draw intersection where trails converge. Thermal lift carries scent above the travel lane at first light. Multiple encounter opportunities. Come in from the field road in the dark.`;
@@ -14934,7 +15030,9 @@ function DeerIntelContent() {
                     adviceText = `Timber corridor stand ${Math.round(distToCorridor)}m from the primary travel lane. Hang at 20 feet in the largest available tree. Deer moving through this corridor pass within 25 yards.`;
                   }
                 } else if (ht === 'gun' || (ht === 'both' && hunterType === 'gun')) {
-                  if (anchor === 'inside_corner') {
+                  if (stand.isSidehillBench) {
+                    adviceText = `Sidehill bench with 80-120 yard shooting lane across the slope. Deer moving along the contour are broadside at a predictable distance. Set up on the uphill edge with the wind quartering downhill. Glass the bench at first light.`;
+                  } else if (anchor === 'inside_corner') {
                     adviceText = `Inside corner of the ${bearingLabel || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
                   } else if (anchor === 'field_edge') {
                     adviceText = `Timber edge overlooking the ${bearingLabel || 'open'} pasture. 100-150 yard shot across open ground to the far tree line. Opening weekend deer pushed from adjacent parcels cross here at first light. Position before 5:30 AM.`;
@@ -16720,13 +16818,15 @@ function DeerIntelContent() {
                 const distToCorridor2 = stand.props?.distToCorridorMeters ?? 999;
                 let adviceText2 = reasonText;
                 if (ht2 === 'bow' || (ht2 === 'both' && hunterType === 'bow')) {
-                  if (anchor2 === 'saddle') adviceText2 = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
+                  if (stand.isSidehillBench) adviceText2 = `Sidehill bench — flat shelf between the ridge and the draw. Hang 20 feet in the biggest white oak on the downhill edge. Deer traversing the slope funnel along this bench to avoid skylining. 15-yard chip shot. Approach from below, stay tight to the contour.`;
+                  else if (anchor2 === 'saddle') adviceText2 = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
                   else if (anchor2 === 'funnel') adviceText2 = `Set up at this draw intersection where trails converge. Thermal lift carries scent above the travel lane at first light. Multiple encounter opportunities. Come in from the field road in the dark.`;
                   else if (anchor2 === 'ridge') adviceText2 = `Hang on the downwind lip of this ridge finger. Deer funneled off the bench have one route — right past your tree. 18-yard window. Wind in your face all morning.`;
                   else if (anchor2 === 'convergence') adviceText2 = `Convergence zone where multiple travel lanes intersect. Hang at 22 feet where timber thickens — deer commit to a single lane within bow range. Plan two exit routes.`;
                   else if (distToCorridor2 <= 150) adviceText2 = `Timber corridor stand ${Math.round(distToCorridor2)}m from the primary travel lane. Hang at 20 feet in the largest available tree. Deer moving through this corridor pass within 25 yards.`;
                 } else if (ht2 === 'gun' || (ht2 === 'both' && hunterType === 'gun')) {
-                  if (anchor2 === 'inside_corner') adviceText2 = `Inside corner of the ${bearingLabel2 || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
+                  if (stand.isSidehillBench) adviceText2 = `Sidehill bench with 80-120 yard shooting lane across the slope. Deer moving along the contour are broadside at a predictable distance. Set up on the uphill edge with the wind quartering downhill. Glass the bench at first light.`;
+                  else if (anchor2 === 'inside_corner') adviceText2 = `Inside corner of the ${bearingLabel2 || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
                   else if (anchor2 === 'field_edge') adviceText2 = `Timber edge overlooking the ${bearingLabel2 || 'open'} pasture. 100-150 yard shot across open ground to the far tree line. Opening weekend deer pushed from adjacent parcels cross here at first light. Position before 5:30 AM.`;
                   else if (anchor2 === 'field_saddle_combo') adviceText2 = `Saddle crossing above the field edge — rut bucks funnel through here before hitting the pasture. Long shot available into the open or close shot in the timber. Best of both worlds.`;
                   else if (stand.props?.isEdgeStand) adviceText2 = `Field edge stand with open shooting lanes. 60-150 yard encounter distance across the field. Set up in the timber edge with the field downwind. Early morning and last light are peak movement windows.`;

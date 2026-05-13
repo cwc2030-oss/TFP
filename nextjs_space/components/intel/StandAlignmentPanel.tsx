@@ -31,6 +31,8 @@ export type AlignedStand = {
   anchorFeature?: TerrainAnchor;
   /** Weapon-type classification: bow (timber/corridor), gun (field edge/open), both */
   hunterStandType?: HunterStandType;
+  /** True when stand sits on a sidehill bench — away from ridge spine and draws but on terrain with relief. */
+  isSidehillBench?: boolean;
   resilience?: {
     score: number;
     corridorCount: number;
