@@ -615,6 +615,52 @@ function pointInPolygon(point: [number, number], polygon: number[][]): boolean {
   return inside;
 }
 
+// ═══ STRUCTURE EXCLUSION ZONE ═══
+// Query Mapbox building layer for structures within parcel bbox
+function getStructureExclusionFilter(
+  map: mapboxgl.Map,
+  parcelBbox: [number, number, number, number]
+): [number, number][] {
+  try {
+    const sw = map.project([parcelBbox[0], parcelBbox[1]]);
+    const ne = map.project([parcelBbox[2], parcelBbox[3]]);
+    const features = map.queryRenderedFeatures(
+      [sw, ne],
+      { layers: ['building'] }
+    );
+    return features
+      .filter(f => f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+      .map(f => {
+        const coords = f.geometry.type === 'Polygon'
+          ? (f.geometry as GeoJSON.Polygon).coordinates[0]
+          : (f.geometry as GeoJSON.MultiPolygon).coordinates[0][0];
+        const lngs = coords.map((c: GeoJSON.Position) => c[0]);
+        const lats = coords.map((c: GeoJSON.Position) => c[1]);
+        const lng = lngs.reduce((a: number, b: number) => a + b) / lngs.length;
+        const lat = lats.reduce((a: number, b: number) => a + b) / lats.length;
+        return [lng, lat] as [number, number];
+      });
+  } catch {
+    return [];
+  }
+}
+
+function distanceToStructuresM(
+  standLng: number,
+  standLat: number,
+  structures: [number, number][]
+): number {
+  if (!structures.length) return Infinity;
+  const R = 6371000;
+  return Math.min(...structures.map(([sLng, sLat]) => {
+    const dLat = (standLat - sLat) * Math.PI / 180;
+    const dLng = (standLng - sLng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(sLat * Math.PI / 180) * Math.cos(standLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }));
+}
+
 // Find the closest point on a polygon boundary to a given point
 function closestPointOnPolygon(point: [number, number], polygon: number[][]): { point: [number, number]; segment: [number, number, number, number]; index: number } {
   let minDist = Infinity;
@@ -3516,6 +3562,49 @@ function DeerIntelContent() {
       return;
     }
     setNoAnchoredStands(false);
+
+    // ═══ STRUCTURE EXCLUSION ZONE — remove stands within 200m of buildings ═══
+    const STRUCTURE_EXCLUSION_M = 200;
+    if (mapRef.current && parcelPolygonRef.current) {
+      // Compute bbox from parcel polygon coordinates
+      const polyCoords = parcelPolygonRef.current.geometry?.type === 'MultiPolygon'
+        ? (parcelPolygonRef.current.geometry as GeoJSON.MultiPolygon).coordinates.flat(2)
+        : (parcelPolygonRef.current.geometry as GeoJSON.Polygon).coordinates[0];
+      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+      for (const c of polyCoords) {
+        if (c[0] < minLng) minLng = c[0];
+        if (c[1] < minLat) minLat = c[1];
+        if (c[0] > maxLng) maxLng = c[0];
+        if (c[1] > maxLat) maxLat = c[1];
+      }
+      const parcelBbox: [number, number, number, number] = [minLng, minLat, maxLng, maxLat];
+      const structures = getStructureExclusionFilter(mapRef.current, parcelBbox);
+      if (structures.length > 0) {
+        const beforeCount = anchoredPool.length;
+        for (let i = anchoredPool.length - 1; i >= 0; i--) {
+          const dist = distanceToStructuresM(anchoredPool[i].coords[0], anchoredPool[i].coords[1], structures);
+          if (dist < STRUCTURE_EXCLUSION_M) {
+            console.log(`[INTEL-DIAG] Stand excluded — within ${Math.round(dist)}m of structure: "${anchoredPool[i].name}"`);
+            anchoredPool.splice(i, 1);
+          }
+        }
+        console.log(`[STRUCTURE-EXCLUSION] ${beforeCount - anchoredPool.length}/${beforeCount} candidates removed (${structures.length} structures detected, ${STRUCTURE_EXCLUSION_M}m buffer)`);
+      } else {
+        console.log('[STRUCTURE-EXCLUSION] No building footprints detected in parcel bbox');
+      }
+
+      // If all candidates excluded by structure filter, fall back to anchor pool
+      if (anchoredPool.length === 0) {
+        console.warn('[STRUCTURE-EXCLUSION] All anchored candidates within structure zone — no stands available');
+        setNoAnchoredStands(true);
+        setAlignedStands([]);
+        setExceptionalIndex(ei);
+        setParcelStrength(ps);
+        setMostAlignedHint(null);
+        previousStandsRef.current = [];
+        return;
+      }
+    }
 
     function dominantTerrainContext(p: StandPointProperties): string {
       // AG field edge stands get their own context to avoid similarity penalties with terrain stands
