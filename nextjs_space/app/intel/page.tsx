@@ -7487,9 +7487,9 @@ function DeerIntelContent() {
       try {
         // Show outline + glow only — fill stays at opacity 0 to prevent salmon wash
         map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-        map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.95));
+        map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
         map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
-        map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.35));
+        map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
         // Clear adjacent source data AND hide layers to prevent grey film overlay.
         // Hiding alone is insufficient — stale geometry stays loaded in the source
         // and repaints instantly if any code path re-triggers visibility.
@@ -9317,22 +9317,22 @@ function DeerIntelContent() {
             source: 'tfp-territory-parcels',
             layout: { visibility: 'none' },
             paint: {
-              'line-color': '#f59e0b',
-              'line-width': 2.5,
-              'line-opacity': 0.95,
+              'line-color': '#c9a84c',
+              'line-width': 1.5,
+              'line-opacity': 0.5,
             }
           });
 
-          // Outer glow for territory parcels (matches tfp-parcel-glow)
+          // Outer glow for territory parcels — softened to avoid dominating terrain
           map.addLayer({
             id: 'tfp-territory-glow',
             type: 'line',
             source: 'tfp-territory-parcels',
             layout: { visibility: 'none' },
             paint: {
-              'line-color': '#fbbf24',
-              'line-width': 5,
-              'line-opacity': 0.35,
+              'line-color': '#c9a84c',
+              'line-width': 3,
+              'line-opacity': 0.2,
               'line-blur': 3,
             }
           });
