@@ -2068,13 +2068,17 @@ export default function DeerIntelPage() {
 function DeerIntelContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { data: session, update: updateSession } = useSession() || {};
+  const { data: session, status: sessionStatus, update: updateSession } = useSession() || {};
+  const sessionLoaded = sessionStatus === 'authenticated' || sessionStatus === 'unauthenticated';
   const subStatus = session?.user?.subscriptionStatus || 'free';
   const role = (session?.user as any)?.role || 'user';
   // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
   const isPro = subStatus === 'pro' || subStatus === 'promax' || role === 'admin';
   const isProMax = subStatus === 'promax' || role === 'admin';
-  const TERRITORY_PARCEL_CAP = isProMax ? 25 : isPro ? 5 : 1;
+  // Guard against auth hydration race: default to ProMax cap (25) until session
+  // confirms the actual tier.  This prevents a stale 'free' default from
+  // blocking Pro/ProMax users mid-session with cap=1.
+  const TERRITORY_PARCEL_CAP = !sessionLoaded ? 25 : isProMax ? 25 : isPro ? 5 : 1;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const [showScoreCard, setShowScoreCard] = useState(false);
@@ -4771,21 +4775,32 @@ function DeerIntelContent() {
       // SHARED-TERRITORY FIX: bypass the tier cap when loading a territory
       // shared via URL (?territory=true&...). Otherwise a free-tier recipient
       // would only see parcel #1 because their cap=1 silently drops 2-5.
-      if (!opts?.bypassCap) {
-        // Tier-based parcel cap: free=1, pro=5, promax=25
-        const cap = isProMax ? 25 : isPro ? 5 : 1;
+      //
+      // MID-SESSION BYPASS: if the user already has parcels in their territory
+      // (prev.length > 0), they already passed the initial gate — never block
+      // them mid-session due to a stale/lagging auth check (race condition on
+      // session hydration can momentarily report 'free' for a Pro user).
+      // The real gate is the territory toggle button which blocks non-Pro from
+      // entering territory mode at all.
+      if (!opts?.bypassCap && prev.length === 0) {
+        // First parcel add — enforce tier gate (free users blocked at toggle,
+        // but this catches any edge case where they reach the setter directly)
+        if (!isPro && !isProMax) {
+          const message = parcelUnlockedRef.current
+            ? 'Upgrade to Pro to build multi-parcel territories'
+            : 'Upgrade to Pro for 5-parcel Territory Mode';
+          toast.error(message, { duration: 5000 });
+          return prev;
+        }
+      } else if (!opts?.bypassCap && prev.length > 0) {
+        // Subsequent parcel adds — enforce real cap but only for confirmed tiers
+        // (sessionLoaded ensures we don't use stale 'free' default)
+        const cap = TERRITORY_PARCEL_CAP; // already guards against hydration race
         if (prev.length >= cap) {
           console.log('[TERRITORY-DIAG] CAP REACHED —', cap, 'parcels max for tier:', subStatus);
-          let message: string;
-          if (isProMax) {
-            message = `Territory limit reached — maximum ${cap} parcels`;
-          } else if (isPro) {
-            message = `Territory limit reached (${cap} parcels max on Pro). Upgrade to Pro Max for 25-parcel territories.`;
-          } else if (parcelUnlockedRef.current) {
-            message = 'Upgrade to Pro to build multi-parcel territories';
-          } else {
-            message = 'Upgrade to Pro for 5-parcel Territory Mode';
-          }
+          const message = isProMax
+            ? `Territory limit reached — maximum ${cap} parcels`
+            : `Territory limit reached (${cap} parcels max on Pro). Upgrade to Pro Max for 25-parcel territories.`;
           toast.error(message, { duration: 5000 });
           return prev;
         }
@@ -13925,8 +13940,8 @@ function DeerIntelContent() {
                       mapRef.current.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
                     } catch(e) {}
                   }
-                } else if (!isPro) {
-                  // Not Pro — show upgrade modal
+                } else if (!isPro && sessionLoaded) {
+                  // Not Pro (and session confirmed) — show upgrade modal
                   setShowUpgradeModal(true);
                 } else {
                   // Entering territory mode — auto-activate pick + seed with current parcel
