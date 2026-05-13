@@ -15321,23 +15321,27 @@ function DeerIntelContent() {
                       Saddles
                     </span>
                   </button>
-                  {/* CDL Field Edge toggle */}
-                  <button
-                    onClick={() => setShowTerrainReasons(v => !v)}
-                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                      (showTerrainReasons && cdlData) ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                    }`}
-                  >
-                    <span className="w-3 h-[2px] rounded-full" style={{ background: LAYER_COLORS.agFieldEdge, opacity: (showTerrainReasons && cdlData) ? 1 : 0.4, borderStyle: 'dashed' }} />
-                    <span className={`flex-1 text-left ${(showTerrainReasons && cdlData) ? 'text-white' : 'text-stone-500'}`}>
-                      Field Edge
-                    </span>
-                    {cdlData && (
-                      <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/40 rounded">
-                        {cdlData.metadata.edgeSegments}
-                      </span>
-                    )}
-                  </button>
+                  {/* CDL Field Edge toggle — only shown when CDL data has edge features */}
+                  {(() => {
+                    const fieldEdgeCount = (cdlData?.agEdgeLines?.features?.length ?? 0) + (cdlData?.insideCorners?.features?.length ?? 0);
+                    if (!cdlData || fieldEdgeCount === 0) return null;
+                    return (
+                      <button
+                        onClick={() => setShowTerrainReasons(v => !v)}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
+                          (showTerrainReasons && cdlData) ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                        }`}
+                      >
+                        <span className="w-3 h-[2px] rounded-full" style={{ background: LAYER_COLORS.agFieldEdge, opacity: (showTerrainReasons && cdlData) ? 1 : 0.4, borderStyle: 'dashed' }} />
+                        <span className={`flex-1 text-left ${(showTerrainReasons && cdlData) ? 'text-white' : 'text-stone-500'}`}>
+                          Field Edge
+                        </span>
+                        <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/40 rounded">
+                          {fieldEdgeCount}
+                        </span>
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
               {/* Legacy "Bedding" toggle removed — replaced by Bedding Zones (tfp-bedding-probability) */}
