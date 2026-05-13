@@ -4678,6 +4678,7 @@ function DeerIntelContent() {
     'tfp-stand-tertiary',
     'tfp-stands',
     'tfp-territory-links',
+    'tfp-territory-hull',
     'tfp-ag-edges', 'tfp-inside-corners',
   ]);
 
@@ -7465,6 +7466,10 @@ function DeerIntelContent() {
         map.setLayoutProperty('tfp-territory-fill', 'visibility', 'none');
         map.setLayoutProperty('tfp-territory-outline', 'visibility', 'none');
         map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+        // Clear hull
+        const hullSrc = map.getSource('tfp-territory-hull') as mapboxgl.GeoJSONSource;
+        if (hullSrc) hullSrc.setData({ type: 'FeatureCollection', features: [] });
+        map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'none');
         // Restore adjacent parcel layers when territory is cleared
         map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'visible');
         map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'visible');
@@ -7485,11 +7490,34 @@ function DeerIntelContent() {
       // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
       // so force them back here when parcels are present.
       try {
-        // Show outline + glow only — fill stays at opacity 0 to prevent salmon wash
-        map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-        map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
-        map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
-        map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
+        if (territoryParcels.length > 1) {
+          // Multi-parcel territory: internal boundaries are thin/subtle,
+          // merged outer hull is bold orange
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-outline', 'line-width', 0.5);
+          map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
+          map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.25));
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+
+          // Build merged hull from all territory parcels
+          const merged = mergeParcelPolygons(territoryParcels);
+          const hullSrc = map.getSource('tfp-territory-hull') as mapboxgl.GeoJSONSource;
+          if (hullSrc && merged) {
+            hullSrc.setData({ type: 'FeatureCollection', features: [merged] });
+          }
+          map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', clampOpacity(0.9));
+        } else {
+          // Single parcel in territory: standard outline styling
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
+          map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
+          map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
+          // Hide hull for single parcel
+          map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'none');
+        }
         // Clear adjacent source data AND hide layers to prevent grey film overlay.
         // Hiding alone is insufficient — stale geometry stays loaded in the source
         // and repaints instantly if any code path re-triggers visibility.
@@ -7716,9 +7744,21 @@ function DeerIntelContent() {
       }
 
       // Update secondary flow source (filter + clip to parcel display boundary)
+      // FIX 2: Suppress secondary flow on small parcels in territory mode (>3 parcels, any <75 ac)
       const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
+      const suppressSecondaryFlow = territoryModeRef.current
+        && territoryParcelsRef.current.length > 3
+        && territoryParcelsRef.current.some(p => p.acreage < 75);
       if (secondarySource) {
-        secondarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_secondary || emptyFC), clipGeom, 50));
+        if (suppressSecondaryFlow) {
+          secondarySource.setData(emptyFC);
+        } else {
+          secondarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_secondary || emptyFC), clipGeom, 50));
+        }
+      }
+      // Also hide/show the layer visibility for secondary flow
+      if (map.getLayer('tfp-flow-secondary')) {
+        map.setLayoutProperty('tfp-flow-secondary', 'visibility', suppressSecondaryFlow ? 'none' : 'visible');
       }
 
       // Update convergence zones source (filter points inside water bodies)
@@ -9335,6 +9375,25 @@ function DeerIntelContent() {
               'line-opacity': 0.2,
               'line-blur': 3,
             }
+          });
+        }
+
+        // ========== TERRITORY HULL (merged outer boundary) ==========
+        if (!map.getSource('tfp-territory-hull')) {
+          map.addSource('tfp-territory-hull', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] },
+          });
+          map.addLayer({
+            id: 'tfp-territory-hull-outline',
+            type: 'line',
+            source: 'tfp-territory-hull',
+            layout: { visibility: 'none' },
+            paint: {
+              'line-color': '#f97316',
+              'line-width': 2.5,
+              'line-opacity': 0.9,
+            },
           });
         }
 
@@ -13516,6 +13575,34 @@ function DeerIntelContent() {
                     setProgress(100);
                     setProgressStep(`Territory assembled — ${allTerrain.length} parcels, ${assembled.territoryLinks.features.length} links`);
                     console.log('[TerritoryAssembly] COMPLETE:', allTerrain.length, 'parcels,', assembled.territoryLinks.features.length, 'cross-parcel links');
+
+                    // Re-apply territory hull / internal boundary styling after assembly
+                    const tMap = mapRef.current;
+                    if (tMap && parcels.length > 1) {
+                      try {
+                        // Internal parcel boundaries: thin gray
+                        if (tMap.getLayer('tfp-territory-outline')) {
+                          tMap.setPaintProperty('tfp-territory-outline', 'line-width', 0.5);
+                          tMap.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
+                          tMap.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.25);
+                        }
+                        if (tMap.getLayer('tfp-territory-glow')) {
+                          tMap.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+                        }
+                        // Merged hull: bold orange
+                        const merged = mergeParcelPolygons(parcels);
+                        const hullSrc = tMap.getSource('tfp-territory-hull') as mapboxgl.GeoJSONSource;
+                        if (hullSrc && merged) {
+                          hullSrc.setData({ type: 'FeatureCollection', features: [merged] });
+                        }
+                        if (tMap.getLayer('tfp-territory-hull-outline')) {
+                          tMap.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'visible');
+                          tMap.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', 0.9);
+                        }
+                      } catch (hullErr) {
+                        console.warn('[TerritoryAssembly] Hull styling error:', hullErr);
+                      }
+                    }
 
                   } catch (err) {
                     const msg = err instanceof Error ? err.message : 'Territory assembly failed';
