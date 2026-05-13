@@ -2065,6 +2065,41 @@ export default function DeerIntelPage() {
   );
 }
 
+// ═══ Moon phase calculator — deterministic, no API call ═══
+function getTodayMoonPhase(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const jd = 367 * year
+    - Math.floor(7 * (year + Math.floor((month + 9) / 12)) / 4)
+    + Math.floor(275 * month / 9)
+    + day + 1721013.5;
+  const knownNewMoon = 2451549.5;
+  const synodicMonth = 29.53058867;
+  const phase = ((jd - knownNewMoon) % synodicMonth + synodicMonth) % synodicMonth;
+  const pct = phase / synodicMonth;
+  if (pct < 0.0625) return 'new_moon';
+  if (pct < 0.1875) return 'waxing_crescent';
+  if (pct < 0.3125) return 'first_quarter';
+  if (pct < 0.4375) return 'waxing_gibbous';
+  if (pct < 0.5625) return 'full_moon';
+  if (pct < 0.6875) return 'waning_gibbous';
+  if (pct < 0.8125) return 'last_quarter';
+  return 'waning_crescent';
+}
+
+const MOON_PHASES = [
+  { value: 'new_moon',         icon: '🌑', label: 'New' },
+  { value: 'waxing_crescent',  icon: '🌒', label: 'Wax Cres' },
+  { value: 'first_quarter',    icon: '🌓', label: '1st Qtr' },
+  { value: 'waxing_gibbous',   icon: '🌔', label: 'Wax Gib' },
+  { value: 'full_moon',        icon: '🌕', label: 'Full' },
+  { value: 'waning_gibbous',   icon: '🌖', label: 'Wan Gib' },
+  { value: 'last_quarter',     icon: '🌗', label: 'Last Qtr' },
+  { value: 'waning_crescent',  icon: '🌘', label: 'Wan Cres' },
+];
+
 function DeerIntelContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -2231,6 +2266,9 @@ function DeerIntelContent() {
   // Simple parcels get lighter heatmap; irregular parcels get stronger expression.
   const parcelComplexityRef = useRef<number>(0);
   const [windDirection, setWindDirection] = useState<WindDirection>('NW');
+  // Moon phase — auto-populated from today's date, adjustable by user
+  const [moonPhase, setMoonPhase] = useState<string>('');
+  useEffect(() => { setMoonPhase(getTodayMoonPhase()); }, []);
   // Refs that always mirror the latest season/wind values.
   // runAnalysis reads from these so it never captures stale closures,
   // while remaining excluded from its dep array to avoid auto-re-triggers.
@@ -2968,7 +3006,7 @@ function DeerIntelContent() {
           windDirection,
           rutPhase: seasonLabel,
           groundMoisture: isSoft ? 'Soft' : 'Firm',
-          moonPhase: null,
+          moonPhase: moonPhase || null,
         }),
       });
 
@@ -14537,6 +14575,37 @@ function DeerIntelContent() {
                   setWindLastUpdated(new Date());
                 }}
               />
+
+              {/* Moon phase selector (part of Conditions chapter) */}
+              <div className="px-3 pb-2">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-[10px] text-stone-500/80 font-medium">Moon Phase</span>
+                  <button
+                    type="button"
+                    onClick={() => setMoonPhase(getTodayMoonPhase())}
+                    className="text-xs text-amber-400 underline ml-2 opacity-70 hover:opacity-100"
+                  >
+                    ↺ today
+                  </button>
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {MOON_PHASES.map((m) => (
+                    <button
+                      key={m.value}
+                      onClick={() => setMoonPhase(m.value)}
+                      className={`
+                        p-1.5 rounded-md text-center transition-all duration-150
+                        ${moonPhase === m.value
+                          ? 'bg-amber-500/20 border border-amber-500/50 text-white shadow-sm'
+                          : 'bg-white/[0.03] border border-transparent text-white/50 hover:bg-white/[0.06] hover:text-white/70'}
+                      `}
+                    >
+                      <span className="text-sm block">{m.icon}</span>
+                      <span className="text-[8px] font-medium block mt-0.5 leading-tight">{m.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {/* ═══ CHAPTER 3 — INTELLIGENCE READOUT ═══ */}
               {summary && (
