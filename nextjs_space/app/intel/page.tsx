@@ -2940,11 +2940,12 @@ function DeerIntelContent() {
   const territoryLineModeRef = useRef<'bold' | 'thin' | 'off'>('bold');
   useEffect(() => { territoryLineModeRef.current = territoryLineMode; }, [territoryLineMode]);
 
-  // Centralized enforcer: applies the current territory line mode to all 4 boundary layers.
-  // Call this AFTER any code path that modifies territory layer visibility or paint.
-  const enforceTerritoryLineMode = useCallback((map: mapboxgl.Map) => {
+  // Centralized enforcer: the SOLE authority for styling the 4 territory boundary layers.
+  // No other code path should set visibility or paint on these layers — call this instead.
+  const enforceTerritoryLineMode = useCallback((map: mapboxgl.Map, caller?: string) => {
     const mode = territoryLineModeRef.current;
     const count = territoryParcelsRef.current.length;
+    console.log(`[TERRITORY-ENFORCE] mode=${mode}, parcels=${count}, caller=${caller || 'unknown'}`);
     if (count === 0) return;
 
     const LAYERS = ['tfp-territory-outline', 'tfp-territory-glow', 'tfp-territory-links-casing', 'tfp-territory-links-line'] as const;
@@ -2982,7 +2983,7 @@ function DeerIntelContent() {
       return;
     }
 
-    // Bold mode — re-apply standard styling based on parcel count
+    // Bold mode — standard styling based on parcel count
     try {
       if (count > 1) {
         if (map.getLayer('tfp-territory-outline')) {
@@ -6534,12 +6535,8 @@ function DeerIntelContent() {
 
     if (territoryLinks && territoryLinks.features.length > 0) {
       linkSource.setData(territoryLinks);
-      try {
-        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
-        map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
-      } catch { /* layers may not exist */ }
-      // Enforce mode override (may downgrade to thin/off)
-      enforceTerritoryLineMode(map);
+      // Enforcer is the SOLE authority for link layer visibility/paint
+      enforceTerritoryLineMode(map, 'links-effect');
       console.log('[MAP] Updated territory links source:', territoryLinks.features.length, 'links');
     } else {
       linkSource.setData(EMPTY_FC);
@@ -7825,18 +7822,10 @@ function DeerIntelContent() {
       console.log('[TERRITORY] Syncing territory source:', fc.features.length, 'features from', territoryParcels.length, 'parcels');
       source.setData(fc);
 
-      // Only show territory fill/outline/glow when we have parcels.
-      // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
-      // so force them back here when parcels are present.
+      // Hull geometry + adjacent parcel cleanup (NOT the 4 boundary layers —
+      // those are handled exclusively by enforceTerritoryLineMode).
       try {
         if (territoryParcels.length > 1) {
-          // Multi-parcel territory: set bold baseline styling, then enforcer adjusts for mode
-          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-          map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
-          map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
-          map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
-          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
-
           // Build merged hull from all territory parcels
           const merged = mergeParcelPolygons(territoryParcels);
           const hullSrc = map.getSource('tfp-territory-hull') as mapboxgl.GeoJSONSource;
@@ -7846,21 +7835,12 @@ function DeerIntelContent() {
           map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'visible');
           map.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', clampOpacity(0.9));
         } else {
-          // Single parcel: set bold baseline styling, then enforcer adjusts for mode
-          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-          map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
-          map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
-          map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
-          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
-          map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
           // Hide hull for single parcel
           map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'none');
         }
-        // Enforce territory line mode (overrides to thin/off if needed)
-        enforceTerritoryLineMode(map);
+        // Enforcer is the SOLE authority for the 4 boundary layers
+        enforceTerritoryLineMode(map, 'territory-sync');
         // Clear adjacent source data AND hide layers to prevent grey film overlay.
-        // Hiding alone is insufficient — stale geometry stays loaded in the source
-        // and repaints instantly if any code path re-triggers visibility.
         const adjSrc = map.getSource('tfp-adjacent-parcels') as mapboxgl.GeoJSONSource;
         if (adjSrc) adjSrc.setData({ type: 'FeatureCollection', features: [] });
         map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'none');
@@ -7886,8 +7866,7 @@ function DeerIntelContent() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || territoryParcels.length === 0) return;
-    enforceTerritoryLineMode(map);
-    console.log('[TERRITORY] Line mode applied:', territoryLineMode);
+    enforceTerritoryLineMode(map, 'useEffect-trigger');
   }, [territoryLineMode, mapReady, territoryParcels.length, enforceTerritoryLineMode]);
 
   // ========== AUTO-LOAD TERRITORY FROM URL PARAMS ==========
@@ -13933,19 +13912,11 @@ function DeerIntelContent() {
                     setProgressStep(`Territory assembled — ${allTerrain.length} parcels, ${assembled.territoryLinks.features.length} links`);
                     console.log('[TerritoryAssembly] COMPLETE:', allTerrain.length, 'parcels,', assembled.territoryLinks.features.length, 'cross-parcel links');
 
-                    // Re-apply territory hull / internal boundary styling after assembly
+                    // Re-apply territory hull styling after assembly (boundary layers
+                    // are handled exclusively by enforceTerritoryLineMode)
                     const tMap = mapRef.current;
                     if (tMap && parcels.length > 1) {
                       try {
-                        // Internal parcel boundaries: whisper-visible, zoom-faded
-                        if (tMap.getLayer('tfp-territory-outline')) {
-                          tMap.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
-                          tMap.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
-                          tMap.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
-                        }
-                        if (tMap.getLayer('tfp-territory-glow')) {
-                          tMap.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
-                        }
                         // Merged hull: bold orange
                         const merged = mergeParcelPolygons(parcels);
                         const hullSrc = tMap.getSource('tfp-territory-hull') as mapboxgl.GeoJSONSource;
@@ -13956,8 +13927,8 @@ function DeerIntelContent() {
                           tMap.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'visible');
                           tMap.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', 0.9);
                         }
-                        // Enforce territory line mode after assembly styling
-                        enforceTerritoryLineMode(tMap);
+                        // Enforcer is sole authority for the 4 boundary layers
+                        enforceTerritoryLineMode(tMap, 'assembly-post');
                       } catch (hullErr) {
                         console.warn('[TerritoryAssembly] Hull styling error:', hullErr);
                       }
@@ -14194,7 +14165,7 @@ function DeerIntelContent() {
                 {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
               </Button>
             )}
-            {/* Territory Parcel Lines 3-State Cycle: Bold → Thin → Off → Bold */}
+            {/* Territory Parcels 3-State Cycle: Bold → Thin → Off → Bold */}
             {territoryParcels.length > 0 && (
               <Button
                 size="sm"
@@ -14209,12 +14180,12 @@ function DeerIntelContent() {
                 onClick={() => setTerritoryLineMode(prev => 
                   prev === 'bold' ? 'thin' : prev === 'thin' ? 'off' : 'bold'
                 )}
-                title={`Parcel lines: ${territoryLineMode.toUpperCase()} — click to cycle`}
+                title={`Parcel boundaries: ${territoryLineMode.toUpperCase()} — click to cycle`}
               >
                 <Layers className="h-4 w-4 mr-1" />
-                {territoryLineMode === 'bold' ? 'Lines: Bold' 
-                  : territoryLineMode === 'thin' ? 'Lines: Thin' 
-                  : 'Lines: Off'}
+                {territoryLineMode === 'bold' ? 'Parcels: Bold' 
+                  : territoryLineMode === 'thin' ? 'Parcels: Thin' 
+                  : 'Parcels: Off'}
               </Button>
             )}
             {/* Exploration Mode Toggle — admin/debug only */}
