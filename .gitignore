@@ -19,3 +19,7 @@ out
 .logs
 *.tsbuildinfo
 .build-check
+# Secrets - never push to GitHub
+**/.env
+**/.env.*
+.env
