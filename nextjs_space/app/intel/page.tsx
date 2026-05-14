@@ -2935,9 +2935,85 @@ function DeerIntelContent() {
   const [adjacentParcels, setAdjacentParcels] = useState<AdjacentParcelInfo[]>([]);
   const [adjacentParcelsLoading, setAdjacentParcelsLoading] = useState(false);
   const [showAdjacentParcels, setShowAdjacentParcels] = useState(true);
-  const [showTerritoryParcels, setShowTerritoryParcels] = useState(true);
-  const showTerritoryParcelsRef = useRef(true);
-  useEffect(() => { showTerritoryParcelsRef.current = showTerritoryParcels; }, [showTerritoryParcels]);
+  // Territory line mode: 'bold' (thick gold), 'thin' (Breckenridge ski-map), 'off' (hidden)
+  const [territoryLineMode, setTerritoryLineMode] = useState<'bold' | 'thin' | 'off'>('bold');
+  const territoryLineModeRef = useRef<'bold' | 'thin' | 'off'>('bold');
+  useEffect(() => { territoryLineModeRef.current = territoryLineMode; }, [territoryLineMode]);
+
+  // Centralized enforcer: applies the current territory line mode to all 4 boundary layers.
+  // Call this AFTER any code path that modifies territory layer visibility or paint.
+  const enforceTerritoryLineMode = useCallback((map: mapboxgl.Map) => {
+    const mode = territoryLineModeRef.current;
+    const count = territoryParcelsRef.current.length;
+    if (count === 0) return;
+
+    const LAYERS = ['tfp-territory-outline', 'tfp-territory-glow', 'tfp-territory-links-casing', 'tfp-territory-links-line'] as const;
+
+    if (mode === 'off') {
+      for (const id of LAYERS) {
+        try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
+      }
+      return;
+    }
+
+    if (mode === 'thin') {
+      // Breckenridge ski-map look: thin, legible, satellite + deer flow show through
+      try {
+        if (map.getLayer('tfp-territory-outline')) {
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-outline', 'line-width', 0.6);
+          map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
+          map.setPaintProperty('tfp-territory-outline', 'line-opacity', 0.25);
+        }
+        if (map.getLayer('tfp-territory-glow')) {
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+        }
+        if (map.getLayer('tfp-territory-links-casing')) {
+          map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-links-casing', 'line-width', 2);
+          map.setPaintProperty('tfp-territory-links-casing', 'line-opacity', 0.12);
+        }
+        if (map.getLayer('tfp-territory-links-line')) {
+          map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-links-line', 'line-width', 0.8);
+          map.setPaintProperty('tfp-territory-links-line', 'line-opacity', 0.3);
+        }
+      } catch {}
+      return;
+    }
+
+    // Bold mode — re-apply standard styling based on parcel count
+    try {
+      if (count > 1) {
+        if (map.getLayer('tfp-territory-outline')) {
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
+          map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
+          map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
+        }
+        if (map.getLayer('tfp-territory-glow')) {
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+        }
+      } else {
+        if (map.getLayer('tfp-territory-outline')) {
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
+          map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
+          map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
+        }
+        if (map.getLayer('tfp-territory-glow')) {
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
+          map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
+        }
+      }
+      if (map.getLayer('tfp-territory-links-casing')) {
+        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
+      }
+      if (map.getLayer('tfp-territory-links-line')) {
+        map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
+      }
+    } catch {}
+  }, []);
   const [selectedAdjacentParcel, setSelectedAdjacentParcel] = useState<AdjacentParcelInfo | null>(null);
   const [adjacentParcelPopupPos, setAdjacentParcelPopupPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -6459,10 +6535,11 @@ function DeerIntelContent() {
     if (territoryLinks && territoryLinks.features.length > 0) {
       linkSource.setData(territoryLinks);
       try {
-        const linksVis = showTerritoryParcelsRef.current ? 'visible' as const : 'none' as const;
-        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', linksVis);
-        map.setLayoutProperty('tfp-territory-links-line', 'visibility', linksVis);
+        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
+        map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
       } catch { /* layers may not exist */ }
+      // Enforce mode override (may downgrade to thin/off)
+      enforceTerritoryLineMode(map);
       console.log('[MAP] Updated territory links source:', territoryLinks.features.length, 'links');
     } else {
       linkSource.setData(EMPTY_FC);
@@ -7752,12 +7829,9 @@ function DeerIntelContent() {
       // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
       // so force them back here when parcels are present.
       try {
-        // Respect the Parcel Lines toggle — skip visibility restoration when toggle is OFF
-        const parcelsVisible = showTerritoryParcelsRef.current;
         if (territoryParcels.length > 1) {
-          // Multi-parcel territory: internal boundaries nearly invisible,
-          // merged outer hull is bold orange
-          map.setLayoutProperty('tfp-territory-outline', 'visibility', parcelsVisible ? 'visible' : 'none');
+          // Multi-parcel territory: set bold baseline styling, then enforcer adjusts for mode
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
           map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
           map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
           map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
@@ -7772,16 +7846,18 @@ function DeerIntelContent() {
           map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'visible');
           map.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', clampOpacity(0.9));
         } else {
-          // Single parcel in territory: standard outline styling
-          map.setLayoutProperty('tfp-territory-outline', 'visibility', parcelsVisible ? 'visible' : 'none');
+          // Single parcel: set bold baseline styling, then enforcer adjusts for mode
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
           map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
           map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
           map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
-          map.setLayoutProperty('tfp-territory-glow', 'visibility', parcelsVisible ? 'visible' : 'none');
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
           map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
           // Hide hull for single parcel
           map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'none');
         }
+        // Enforce territory line mode (overrides to thin/off if needed)
+        enforceTerritoryLineMode(map);
         // Clear adjacent source data AND hide layers to prevent grey film overlay.
         // Hiding alone is insufficient — stale geometry stays loaded in the source
         // and repaints instantly if any code path re-triggers visibility.
@@ -7804,69 +7880,15 @@ function DeerIntelContent() {
     }
   }, [territoryParcels, mapReady, getTerritoryBounds]);
 
-  // ========== TERRITORY PARCEL LINES VISIBILITY OVERRIDE ==========
-  // When showTerritoryParcels is toggled OFF, force-hide all four territory
-  // boundary layers (outline, glow, links-casing, links-line) so the deer flow
-  // visualization isn't overwhelmed by the orange mesh on multi-parcel territories.
-  // When toggled back ON, restore normal visibility and let the existing logic decide.
+  // ========== TERRITORY LINE MODE ENFORCER ==========
+  // When territoryLineMode changes, apply the correct visibility + paint to all 4 layers.
+  // Bold = thick gold (territory-building), Thin = Breckenridge ski-map, Off = hidden for deer flow.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady) return;
-    const TERRITORY_BOUNDARY_LAYERS = [
-      'tfp-territory-outline',
-      'tfp-territory-glow',
-      'tfp-territory-links-casing',
-      'tfp-territory-links-line',
-    ] as const;
-
-    if (!showTerritoryParcels) {
-      // Force-hide all territory boundary layers
-      for (const layerId of TERRITORY_BOUNDARY_LAYERS) {
-        try {
-          if (map.getLayer(layerId)) {
-            map.setLayoutProperty(layerId, 'visibility', 'none');
-          }
-        } catch { /* layer may not exist yet */ }
-      }
-      console.log('[TERRITORY] Parcel lines hidden by toggle');
-    } else if (territoryParcels.length > 0) {
-      // Restore visibility — re-apply the correct styling for current territory state
-      try {
-        if (territoryParcels.length > 1) {
-          // Multi-parcel: subtle internal boundaries
-          if (map.getLayer('tfp-territory-outline')) {
-            map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-            map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
-            map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
-            map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
-          }
-          if (map.getLayer('tfp-territory-glow')) {
-            map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
-          }
-        } else {
-          // Single parcel: standard gold outline
-          if (map.getLayer('tfp-territory-outline')) {
-            map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
-            map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
-            map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
-            map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
-          }
-          if (map.getLayer('tfp-territory-glow')) {
-            map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
-            map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
-          }
-        }
-        // Restore link lines (spider-leg connectors)
-        if (map.getLayer('tfp-territory-links-casing')) {
-          map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
-        }
-        if (map.getLayer('tfp-territory-links-line')) {
-          map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
-        }
-      } catch { /* layers may not exist yet */ }
-      console.log('[TERRITORY] Parcel lines restored by toggle');
-    }
-  }, [showTerritoryParcels, mapReady, territoryParcels.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!map || !mapReady || territoryParcels.length === 0) return;
+    enforceTerritoryLineMode(map);
+    console.log('[TERRITORY] Line mode applied:', territoryLineMode);
+  }, [territoryLineMode, mapReady, territoryParcels.length, enforceTerritoryLineMode]);
 
   // ========== AUTO-LOAD TERRITORY FROM URL PARAMS ==========
   // When ?territory=true&p1lat=..&p1lng=..&p2lat=..&p2lng=..&name=.. is in the URL,
@@ -13934,6 +13956,8 @@ function DeerIntelContent() {
                           tMap.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'visible');
                           tMap.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', 0.9);
                         }
+                        // Enforce territory line mode after assembly styling
+                        enforceTerritoryLineMode(tMap);
                       } catch (hullErr) {
                         console.warn('[TerritoryAssembly] Hull styling error:', hullErr);
                       }
@@ -14170,20 +14194,27 @@ function DeerIntelContent() {
                 {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
               </Button>
             )}
-            {/* Territory Parcel Lines Toggle */}
+            {/* Territory Parcel Lines 3-State Cycle: Bold → Thin → Off → Bold */}
             {territoryParcels.length > 0 && (
               <Button
                 size="sm"
                 variant="ghost"
-                className={`${showTerritoryParcels 
-                  ? 'bg-amber-600/20 text-amber-400 border border-amber-500/40' 
-                  : 'text-white/60 hover:text-white hover:bg-white/10'
+                className={`${
+                  territoryLineMode === 'bold'
+                    ? 'bg-amber-600/20 text-amber-400 border border-amber-500/40'
+                    : territoryLineMode === 'thin'
+                    ? 'bg-amber-600/10 text-amber-300/70 border border-amber-500/20'
+                    : 'text-white/40 hover:text-white/60 hover:bg-white/5'
                 }`}
-                onClick={() => setShowTerritoryParcels(!showTerritoryParcels)}
-                title={`${showTerritoryParcels ? 'Hide' : 'Show'} territory parcel boundaries`}
+                onClick={() => setTerritoryLineMode(prev => 
+                  prev === 'bold' ? 'thin' : prev === 'thin' ? 'off' : 'bold'
+                )}
+                title={`Parcel lines: ${territoryLineMode.toUpperCase()} — click to cycle`}
               >
                 <Layers className="h-4 w-4 mr-1" />
-                Parcel Lines
+                {territoryLineMode === 'bold' ? 'Lines: Bold' 
+                  : territoryLineMode === 'thin' ? 'Lines: Thin' 
+                  : 'Lines: Off'}
               </Button>
             )}
             {/* Exploration Mode Toggle — admin/debug only */}
