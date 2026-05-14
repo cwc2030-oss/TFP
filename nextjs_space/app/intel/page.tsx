@@ -2935,6 +2935,9 @@ function DeerIntelContent() {
   const [adjacentParcels, setAdjacentParcels] = useState<AdjacentParcelInfo[]>([]);
   const [adjacentParcelsLoading, setAdjacentParcelsLoading] = useState(false);
   const [showAdjacentParcels, setShowAdjacentParcels] = useState(true);
+  const [showTerritoryParcels, setShowTerritoryParcels] = useState(true);
+  const showTerritoryParcelsRef = useRef(true);
+  useEffect(() => { showTerritoryParcelsRef.current = showTerritoryParcels; }, [showTerritoryParcels]);
   const [selectedAdjacentParcel, setSelectedAdjacentParcel] = useState<AdjacentParcelInfo | null>(null);
   const [adjacentParcelPopupPos, setAdjacentParcelPopupPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -6456,8 +6459,9 @@ function DeerIntelContent() {
     if (territoryLinks && territoryLinks.features.length > 0) {
       linkSource.setData(territoryLinks);
       try {
-        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
-        map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
+        const linksVis = showTerritoryParcelsRef.current ? 'visible' as const : 'none' as const;
+        map.setLayoutProperty('tfp-territory-links-casing', 'visibility', linksVis);
+        map.setLayoutProperty('tfp-territory-links-line', 'visibility', linksVis);
       } catch { /* layers may not exist */ }
       console.log('[MAP] Updated territory links source:', territoryLinks.features.length, 'links');
     } else {
@@ -7748,10 +7752,12 @@ function DeerIntelContent() {
       // gracefulClear fades ALL tfp- layers (except tfp-parcel-) to opacity 0,
       // so force them back here when parcels are present.
       try {
+        // Respect the Parcel Lines toggle — skip visibility restoration when toggle is OFF
+        const parcelsVisible = showTerritoryParcelsRef.current;
         if (territoryParcels.length > 1) {
           // Multi-parcel territory: internal boundaries nearly invisible,
           // merged outer hull is bold orange
-          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', parcelsVisible ? 'visible' : 'none');
           map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
           map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
           map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
@@ -7767,11 +7773,11 @@ function DeerIntelContent() {
           map.setPaintProperty('tfp-territory-hull-outline', 'line-opacity', clampOpacity(0.9));
         } else {
           // Single parcel in territory: standard outline styling
-          map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+          map.setLayoutProperty('tfp-territory-outline', 'visibility', parcelsVisible ? 'visible' : 'none');
           map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
           map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
           map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
-          map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
+          map.setLayoutProperty('tfp-territory-glow', 'visibility', parcelsVisible ? 'visible' : 'none');
           map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
           // Hide hull for single parcel
           map.setLayoutProperty('tfp-territory-hull-outline', 'visibility', 'none');
@@ -7797,6 +7803,70 @@ function DeerIntelContent() {
       // Don't re-throw — territory useEffect errors should never crash the UI
     }
   }, [territoryParcels, mapReady, getTerritoryBounds]);
+
+  // ========== TERRITORY PARCEL LINES VISIBILITY OVERRIDE ==========
+  // When showTerritoryParcels is toggled OFF, force-hide all four territory
+  // boundary layers (outline, glow, links-casing, links-line) so the deer flow
+  // visualization isn't overwhelmed by the orange mesh on multi-parcel territories.
+  // When toggled back ON, restore normal visibility and let the existing logic decide.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const TERRITORY_BOUNDARY_LAYERS = [
+      'tfp-territory-outline',
+      'tfp-territory-glow',
+      'tfp-territory-links-casing',
+      'tfp-territory-links-line',
+    ] as const;
+
+    if (!showTerritoryParcels) {
+      // Force-hide all territory boundary layers
+      for (const layerId of TERRITORY_BOUNDARY_LAYERS) {
+        try {
+          if (map.getLayer(layerId)) {
+            map.setLayoutProperty(layerId, 'visibility', 'none');
+          }
+        } catch { /* layer may not exist yet */ }
+      }
+      console.log('[TERRITORY] Parcel lines hidden by toggle');
+    } else if (territoryParcels.length > 0) {
+      // Restore visibility — re-apply the correct styling for current territory state
+      try {
+        if (territoryParcels.length > 1) {
+          // Multi-parcel: subtle internal boundaries
+          if (map.getLayer('tfp-territory-outline')) {
+            map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+            map.setPaintProperty('tfp-territory-outline', 'line-width', 0.4);
+            map.setPaintProperty('tfp-territory-outline', 'line-color', '#888888');
+            map.setPaintProperty('tfp-territory-outline', 'line-opacity', ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.12] as any);
+          }
+          if (map.getLayer('tfp-territory-glow')) {
+            map.setLayoutProperty('tfp-territory-glow', 'visibility', 'none');
+          }
+        } else {
+          // Single parcel: standard gold outline
+          if (map.getLayer('tfp-territory-outline')) {
+            map.setLayoutProperty('tfp-territory-outline', 'visibility', 'visible');
+            map.setPaintProperty('tfp-territory-outline', 'line-width', 1.5);
+            map.setPaintProperty('tfp-territory-outline', 'line-color', '#c9a84c');
+            map.setPaintProperty('tfp-territory-outline', 'line-opacity', clampOpacity(0.5));
+          }
+          if (map.getLayer('tfp-territory-glow')) {
+            map.setLayoutProperty('tfp-territory-glow', 'visibility', 'visible');
+            map.setPaintProperty('tfp-territory-glow', 'line-opacity', clampOpacity(0.2));
+          }
+        }
+        // Restore link lines (spider-leg connectors)
+        if (map.getLayer('tfp-territory-links-casing')) {
+          map.setLayoutProperty('tfp-territory-links-casing', 'visibility', 'visible');
+        }
+        if (map.getLayer('tfp-territory-links-line')) {
+          map.setLayoutProperty('tfp-territory-links-line', 'visibility', 'visible');
+        }
+      } catch { /* layers may not exist yet */ }
+      console.log('[TERRITORY] Parcel lines restored by toggle');
+    }
+  }, [showTerritoryParcels, mapReady, territoryParcels.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== AUTO-LOAD TERRITORY FROM URL PARAMS ==========
   // When ?territory=true&p1lat=..&p1lng=..&p2lat=..&p2lng=..&name=.. is in the URL,
@@ -14098,6 +14168,22 @@ function DeerIntelContent() {
               >
                 <Grid3X3 className="h-4 w-4 mr-1" />
                 {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
+              </Button>
+            )}
+            {/* Territory Parcel Lines Toggle */}
+            {territoryParcels.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`${showTerritoryParcels 
+                  ? 'bg-amber-600/20 text-amber-400 border border-amber-500/40' 
+                  : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+                onClick={() => setShowTerritoryParcels(!showTerritoryParcels)}
+                title={`${showTerritoryParcels ? 'Hide' : 'Show'} territory parcel boundaries`}
+              >
+                <Layers className="h-4 w-4 mr-1" />
+                Parcel Lines
               </Button>
             )}
             {/* Exploration Mode Toggle — admin/debug only */}
