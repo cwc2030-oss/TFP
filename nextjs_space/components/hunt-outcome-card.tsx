@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, Crosshair } from 'lucide-react';
+import { X, Crosshair, CalendarX2 } from 'lucide-react';
 
 interface HuntSessionData {
   id: string;
@@ -17,7 +17,7 @@ interface HuntSessionData {
 interface HuntOutcomeCardProps {
   /** Called after outcome is recorded or skipped */
   onDismiss: () => void;
-  /** Force-show the card (from "Record Outcome" tap) */
+  /** Force-show the card (from "Record Outcome" tap or banner expand) */
   forceShow?: boolean;
 }
 
@@ -28,9 +28,14 @@ const OUTCOMES = [
   { key: 'no_activity', emoji: '✗',  label: 'No Activity' },
 ] as const;
 
+// Session-storage key so "Skip" collapse survives within a browser tab
+// but resets on next full page load / new tab
+const SKIP_KEY = 'hunt_outcome_skipped';
+
 export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCardProps) {
   const [huntSession, setHuntSession] = useState<HuntSessionData | null>(null);
-  const [visible, setVisible] = useState(false);
+  // 'full' = expanded panel, 'banner' = collapsed top bar, 'hidden' = nothing
+  const [mode, setMode] = useState<'full' | 'banner' | 'hidden'>('hidden');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -42,7 +47,6 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
     fetch(`/api/hunt-sessions?id=${activeId}`)
       .then(r => {
         if (!r.ok) {
-          // Session not found or unauthorized — clear stale reference
           localStorage.removeItem('active_hunt_session_id');
           return null;
         }
@@ -51,27 +55,36 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
       .then((data: HuntSessionData | null) => {
         if (!data) return;
         if (data.outcome) {
-          // Already recorded — clean up
           localStorage.removeItem('active_hunt_session_id');
           return;
         }
         setHuntSession(data);
 
-        if (forceShow) {
-          setVisible(true);
+        // Check if user already skipped this session
+        const skipped = sessionStorage.getItem(SKIP_KEY);
+        if (skipped === activeId) {
+          // Already skipped — show collapsed banner instead
+          setMode('banner');
           return;
         }
 
-        // Auto-show after 2 hours
+        // Auto-show full panel after 2 hours
         const hoursSince = (Date.now() - new Date(data.huntStartTime).getTime()) / 36e5;
         if (hoursSince >= 2) {
-          setVisible(true);
+          setMode('full');
         }
       })
       .catch(err => {
         console.error('[HuntOutcome] Failed to load session:', err);
       });
-  }, [forceShow]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // React to forceShow prop — open full panel when parent triggers it
+  useEffect(() => {
+    if (forceShow && huntSession) {
+      setMode('full');
+    }
+  }, [forceShow, huntSession]);
 
   const handleOutcome = useCallback(async (outcome: string) => {
     if (!huntSession || submitting) return;
@@ -88,9 +101,10 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
       });
       if (res.ok) {
         localStorage.removeItem('active_hunt_session_id');
+        sessionStorage.removeItem(SKIP_KEY);
         setSuccess(true);
         setTimeout(() => {
-          setVisible(false);
+          setMode('hidden');
           onDismiss();
         }, 2000);
       } else {
@@ -105,12 +119,19 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
   }, [huntSession, submitting, onDismiss]);
 
   const handleSkip = useCallback(() => {
-    // Don't clear localStorage — card resurfaces next load
-    setVisible(false);
-    onDismiss();
-  }, [onDismiss]);
+    // Collapse to banner — don't clear localStorage so it resurfaces next session
+    if (huntSession) {
+      sessionStorage.setItem(SKIP_KEY, huntSession.id);
+    }
+    setMode('banner');
+  }, [huntSession]);
 
-  if (!visible || !huntSession) return null;
+  const handleBannerExpand = useCallback(() => {
+    setMode('full');
+  }, []);
+
+  // No session or fully hidden
+  if (!huntSession || mode === 'hidden') return null;
 
   const huntTime = new Date(huntSession.huntStartTime);
   const dateStr = huntTime.toLocaleDateString('en-US', {
@@ -121,6 +142,7 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
   });
   const seasonLabel = huntSession.rutPhase === 'early' ? 'Early' : huntSession.rutPhase === 'rut' ? 'Rut' : 'Late';
 
+  // ─── Success confirmation ───
   if (success) {
     return (
       <div style={{
@@ -138,6 +160,36 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
     );
   }
 
+  // ─── Collapsed banner (after "Skip for now") ───
+  if (mode === 'banner') {
+    return (
+      <div
+        onClick={handleBannerExpand}
+        style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+          background: 'rgba(10,20,14,0.92)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid rgba(201,168,76,0.3)',
+          padding: '10px 16px',
+          display: 'flex', alignItems: 'center', gap: 10,
+          cursor: 'pointer',
+          transition: 'background 0.15s ease',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(10,20,14,0.98)'; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(10,20,14,0.92)'; }}
+      >
+        <Crosshair style={{ width: 14, height: 14, color: '#c9a84c', flexShrink: 0 }} />
+        <span style={{ flex: 1, color: '#d1d5db', fontSize: 12, fontWeight: 500 }}>
+          Log your <span style={{ color: '#c9a84c', fontWeight: 600 }}>{huntSession.standLabel}</span> sit — tap to record
+        </span>
+        <span style={{ color: '#c9a84c', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Record ›
+        </span>
+      </div>
+    );
+  }
+
+  // ─── Full expanded panel ───
   return (
     <div style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
@@ -200,8 +252,8 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
         </div>
       </div>
 
-      {/* Outcome buttons */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+      {/* Outcome buttons — 5 buttons: 2×2 grid + full-width 5th */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         {OUTCOMES.map(o => (
           <button
             key={o.key}
@@ -233,6 +285,36 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
         ))}
       </div>
 
+      {/* Didn't Hunt — full-width 5th button */}
+      <button
+        disabled={submitting}
+        onClick={() => handleOutcome('didnt_hunt')}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 8,
+          width: '100%',
+          padding: '12px 8px',
+          borderRadius: 10,
+          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'rgba(255,255,255,0.03)',
+          cursor: submitting ? 'wait' : 'pointer',
+          opacity: submitting ? 0.5 : 1,
+          transition: 'all 0.15s ease',
+          marginBottom: 16,
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)';
+          (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)';
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
+          (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.08)';
+        }}
+      >
+        <CalendarX2 style={{ width: 18, height: 18, color: '#9ca3af' }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#d1d5db' }}>Didn&apos;t Hunt</span>
+      </button>
+
       {/* Skip */}
       <div style={{ textAlign: 'center' }}>
         <button
@@ -253,7 +335,8 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
 }
 
 /* ──────────────────────────────────────────────
-   Hunt-in-progress indicator (top of left panel)
+   Hunt-in-progress / awaiting-outcome indicator
+   (top of left panel)
    ────────────────────────────────────────────── */
 
 interface HuntInProgressProps {
@@ -262,6 +345,7 @@ interface HuntInProgressProps {
 
 export function HuntInProgressBanner({ onRecordOutcome }: HuntInProgressProps) {
   const [standLabel, setStandLabel] = useState<string | null>(null);
+  const [awaitingOutcome, setAwaitingOutcome] = useState(false);
 
   useEffect(() => {
     const activeId = localStorage.getItem('active_hunt_session_id');
@@ -272,6 +356,9 @@ export function HuntInProgressBanner({ onRecordOutcome }: HuntInProgressProps) {
       .then((data: HuntSessionData | null) => {
         if (data && !data.outcome) {
           setStandLabel(data.standLabel);
+          // If >2 hours since start, it's "awaiting outcome" not "in progress"
+          const hoursSince = (Date.now() - new Date(data.huntStartTime).getTime()) / 36e5;
+          setAwaitingOutcome(hoursSince >= 2);
         } else {
           setStandLabel(null);
           if (data?.outcome) localStorage.removeItem('active_hunt_session_id');
@@ -284,6 +371,7 @@ export function HuntInProgressBanner({ onRecordOutcome }: HuntInProgressProps) {
   useEffect(() => {
     const handler = (e: CustomEvent) => {
       setStandLabel(e.detail?.standLabel || null);
+      setAwaitingOutcome(false); // just started — not awaiting yet
     };
     window.addEventListener('hunt-session-started' as any, handler);
     return () => window.removeEventListener('hunt-session-started' as any, handler);
@@ -291,7 +379,7 @@ export function HuntInProgressBanner({ onRecordOutcome }: HuntInProgressProps) {
 
   // Listen for dismissal
   useEffect(() => {
-    const handler = () => setStandLabel(null);
+    const handler = () => { setStandLabel(null); setAwaitingOutcome(false); };
     window.addEventListener('hunt-session-cleared' as any, handler);
     return () => window.removeEventListener('hunt-session-cleared' as any, handler);
   }, []);
@@ -302,13 +390,13 @@ export function HuntInProgressBanner({ onRecordOutcome }: HuntInProgressProps) {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
       padding: '8px 12px',
-      background: 'rgba(34,197,94,0.08)',
-      borderBottom: '1px solid rgba(34,197,94,0.15)',
+      background: awaitingOutcome ? 'rgba(201,168,76,0.08)' : 'rgba(34,197,94,0.08)',
+      borderBottom: `1px solid ${awaitingOutcome ? 'rgba(201,168,76,0.15)' : 'rgba(34,197,94,0.15)'}`,
       borderRadius: 0,
     }}>
-      <span style={{ fontSize: 10, lineHeight: 1 }}>🟢</span>
-      <span style={{ flex: 1, fontSize: 11, color: '#86efac', fontWeight: 500 }}>
-        Hunt in progress — {standLabel}
+      <span style={{ fontSize: 10, lineHeight: 1 }}>{awaitingOutcome ? '🟡' : '🟢'}</span>
+      <span style={{ flex: 1, fontSize: 11, color: awaitingOutcome ? '#fbbf24' : '#86efac', fontWeight: 500 }}>
+        {awaitingOutcome ? 'Awaiting outcome' : 'Hunt in progress'} — {standLabel}
       </span>
       <button
         onClick={onRecordOutcome}

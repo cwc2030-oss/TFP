@@ -18634,17 +18634,17 @@ function DeerIntelContent() {
       })()}
 
 
-      {/* ═══ v4.1 — HUNT OUTCOME CARD (bottom sheet) ═══ */}
-      {showOutcomeCard && (
-        <HuntOutcomeCard
-          forceShow
-          onDismiss={() => {
-            setShowOutcomeCard(false);
-            setActiveHuntStandLabel(null);
-            window.dispatchEvent(new CustomEvent('hunt-session-cleared'));
-          }}
-        />
-      )}
+      {/* ═══ v4.1 — HUNT OUTCOME CARD (bottom sheet / collapsed banner) ═══ */}
+      {/* Always mounted so it can auto-detect sessions and show banner/panel.
+          forceShow opens the full panel from the "Record Outcome" button. */}
+      <HuntOutcomeCard
+        forceShow={showOutcomeCard}
+        onDismiss={() => {
+          setShowOutcomeCard(false);
+          setActiveHuntStandLabel(null);
+          window.dispatchEvent(new CustomEvent('hunt-session-cleared'));
+        }}
+      />
 
 
     </div>
