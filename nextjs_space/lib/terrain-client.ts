@@ -234,15 +234,36 @@ export async function fetchTerrainAnalysis(
 }
 
 /**
- * Fetch parcel boundary from Regrid API
+ * Client-side session cache for parcel geometry.
+ * Key = rounded "lat,lng" (6 decimals). Survives within a single browser session,
+ * preventing duplicate Regrid lookups when the same parcel is viewed multiple times
+ * (e.g., Intel re-analyze, back-nav, page re-render).
+ */
+const parcelSessionCache = new Map<string, GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>>();
+function sessionCacheKey(lat: number, lng: number): string {
+  return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+}
+
+/**
+ * Fetch parcel boundary — uses the lightweight /api/parcels/lookup endpoint
+ * (backed by the same 30-day DB cache) instead of the heavier /api/parcels.
+ * Also checks a client-side session map to avoid hitting the server at all
+ * for parcels already loaded this browser session.
  */
 export async function fetchParcelGeometry(
   lat: number,
   lng: number
 ): Promise<GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null> {
+  // ── Session cache check ──
+  const cKey = sessionCacheKey(lat, lng);
+  const cached = parcelSessionCache.get(cKey);
+  if (cached) {
+    console.log('[TerrainClient] SESSION-CACHE HIT for:', lat, lng);
+    return cached;
+  }
+
   console.log('[TerrainClient] Fetching parcel boundary for:', lat, lng);
   
-  // 15-second timeout for parcel fetch to prevent indefinite hang
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
@@ -250,7 +271,8 @@ export async function fetchParcelGeometry(
   }, 15_000);
 
   try {
-    const response = await fetch(`/api/parcels?lat=${lat}&lng=${lng}`, {
+    // Use /api/parcels/lookup — lighter endpoint, same DB-backed cache
+    const response = await fetch(`/api/parcels/lookup?lat=${lat}&lng=${lng}`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -261,28 +283,33 @@ export async function fetchParcelGeometry(
     }
 
     const result = await response.json();
-    const data = result.parcels?.[0];
     
-    if (!data || !data.coordinates || !data.geometryType) {
+    if (!result.found || !result.parcel) {
       console.log('[TerrainClient] No parcel data in response');
       return null;
     }
 
+    const data = result.parcel;
     console.log('[TerrainClient] Got parcel:', data.parcelId, data.acreage, 'acres');
     
-    return {
+    const feature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> = {
       type: 'Feature',
       properties: {
         parcelId: data.parcelId,
         owner: data.owner,
         acreage: data.acreage,
-        address: data.siteAddress,
+        address: data.address,
       },
       geometry: {
         type: data.geometryType as 'Polygon' | 'MultiPolygon',
         coordinates: data.coordinates,
       },
     };
+
+    // Store in session cache
+    parcelSessionCache.set(cKey, feature);
+
+    return feature;
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === 'AbortError') {

@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { regridFetch } from "@/lib/regrid-client";
+import { geocodeAddress } from "@/lib/geocode-address";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
 import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
@@ -37,8 +39,20 @@ interface ParcelData {
 
 // Fetch REAL parcel data from Regrid API with caching
 async function fetchRegridParcelData(lat: number, lng: number, address?: string): Promise<ParcelData | null> {
+  // If address provided, geocode to lat/lng for better cache hit rates
+  let effectiveLat = lat;
+  let effectiveLng = lng;
+  if (address && (!lat || !lng || (lat === 0 && lng === 0))) {
+    const geo = await geocodeAddress(address);
+    if (geo) {
+      effectiveLat = geo.lat;
+      effectiveLng = geo.lng;
+      console.log(`[PDF] Geocoded "${address}" → ${effectiveLat}, ${effectiveLng}`);
+    }
+  }
+
   // Check cache first
-  const cached = await getCachedParcel(lat, lng);
+  const cached = await getCachedParcel(effectiveLat, effectiveLng);
   if (cached) {
     console.log(`[PDF] Using cached parcel data for ${lat}, ${lng}`);
     return {
@@ -73,16 +87,19 @@ async function fetchRegridParcelData(lat: number, lng: number, address?: string)
   }
 
   try {
-    // Try address search first if provided (more reliable than exact coordinates)
+    // Prefer coordinates (original or geocoded) for consistent caching
     let searchUrl: string;
-    if (address) {
-      console.log(`[PDF] Searching Regrid by address: ${address}`);
+    if (effectiveLat && effectiveLng) {
+      console.log(`[PDF] Fetching from Regrid by coordinates: ${effectiveLat}, ${effectiveLng}`);
+      searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${effectiveLat}&lon=${effectiveLng}&token=${apiKey}`;
+    } else if (address) {
+      console.log(`[PDF] Geocoding failed, searching Regrid by address: ${address}`);
       searchUrl = `https://app.regrid.com/api/v1/search.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
     } else {
       console.log(`[PDF] Fetching from Regrid by coordinates: ${lat}, ${lng}`);
       searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
     }
-    const searchResponse = await fetch(searchUrl, {
+    const searchResponse = await regridFetch(searchUrl, 'generate-pdf', {
       headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(15000),
     });
@@ -141,11 +158,11 @@ async function fetchRegridParcelData(lat: number, lng: number, address?: string)
       plssSection: fields.plss_section || null,
     };
 
-    // Cache the result
+    // Cache the result at effective coordinates (original or geocoded)
     const cacheData: CachedParcelData = {
       ...result,
     };
-    setCachedParcel(lat, lng, cacheData).catch(console.error);
+    setCachedParcel(effectiveLat, effectiveLng, cacheData).catch(console.error);
 
     return result;
   } catch (error) {

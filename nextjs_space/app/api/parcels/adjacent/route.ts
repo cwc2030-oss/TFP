@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { regridFetch } from "@/lib/regrid-client";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
     const url = `https://app.regrid.com/api/v2/parcels/point?lat=${lat}&lon=${lng}&radius=${radius}&limit=30&token=${apiKey}`;
     console.log('[Adjacent] Fetching:', url.replace(apiKey, '***'));
 
-    const resp = await fetch(url, {
+    const resp = await regridFetch(url, 'parcels-adjacent-v2', {
       headers: { 'Accept': 'application/json' },
       signal: AbortSignal.timeout(20000),
     });

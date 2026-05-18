@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { regridFetch } from "@/lib/regrid-client";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
 import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
@@ -78,7 +79,7 @@ async function fetchRegridParcelData(lat: number, lng: number): Promise<ParcelDa
   try {
     console.log(`[SAMPLE] Fetching fresh parcel data from Regrid for ${lat}, ${lng}`);
     const searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
-    const searchResponse = await fetch(searchUrl, {
+    const searchResponse = await regridFetch(searchUrl, 'free-look', {
       headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(15000),
     });

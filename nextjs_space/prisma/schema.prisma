@@ -102,6 +102,44 @@ model ParcelCache {
   @@index([lat, lng])
 }
 
+model NeighborCache {
+  id          String   @id @default(cuid())
+  lat         Float
+  lng         Float
+  radius      Int      @default(500)
+  data        String   // JSON stringified array of neighbor parcels
+  createdAt   DateTime @default(now())
+
+  @@unique([lat, lng, radius])
+  @@index([lat, lng])
+}
+
+model RegridUsage {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  endpointTag String
+  callCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([date, endpointTag])
+  @@index([date])
+}
+
+model RandomParcelPool {
+  id          String   @id @default(cuid())
+  state       String   // MO, KS, IA, OK
+  parcelId    String
+  data        String   // JSON stringified parcel response object
+  acreage     Float
+  county      String
+  createdAt   DateTime @default(now())
+  served      Boolean  @default(false)  // true once served to a user
+
+  @@index([state, served])
+  @@index([state, acreage])
+}
+
 model ParcelPurchase {
   id              String   @id @default(cuid())
   userId          String

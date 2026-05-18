@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { regridFetch } from "@/lib/regrid-client";
+import { geocodeAddress } from "@/lib/geocode-address";
 
 // Version 2.1 - Regrid Pro API with caching
 export const dynamic = "force-dynamic";
@@ -118,18 +120,30 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Check cache first for coordinate-based lookups
-    if (lat && lng) {
-      const cached = await getCachedParcel(parseFloat(lat), parseFloat(lng));
+    // If address provided without lat/lng, geocode it first so we can check cache
+    let effectiveLat = lat;
+    let effectiveLng = lng;
+    if (address && !lat && !lng) {
+      const geo = await geocodeAddress(address);
+      if (geo) {
+        effectiveLat = String(geo.lat);
+        effectiveLng = String(geo.lng);
+        console.log(`[PARCELS GET] Geocoded "${address}" → ${effectiveLat}, ${effectiveLng}`);
+      }
+    }
+
+    // Check cache first for coordinate-based lookups (now includes geocoded addresses)
+    if (effectiveLat && effectiveLng) {
+      const cached = await getCachedParcel(parseFloat(effectiveLat), parseFloat(effectiveLng));
       if (cached) {
         // Validate cached geometry — if no polygon coordinates, evict and re-fetch from Regrid
         const hasValidGeometry = cached.coordinates && 
           Array.isArray(cached.coordinates) && 
           cached.coordinates.length > 0;
         if (!hasValidGeometry) {
-          console.log(`[CACHE EVICT] No geometry for parcel at ${lat}, ${lng} — forcing fresh Regrid fetch`);
-          const roundedLat = Math.round(parseFloat(lat) * 100000) / 100000;
-          const roundedLng = Math.round(parseFloat(lng) * 100000) / 100000;
+          console.log(`[CACHE EVICT] No geometry for parcel at ${effectiveLat}, ${effectiveLng} — forcing fresh Regrid fetch`);
+          const roundedLat = Math.round(parseFloat(effectiveLat) * 100000) / 100000;
+          const roundedLng = Math.round(parseFloat(effectiveLng) * 100000) / 100000;
           try {
             await prisma.parcelCache.delete({
               where: { lat_lng: { lat: roundedLat, lng: roundedLng } },
@@ -151,8 +165,8 @@ export async function GET(request: NextRequest) {
           useDescription: cached.useDescription,
           coordinates: cached.coordinates || [],
           geometryType: cached.geometryType || "Polygon",
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
+          lat: parseFloat(effectiveLat),
+          lng: parseFloat(effectiveLng),
           regridPath: "",
           marketValue: cached.marketValue,
           landValue: cached.landValue,
@@ -191,14 +205,15 @@ export async function GET(request: NextRequest) {
     }
 
     // Use the search endpoint (more reliable than typeahead)
+    // Prefer geocoded lat/lng over raw address query to improve cache hit rates
     let searchUrl: string;
     
-    if (address) {
-      // Search by address
+    if (effectiveLat && effectiveLng) {
+      // Search by coordinates (original or geocoded from address)
+      searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${effectiveLat}&lon=${effectiveLng}&token=${apiKey}`;
+    } else if (address) {
+      // Geocoding failed — fall back to raw address query
       searchUrl = `https://app.regrid.com/api/v1/search.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
-    } else if (lat && lng) {
-      // Search by coordinates
-      searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
     } else {
       return NextResponse.json(
         { parcels: [], message: "Address or coordinates required" },
@@ -206,7 +221,7 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    const searchResponse = await fetch(searchUrl, {
+    const searchResponse = await regridFetch(searchUrl, 'parcels-get', {
       headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(15000),
     });
@@ -317,8 +332,8 @@ export async function GET(request: NextRequest) {
     };
 
     // Cache the result for future lookups
-    const parcelLat = parseFloat(fields.lat) || (lat ? parseFloat(lat) : 0);
-    const parcelLng = parseFloat(fields.lon) || (lng ? parseFloat(lng) : 0);
+    const parcelLat = parseFloat(fields.lat) || (effectiveLat ? parseFloat(effectiveLat) : 0);
+    const parcelLng = parseFloat(fields.lon) || (effectiveLng ? parseFloat(effectiveLng) : 0);
     
     if (parcelLat && parcelLng) {
       const cacheData: CachedParcelData = {
@@ -365,7 +380,13 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Also support getting neighboring parcels using radius search
+// Round coordinates for consistent neighbor cache keys (4 decimal places ≈ 11m)
+function roundCoord4(val: number): number {
+  return Math.round(val * 10000) / 10000;
+}
+
+// Neighboring parcels using single Regrid v2 parcels/point?radius= call + DB cache.
+// Replaces the old 8-call "compass rose" v1 pattern, saving 7 Regrid calls per invocation.
 export async function POST(request: NextRequest) {
   const apiKey = process.env.REGRID_API_KEY;
   
@@ -378,7 +399,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { lat, lng, radius = 0.002 } = body;
+    const { lat, lng, radius: _radius } = body;
     
     if (!lat || !lng) {
       return NextResponse.json(
@@ -387,101 +408,113 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use the v1 search endpoint with multiple offset points to find neighbors
-    // This is more reliable than the v2 bbox query which can be problematic
-    const offsets = [
-      { latOff: radius, lngOff: 0 },      // North
-      { latOff: -radius, lngOff: 0 },     // South
-      { latOff: 0, lngOff: radius },      // East
-      { latOff: 0, lngOff: -radius },     // West
-      { latOff: radius, lngOff: radius }, // NE
-      { latOff: radius, lngOff: -radius },// NW
-      { latOff: -radius, lngOff: radius },// SE
-      { latOff: -radius, lngOff: -radius },// SW
-    ];
+    // Convert the old radius (in degrees, ~0.002) to meters for v2 endpoint.
+    // 0.002 degrees ≈ 220m. Default to 500m for good neighbor coverage.
+    const radiusMeters = 500;
 
-    const uniqueParcels = new Map<string, any>();
-    
-    // Fetch parcels at each offset point
-    const fetchPromises = offsets.map(async ({ latOff, lngOff }) => {
-      const searchLat = lat + latOff;
-      const searchLng = lng + lngOff;
-      
-      try {
-        const url = `https://app.regrid.com/api/v1/search.json?lat=${searchLat}&lon=${searchLng}&token=${apiKey}`;
-        const response = await fetch(url, {
-          headers: { "Accept": "application/json" },
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (!response.ok) return [];
-        
-        const data = await response.json();
-        return data.results || [];
-      } catch {
-        return [];
+    // ── Check neighbor cache ──
+    const rLat = roundCoord4(lat);
+    const rLng = roundCoord4(lng);
+    try {
+      const cached = await prisma.neighborCache.findUnique({
+        where: { lat_lng_radius: { lat: rLat, lng: rLng, radius: radiusMeters } },
+      });
+      if (cached) {
+        console.log(`[NEIGHBOR-CACHE HIT] ${rLat}, ${rLng}, r=${radiusMeters}`);
+        const parcels = JSON.parse(cached.data);
+        return NextResponse.json({ parcels, cached: true });
       }
+    } catch (cacheErr) {
+      console.error('[NEIGHBOR-CACHE] Read error (non-fatal):', cacheErr);
+    }
+
+    // ── Single v2 call ──
+    const url = `https://app.regrid.com/api/v2/parcels/point?lat=${lat}&lon=${lng}&radius=${radiusMeters}&limit=30&token=${apiKey}`;
+    console.log('[Neighbors-v2] Fetching:', url.replace(apiKey, '***'));
+
+    const resp = await regridFetch(url, 'parcels-neighbors-v2', {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15000),
     });
 
-    const allResults = await Promise.all(fetchPromises);
-    
-    // Combine and dedupe by parcel ID
-    allResults.flat().forEach((feature: any) => {
-      const fields = feature.properties?.fields || {};
-      const parcelId = fields.parcelnumb || fields.parcelnumb_no_formatting;
-      
-      if (parcelId && !uniqueParcels.has(parcelId)) {
-        const mailParts = [
-          fields.mailadd || fields.mail_address,
-          fields.mail_city,
-          fields.mail_state2,
-          fields.mail_zip
-        ].filter(Boolean);
-        
-        const siteParts = [
-          fields.address,
-          fields.city || fields.situs_city,
-          fields.state2 || fields.situs_state2,
-          fields.szip || fields.situs_zip
-        ].filter(Boolean);
+    if (!resp.ok) {
+      console.error('[Neighbors-v2] Regrid error:', resp.status);
+      return NextResponse.json(
+        { parcels: [], error: `Regrid API error: ${resp.status}` },
+        { status: 200 }
+      );
+    }
 
-        uniqueParcels.set(parcelId, {
-          parcelId,
-          owner: fields.owner || "Unknown Owner",
-          mailingAddress: mailParts.length > 0 ? mailParts.join(", ") : "Not Available",
-          siteAddress: siteParts.length > 0 ? siteParts.join(", ") : feature.properties?.headline || "Not Available",
-          acreage: fields.ll_gisacre || fields.gisacre || fields.acres || 0,
-          sqft: fields.ll_gissqft || fields.sqft || 0,
-          zoning: fields.zoning || "N/A",
-          useDescription: fields.usedesc || fields.zoning_description || "N/A",
-          coordinates: feature.geometry?.coordinates || [],
-          geometryType: feature.geometry?.type || "Polygon",
-          lat: parseFloat(fields.lat) || 0,
-          lng: parseFloat(fields.lon) || 0,
-          regridPath: fields.path || feature.properties?.path || "",
-          buildingFootprintSqft: fields.recrdareano || fields.area_building || null,
-          buildingCount: fields.ll_address_count || null,
-          isQualifiedOpportunityZone: fields.qoz === "Yes" || fields.qoz === "1" || fields.qoz === true,
-          qozTract: fields.qoz_tract || null,
-          femaNriRiskRating: fields.fema_nri_risk_rating || null,
-          femaFloodZone: fields.fema_flood_zone || null,
-          femaFloodZoneSubtype: fields.fema_flood_zone_subtype || null,
-          elementarySchoolDistrict: fields.census_elementary_school_district || null,
-          secondarySchoolDistrict: fields.census_secondary_school_district || null,
-          unifiedSchoolDistrict: fields.census_unified_school_district || null,
-        });
-      }
-    });
+    const data = await resp.json();
+    const features: GeoJSON.Feature[] = data?.features || [];
+    console.log('[Neighbors-v2] Got', features.length, 'features');
 
-    const parcels = Array.from(uniqueParcels.values());
-    
+    // Map to the same shape the frontend expects
+    const parcels: any[] = [];
+    for (const f of features) {
+      const props = f.properties || {};
+      const fields = props.fields || props;
+      const parcelId = fields.parcelnumb || fields.parcelnumb_no_formatting || fields.ll_uuid || '';
+
+      if (!f.geometry) continue;
+
+      const mailParts = [
+        fields.mailadd || fields.mail_address,
+        fields.mail_city,
+        fields.mail_state2,
+        fields.mail_zip,
+      ].filter(Boolean);
+
+      const siteParts = [
+        fields.address || fields.situs_address,
+        fields.city || fields.situs_city,
+        fields.state2 || fields.situs_state2,
+        fields.szip || fields.situs_zip,
+      ].filter(Boolean);
+
+      const geom = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+
+      parcels.push({
+        parcelId: parcelId || `unknown-${parcels.length}`,
+        owner: fields.owner || 'Unknown Owner',
+        mailingAddress: mailParts.length > 0 ? mailParts.join(', ') : 'Not Available',
+        siteAddress: siteParts.length > 0 ? siteParts.join(', ') : props.headline || 'Not Available',
+        acreage: parseFloat(fields.ll_gisacre || fields.gisacre || fields.acres || '0') || 0,
+        sqft: parseFloat(fields.ll_gissqft || fields.sqft || '0') || 0,
+        zoning: fields.zoning || 'N/A',
+        useDescription: fields.usedesc || fields.zoning_description || 'N/A',
+        coordinates: geom.coordinates || [],
+        geometryType: geom.type || 'Polygon',
+        lat: parseFloat(fields.lat) || 0,
+        lng: parseFloat(fields.lon) || 0,
+        regridPath: fields.path || props.path || '',
+        buildingFootprintSqft: fields.recrdareano || fields.area_building || null,
+        buildingCount: fields.ll_address_count || null,
+        isQualifiedOpportunityZone: fields.qoz === 'Yes' || fields.qoz === '1' || fields.qoz === true,
+        qozTract: fields.qoz_tract || null,
+        femaNriRiskRating: fields.fema_nri_risk_rating || null,
+        femaFloodZone: fields.fema_flood_zone || null,
+        femaFloodZoneSubtype: fields.fema_flood_zone_subtype || null,
+        elementarySchoolDistrict: fields.census_elementary_school_district || null,
+        secondarySchoolDistrict: fields.census_secondary_school_district || null,
+        unifiedSchoolDistrict: fields.census_unified_school_district || null,
+      });
+    }
+
+    // ── Write neighbor cache (background, fire-and-forget) ──
+    prisma.neighborCache.upsert({
+      where: { lat_lng_radius: { lat: rLat, lng: rLng, radius: radiusMeters } },
+      update: { data: JSON.stringify(parcels) },
+      create: { lat: rLat, lng: rLng, radius: radiusMeters, data: JSON.stringify(parcels) },
+    }).catch((err) => console.error('[NEIGHBOR-CACHE] Write error:', err));
+
     return NextResponse.json({ parcels });
 
   } catch (error) {
     console.error("Error fetching neighboring parcels:", error);
     return NextResponse.json(
       { parcels: [], error: "Failed to fetch neighboring parcels" },
-      { status: 200 } // Return 200 with empty array to avoid breaking the UI
+      { status: 200 }
     );
   }
 }

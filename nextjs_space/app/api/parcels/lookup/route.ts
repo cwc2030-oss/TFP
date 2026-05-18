@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { normalizeToOuterRing, validateParcelGeometry, logGeometryDebug } from "@/lib/geometry-validation";
+import { regridFetch } from "@/lib/regrid-client";
 
 export const dynamic = "force-dynamic";
 
@@ -230,7 +231,7 @@ export async function GET(request: NextRequest) {
     // Fetch from Regrid
     const searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
 
-    const searchResponse = await fetch(searchUrl, {
+    const searchResponse = await regridFetch(searchUrl, 'parcels-lookup', {
       headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(15000),
     });

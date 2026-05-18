@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { regridFetch } from "@/lib/regrid-client";
+import { geocodeAddress } from "@/lib/geocode-address";
 import { fetchSoilData } from "@/lib/usda-soil";
 import { getCWDStatus, getDroughtStatus, getHarvestData, getHarvestPressureLabel, DEER_SEASONS_2025_2026 } from "@/lib/missouri-hunting";
 
@@ -25,7 +27,19 @@ interface ParcelData {
 }
 
 async function fetchRegridParcelData(lat: number, lng: number, address?: string): Promise<ParcelData | null> {
-  const cached = await getCachedParcel(lat, lng);
+  // If address provided, geocode to lat/lng for better cache hit rates
+  let effectiveLat = lat;
+  let effectiveLng = lng;
+  if (address && (!lat || !lng || (lat === 0 && lng === 0))) {
+    const geo = await geocodeAddress(address);
+    if (geo) {
+      effectiveLat = geo.lat;
+      effectiveLng = geo.lng;
+      console.log(`[HUNTING-INTEL] Geocoded "${address}" → ${effectiveLat}, ${effectiveLng}`);
+    }
+  }
+
+  const cached = await getCachedParcel(effectiveLat, effectiveLng);
   if (cached) {
     return {
       parcelId: cached.parcelId,
@@ -46,13 +60,16 @@ async function fetchRegridParcelData(lat: number, lng: number, address?: string)
   if (!apiKey) return null;
 
   try {
+    // Prefer coordinates over raw address query for consistent caching
     let searchUrl: string;
-    if (address) {
+    if (effectiveLat && effectiveLng) {
+      searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${effectiveLat}&lon=${effectiveLng}&token=${apiKey}`;
+    } else if (address) {
       searchUrl = `https://app.regrid.com/api/v1/search.json?query=${encodeURIComponent(address)}&token=${apiKey}`;
     } else {
       searchUrl = `https://app.regrid.com/api/v1/search.json?lat=${lat}&lon=${lng}&token=${apiKey}`;
     }
-    const searchResponse = await fetch(searchUrl, {
+    const searchResponse = await regridFetch(searchUrl, 'hunting-intel', {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(15000),
     });
@@ -88,7 +105,7 @@ async function fetchRegridParcelData(lat: number, lng: number, address?: string)
       legalDescription: fields.legaldesc || null,
     };
 
-    setCachedParcel(lat, lng, result as CachedParcelData).catch(console.error);
+    setCachedParcel(effectiveLat, effectiveLng, result as CachedParcelData).catch(console.error);
     return result;
   } catch (error) {
     console.error("Regrid fetch error:", error);
