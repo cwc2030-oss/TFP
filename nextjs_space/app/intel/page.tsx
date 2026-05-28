@@ -54,7 +54,7 @@ import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySynthetic
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
-import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain } from '@/lib/territory-assembly';
+import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain, type TerrainFlowBundle } from '@/lib/territory-assembly';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { CDLAnalysisResult } from '@/lib/cdl-analysis';
 import type { TerrainFlowResponse, TerrainFlowVisibility, FlowComparisonState, FlowSegmentScoreResponse, OpportunityZoneProperties, FlowMode } from '@/types/terrain-flow';
@@ -13899,6 +13899,108 @@ function DeerIntelContent() {
                     // Step 3: Assemble merged territory data
                     const parcelPolygons = parcels.map(p => ({ id: p.id, lat: p.lat, lng: p.lng, polygon: p.polygon }));
                     const assembled = assembleTerritory(allTerrain, parcelPolygons);
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // STEP 3b: UNIFIED TERRITORY DEER FLOW
+                    // "Hunters don't think in parcels — Territory is the user-facing
+                    // concept; parcels are invisible plumbing."
+                    //
+                    // Corridors, ridges, and bedding can be assembled per-parcel
+                    // (they're spatially local), but Deer Flow must be computed
+                    // across the entire territory as one unit — a herd doesn't
+                    // stop at a property line.
+                    //
+                    // The per-parcel cache-miss loop above handles corridors/ridges/
+                    // bedding. Here we bypass that for flow: one fetchFlow call over
+                    // the merged MultiPolygon, cached by a SHA-256 hash of sorted
+                    // parcel IDs. Single-parcel "territories" skip this — the
+                    // per-parcel path already covers them.
+                    // ═══════════════════════════════════════════════════════════════
+                    if (parcels.length > 1 && merged) {
+                      try {
+                        setProgress(88);
+                        setProgressStep('Computing territory-wide deer flow...');
+
+                        // Deterministic territory cache key: SHA-256 of sorted parcel IDs
+                        const sortedIds = parcelIds.slice().sort().join('|');
+                        const hashBuffer = await crypto.subtle.digest(
+                          'SHA-256',
+                          new TextEncoder().encode(sortedIds)
+                        );
+                        const hashHex = Array.from(new Uint8Array(hashBuffer))
+                          .map(b => b.toString(16).padStart(2, '0'))
+                          .join('');
+                        const territoryFlowKey = `territory_flow_${hashHex}`;
+
+                        // Check territory flow cache
+                        const territoryCache = await fetchCachedTerrain([territoryFlowKey]);
+
+                        if (
+                          territoryCache.found.length > 0 &&
+                          territoryCache.results[territoryFlowKey]?.terrainFlowData
+                        ) {
+                          // Cache HIT — use cached unified flow
+                          console.log('[TerritoryFlow] Cache HIT for', territoryFlowKey.slice(0, 40));
+                          assembled.terrainFlowData = territoryCache.results[territoryFlowKey].terrainFlowData!;
+                        } else {
+                          // Cache MISS — fetch unified flow across the entire territory
+                          console.log('[TerritoryFlow] Cache MISS — fetching unified flow for', parcels.length, 'parcels');
+                          const { fetchTerrainFlow: fetchFlowUnified } = await import('@/lib/terrain-flow');
+                          const unifiedFlowResult = await fetchFlowUnified({
+                            parcel: merged,
+                            parcel_id: territoryFlowKey,
+                            bufferMeters: 1000,
+                          });
+
+                          if (unifiedFlowResult.success && unifiedFlowResult.data) {
+                            const unifiedFlow: TerrainFlowBundle = {
+                              flow_primary: unifiedFlowResult.data.flow_primary,
+                              flow_secondary: unifiedFlowResult.data.flow_secondary,
+                              convergence_zones: unifiedFlowResult.data.convergence_zones,
+                              opportunity_zones: unifiedFlowResult.data.opportunity_zones,
+                              isSynthetic: unifiedFlowResult.isSynthetic,
+                              metadata: {
+                                flow_count_primary: unifiedFlowResult.data.metadata?.stats?.flow_count_primary || 0,
+                                flow_count_secondary: unifiedFlowResult.data.metadata?.stats?.flow_count_secondary || 0,
+                                convergence_count: unifiedFlowResult.data.metadata?.stats?.convergence_count || 0,
+                                total_flow_length_m: unifiedFlowResult.data.metadata?.stats?.total_flow_length_m || 0,
+                                mode: unifiedFlowResult.data.metadata?.mode,
+                                dem_source: unifiedFlowResult.data.metadata?.dem_source,
+                              },
+                            };
+                            assembled.terrainFlowData = unifiedFlow;
+
+                            // Cache the unified result for future territory loads
+                            const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+                            writeCachedTerrain(
+                              territoryFlowKey,
+                              centerLat,
+                              centerLng,
+                              parcels.reduce((s, p) => s + p.acreage, 0),
+                              {
+                                parcelId: territoryFlowKey,
+                                layers: { beddingPolygons: emptyFC as any, funnels: emptyFC as any, standPoints: emptyFC as any },
+                                tieredCorridorData: null,
+                                ridgeSpineData: null,
+                                terrainFlowData: unifiedFlow,
+                                summary: null,
+                                provenance: 'territory_unified_flow',
+                              }
+                            );
+                            console.log(
+                              '[TerritoryFlow] Unified flow computed and cached:',
+                              unifiedFlowResult.data.flow_primary?.features?.length || 0, 'primary,',
+                              unifiedFlowResult.data.flow_secondary?.features?.length || 0, 'secondary,',
+                              unifiedFlowResult.data.convergence_zones?.features?.length || 0, 'convergence'
+                            );
+                          } else {
+                            console.warn('[TerritoryFlow] Unified flow fetch failed, falling back to per-parcel assembly');
+                          }
+                        }
+                      } catch (flowErr) {
+                        console.warn('[TerritoryFlow] Territory flow error, falling back to per-parcel assembly:', flowErr);
+                      }
+                    }
 
                     // Step 4: Inject all assembled data directly into state
                     setLayers(assembled.layers);
