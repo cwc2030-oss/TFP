@@ -171,37 +171,70 @@ export function assembleTerritory(
     intrusion_overlay: mergeFeatureCollections(
       ...parcels.map(p => tagFeatures(p.tieredCorridorData?.intrusion_overlay, p.parcelId))
     ),
+    metadata: {
+      local_baseline: parcels.reduce((sum, p) => sum + (p.tieredCorridorData?.metadata?.local_baseline || 0), 0) / (parcels.filter(p => p.tieredCorridorData?.metadata?.local_baseline).length || 1),
+      primary_threshold: parcels.reduce((sum, p) => sum + (p.tieredCorridorData?.metadata?.primary_threshold || 0), 0) / (parcels.filter(p => p.tieredCorridorData?.metadata?.primary_threshold).length || 1),
+      possible_threshold: parcels.reduce((sum, p) => sum + (p.tieredCorridorData?.metadata?.possible_threshold || 0), 0) / (parcels.filter(p => p.tieredCorridorData?.metadata?.possible_threshold).length || 1),
+      exploratory_threshold: parcels.reduce((sum, p) => sum + (p.tieredCorridorData?.metadata?.exploratory_threshold || 0), 0) / (parcels.filter(p => p.tieredCorridorData?.metadata?.exploratory_threshold).length || 1),
+      parcel_coverage_pct: parcels.reduce((sum, p) => sum + (p.tieredCorridorData?.metadata?.parcel_coverage_pct || 0), 0) / (parcels.filter(p => p.tieredCorridorData?.metadata?.parcel_coverage_pct).length || 1),
+    },
   };
 
   // ---- Merge ridge spines ----
+  const mergedRidgesPrimary = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.ridgeSpineData?.ridges_primary, p.parcelId))
+  );
+  const mergedRidgesSecondary = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.ridgeSpineData?.ridges_secondary, p.parcelId))
+  );
+  const mergedSaddleNodes = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.ridgeSpineData?.saddle_nodes, p.parcelId))
+  );
   const mergedRidges: RidgeSpineBundle = {
-    ridges_primary: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.ridgeSpineData?.ridges_primary, p.parcelId))
-    ),
-    ridges_secondary: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.ridgeSpineData?.ridges_secondary, p.parcelId))
-    ),
-    saddle_nodes: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.ridgeSpineData?.saddle_nodes, p.parcelId))
-    ),
+    ridges_primary: mergedRidgesPrimary,
+    ridges_secondary: mergedRidgesSecondary,
+    saddle_nodes: mergedSaddleNodes,
     isSynthetic: parcels.every(p => p.ridgeSpineData?.isSynthetic !== false),
+    metadata: {
+      ridge_count_primary: mergedRidgesPrimary.features.length,
+      ridge_count_secondary: mergedRidgesSecondary.features.length,
+      saddle_count: mergedSaddleNodes.features.length,
+      total_ridge_length_m: parcels.reduce((sum, p) => sum + (p.ridgeSpineData?.metadata?.total_ridge_length_m || 0), 0),
+      dem_source: parcels.find(p => p.ridgeSpineData?.metadata?.dem_source)?.ridgeSpineData?.metadata?.dem_source,
+      backbone_confidence: parcels.length > 0
+        ? parcels.reduce((sum, p) => sum + (p.ridgeSpineData?.metadata?.backbone_confidence || 0), 0) / parcels.filter(p => p.ridgeSpineData?.metadata?.backbone_confidence).length || 0
+        : 0,
+    },
   };
 
   // ---- Merge terrain flow ----
+  const mergedFlowPrimary = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.terrainFlowData?.flow_primary, p.parcelId))
+  );
+  const mergedFlowSecondary = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.terrainFlowData?.flow_secondary, p.parcelId))
+  );
+  const mergedConvergence = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.terrainFlowData?.convergence_zones, p.parcelId))
+  );
+  const mergedOpportunity = mergeFeatureCollections(
+    ...parcels.map(p => tagFeatures(p.terrainFlowData?.opportunity_zones, p.parcelId))
+  );
   const mergedFlow: TerrainFlowBundle = {
-    flow_primary: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.terrainFlowData?.flow_primary, p.parcelId))
-    ),
-    flow_secondary: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.terrainFlowData?.flow_secondary, p.parcelId))
-    ),
-    convergence_zones: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.terrainFlowData?.convergence_zones, p.parcelId))
-    ),
-    opportunity_zones: mergeFeatureCollections(
-      ...parcels.map(p => tagFeatures(p.terrainFlowData?.opportunity_zones, p.parcelId))
-    ),
+    flow_primary: mergedFlowPrimary,
+    flow_secondary: mergedFlowSecondary,
+    convergence_zones: mergedConvergence,
+    opportunity_zones: mergedOpportunity,
     isSynthetic: parcels.every(p => p.terrainFlowData?.isSynthetic !== false),
+    metadata: {
+      flow_count_primary: mergedFlowPrimary.features.length,
+      flow_count_secondary: mergedFlowSecondary.features.length,
+      convergence_count: mergedConvergence.features.length,
+      opportunity_count: mergedOpportunity.features.length,
+      total_flow_length_m: parcels.reduce((sum, p) => sum + (p.terrainFlowData?.metadata?.total_flow_length_m || 0), 0),
+      mode: parcels.find(p => p.terrainFlowData?.metadata?.mode)?.terrainFlowData?.metadata?.mode,
+      dem_source: parcels.find(p => p.terrainFlowData?.metadata?.dem_source)?.terrainFlowData?.metadata?.dem_source,
+    },
   };
 
   // ---- Merge summaries ----
@@ -210,6 +243,7 @@ export function assembleTerritory(
   // ---- Compute cross-parcel connections ----
   const territoryLinks = computeCrossParcelLinks(parcels, parcelPolygons);
   console.log('[TerritoryAssembly] Generated', territoryLinks.features.length, 'cross-parcel links');
+  console.log('[TerritoryAssembly] Metadata — Ridges:', mergedRidges.metadata?.ridge_count_primary, 'primary,', mergedRidges.metadata?.ridge_count_secondary, 'secondary,', mergedRidges.metadata?.saddle_count, 'saddles | Flow:', mergedFlow.metadata?.flow_count_primary, 'primary,', mergedFlow.metadata?.flow_count_secondary, 'secondary,', mergedFlow.metadata?.convergence_count, 'convergence');
 
   return {
     layers: mergedLayers,
