@@ -8520,13 +8520,14 @@ function DeerIntelContent() {
       }
       // v3.8.2: Bedding Zones — DEMOTED to low-confidence context layer.
       // Visible only when user opts-in via toggle. Subdued opacity — supporting context, not signal.
+      // v4.1: Bedding Zones — elevated from whisper-level to readable context.
+      // Previous 0.08 fill was invisible on satellite. Now 0.22 fill + 0.55 outline.
       fadeToggleLayers(map, showBeddingProbability, [
-        // Polygon bedding zones — whisper-level opacity (context, not decision)
-        { id: 'tfp-bedding-fill', targetOpacity: 0.08, opacityProp: 'fill-opacity' },
-        { id: 'tfp-bedding-outline', targetOpacity: 0.30 },
-        // Ghost bedding edge zones — follows same toggle
-        { id: 'tfp-edge-ghost-fill', targetOpacity: 0.08, opacityProp: 'fill-opacity' },
-        { id: 'tfp-edge-ghost-outline', targetOpacity: 0.20 },
+        { id: 'tfp-bedding-fill', targetOpacity: 0.22, opacityProp: 'fill-opacity' },
+        { id: 'tfp-bedding-outline', targetOpacity: 0.55 },
+        // Ghost bedding edge zones — follows same toggle, slightly subdued
+        { id: 'tfp-edge-ghost-fill', targetOpacity: 0.15, opacityProp: 'fill-opacity' },
+        { id: 'tfp-edge-ghost-outline', targetOpacity: 0.40 },
         // Probability circles disabled — kept at 0 so toggle doesn't throw
         { id: 'tfp-bedding-probability-glow', targetOpacity: 0, opacityProp: 'circle-opacity' },
         { id: 'tfp-bedding-probability-fill', targetOpacity: 0, opacityProp: 'circle-opacity' },
@@ -14024,6 +14025,40 @@ function DeerIntelContent() {
                     setTerrainFlowData(assembled.terrainFlowData);
                     setTerritoryLinks(assembled.territoryLinks);
 
+                    // Step 4b: Generate terrain story for territory
+                    // The terrain flow useEffect is gated by territoryAssemblyRef,
+                    // so it never generates the story for territories. Do it here.
+                    try {
+                      const tAcreage = parcels.reduce((s, p) => s + (p.acreage || 0), 0) || undefined;
+                      const tAddress = territoryName || address || undefined;
+                      // Build a synthetic TerrainFlowResponse shape from assembled data
+                      const flowForStory = assembled.terrainFlowData ? {
+                        flow_primary: assembled.terrainFlowData.flow_primary,
+                        flow_secondary: assembled.terrainFlowData.flow_secondary,
+                        convergence_zones: assembled.terrainFlowData.convergence_zones,
+                        opportunity_zones: assembled.terrainFlowData.opportunity_zones,
+                        metadata: {
+                          mode: assembled.terrainFlowData.metadata?.mode || 'terrain_driven',
+                          dem_source: assembled.terrainFlowData.metadata?.dem_source,
+                          stats: {
+                            flow_count_primary: assembled.terrainFlowData.metadata?.flow_count_primary || 0,
+                            flow_count_secondary: assembled.terrainFlowData.metadata?.flow_count_secondary || 0,
+                            convergence_count: assembled.terrainFlowData.metadata?.convergence_count || 0,
+                            total_flow_length_m: assembled.terrainFlowData.metadata?.total_flow_length_m || 0,
+                          },
+                          weights: assembled.terrainFlowData.isSynthetic
+                            ? { bench_proximity: 0, saddle_proximity: 0, ridge_proximity: 0, convergence_density: 0 }
+                            : { bench_proximity: 0.3, saddle_proximity: 0.3, ridge_proximity: 0.3, convergence_density: 0.3 },
+                        },
+                      } as any : null;
+                      const tStory = generateTerrainStory(flowForStory, tAcreage, tAddress, assembled.ridgeSpineData);
+                      setTerrainStory(tStory);
+                      terrainFlowRawRef.current = flowForStory;
+                      console.log('[TerritoryAssembly] Terrain story generated — saddle:', tStory.drivers.saddleInfluence.score.toFixed(2), 'bench:', tStory.drivers.benchSupport.score.toFixed(2));
+                    } catch (storyErr) {
+                      console.warn('[TerritoryAssembly] Terrain story generation failed:', storyErr);
+                    }
+
                     setProgress(100);
                     setProgressStep(`Territory assembled — ${allTerrain.length} parcels, ${assembled.territoryLinks.features.length} links`);
                     console.log('[TerritoryAssembly] COMPLETE:', allTerrain.length, 'parcels,', assembled.territoryLinks.features.length, 'cross-parcel links');
@@ -15726,13 +15761,14 @@ function DeerIntelContent() {
                       <>
                         <button
                           onClick={() => setShowBeddingProbability(v => !v)}
+                          disabled={!huntabilityData}
                           className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
                             !huntabilityData ? 'opacity-40 cursor-not-allowed' :
-                            showBeddingProbability ? 'bg-stone-800/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                            showBeddingProbability ? 'bg-emerald-900/40 ring-1 ring-emerald-700/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                           }`}
                         >
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#52b788', opacity: showBeddingProbability ? 0.6 : 0.25 }} />
-                          <span className={`flex-1 text-left ${showBeddingProbability ? 'text-stone-400' : 'text-stone-600'}`}>Bedding Zones</span>
+                          <span className="w-2.5 h-2.5 rounded-full transition-opacity" style={{ background: '#52b788', opacity: showBeddingProbability ? 0.85 : 0.25 }} />
+                          <span className={`flex-1 text-left transition-colors ${showBeddingProbability ? 'text-emerald-400/90' : 'text-stone-600'}`}>Bedding Zones</span>
                           <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800/40 rounded uppercase tracking-wider">
                             speculative
                           </span>
