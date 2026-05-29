@@ -54,6 +54,7 @@ import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySynthetic
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
+import { smoothFeatureCollection } from '@/lib/polyline-smooth';
 import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain, type TerrainFlowBundle } from '@/lib/territory-assembly';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { CDLAnalysisResult } from '@/lib/cdl-analysis';
@@ -2226,6 +2227,7 @@ function DeerIntelContent() {
   // Part 3: orderId from URL param (checkout success link) takes priority over localStorage
   const urlOrderId = searchParams.get('orderId');
   const debugMode = searchParams.get('debug') === 'true'; // Admin/debug only features
+  const refreshMode = searchParams.get('refresh') === '1'; // Clear cache before analysis
   // Demo mode: ?demo=true → always load Pineville parcel, skip parcel lookup
   const demoMode = searchParams.get('demo') === 'true';
   // Hero parcel: ?parcel=<slug> → load a curated demo parcel directly
@@ -6782,16 +6784,16 @@ function DeerIntelContent() {
     if (!map || !mapReady || !overlaySourcesCreated.current || !ridgeSpineData) return;
 
     try {
-      // Update primary ridges source
+      // Update primary ridges source (smoothed for clean Niehues-style rendering)
       const primarySource = map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(ridgeSpineData.ridges_primary);
+        primarySource.setData(smoothFeatureCollection(ridgeSpineData.ridges_primary, 2, 0.00005));
       }
 
-      // Update secondary ridges source
+      // Update secondary ridges source (smoothed)
       const secondarySource = map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(ridgeSpineData.ridges_secondary);
+        secondarySource.setData(smoothFeatureCollection(ridgeSpineData.ridges_secondary, 2, 0.00005));
       }
 
       // Update saddle nodes source
@@ -15370,6 +15372,39 @@ function DeerIntelContent() {
                   <p className="text-[10px] text-stone-500/60 text-center mt-2 leading-relaxed">
                     Re-centers the map on the current parcel
                   </p>
+                )}
+                {/* Clear Cache & Re-Analyze — subtle secondary action */}
+                {summary && !isLoading && (
+                  <button
+                    onClick={async () => {
+                      const parcelId = (parcelPolygon?.properties as any)?.parcelId ||
+                                       (parcelPolygon?.properties as any)?.ll_uuid;
+                      if (parcelId) {
+                        try {
+                          // Clear cache for this parcel
+                          const resp = await fetch(`/api/terrain-cache?parcelIds=${encodeURIComponent(parcelId)}`, { method: 'DELETE' });
+                          if (resp.ok) {
+                            console.log('[ClearCache] Deleted cache for', parcelId);
+                          }
+                        } catch (err) {
+                          console.warn('[ClearCache] Delete failed:', err);
+                        }
+                      }
+                      // Clear current analysis state and re-run
+                      setLayers(null as any);
+                      setTieredCorridorData(null as any);
+                      setRidgeSpineData(null as any);
+                      setTerrainFlowData(null as any);
+                      setSummary(null as any);
+                      setTerrainStory(null);
+                      setCdlData(null);
+                      runAnalysis();
+                    }}
+                    className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] text-stone-500 hover:text-stone-300 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] rounded-lg transition-colors"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    <span>Clear Cache & Re-Analyze</span>
+                  </button>
                 )}
               </div>
               )}

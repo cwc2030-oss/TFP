@@ -63,6 +63,35 @@ export async function GET(req: NextRequest) {
  * Body: { parcelId, lat, lng, acreage, data }
  * Upserts cached terrain analysis for a single parcel.
  */
+/**
+ * DELETE /api/terrain-cache?parcelIds=id1,id2,id3
+ * Deletes cached terrain analysis for the specified parcel IDs.
+ * If no parcelIds provided, does nothing (safety guard).
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const parcelIds = req.nextUrl.searchParams.get('parcelIds');
+    if (!parcelIds) {
+      return NextResponse.json({ error: 'parcelIds required' }, { status: 400 });
+    }
+
+    const ids = parcelIds.split(',').map(s => s.trim()).filter(Boolean);
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'No valid parcel IDs' }, { status: 400 });
+    }
+
+    const result = await prisma.terrainAnalysisCache.deleteMany({
+      where: { parcelId: { in: ids } },
+    });
+
+    console.log('[TerrainCache] Deleted', result.count, 'entries for', ids.length, 'parcel IDs');
+    return NextResponse.json({ ok: true, deleted: result.count });
+  } catch (err) {
+    console.error('[TerrainCache] DELETE error:', err);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
