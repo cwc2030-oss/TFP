@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
 
     // Build a map of parcelId → parsed data
     const results: Record<string, any> = {};
+    const foundSet = new Set<string>();
     const found: string[] = [];
     const missing: string[] = [];
 
@@ -38,16 +39,19 @@ export async function GET(req: NextRequest) {
       try {
         results[entry.parcelId] = JSON.parse(entry.data);
         found.push(entry.parcelId);
+        foundSet.add(entry.parcelId);
       } catch {
-        // Corrupt cache entry — treat as miss
-        missing.push(entry.parcelId);
+        // Corrupt cache entry — will be caught as missing below
       }
     }
 
-    // Mark IDs that weren't in cache
+    // Mark IDs that weren't successfully parsed from cache
+    // Use Set to avoid double-counting + deduplicate input IDs
+    const missingSet = new Set<string>();
     for (const id of ids) {
-      if (!found.includes(id)) {
+      if (!foundSet.has(id) && !missingSet.has(id)) {
         missing.push(id);
+        missingSet.add(id);
       }
     }
 

@@ -13746,20 +13746,32 @@ function DeerIntelContent() {
                     setProgressStep(`Looking up ${parcels.length} parcels in cache...`);
 
                     // Step 1: Fetch cached terrain for all parcels
-                    const parcelIds = parcels.map(p => p.id).filter(Boolean);
+                    // Deduplicate IDs to prevent inflated miss counts
+                    const parcelIds = [...new Set(parcels.map(p => p.id).filter(Boolean))];
                     const cacheResult = await fetchCachedTerrain(parcelIds);
                     console.log('[TerritoryAssembly] Cache lookup:', cacheResult.found.length, 'hits,', cacheResult.missing.length, 'misses');
 
                     setProgress(30);
 
                     // Step 2: For cache misses, run individual terrain analysis
+                    const totalParcels = parcels.length;
                     const allTerrain: CachedParcelTerrain[] = [];
                     // Add cache hits
                     for (const id of cacheResult.found) {
                       allTerrain.push(cacheResult.results[id]);
                     }
+                    const cachedCount = allTerrain.length;
+
+                    if (cacheResult.missing.length === 0) {
+                      setProgressStep(`All ${totalParcels} parcels found in cache — assembling...`);
+                    } else if (cachedCount > 0) {
+                      setProgressStep(`${cachedCount} of ${totalParcels} parcels cached — analyzing ${cacheResult.missing.length} remaining...`);
+                    } else {
+                      setProgressStep(`Analyzing ${totalParcels} parcels...`);
+                    }
 
                     if (cacheResult.missing.length > 0) {
+
                       const { fetchTerrainAnalysis, fetchParcelGeometry, generateSyntheticParcel } = await import('@/lib/terrain-client');
                       const { fetchRidgeSpines: fetchRidges } = await import('@/lib/ridge-extraction');
                       const { fetchTerrainFlow: fetchFlow } = await import('@/lib/terrain-flow');
@@ -13769,9 +13781,9 @@ function DeerIntelContent() {
                         const tp = parcels.find(p => p.id === missingId);
                         if (!tp) continue;
 
-                        const pct = 30 + Math.round((mi / cacheResult.missing.length) * 50);
+                        const pct = 30 + Math.round(((cachedCount + mi) / totalParcels) * 50);
                         setProgress(pct);
-                        setProgressStep(`Analyzing parcel ${mi + 1} of ${cacheResult.missing.length}...`);
+                        setProgressStep(`Analyzing parcel ${cachedCount + mi + 1} of ${totalParcels}...`);
 
                         // Run full analysis for this single parcel
                         const singleParcel = tp.polygon;
