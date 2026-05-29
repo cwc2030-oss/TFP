@@ -792,7 +792,8 @@ export function generateTerrainFlowV3(
   const heightM = distanceMeters([centroid[0], bbox[1]], [centroid[0], bbox[3]]);
   
   // Compute parcel scale
-  const parcelScale = computeParcelScale(widthM, heightM);
+  const isTerritory = parcelRings.length > 1;
+  const parcelScale = computeParcelScale(widthM, heightM, isTerritory);
   
   console.log('[TerrainFlowV3] Parcel: %d x %d m (~%d acres), rings=%d', 
     Math.round(widthM), Math.round(heightM), Math.round(parcelScale.areaAcres), parcelRings.length);

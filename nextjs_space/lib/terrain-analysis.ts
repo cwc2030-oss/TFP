@@ -129,14 +129,18 @@ export interface ParcelScaleMetrics {
  * @param heightM - Parcel height in meters
  * @returns ParcelScaleMetrics with scaled parameters
  */
-export function computeParcelScale(widthM: number, heightM: number): ParcelScaleMetrics {
+export function computeParcelScale(widthM: number, heightM: number, isTerritory: boolean = false): ParcelScaleMetrics {
   const diagonalM = Math.sqrt(widthM * widthM + heightM * heightM);
   const areaAcres = (widthM * heightM * 0.8) / 4046.86; // ~80% fill factor
   
   // Scale factor: 1.0 at reference size, increases for larger parcels
   // Clamped between 1.0 (small parcels stay tight) and 2.5 (avoid runaway scaling)
+  // v4.1: Territory mode caps at 1.5 — prevents cross-parcel bbox inflation from
+  // suppressing flow lines on lower-relief parcels. The unified flow field still
+  // computes on the full territory extent; only the min-length filter relaxes.
+  const maxScale = isTerritory ? 1.5 : 2.5;
   const rawScale = diagonalM / REFERENCE_DIAGONAL_M;
-  const scaleFactor = Math.max(1.0, Math.min(2.5, rawScale));
+  const scaleFactor = Math.max(1.0, Math.min(maxScale, rawScale));
   
   // Apply non-linear scaling for very large parcels (diminishing returns)
   // Use square root scaling for zone counts to avoid excessive features

@@ -420,7 +420,7 @@ export function generateTerrainDrivenFlow(
   
   // ========== PARCEL-ADAPTIVE SCALING ==========
   // Compute scale metrics based on parcel dimensions
-  const parcelScale = computeParcelScale(widthM, heightM);
+  const parcelScale = computeParcelScale(widthM, heightM, isTerritory);
   const scaledThresholds = getScaledFlowThresholds(parcelScale);
   
   // Build zone scaling options from parcel scale
