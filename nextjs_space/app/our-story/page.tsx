@@ -65,6 +65,21 @@ export default function OurStoryPage() {
             By fall the woods are loud — squirrels, turkeys, every critter stirring up the leaf litter. The smell of fall woods that tells you winter is coming. Dad blowing leaves off the campground as the family rolled in from a week of work. Friday night before opening morning, he&apos;d have a fire going and steaks on the open grill. Just family, plus my hunting buddy Dean, who&apos;d earned all rights and privileges. Primal energy. Locked and loaded by 5 AM.
           </p>
 
+          {/* Sunset field photo — inline between paragraphs */}
+          <div className="my-10">
+            <div className="relative rounded-xl overflow-hidden shadow-lg" style={{ maxWidth: 600, margin: '0 auto' }}>
+              <div className="relative aspect-[16/10]">
+                <Image
+                  src="/sunset-field.jpg"
+                  alt="Sunset over Missouri farmland"
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 640px) 100vw, 600px"
+                />
+              </div>
+            </div>
+          </div>
+
           <p>
             In forty years of hunting that ground, we never took a Boone &amp; Crockett buck. We hunted as hard as anyone. We knew the land. But the trophy never came, and we couldn&apos;t quite say why.
           </p>
