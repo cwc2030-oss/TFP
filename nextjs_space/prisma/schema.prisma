@@ -417,3 +417,30 @@ model StandSelection {
   @@unique([userId, huntDate])              // one selection per user per day
   @@index([userId])
 }
+
+// Founding Property Signups — /listings landing page
+model FoundingPropertySignup {
+  id             String   @id @default(uuid())
+  createdAt      DateTime @default(now())
+  firstName      String
+  email          String
+  state          String
+  approxAcreage  String
+  landownerType  String   // 'personal' or 'commercial'
+  status         String   @default("new") // new, contacted, declined, onboarded
+  notifiedClark  Boolean  @default(false)
+
+  @@index([landownerType, status])
+  @@index([email])
+}
+
+// Launch Waitlist — shown when founding cohort is full
+model LaunchWaitlist {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  firstName String
+  email     String
+  state     String
+
+  @@index([email])
+}
