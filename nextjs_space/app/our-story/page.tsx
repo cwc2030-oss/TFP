@@ -23,7 +23,7 @@ export default function OurStoryPage() {
 
         <div className="prose-story space-y-6 text-stone-700 text-lg leading-[1.85] font-normal">
           <p>
-            My family bought this land when I was at Raytown South High in Kansas City. My dad Kelly had a vision: a place to retire and hunt, somewhere he could be himself outside the city.
+            My family bought the 100 acres when I was in high school at Raytown South in Kansas City. My dad Kelly had a vision: somewhere we could connect with nature, improve the land, and hunt every season the MDC offered.
           </p>
 
           <p>
@@ -31,15 +31,15 @@ export default function OurStoryPage() {
           </p>
 
           <p>
-            One night in the eighties, Dad and his hunting buddy Cliff decided to burn off what is now the Clover Field. The fire got bigger than they planned, then bigger than that. When they finally couldn&apos;t stop it, they drove into town to Perry Foster&apos;s Barbeque before heading back to the city. The Colwells made an impression on Leeton and Warrensburg. Being Kelly and Lucy&apos;s boy is something I still mention whenever I can.
+            In the eighties, Dad and his hunting buddy Cliff had a controlled burn of what is now the Clover Field. The fire got bigger than they planned, then bigger than that. When they finally couldn&apos;t stop it, they drove into town to Perry Foster&apos;s Barbeque before heading back to the city. My parents made quite an impact on the community. Being Kelly and Lucy&apos;s boy is something I still mention whenever I can.
           </p>
 
           <p>
-            When I was seven, my dad worked a day job at Southwestern Bell in downtown KC. On weekends he and I would knock on the doors of farmhouses and ask if we could squirrel hunt. He called me Eagle Eye back then. We hunted dove and turkeys in the spring, deer in the fall.
+            When I was seven, I started hunting with my dad. On weekends he and I would knock on the doors of farmhouses and ask if we could squirrel hunt. He called me Eagle Eye back then. We hunted mainly dove and turkeys in the spring, deer in the fall.
           </p>
 
           <p>
-            The oldest stand on the property is on the Clover Field. In retirement, my folks would carry cappuccino to the &ldquo;outhouse&rdquo; Dad built to hunt from. They would count deer in the evenings before season. Dad was my trail camera while I was still working in the city.
+            The oldest stand on the property overlooks the Clover Field. In retirement, my folks would carry cappuccino to the &ldquo;outhouse&rdquo; Dad built to hunt from. They would count deer in the evenings before season. Dad was my trail camera while I was still working in the city.
           </p>
 
           {/* Outhouse photo — inline between paragraphs */}
@@ -85,7 +85,7 @@ export default function OurStoryPage() {
           </p>
 
           <p>
-            The first time I ran our property — C-Nile Acres — through Terrain Brain, my heart was racing. There it was on the map: the deer flow skirts the property. Our 100 isn&apos;t a trophy destination — never was. It&apos;s a family meat-hunting property, a conservation property, the kind of place that fills freezers and teaches kids and grounds you when life gets loud. Terrain Brain showed me in five minutes what forty years had been quietly telling us.
+            The first time I ran our property through Terrain Brain, my heart was racing. There it was on the map: the deer flow skirts the property. Our 100 isn&apos;t a trophy destination — never was. It&apos;s a family meat-hunting property, a conservation property, the kind of place that fills freezers and teaches kids and grounds you when life gets loud. Terrain Brain showed me in five minutes what forty years had been quietly telling us.
           </p>
 
           <p>

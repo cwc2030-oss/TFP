@@ -72,6 +72,9 @@ export default function Navbar() {
             <NavLink href="/our-story" active={pathname === "/our-story"}>
               Our Story
             </NavLink>
+            <NavLink href="/field-guide" active={pathname === "/field-guide"}>
+              Field Guide
+            </NavLink>
 
             {!mounted || status === "loading" ? (
               <div className="w-8 h-8 rounded-full bg-stone-200 animate-pulse" />
@@ -165,6 +168,9 @@ export default function Navbar() {
               </MobileNavLink>
               <MobileNavLink href="/our-story" onClick={() => setIsMenuOpen(false)}>
                 Our Story
+              </MobileNavLink>
+              <MobileNavLink href="/field-guide" onClick={() => setIsMenuOpen(false)}>
+                Field Guide
               </MobileNavLink>
 
               <div className="pt-4 border-t border-stone-200">
