@@ -147,9 +147,13 @@ export interface TerrainFlowState {
 
 export interface TerrainFlowVisibility {
   pressureHeatmap: boolean;   // PRIMARY: Terrain pressure heat map
-  flowPrimary: boolean;       // Secondary: Primary flow lines (supporting evidence)
-  flowSecondary: boolean;     // Secondary: Secondary flow lines
+  flowGreen: boolean;         // Green tier: high-confidence flow (≥0.66)
+  flowBlue: boolean;          // Blue tier: moderate-confidence flow (0.33–0.66)
+  flowBlack: boolean;         // Black tier: low-confidence flow (<0.33)
   convergenceZones: boolean;  // Convergence zone markers (convergence IS opportunity)
+  // Legacy aliases (backward compat — resolve to green/blue)
+  flowPrimary?: boolean;
+  flowSecondary?: boolean;
 }
 
 // ========== Comparison Mode ==========

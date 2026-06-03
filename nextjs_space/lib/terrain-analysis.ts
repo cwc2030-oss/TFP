@@ -154,8 +154,10 @@ export function computeParcelScale(widthM: number, heightM: number, isTerritory:
     scaleFactor,
     
     // Flow line lengths scale directly with parcel size
-    minLengthPrimary: Math.round(SPATIAL_SCALING_BASE.flow_min_length_primary * scaleFactor),
-    minLengthSecondary: Math.round(SPATIAL_SCALING_BASE.flow_min_length_secondary * scaleFactor),
+    // Phase B: In territory mode, drop length thresholds entirely —
+    // extract ALL candidates and classify at display via Green/Blue/Black tiers
+    minLengthPrimary: isTerritory ? 0 : Math.round(SPATIAL_SCALING_BASE.flow_min_length_primary * scaleFactor),
+    minLengthSecondary: isTerritory ? 0 : Math.round(SPATIAL_SCALING_BASE.flow_min_length_secondary * scaleFactor),
     
     // Search and display radii scale with parcel size
     convergenceSearchRadius: Math.round(SPATIAL_SCALING_BASE.convergence_search_radius * scaleFactor),

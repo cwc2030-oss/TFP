@@ -55,6 +55,7 @@ import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
 import { smoothFeatureCollection, smoothFlowFeatureCollection } from '@/lib/polyline-smooth';
+import { mergeAndClassifyFlows, countByTier, FLOW_TIER_COLORS, FLOW_TIER_WIDTH_MULT, type DisplayFlowTier } from '@/lib/flow-tiering';
 import { computeScaleParams, geometryToBbox, bboxToAcres, type ScaleVisualParams, type TerritoryScaleMode } from '@/lib/scale-adaptive';
 import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain, type TerrainFlowBundle } from '@/lib/territory-assembly';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
@@ -508,6 +509,13 @@ const LAYER_COLORS = {
   flowPathGlow: '#3A3A3A',             // Subtle dark glow behind Primary Path
   corridorLabelBg: '#F5EDDC',          // Cream label background (Niehues)
   corridorLabelText: '#2C3E50',        // Slate label text
+  // Phase B: Green/Blue/Black flow tiers (ski-resort metaphor)
+  flowTierGreen: FLOW_TIER_COLORS.green,        // #2D6A4F deep forest green
+  flowTierGreenGlow: FLOW_TIER_COLORS.greenGlow, // lighter green glow
+  flowTierBlue: FLOW_TIER_COLORS.blue,           // #3B6FA0 steel blue
+  flowTierBlueGlow: FLOW_TIER_COLORS.blueGlow,   // lighter blue glow
+  flowTierBlack: FLOW_TIER_COLORS.black,         // #1A1A1A near-black
+  flowTierBlackGlow: FLOW_TIER_COLORS.blackGlow,  // dark gray glow
 };
 
 // ========== EDGE INTELLIGENCE UTILITIES ==========
@@ -2431,13 +2439,18 @@ function DeerIntelContent() {
   // Phase 1 cleanup: all flow/interpretation layers default OFF — terrain features justify stands on their own
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
     pressureHeatmap: false,  // PRIMARY: Terrain pressure heat map — opt-in
-    flowPrimary: false,      // Primary flow corridors — opt-in
-    flowSecondary: false,    // Secondary feeder lines — opt-in
+    flowGreen: false,        // Phase B: Green tier — high-confidence (≥0.66) — opt-in
+    flowBlue: false,         // Phase B: Blue tier — moderate (0.33–0.66) — opt-in
+    flowBlack: false,        // Phase B: Black tier — low-confidence (<0.33) — opt-in
     convergenceZones: false, // Convergence zone markers — opt-in
   });
   
   // Derived: true when the Pressure Map master toggle is ON
   const isPressureMode = flowVisibility.pressureHeatmap === true;
+  // Derived: true when ANY flow tier is enabled (replaces old flowPrimary check)
+  const anyFlowTierOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack;
+  // Phase B: Classified flow tier data for badge counts
+  const [flowTierCounts, setFlowTierCounts] = useState<{ green: number; blue: number; black: number; total: number }>({ green: 0, blue: 0, black: 0, total: 0 });
 
   // v3.6.0 — Terrain Reasons toggle (shows explanations when clicking features)
   const [showTerrainReasons, setShowTerrainReasons] = useState(false);
@@ -3211,7 +3224,7 @@ function DeerIntelContent() {
   const [selectedFlowSegment, setSelectedFlowSegment] = useState<{
     segmentId: string;
     coordinates: [number, number][];
-    tier: 'primary' | 'secondary';
+    tier: string;
   } | null>(null);
   const [flowSegmentExplain, setFlowSegmentExplain] = useState<FlowSegmentScoreResponse | null>(null);
   const [flowSegmentExplainLoading, setFlowSegmentExplainLoading] = useState(false);
@@ -4319,21 +4332,25 @@ function DeerIntelContent() {
       map.setPaintProperty('tfp-funnels-lines-draws', 'line-width', sp.drawWidth);
     }
 
-    // --- Flow Primary Path widths ---
-    if (map.getLayer('tfp-flow-primary')) {
-      map.setPaintProperty('tfp-flow-primary', 'line-width',
-        ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, sp.flowPrimaryWidth * 0.5,
-          0.55, sp.flowPrimaryWidth * 0.73,
-          0.75, sp.flowPrimaryWidth]);
-      map.setPaintProperty('tfp-flow-primary', 'line-opacity',
-        ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, sp.flowOpacity * 0.6,
-          0.55, sp.flowOpacity * 0.8,
-          0.75, sp.flowOpacity]);
+    // --- Phase B: Flow tier widths (green/blue/black) ---
+    const tierLayers: [string, number][] = [
+      ['tfp-flow-green', FLOW_TIER_WIDTH_MULT.green],
+      ['tfp-flow-blue', FLOW_TIER_WIDTH_MULT.blue],
+      ['tfp-flow-black', FLOW_TIER_WIDTH_MULT.black],
+    ];
+    for (const [layerId, wMult] of tierLayers) {
+      if (map.getLayer(layerId)) {
+        const w = sp.flowPrimaryWidth * wMult;
+        map.setPaintProperty(layerId, 'line-width',
+          ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+            0.3, w * 0.5, 0.5, w * 0.73, 0.75, w]);
+        map.setPaintProperty(layerId, 'line-opacity',
+          ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+            0.3, sp.flowOpacity * 0.6, 0.5, sp.flowOpacity * 0.8, 0.75, sp.flowOpacity]);
+      }
     }
-    if (map.getLayer('tfp-flow-primary-glow')) {
-      map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', sp.flowOpacity * 0.22);
+    if (map.getLayer('tfp-flow-tiers-glow')) {
+      map.setPaintProperty('tfp-flow-tiers-glow', 'line-opacity', sp.flowOpacity * 0.22);
     }
 
     // --- Stand marker sizes (scale multiplier applied to rank-based radii) ---
@@ -5048,7 +5065,7 @@ function DeerIntelContent() {
     'tfp-movement-delta',
     'tfp-movement-post',
     'tfp-refuge-zones',
-    'tfp-flow-primary', 'tfp-flow-nearest-highlight', 'tfp-flow-secondary', 'tfp-flow-convergence',
+    'tfp-flow-green', 'tfp-flow-blue', 'tfp-flow-black', 'tfp-flow-tiers-glow', 'tfp-flow-nearest-highlight', 'tfp-flow-convergence',
     'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
     'tfp-huntability-corridors', 'tfp-huntability-convergence',
     'tfp-bedding-probability',
@@ -6114,8 +6131,9 @@ function DeerIntelContent() {
             ridgeSpines: vis.ridgeSpines,
             stands: vis.stands,
             pressureHeatmap: fv.pressureHeatmap,
-            flowPrimary: fv.flowPrimary,
-            flowSecondary: fv.flowSecondary,
+            flowGreen: fv.flowGreen,
+            flowBlue: fv.flowBlue,
+            flowBlack: fv.flowBlack,
             convergenceZones: fv.convergenceZones,
             beddingProbability: showBeddingProbRef.current,
           },
@@ -6140,13 +6158,16 @@ function DeerIntelContent() {
           // Heatmap layers — always hidden
           if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
           if (id === 'tfp-pressure-heatmap' && !_pm) return true;
-          // Flow primary family — gated on isPressureMode && flowPrimary
-          if (id === 'tfp-flow-primary' || id === 'tfp-flow-primary-glow' ||
-              id === 'tfp-flow-nearest-highlight' || id === 'tfp-flow-direction-chevrons') {
-            return !(_pm && _fv.flowPrimary);
+          // Phase B: Flow tier layers — gated on isPressureMode && per-tier flag
+          if (id === 'tfp-flow-green') return !(_pm && _fv.flowGreen);
+          if (id === 'tfp-flow-blue') return !(_pm && _fv.flowBlue);
+          if (id === 'tfp-flow-black') return !(_pm && _fv.flowBlack);
+          if (id === 'tfp-flow-tiers-glow' || id === 'tfp-flow-direction-chevrons') {
+            return !(_pm && (_fv.flowGreen || _fv.flowBlue || _fv.flowBlack));
           }
-          // Flow secondary
-          if (id === 'tfp-flow-secondary') return !(_pm && _fv.flowSecondary);
+          if (id === 'tfp-flow-nearest-highlight') {
+            return !(_pm && (_fv.flowGreen || _fv.flowBlue || _fv.flowBlack));
+          }
           // Convergence zones
           if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
             return !(_pm && _fv.convergenceZones);
@@ -6888,15 +6909,17 @@ function DeerIntelContent() {
 
     try {
       // Update primary ridges source (smoothed for clean Niehues-style rendering)
+      // Phase B / Item 1 fix: Catmull-Rom spline (was Chaikin corner-cutting)
+      // Same DP→CR pipeline as flow lines, pathSmoothing 0.7 for natural S-curves
       const primarySource = map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(smoothFeatureCollection(ridgeSpineData.ridges_primary, 2, 0.00005));
+        primarySource.setData(smoothFlowFeatureCollection(ridgeSpineData.ridges_primary, 0.7));
       }
 
-      // Update secondary ridges source (smoothed)
+      // Update secondary ridges source (smoothed via Catmull-Rom)
       const secondarySource = map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(smoothFeatureCollection(ridgeSpineData.ridges_secondary, 2, 0.00005));
+        secondarySource.setData(smoothFlowFeatureCollection(ridgeSpineData.ridges_secondary, 0.7));
       }
 
       // Update saddle nodes source
@@ -8178,31 +8201,22 @@ function DeerIntelContent() {
         clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
       }
 
-      // Update primary flow source (filter + smooth + clip to parcel display boundary)
-      // Phase A Item 1: Apply Catmull-Rom smoothing to Primary Path for clean Niehues aesthetic
-      const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
-      if (primarySource) {
-        const rawPrimary = filterFlowLines(flowData?.flow_primary || emptyFC);
-        const smoothedPrimary = smoothFlowFeatureCollection(rawPrimary, 0.7); // pathSmoothing default
-        primarySource.setData(clipLinesToParcel(smoothedPrimary, clipGeom, 50, 'tfp-flow-primary'));
-      }
-
-      // Update secondary flow source (filter + clip to parcel display boundary)
-      // FIX 2: Suppress secondary flow on small parcels in territory mode (>3 parcels, any <75 ac)
-      const secondarySource = map.getSource('tfp-flow-secondary') as mapboxgl.GeoJSONSource;
-      const suppressSecondaryFlow = territoryModeRef.current
-        && territoryParcelsRef.current.length > 3
-        && territoryParcelsRef.current.some(p => p.acreage < 75);
-      if (secondarySource) {
-        if (suppressSecondaryFlow) {
-          secondarySource.setData(emptyFC);
-        } else {
-          secondarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_secondary || emptyFC), clipGeom, 50));
-        }
-      }
-      // Also hide/show the layer visibility for secondary flow
-      if (map.getLayer('tfp-flow-secondary')) {
-        map.setLayoutProperty('tfp-flow-secondary', 'visibility', suppressSecondaryFlow ? 'none' : 'visible');
+      // Phase B: Merge primary+secondary into unified classified source
+      // Merge → classify (green/blue/black by likelihood) → filter water → smooth → clip
+      const filteredPrimary = filterFlowLines(flowData?.flow_primary || emptyFC);
+      const filteredSecondary = filterFlowLines(flowData?.flow_secondary || emptyFC);
+      const merged = mergeAndClassifyFlows(filteredPrimary, filteredSecondary);
+      const smoothed = smoothFlowFeatureCollection(merged, 0.7);
+      const clipped = clipLinesToParcel(smoothed, clipGeom, 50, 'tfp-flow-tiers');
+      
+      // Update tier counts for UI badges
+      const counts = countByTier(clipped);
+      setFlowTierCounts(counts);
+      
+      // Push to unified source
+      const tiersSource = map.getSource('tfp-flow-tiers') as mapboxgl.GeoJSONSource;
+      if (tiersSource) {
+        tiersSource.setData(clipped);
       }
 
       // Update convergence zones source (filter points inside water bodies)
@@ -8417,7 +8431,7 @@ function DeerIntelContent() {
     });
 
     // Show the highlight layer (only if primary flow is visible)
-    if (map.getLayer('tfp-flow-nearest-highlight') && flowVisibility.flowPrimary) {
+    if (map.getLayer('tfp-flow-nearest-highlight') && anyFlowTierOn) {
       map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'visible');
     }
 
@@ -8443,12 +8457,12 @@ function DeerIntelContent() {
     });
 
     // Delayed highlight reveal for selected corridor
-    if (selecting && map.getLayer('tfp-flow-nearest-highlight') && flowVisibility.flowPrimary) {
+    if (selecting && map.getLayer('tfp-flow-nearest-highlight') && anyFlowTierOn) {
       setTimeout(() => {
         fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.75, 'line-opacity', 500);
       }, 200);
     }
-  }, [selectedStand, alignedStands, terrainFlowData, mapReady, flowVisibility.flowPrimary]);
+  }, [selectedStand, alignedStands, terrainFlowData, mapReady, anyFlowTierOn]);
 
   // ========== UPDATE LAYER VISIBILITY ==========
   useEffect(() => {
@@ -8536,80 +8550,57 @@ function DeerIntelContent() {
         }, 380);
       });
 
-      // Flow lines (PRIMARY PATH) — Phase A: dark solid smoothed line
-      // V4 Step 11: Smooth fade for flow visibility
+      // Phase B: Green/Blue/Black flow tier visibility
+      // Each tier has independent visibility, all gated on isPressureMode
       const spFlow = scaleParamsRef.current;
-      if (map.getLayer('tfp-flow-primary')) {
-        if (isPressureMode && flowVisibility.flowPrimary) {
-          map.setLayoutProperty('tfp-flow-primary', 'visibility', 'visible');
-        } else {
-          fadeLayerOut(map, 'tfp-flow-primary', 'line-opacity', FADE_OUT);
-        }
-        // Scale-adaptive widths for Primary Path
-        const fw = spFlow.flowPrimaryWidth;
-        map.setPaintProperty('tfp-flow-primary', 'line-width', isPressureMode ? [
-          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, fw * 0.7,
-          0.55, fw * 1.0,
-          0.75, fw * 1.4
-        ] : [
-          'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, fw * 0.5,
-          0.55, fw * 0.73,
-          0.75, fw
-        ]);
-        if (isPressureMode && flowVisibility.flowPrimary) {
+      const tierVisMap: [string, boolean, number][] = [
+        ['tfp-flow-green', flowVisibility.flowGreen, FLOW_TIER_WIDTH_MULT.green],
+        ['tfp-flow-blue', flowVisibility.flowBlue, FLOW_TIER_WIDTH_MULT.blue],
+        ['tfp-flow-black', flowVisibility.flowBlack, FLOW_TIER_WIDTH_MULT.black],
+      ];
+      for (const [layerId, tierOn, wMult] of tierVisMap) {
+        if (!map.getLayer(layerId)) continue;
+        if (isPressureMode && tierOn) {
+          map.setLayoutProperty(layerId, 'visibility', 'visible');
+          const fw = spFlow.flowPrimaryWidth * wMult;
+          map.setPaintProperty(layerId, 'line-width', [
+            'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+            0.3, fw * 0.7, 0.5, fw * 1.0, 0.75, fw * 1.4
+          ]);
           const fo = spFlow.flowOpacity;
-          map.setPaintProperty('tfp-flow-primary', 'line-opacity', clampOpacityExpr(isPressureMode ? [
+          map.setPaintProperty(layerId, 'line-opacity', clampOpacityExpr([
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.4, fo * 0.7,
-            0.55, fo * 0.85,
-            0.75, fo
-          ] : [
-            'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.4, fo * 0.6,
-            0.55, fo * 0.8,
-            0.75, fo
+            0.3, fo * 0.7, 0.5, fo * 0.85, 0.75, fo
           ]));
-        }
-      }
-      if (map.getLayer('tfp-flow-primary-glow')) {
-        if (isPressureMode && flowVisibility.flowPrimary) {
-          fadeLayerIn(map, 'tfp-flow-primary-glow', isPressureMode ? 0.22 : 0.18, 'line-opacity', FADE_IN);
         } else {
-          fadeLayerOut(map, 'tfp-flow-primary-glow', 'line-opacity', FADE_OUT);
+          fadeLayerOut(map, layerId, 'line-opacity', FADE_OUT);
         }
       }
-      // Nearest corridor highlight follows primary flow visibility + stand selection
+      // Glow layer follows any-tier-on
+      const _anyOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack;
+      if (map.getLayer('tfp-flow-tiers-glow')) {
+        if (isPressureMode && _anyOn) {
+          fadeLayerIn(map, 'tfp-flow-tiers-glow', 0.22, 'line-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-tiers-glow', 'line-opacity', FADE_OUT);
+        }
+      }
+      // Nearest corridor highlight follows any flow tier + stand selection
       if (map.getLayer('tfp-flow-nearest-highlight')) {
-        const showHighlight = isPressureMode && flowVisibility.flowPrimary && selectedStand !== null;
+        const showHighlight = isPressureMode && _anyOn && selectedStand !== null;
         if (showHighlight) {
           fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-nearest-highlight', 'line-opacity', FADE_OUT);
         }
       }
-      // v3.8.1 — Directional chevrons follow primary flow visibility
+      // Directional chevrons follow green tier (highest confidence)
       if (map.getLayer('tfp-flow-direction-chevrons')) {
-        if (isPressureMode && flowVisibility.flowPrimary) {
+        if (isPressureMode && flowVisibility.flowGreen) {
           map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'visible');
         } else {
           map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'none');
         }
-      }
-      if (map.getLayer('tfp-flow-secondary')) {
-        const secTarget = isPressureMode ? 0.40 : 0.35;
-        if (isPressureMode && flowVisibility.flowSecondary) {
-          fadeLayerIn(map, 'tfp-flow-secondary', secTarget, 'line-opacity', FADE_IN);
-        } else {
-          fadeLayerOut(map, 'tfp-flow-secondary', 'line-opacity', FADE_OUT);
-        }
-        map.setPaintProperty('tfp-flow-secondary', 'line-width', isPressureMode ? [
-          'interpolate', ['linear'], ['zoom'],
-          10, 1.4,
-          15, 1.8,
-          18, 2.2,
-        ] : 1.2);
       }
       // Convergence zones — smooth fade with pressure-aware opacity
       if (map.getLayer('tfp-flow-convergence')) {
@@ -9649,66 +9640,105 @@ function DeerIntelContent() {
         // Primary travel corridors with subtle animation to communicate movement
         // Slow, calm dash animation along corridor centerlines
         
-        // PRIMARY PATH: Smoothed deer movement spine (Phase A, Items 1 + 6)
-        // Dark (#1A1A1A) solid line — the principal movement route through the property.
-        // Smoothed via Catmull-Rom at data-push time (see flow useEffect above).
-        if (!map.getSource('tfp-flow-primary')) {
-          map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
+        // ========== PHASE B: UNIFIED FLOW TIERS (Green/Blue/Black) ==========
+        // Single source with per-tier filtered layers. Tier classification
+        // happens at data-push time in the flow useEffect via mergeAndClassifyFlows().
+        if (!map.getSource('tfp-flow-tiers')) {
+          map.addSource('tfp-flow-tiers', { type: 'geojson', data: EMPTY_FC });
           
-          // Subtle dark glow behind the Primary Path for contrast over satellite imagery
+          // Subtle glow behind all tiers (tier-colored via match expression)
           map.addLayer({
-            id: 'tfp-flow-primary-glow',
+            id: 'tfp-flow-tiers-glow',
             type: 'line',
-            source: 'tfp-flow-primary',
+            source: 'tfp-flow-tiers',
             paint: {
-              'line-color': LAYER_COLORS.flowPathGlow, // #3A3A3A subtle dark
+              'line-color': [
+                'match', ['get', 'flowTier'],
+                'green', LAYER_COLORS.flowTierGreenGlow,
+                'blue', LAYER_COLORS.flowTierBlueGlow,
+                'black', LAYER_COLORS.flowTierBlackGlow,
+                LAYER_COLORS.flowTierBlackGlow
+              ],
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 5,
-                0.75, 8
+                0.3, 5, 0.75, 8
               ],
               'line-opacity': 0.18,
               'line-blur': 2.5,
             },
           });
           
-          // Main Primary Path line — solid near-black, 3px
+          // BLACK tier — dashed 8/4, near-black (lowest confidence, bottom layer)
           map.addLayer({
-            id: 'tfp-flow-primary',
+            id: 'tfp-flow-black',
             type: 'line',
-            source: 'tfp-flow-primary',
+            source: 'tfp-flow-tiers',
+            filter: ['==', ['get', 'flowTier'], 'black'],
             paint: {
-              'line-color': LAYER_COLORS.flowPathDark,  // #1A1A1A near-black
+              'line-color': LAYER_COLORS.flowTierBlack,
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 1.5,
-                0.55, 2.2,
-                0.75, 3.0
+                0.1, 1.0, 0.3, 1.5, 0.5, 2.0
               ],
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 0.50,
-                0.55, 0.65,
-                0.75, 0.80
+                0.1, 0.35, 0.3, 0.55
               ],
-              // SOLID — no dasharray (smoothed curves read clearly without dashes)
+              'line-dasharray': [8, 4],
             },
           });
           
-          // Directional chevrons along primary flow lines (dark, subtle)
+          // BLUE tier — solid steel blue (moderate confidence)
+          map.addLayer({
+            id: 'tfp-flow-blue',
+            type: 'line',
+            source: 'tfp-flow-tiers',
+            filter: ['==', ['get', 'flowTier'], 'blue'],
+            paint: {
+              'line-color': LAYER_COLORS.flowTierBlue,
+              'line-width': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.3, 1.2, 0.5, 2.0, 0.66, 2.5
+              ],
+              'line-opacity': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.3, 0.50, 0.5, 0.65, 0.66, 0.80
+              ],
+            },
+          });
+          
+          // GREEN tier — solid forest green (highest confidence, top layer)
+          map.addLayer({
+            id: 'tfp-flow-green',
+            type: 'line',
+            source: 'tfp-flow-tiers',
+            filter: ['==', ['get', 'flowTier'], 'green'],
+            paint: {
+              'line-color': LAYER_COLORS.flowTierGreen,
+              'line-width': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.5, 1.5, 0.66, 2.2, 0.85, 3.0
+              ],
+              'line-opacity': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.5, 0.55, 0.66, 0.70, 0.85, 0.85
+              ],
+            },
+          });
+          
+          // Directional chevrons — green tier only (highest confidence gets arrows)
           map.addLayer({
             id: 'tfp-flow-direction-chevrons',
             type: 'symbol',
-            source: 'tfp-flow-primary',
+            source: 'tfp-flow-tiers',
+            filter: ['==', ['get', 'flowTier'], 'green'],
             layout: {
               'symbol-placement': 'line',
-              // NOTE: Mapbox GL does NOT allow data expressions on `symbol-spacing`
               'symbol-spacing': 110,
               'text-field': '›',
               'text-size': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 10,
-                0.75, 14,
+                0.5, 10, 0.85, 14,
               ],
               'text-allow-overlap': true,
               'text-ignore-placement': true,
@@ -9716,12 +9746,10 @@ function DeerIntelContent() {
               'text-keep-upright': false,
             },
             paint: {
-              'text-color': LAYER_COLORS.flowPathDark, // #1A1A1A matches path
+              'text-color': LAYER_COLORS.flowTierGreen,
               'text-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 0.18,
-                0.55, 0.28,
-                0.75, 0.40,
+                0.5, 0.18, 0.66, 0.28, 0.85, 0.40,
               ],
               'text-halo-color': 'rgba(255,255,255,0.15)',
               'text-halo-width': 0.5,
@@ -9747,22 +9775,7 @@ function DeerIntelContent() {
           });
         }
         
-        // Secondary flow lines: subordinate feeders (lighter, thinner)
-        // Phase B will restructure these into Green/Blue/Black tiers
-        if (!map.getSource('tfp-flow-secondary')) {
-          map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
-          map.addLayer({
-            id: 'tfp-flow-secondary',
-            type: 'line',
-            source: 'tfp-flow-secondary',
-            paint: {
-              'line-color': '#4A5568',  // Warm gray — subordinate to dark primary path
-              'line-width': 1.2,
-              'line-opacity': 0.35,
-              'line-dasharray': [4, 3],
-            },
-          });
-        }
+        // Phase B: Secondary flow source removed — all flows unified in tfp-flow-tiers above
         
         // Convergence zones: where flows overlap or pinch
         if (!map.getSource('tfp-flow-convergence')) {
@@ -10734,11 +10747,12 @@ function DeerIntelContent() {
           'tfp-stand-tertiary-dot',      // v1.1 — faint tertiary stand dots
           // Flow lines (animated) — v3.5.1
           'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
-          'tfp-flow-secondary',
-          'tfp-flow-primary-glow',      // Animated glow below main line
-          'tfp-flow-nearest-highlight', // Nearest corridor to selected stand (amber glow)
-          'tfp-flow-primary',
-          'tfp-flow-direction-chevrons', // v3.8.1 — directional chevrons along flow
+          'tfp-flow-tiers-glow',         // Phase B: glow behind all flow tiers
+          'tfp-flow-black',              // Phase B: low-confidence dashed
+          'tfp-flow-blue',               // Phase B: moderate-confidence solid
+          'tfp-flow-green',              // Phase B: high-confidence solid
+          'tfp-flow-direction-chevrons', // Directional chevrons (green tier only)
+          'tfp-flow-nearest-highlight',  // Nearest corridor to selected stand (amber glow)
           // Convergence (top — convergence IS opportunity)
           'tfp-flow-convergence-pulse',
           'tfp-flow-convergence',
@@ -11118,7 +11132,7 @@ function DeerIntelContent() {
 
         // ========== TERRAIN FLOW CLICK HANDLERS ==========
         // Flow segment click - triggers inspector panel
-        const handleFlowSegmentClick = (e: mapboxgl.MapLayerMouseEvent, tier: 'primary' | 'secondary') => {
+        const handleFlowSegmentClick = (e: mapboxgl.MapLayerMouseEvent, tier: string) => {
           if (!e.features || !e.features[0]) return;
           
           const feature = e.features[0];
@@ -11143,9 +11157,10 @@ function DeerIntelContent() {
           }));
         };
         
-        // Register flow click handlers
-        map.on('click', 'tfp-flow-primary', (e) => handleFlowSegmentClick(e, 'primary'));
-        map.on('click', 'tfp-flow-secondary', (e) => handleFlowSegmentClick(e, 'secondary'));
+        // Register flow click handlers (Phase B: per-tier layers)
+        map.on('click', 'tfp-flow-green', (e) => handleFlowSegmentClick(e, 'green'));
+        map.on('click', 'tfp-flow-blue', (e) => handleFlowSegmentClick(e, 'blue'));
+        map.on('click', 'tfp-flow-black', (e) => handleFlowSegmentClick(e, 'black'));
 
         // v4.1: Tiered corridor click handler — surfaces ridge-alignment reason
         const handleCorridorClick = (e: mapboxgl.MapLayerMouseEvent) => {
@@ -11208,7 +11223,7 @@ function DeerIntelContent() {
         map.on('click', 'tfp-bedding-probability-glow', handleBeddingClick);
         
         // Cursor changes for clickable layers
-        const flowLayers = ['tfp-flow-primary', 'tfp-flow-secondary', 'tfp-bedding-probability-fill', 'tfp-bedding-probability-glow'];
+        const flowLayers = ['tfp-flow-green', 'tfp-flow-blue', 'tfp-flow-black', 'tfp-bedding-probability-fill', 'tfp-bedding-probability-glow'];
         flowLayers.forEach(layerId => {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
           map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -12523,7 +12538,7 @@ function DeerIntelContent() {
       // Don't intercept clicks on existing stand markers or terrain features
       const features = map.queryRenderedFeatures(e.point, {
         layers: [
-          'tfp-flow-primary', 'tfp-flow-secondary',
+          'tfp-flow-green', 'tfp-flow-blue', 'tfp-flow-black',
         ].filter(l => map.getLayer(l))
       });
       if (features && features.length > 0) return;
@@ -12782,7 +12797,7 @@ function DeerIntelContent() {
       // Don't trigger if clicking on existing features
       const features = map.queryRenderedFeatures(e.point, {
         layers: [
-          'tfp-flow-primary', 'tfp-flow-secondary',
+          'tfp-flow-green', 'tfp-flow-blue', 'tfp-flow-black',
           'tfp-bedding-fill', 'tfp-funnels-lines-draws', 'tfp-funnels-polys-fill'
         ].filter(l => map.getLayer(l))
       });
@@ -12842,7 +12857,7 @@ function DeerIntelContent() {
       const customEvent = e as CustomEvent<{
         segmentId: string;
         coordinates: [number, number][];
-        tier: 'primary' | 'secondary';
+        tier: string;
         likelihood: number;
         screenX: number;
         screenY: number;
@@ -15999,56 +16014,35 @@ function DeerIntelContent() {
                     <div className="flex-1 h-px bg-stone-700/50" />
                   </div>
                   
-                  {/* Primary Flow Toggle (now secondary) */}
-                  {(() => {
-                    const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
-                    const hasData = primaryCount > 0;
-                    const isLoading = terrainFlowLoading;
-                    
-                    return (
-                      <button
-                        onClick={() => setFlowVisibility(v => ({ ...v, flowPrimary: !v.flowPrimary }))}
-                        className={`w-full flex items-center gap-2 px-2 py-1 rounded transition-all text-[11px] ${
-                          flowVisibility.flowPrimary ? 'bg-stone-700/30' : 'bg-stone-800/20 hover:bg-stone-700/20'
-                        }`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded" style={{ background: LAYER_COLORS.flowPathDark, opacity: flowVisibility.flowPrimary ? 1 : 0.3 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-stone-300' : 'text-stone-600'}`}>Flow Lines</span>
-                        {hasData ? (
-                          <span className="text-[8px] text-stone-400/70 px-1 py-0.5 bg-stone-700/30 rounded">
-                            {primaryCount}
-                          </span>
-                        ) : isLoading ? (
-                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">...</span>
-                        ) : (
-                          <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">—</span>
-                        )}
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* Secondary Flow Toggle */}
-                  {(() => {
-                    const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
-                    const hasData = secondaryCount > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setFlowVisibility(v => ({ ...v, flowSecondary: !v.flowSecondary }))}
-                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                          flowVisibility.flowSecondary ? 'bg-stone-700/20' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                        }`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#4A5568', opacity: flowVisibility.flowSecondary ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${flowVisibility.flowSecondary ? 'text-white' : 'text-stone-500'}`}>Secondary Flow</span>
-                        {hasData && (
-                          <span className="text-[9px] text-stone-300 px-1.5 py-0.5 bg-stone-700/30 rounded">
-                            {secondaryCount}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
+                   {/* Phase B: Green/Blue/Black Flow Tier Toggles */}
+                   {([['flowGreen', 'Green Runs', LAYER_COLORS.flowTierGreen, flowTierCounts.green],
+                     ['flowBlue', 'Blue Runs', LAYER_COLORS.flowTierBlue, flowTierCounts.blue],
+                     ['flowBlack', 'Black Runs', LAYER_COLORS.flowTierBlack, flowTierCounts.black],
+                   ] as [keyof typeof flowVisibility, string, string, number][]).map(([key, label, color, count]) => (
+                     <button
+                       key={key}
+                       onClick={() => setFlowVisibility(v => ({ ...v, [key]: !v[key] }))}
+                       className={`w-full flex items-center gap-2 px-2 py-1 rounded transition-all text-[11px] ${
+                         flowVisibility[key] ? 'bg-stone-700/30' : 'bg-stone-800/20 hover:bg-stone-700/20'
+                       }`}
+                     >
+                       <span className="w-2.5 h-2.5 rounded" style={{
+                         background: color,
+                         opacity: flowVisibility[key] ? 1 : 0.3,
+                         ...(key === 'flowBlack' ? { border: '1px dashed rgba(255,255,255,0.3)' } : {}),
+                       }} />
+                       <span className={`flex-1 text-left ${flowVisibility[key] ? 'text-stone-300' : 'text-stone-600'}`}>{label}</span>
+                       {count > 0 ? (
+                         <span className="text-[8px] text-stone-400/70 px-1 py-0.5 bg-stone-700/30 rounded">
+                           {count}
+                         </span>
+                       ) : terrainFlowLoading ? (
+                         <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">...</span>
+                       ) : (
+                         <span className="text-[8px] text-stone-600 px-1 py-0.5 bg-stone-800 rounded">—</span>
+                       )}
+                     </button>
+                   ))}
                   
                   {/* Convergence Zones Toggle */}
                   {(() => {
@@ -16076,14 +16070,15 @@ function DeerIntelContent() {
 
                 
                 {/* Expanded details when any flow toggle is on */}
-                {(flowVisibility.flowPrimary || flowVisibility.flowSecondary || flowVisibility.convergenceZones) && (
+                {(anyFlowTierOn || flowVisibility.convergenceZones) && (
                   <div className="mt-2 space-y-2 px-1">
                     {(() => {
-                      const primaryCount = terrainFlowData?.metadata?.flow_count_primary || 0;
-                      const secondaryCount = terrainFlowData?.metadata?.flow_count_secondary || 0;
+                      const greenCount = flowTierCounts.green;
+                      const blueCount = flowTierCounts.blue;
+                      const blackCount = flowTierCounts.black;
                       const convergenceCount = terrainFlowData?.metadata?.convergence_count || 0;
                       const totalFlowLength = terrainFlowData?.metadata?.total_flow_length_m || 0;
-                      const totalFeatures = primaryCount + secondaryCount + convergenceCount;
+                      const totalFeatures = greenCount + blueCount + blackCount + convergenceCount;
                       const isSynthetic = terrainFlowData?.isSynthetic || false;
                       const mode = (isSynthetic ? 'synthetic' : 'real_dem') as FlowMode;
                       
@@ -16111,16 +16106,22 @@ function DeerIntelContent() {
                             
                             {/* Movement summary — plain language */}
                             <div className="text-[10px] text-stone-400 space-y-0.5">
-                              {primaryCount > 0 && (
+                              {greenCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span>Primary Routes</span>
-                                  <span className="text-emerald-400">{primaryCount}</span>
+                                  <span className="flex items-center gap-1"><span className="inline-block w-2 h-0.5 rounded" style={{background:'#2D6A4F'}}/>Green Runs</span>
+                                  <span style={{color:'#2D6A4F'}}>{greenCount}</span>
                                 </div>
                               )}
-                              {secondaryCount > 0 && (
+                              {blueCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span>Secondary Routes</span>
-                                  <span className="text-cyan-400">{secondaryCount}</span>
+                                  <span className="flex items-center gap-1"><span className="inline-block w-2 h-0.5 rounded" style={{background:'#3B6FA0'}}/>Blue Runs</span>
+                                  <span style={{color:'#3B6FA0'}}>{blueCount}</span>
+                                </div>
+                              )}
+                              {blackCount > 0 && (
+                                <div className="flex justify-between">
+                                  <span className="flex items-center gap-1"><span className="inline-block w-2 h-0.5 rounded" style={{background:'#1A1A1A'}}/>Black Runs</span>
+                                  <span className="text-stone-300">{blackCount}</span>
                                 </div>
                               )}
                               {convergenceCount > 0 && (

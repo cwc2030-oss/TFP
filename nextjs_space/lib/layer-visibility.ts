@@ -135,12 +135,13 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-ridges-secondary-casing', group: 'ridgeSpines', opacityProp: 'line-opacity', targetOpacity: 0.15, source: { kind: 'toggle', key: 'ridgeSpines' } },
   { id: 'tfp-ridges-secondary',        group: 'ridgeSpines', opacityProp: 'line-opacity', targetOpacity: 0.55, source: { kind: 'toggle', key: 'ridgeSpines' } },
 
-  // ── Flow layers (complex: pressure-mode-dependent opacities, data-driven expressions) ──
-  { id: 'tfp-flow-primary-glow',        group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.25,  source: { kind: 'flowToggle', key: 'flowPrimary' } },
-  { id: 'tfp-flow-primary',             group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.75,  source: { kind: 'complex' } },  // data-driven expression
-  { id: 'tfp-flow-direction-chevrons',  group: 'flow', opacityProp: 'icon-opacity',   targetOpacity: 1.0,   source: { kind: 'flowToggle', key: 'flowPrimary' } },
+  // ── Flow layers — Phase B tier system (green/blue/black) ──
+  { id: 'tfp-flow-tiers-glow',          group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.25,  source: { kind: 'compound', anyOf: ['flowGreen', 'flowBlue', 'flowBlack'] } },
+  { id: 'tfp-flow-green',               group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.75,  source: { kind: 'flowToggle', key: 'flowGreen' } },
+  { id: 'tfp-flow-blue',                group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.65,  source: { kind: 'flowToggle', key: 'flowBlue' } },
+  { id: 'tfp-flow-black',               group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.55,  source: { kind: 'flowToggle', key: 'flowBlack' } },
+  { id: 'tfp-flow-direction-chevrons',  group: 'flow', opacityProp: 'icon-opacity',   targetOpacity: 1.0,   source: { kind: 'flowToggle', key: 'flowGreen' } },
   { id: 'tfp-flow-nearest-highlight',   group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.75,  source: { kind: 'complex' } },  // depends on selectedStand
-  { id: 'tfp-flow-secondary',           group: 'flow', opacityProp: 'line-opacity',   targetOpacity: 0.45,  source: { kind: 'flowToggle', key: 'flowSecondary' } },
   { id: 'tfp-flow-convergence-pulse',   group: 'flow', opacityProp: 'circle-opacity', targetOpacity: 0.15,  source: { kind: 'flowToggle', key: 'convergenceZones' } },
   { id: 'tfp-flow-convergence',         group: 'flow', opacityProp: 'circle-opacity', targetOpacity: 0.85,  source: { kind: 'flowToggle', key: 'convergenceZones' } },
 
