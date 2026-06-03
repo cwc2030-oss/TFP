@@ -2431,7 +2431,7 @@ function DeerIntelContent() {
     funnels: true,    // Pinch points / funnels
     saddles: true,    // Saddle features
     draws: false,     // DEFAULT OFF — blue dashed draw lines are noisy; user opts-in via toggle
-    ridgeSpines: true, // Ridge spines
+    ridgeSpines: false, // Ridge spines — default OFF (squiggly rendering, hidden from hunter view)
   });
   
   // Terrain Flow visibility (separate from main visibility for cleaner control)
@@ -15811,15 +15811,18 @@ function DeerIntelContent() {
                 <p className="text-[9px] text-stone-600 mt-1 leading-relaxed">How terrain shapes where deer travel</p>
               </div>
 
-              {/* Travel Corridor Layer (Primary Movement Path - ON by default) */}
+              {/* Travel Corridor Layer (Primary Path) — admin/debug only
+                  Hidden from hunters: squiggly rendering hurts polish.
+                  Default OFF, smoothing fix planned as separate patch. */}
+              {role === 'admin' && (
               <div className="p-3 border-b border-white/[0.06]">
                 <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
                   <Mountain className="h-4 w-4 text-stone-400" />
                   Travel Corridor
+                  <span className="text-[8px] text-stone-600 bg-stone-800/60 px-1.5 py-0.5 rounded ml-auto">DEBUG</span>
                 </h3>
                 <div className="space-y-1">
                   {(() => {
-                    // Calculate corridor status
                     const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
                     const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
                     const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
@@ -15838,7 +15841,6 @@ function DeerIntelContent() {
                       >
                         <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
                         <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Primary Path</span>
-                        {/* Status badge */}
                         {hasFeatures ? (
                           <span className="text-[9px] text-green-400 px-1.5 py-0.5 bg-green-900/40 rounded">
                             {primaryCount}{secondaryCount > 0 ? `+${secondaryCount}` : ''}
@@ -15851,7 +15853,6 @@ function DeerIntelContent() {
                   })()}
                 </div>
                 
-                {/* Expanded details when toggle is on */}
                 {visibility.ridgeSpines && (
                   <div className="mt-2 text-[10px] space-y-1 px-1">
                     {(() => {
@@ -15863,7 +15864,6 @@ function DeerIntelContent() {
                                              ridgeSpineData?.metadata?.dem_source === 'NONE' ||
                                              !ridgeSpineData;
                       
-                      // Case 1: Features detected
                       if (totalFeatures > 0) {
                         return (
                           <div className="text-stone-400 space-y-0.5">
@@ -15893,7 +15893,6 @@ function DeerIntelContent() {
                         );
                       }
                       
-                      // Case 2: No features detected (clean empty state)
                       return (
                         <div className="text-stone-500 bg-stone-800/30 rounded p-2">
                           <p className="italic">Not detected on this parcel</p>
@@ -15906,6 +15905,7 @@ function DeerIntelContent() {
                   </div>
                 )}
               </div>
+              )}
               <div className="p-3 border-b border-white/[0.06]">
                 <div className="space-y-1">
                   <button
