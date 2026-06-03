@@ -54,7 +54,8 @@ import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySynthetic
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
-import { smoothFeatureCollection } from '@/lib/polyline-smooth';
+import { smoothFeatureCollection, smoothFlowFeatureCollection } from '@/lib/polyline-smooth';
+import { computeScaleParams, geometryToBbox, bboxToAcres, type ScaleVisualParams, type TerritoryScaleMode } from '@/lib/scale-adaptive';
 import { assembleTerritory, fetchCachedTerrain, writeCachedTerrain, type CachedParcelTerrain, type TerrainFlowBundle } from '@/lib/territory-assembly';
 import { buildTerrainHuntability, type HuntabilityResult, type HuntabilityScore } from '@/lib/terrain-huntability';
 import type { CDLAnalysisResult } from '@/lib/cdl-analysis';
@@ -499,6 +500,14 @@ const LAYER_COLORS = {
   beddingProbability: '#7c3aed', // Violet-600: bedding zone fill
   beddingProbabilityGlow: '#a855f7', // Purple-500: bedding zone glow/halo
   beddingProbabilityOutline: '#6d28d9', // Violet-700: bedding zone outline
+  // Phase A: Ski-map visual language (Niehues aesthetic)
+  corridorUmber: '#A0522D',            // Primary corridor — solid umber (Item 6)
+  corridorUmberCasing: '#8B6F47',      // Warm casing behind umber corridors
+  drawSlate: '#5C7080',                // Draw features — slate dashed (Item 6)
+  flowPathDark: '#1A1A1A',             // Primary Path — near-black, smoothed (Item 6)
+  flowPathGlow: '#3A3A3A',             // Subtle dark glow behind Primary Path
+  corridorLabelBg: '#F5EDDC',          // Cream label background (Niehues)
+  corridorLabelText: '#2C3E50',        // Slate label text
 };
 
 // ========== EDGE INTELLIGENCE UTILITIES ==========
@@ -3213,6 +3222,11 @@ function DeerIntelContent() {
   // Terrain Story State (structural narrative)
   const [terrainStory, setTerrainStory] = useState<TerrainStorySummary | null>(null);
 
+  // ========== SCALE-ADAPTIVE VISUAL HIERARCHY (Phase A, Item 3) ==========
+  const [scaleParams, setScaleParams] = useState<ScaleVisualParams>(() => computeScaleParams(200)); // default MEDIUM
+  const scaleParamsRef = useRef(scaleParams);
+  useEffect(() => { scaleParamsRef.current = scaleParams; }, [scaleParams]);
+
   // ========== HUNTABILITY ENGINE STATE (Big Beautiful Map v1) ==========
   const [huntabilityData, setHuntabilityData] = useState<HuntabilityResult | null>(null);
   const [huntabilityLoading, setHuntabilityLoading] = useState(false);
@@ -4257,6 +4271,95 @@ function DeerIntelContent() {
     if (!layers?.standPoints) return;
     computeAlignmentScores();
   }, [layers?.standPoints, windDirection, season, parcelPolygon, computeAlignmentScores]);
+
+  // ── SCALE-ADAPTIVE: Recompute when parcel/territory geometry changes ──
+  useEffect(() => {
+    if (!parcelPolygon?.geometry) return;
+    const geom = parcelPolygon.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+    const bbox = geometryToBbox(geom);
+    // Use actual acreage if available (more accurate than bbox estimate)
+    const acres = parseFloat(acreageParam || '0');
+    const estimatedAcres = acres > 0 ? acres : bboxToAcres(bbox);
+    const newParams = computeScaleParams(estimatedAcres);
+    setScaleParams(prev => {
+      // Only update if mode changed or significant parameter shift
+      if (prev.mode !== newParams.mode || Math.abs(prev.areaAcres - newParams.areaAcres) > 10) {
+        console.log(`[ScaleAdaptive] ${prev.mode} → ${newParams.mode} (${Math.round(estimatedAcres)} acres)`);
+        return newParams;
+      }
+      return prev;
+    });
+  }, [parcelPolygon, acreageParam]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── SCALE-ADAPTIVE: Apply visual params to map layers when scale changes ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const sp = scaleParams;
+
+    // --- Corridor widths ---
+    if (map.getLayer('tfp-corridors-primary')) {
+      map.setPaintProperty('tfp-corridors-primary', 'line-width',
+        ['interpolate', ['linear'], ['zoom'], 12, sp.corridorPrimaryWidth * 0.6, 14, sp.corridorPrimaryWidth * 0.85, 17, sp.corridorPrimaryWidth]);
+      map.setPaintProperty('tfp-corridors-primary', 'line-opacity', sp.flowOpacity);
+    }
+    if (map.getLayer('tfp-corridors-primary-casing')) {
+      map.setPaintProperty('tfp-corridors-primary-casing', 'line-width',
+        ['interpolate', ['linear'], ['zoom'], 12, sp.corridorPrimaryWidth * 1.4, 14, sp.corridorPrimaryWidth * 2.0, 17, sp.corridorPrimaryWidth * 2.6]);
+      map.setPaintProperty('tfp-corridors-primary-casing', 'line-opacity', sp.flowOpacity * 0.14);
+    }
+    if (map.getLayer('tfp-corridors-possible')) {
+      map.setPaintProperty('tfp-corridors-possible', 'line-width',
+        ['interpolate', ['linear'], ['zoom'], 12, sp.corridorPossibleWidth * 0.6, 14, sp.corridorPossibleWidth * 0.85, 17, sp.corridorPossibleWidth]);
+      map.setPaintProperty('tfp-corridors-possible', 'line-opacity', sp.flowOpacity * 0.7);
+    }
+
+    // --- Draw widths ---
+    if (map.getLayer('tfp-funnels-lines-draws')) {
+      map.setPaintProperty('tfp-funnels-lines-draws', 'line-width', sp.drawWidth);
+    }
+
+    // --- Flow Primary Path widths ---
+    if (map.getLayer('tfp-flow-primary')) {
+      map.setPaintProperty('tfp-flow-primary', 'line-width',
+        ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+          0.4, sp.flowPrimaryWidth * 0.5,
+          0.55, sp.flowPrimaryWidth * 0.73,
+          0.75, sp.flowPrimaryWidth]);
+      map.setPaintProperty('tfp-flow-primary', 'line-opacity',
+        ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+          0.4, sp.flowOpacity * 0.6,
+          0.55, sp.flowOpacity * 0.8,
+          0.75, sp.flowOpacity]);
+    }
+    if (map.getLayer('tfp-flow-primary-glow')) {
+      map.setPaintProperty('tfp-flow-primary-glow', 'line-opacity', sp.flowOpacity * 0.22);
+    }
+
+    // --- Stand marker sizes (scale multiplier applied to rank-based radii) ---
+    const sm = sp.markerSize; // multiplier: 1.4 (SMALL) → 1.0 (MEDIUM) → 0.72 (LARGE)
+    if (map.getLayer('tfp-stands-glow')) {
+      map.setPaintProperty('tfp-stands-glow', 'circle-radius',
+        ['match', ['get', 'rank'], 1, Math.round(14 * sm), 2, Math.round(12 * sm), Math.round(10 * sm)]);
+    }
+    if (map.getLayer('tfp-stands-disc')) {
+      map.setPaintProperty('tfp-stands-disc', 'circle-radius',
+        ['match', ['get', 'rank'], 1, Math.round(9 * sm), 2, Math.round(7.5 * sm), Math.round(6 * sm)]);
+    }
+    if (map.getLayer('tfp-stands-reticle')) {
+      map.setPaintProperty('tfp-stands-reticle', 'circle-radius',
+        ['match', ['get', 'rank'], 1, Math.round(4.5 * sm), 2, Math.round(3.8 * sm), Math.round(3 * sm)]);
+    }
+
+    // --- Stand labels: always-visible at SMALL, hover at MEDIUM/LARGE ---
+    // Label visibility is managed by the stand rendering useEffect — we just
+    // adjust text size here based on scale
+    if (map.getLayer('tfp-stands-label')) {
+      map.setLayoutProperty('tfp-stands-label', 'text-size', sp.mode === 'SMALL' ? 12 : 10);
+    }
+
+    console.log(`[ScaleAdaptive] Applied ${sp.mode} params — corridor ${sp.corridorPrimaryWidth.toFixed(1)}px, flow ${sp.flowPrimaryWidth.toFixed(1)}px, marker ×${sm.toFixed(2)}, opacity ${sp.flowOpacity.toFixed(2)}`);
+  }, [scaleParams, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Check parcel access when analysis completes ──
   useEffect(() => {
@@ -8075,10 +8178,13 @@ function DeerIntelContent() {
         clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
       }
 
-      // Update primary flow source (filter + clip to parcel display boundary)
+      // Update primary flow source (filter + smooth + clip to parcel display boundary)
+      // Phase A Item 1: Apply Catmull-Rom smoothing to Primary Path for clean Niehues aesthetic
       const primarySource = map.getSource('tfp-flow-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(clipLinesToParcel(filterFlowLines(flowData?.flow_primary || emptyFC), clipGeom, 50, 'tfp-flow-primary'));
+        const rawPrimary = filterFlowLines(flowData?.flow_primary || emptyFC);
+        const smoothedPrimary = smoothFlowFeatureCollection(rawPrimary, 0.7); // pathSmoothing default
+        primarySource.setData(clipLinesToParcel(smoothedPrimary, clipGeom, 50, 'tfp-flow-primary'));
       }
 
       // Update secondary flow source (filter + clip to parcel display boundary)
@@ -8319,11 +8425,12 @@ function DeerIntelContent() {
     // 1. Corridors dim smoothly (600ms ease) to push attention toward the highlight
     // 2. Nearest corridor highlight fades in after a 200ms delay for a deliberate reveal
     const selecting = selectedStand !== null;
-    // v3.8.1: Dim opacities match new hierarchy (primary demoted, possible elevated)
+    // Phase A: Umber corridor opacities — primary elevated, scale-adaptive drives fullOpacity
+    const sp = scaleParamsRef.current;
     const corridorDimLayers = [
-      { id: 'tfp-corridors-primary', dimOpacity: 0.12, fullOpacity: 0.35 },
-      { id: 'tfp-corridors-primary-casing', dimOpacity: 0.02, fullOpacity: 0.06 },
-      { id: 'tfp-corridors-possible', dimOpacity: 0.18, fullOpacity: 0.55 },
+      { id: 'tfp-corridors-primary', dimOpacity: 0.25, fullOpacity: sp.flowOpacity },
+      { id: 'tfp-corridors-primary-casing', dimOpacity: 0.04, fullOpacity: sp.flowOpacity * 0.14 },
+      { id: 'tfp-corridors-possible', dimOpacity: 0.18, fullOpacity: sp.flowOpacity * 0.7 },
       { id: 'tfp-corridors-exploratory', dimOpacity: 0.04, fullOpacity: 0.22 },
       { id: 'tfp-corridors-context-primary', dimOpacity: 0.06, fullOpacity: 0.28 },
       { id: 'tfp-corridors-context-possible', dimOpacity: 0.03, fullOpacity: 0.15 },
@@ -8387,12 +8494,12 @@ function DeerIntelContent() {
         { id: 'tfp-funnels-polys-outline', targetOpacity: 1.0 },
       ], FADE_IN);
       
-      // V4 Step 11b: Staggered corridor reveal — cascading "drawing on" effect
-      // v3.8.1: Primary demoted, possible elevated as main readable signal
+      // Phase A: Staggered corridor reveal — umber solid corridors, scale-adaptive opacities
+      const spFade = scaleParamsRef.current;
       staggeredFadeToggle(map, visibility.corridors, [
-        { id: 'tfp-corridors-primary-casing', targetOpacity: 0.06 },
-        { id: 'tfp-corridors-primary', targetOpacity: 0.35 },
-        { id: 'tfp-corridors-possible', targetOpacity: 0.55 },
+        { id: 'tfp-corridors-primary-casing', targetOpacity: spFade.flowOpacity * 0.14 },
+        { id: 'tfp-corridors-primary', targetOpacity: spFade.flowOpacity },
+        { id: 'tfp-corridors-possible', targetOpacity: spFade.flowOpacity * 0.7 },
         { id: 'tfp-corridors-exploratory', targetOpacity: 0.22 },
         { id: 'tfp-corridors-context-primary', targetOpacity: 0.28 },
         { id: 'tfp-corridors-context-possible', targetOpacity: 0.15 },
@@ -8429,43 +8536,46 @@ function DeerIntelContent() {
         }, 380);
       });
 
-      // Flow lines (SUPPORTING EVIDENCE) — v3.5.1 animated corridors
+      // Flow lines (PRIMARY PATH) — Phase A: dark solid smoothed line
       // V4 Step 11: Smooth fade for flow visibility
+      const spFlow = scaleParamsRef.current;
       if (map.getLayer('tfp-flow-primary')) {
         if (isPressureMode && flowVisibility.flowPrimary) {
           map.setLayoutProperty('tfp-flow-primary', 'visibility', 'visible');
         } else {
           fadeLayerOut(map, 'tfp-flow-primary', 'line-opacity', FADE_OUT);
         }
-        // When Deer Flow is active, boost primary lines so the connective structure reads clearly
+        // Scale-adaptive widths for Primary Path
+        const fw = spFlow.flowPrimaryWidth;
         map.setPaintProperty('tfp-flow-primary', 'line-width', isPressureMode ? [
           'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, 2.5,     // Weak: slightly bolder
-          0.55, 3.5,    // Moderate: clear
-          0.75, 5       // Strong: bold corridor
+          0.4, fw * 0.7,
+          0.55, fw * 1.0,
+          0.75, fw * 1.4
         ] : [
           'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-          0.4, 2,
-          0.55, 3,
-          0.75, 4
+          0.4, fw * 0.5,
+          0.55, fw * 0.73,
+          0.75, fw
         ]);
         if (isPressureMode && flowVisibility.flowPrimary) {
+          const fo = spFlow.flowOpacity;
           map.setPaintProperty('tfp-flow-primary', 'line-opacity', clampOpacityExpr(isPressureMode ? [
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.4, 0.65,
-            0.55, 0.80,
-            0.75, 0.95
+            0.4, fo * 0.7,
+            0.55, fo * 0.85,
+            0.75, fo
           ] : [
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.4, 0.55,
-            0.55, 0.70,
-            0.75, 0.85
+            0.4, fo * 0.6,
+            0.55, fo * 0.8,
+            0.75, fo
           ]));
         }
       }
       if (map.getLayer('tfp-flow-primary-glow')) {
         if (isPressureMode && flowVisibility.flowPrimary) {
-          fadeLayerIn(map, 'tfp-flow-primary-glow', isPressureMode ? 0.35 : 0.25, 'line-opacity', FADE_IN);
+          fadeLayerIn(map, 'tfp-flow-primary-glow', isPressureMode ? 0.22 : 0.18, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-primary-glow', 'line-opacity', FADE_OUT);
         }
@@ -8488,7 +8598,7 @@ function DeerIntelContent() {
         }
       }
       if (map.getLayer('tfp-flow-secondary')) {
-        const secTarget = isPressureMode ? 0.50 : 0.45;
+        const secTarget = isPressureMode ? 0.40 : 0.35;
         if (isPressureMode && flowVisibility.flowSecondary) {
           fadeLayerIn(map, 'tfp-flow-secondary', secTarget, 'line-opacity', FADE_IN);
         } else {
@@ -8496,10 +8606,10 @@ function DeerIntelContent() {
         }
         map.setPaintProperty('tfp-flow-secondary', 'line-width', isPressureMode ? [
           'interpolate', ['linear'], ['zoom'],
-          10, 1.8,
-          15, 2.2,
-          18, 2.8,
-        ] : 1.5);
+          10, 1.4,
+          15, 1.8,
+          18, 2.2,
+        ] : 1.2);
       }
       // Convergence zones — smooth fade with pressure-aware opacity
       if (map.getLayer('tfp-flow-convergence')) {
@@ -8878,8 +8988,9 @@ function DeerIntelContent() {
         // Funnel lines source (draws, corridors) - separate by funnelType for different colors
         if (!map.getSource('tfp-funnels-lines')) {
           map.addSource('tfp-funnels-lines', { type: 'geojson', data: EMPTY_FC });
-          // Draws layer (blue) - Physical terrain, SHOW in Terrain Work Mode
-          // v3.9.1: dasharray for extremely subtle animation (structural pathways)
+          // Draws layer: SLATE DASHED — high-confidence-but-conditional (Phase A, Item 6)
+          // Brief: "Dashed strokes convey high-confidence but conditional — features the
+          // algorithm is confident about, but whose precise path varies."
           map.addLayer({
             id: 'tfp-funnels-lines-draws',
             type: 'line',
@@ -8887,9 +8998,9 @@ function DeerIntelContent() {
             filter: ['==', ['get', 'funnelType'], 'draw'],
             layout: { visibility: 'none' }, // Draws default OFF — user opts-in via panel toggle
             paint: {
-              'line-color': LAYER_COLORS.funnelDraw,
-              'line-width': 3,
-              'line-dasharray': [10, 2],
+              'line-color': LAYER_COLORS.drawSlate,     // #5C7080 slate (was blue)
+              'line-width': 2,                          // 2px (was 3)
+              'line-dasharray': [4, 2],                 // 4px dash / 2px gap (was 10/2)
             },
           });
           // Corridors layer: HIGH + MEDIUM confidence = SOLID lines
@@ -8998,34 +9109,59 @@ function DeerIntelContent() {
         // Primary corridors demoted to faint support — high model confidence but visually
         // overwhelming on large parcels. Secondary dashed flows read better as terrain seams.
         
-        // Primary corridors: DEMOTED — thin, low-opacity support layer
+        // Primary corridors: UMBER SOLID — ski-run styling (Phase A, Item 6)
         if (!map.getSource('tfp-corridors-primary')) {
           map.addSource('tfp-corridors-primary', { type: 'geojson', data: EMPTY_FC });
-          // Casing layer: very faint glow — barely visible
+          // Casing layer: warm umber glow behind the main line
           map.addLayer({
             id: 'tfp-corridors-primary-casing',
             type: 'line',
             source: 'tfp-corridors-primary',
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
-              'line-color': LAYER_COLORS.corridorPrimary,
-              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 17, 8],
-              'line-opacity': 0.06,
-              'line-blur': 3,
+              'line-color': LAYER_COLORS.corridorUmberCasing,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 14, 7, 17, 9],
+              'line-opacity': 0.12,
+              'line-blur': 2,
             },
           });
-          // Core line: thinner, lower opacity — context, not focal point
+          // Core line: solid umber, 3.5px — THE terrain feature line
           map.addLayer({
             id: 'tfp-corridors-primary',
             type: 'line',
             source: 'tfp-corridors-primary',
             layout: { visibility: TERRAIN_WORK_MODE ? 'none' : 'visible' },
             paint: {
-              'line-color': LAYER_COLORS.corridorPrimary,
-              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 14, 2.2, 17, 3],
-              'line-opacity': 0.35,
-              'line-dasharray': [10, 4],
+              'line-color': LAYER_COLORS.corridorUmber,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.0, 14, 3.0, 17, 3.5],
+              'line-opacity': 0.85,
+              // SOLID — no dasharray (terrain features are high-confidence)
             },
+          });
+          // Ski-run-style labels for named corridors (cream bg, slate text)
+          // Only shows when corridor features have a 'name' or 'corridorName' property
+          map.addLayer({
+            id: 'tfp-corridors-primary-labels',
+            type: 'symbol',
+            source: 'tfp-corridors-primary',
+            layout: {
+              'symbol-placement': 'line-center',
+              'text-field': ['coalesce', ['get', 'name'], ['get', 'corridorName'], ''],
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+              'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 15, 13],
+              'text-allow-overlap': false,
+              'text-max-angle': 25,
+              'text-anchor': 'center',
+              'text-offset': [0, -0.8],
+            },
+            paint: {
+              'text-color': LAYER_COLORS.corridorLabelText,
+              'text-halo-color': LAYER_COLORS.corridorLabelBg,
+              'text-halo-width': 3.5,
+              'text-halo-blur': 0.5,
+              'text-opacity': 0.95,
+            },
+            filter: ['any', ['has', 'name'], ['has', 'corridorName']],
           });
         }
         
@@ -9513,62 +9649,53 @@ function DeerIntelContent() {
         // Primary travel corridors with subtle animation to communicate movement
         // Slow, calm dash animation along corridor centerlines
         
-        // Primary flow lines: animated teal/cyan movement corridors
+        // PRIMARY PATH: Smoothed deer movement spine (Phase A, Items 1 + 6)
+        // Dark (#1A1A1A) solid line — the principal movement route through the property.
+        // Smoothed via Catmull-Rom at data-push time (see flow useEffect above).
         if (!map.getSource('tfp-flow-primary')) {
           map.addSource('tfp-flow-primary', { type: 'geojson', data: EMPTY_FC });
           
-          // v3.5.1 — Animated glow layer (soft teal glow behind main line)
+          // Subtle dark glow behind the Primary Path for contrast over satellite imagery
           map.addLayer({
             id: 'tfp-flow-primary-glow',
             type: 'line',
             source: 'tfp-flow-primary',
             paint: {
-              'line-color': LAYER_COLORS.flowAnimated, // Teal-400 glow
+              'line-color': LAYER_COLORS.flowPathGlow, // #3A3A3A subtle dark
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 6,      // Wider glow halo
-                0.75, 10
+                0.4, 5,
+                0.75, 8
               ],
-              'line-opacity': 0.25,
-              'line-blur': 3,
+              'line-opacity': 0.18,
+              'line-blur': 2.5,
             },
           });
           
-          // v3.5.1 — Main animated flow line (teal/cyan with dashes for animation)
+          // Main Primary Path line — solid near-black, 3px
           map.addLayer({
             id: 'tfp-flow-primary',
             type: 'line',
             source: 'tfp-flow-primary',
             paint: {
-              // Teal/cyan color palette for movement feel
-              'line-color': [
-                'case',
-                ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.7],
-                LAYER_COLORS.flowPrimary,      // Teal-500 — strong corridors
-                ['>=', ['coalesce', ['get', 'likelihood'], 0.5], 0.5],
-                LAYER_COLORS.flowAnimated,     // Teal-400 — moderate
-                LAYER_COLORS.flowSecondary     // Teal-300 — weak
-              ],
-              // Bolder widths for visibility
+              'line-color': LAYER_COLORS.flowPathDark,  // #1A1A1A near-black
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 2,      // Weak: visible
-                0.55, 3,     // Moderate: clear
-                0.75, 4      // Strong: bold corridor
+                0.4, 1.5,
+                0.55, 2.2,
+                0.75, 3.0
               ],
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 0.55,
-                0.55, 0.70,
-                0.75, 0.85
+                0.4, 0.50,
+                0.55, 0.65,
+                0.75, 0.80
               ],
-              // Dashed pattern for animation (will be animated via dasharray-offset)
-              'line-dasharray': [6, 4],
+              // SOLID — no dasharray (smoothed curves read clearly without dashes)
             },
           });
           
-          // v3.8.1 — Directional chevron symbols along primary flow lines
-          // Uses text symbols placed along lines to indicate flow direction
+          // Directional chevrons along primary flow lines (dark, subtle)
           map.addLayer({
             id: 'tfp-flow-direction-chevrons',
             type: 'symbol',
@@ -9576,15 +9703,12 @@ function DeerIntelContent() {
             layout: {
               'symbol-placement': 'line',
               // NOTE: Mapbox GL does NOT allow data expressions on `symbol-spacing`
-              // (only zoom-based expressions). Using data-driven values here throws
-              // a style error that crashes the entire map useEffect before it
-              // reaches the sit-pin contextmenu registration block. Keep it static.
               'symbol-spacing': 110,
               'text-field': '›',
               'text-size': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 11,
-                0.75, 16,
+                0.4, 10,
+                0.75, 14,
               ],
               'text-allow-overlap': true,
               'text-ignore-placement': true,
@@ -9592,14 +9716,14 @@ function DeerIntelContent() {
               'text-keep-upright': false,
             },
             paint: {
-              'text-color': LAYER_COLORS.flowDirectionChevron,
+              'text-color': LAYER_COLORS.flowPathDark, // #1A1A1A matches path
               'text-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.4, 0.22,
-                0.55, 0.35,
-                0.75, 0.50,
+                0.4, 0.18,
+                0.55, 0.28,
+                0.75, 0.40,
               ],
-              'text-halo-color': 'rgba(0,0,0,0.15)',
+              'text-halo-color': 'rgba(255,255,255,0.15)',
               'text-halo-width': 0.5,
             },
           });
@@ -9623,7 +9747,8 @@ function DeerIntelContent() {
           });
         }
         
-        // Secondary flow lines: visible but clearly subordinate feeders
+        // Secondary flow lines: subordinate feeders (lighter, thinner)
+        // Phase B will restructure these into Green/Blue/Black tiers
         if (!map.getSource('tfp-flow-secondary')) {
           map.addSource('tfp-flow-secondary', { type: 'geojson', data: EMPTY_FC });
           map.addLayer({
@@ -9631,9 +9756,9 @@ function DeerIntelContent() {
             type: 'line',
             source: 'tfp-flow-secondary',
             paint: {
-              'line-color': LAYER_COLORS.flowSecondary, // Teal-300
-              'line-width': 1.5,
-              'line-opacity': 0.45,
+              'line-color': '#4A5568',  // Warm gray — subordinate to dark primary path
+              'line-width': 1.2,
+              'line-opacity': 0.35,
               'line-dasharray': [4, 3],
             },
           });
@@ -10583,6 +10708,7 @@ function DeerIntelContent() {
           // Corridors & funnels (V4 Step 10: casing + core)
           'tfp-corridors-primary-casing',  // Glow casing below core
           'tfp-corridors-primary',
+          'tfp-corridors-primary-labels',   // Ski-run-style corridor name labels
           'tfp-corridors-possible',
           'tfp-corridors-exploratory',
           // Pressure polygon fill grid (new primary visual)
@@ -15883,13 +16009,13 @@ function DeerIntelContent() {
                       <button
                         onClick={() => setFlowVisibility(v => ({ ...v, flowPrimary: !v.flowPrimary }))}
                         className={`w-full flex items-center gap-2 px-2 py-1 rounded transition-all text-[11px] ${
-                          flowVisibility.flowPrimary ? 'bg-cyan-900/20' : 'bg-stone-800/20 hover:bg-stone-700/20'
+                          flowVisibility.flowPrimary ? 'bg-stone-700/30' : 'bg-stone-800/20 hover:bg-stone-700/20'
                         }`}
                       >
-                        <span className="w-2.5 h-2.5 rounded" style={{ background: LAYER_COLORS.flowPrimary, opacity: flowVisibility.flowPrimary ? 1 : 0.3 }} />
+                        <span className="w-2.5 h-2.5 rounded" style={{ background: LAYER_COLORS.flowPathDark, opacity: flowVisibility.flowPrimary ? 1 : 0.3 }} />
                         <span className={`flex-1 text-left ${flowVisibility.flowPrimary ? 'text-stone-300' : 'text-stone-600'}`}>Flow Lines</span>
                         {hasData ? (
-                          <span className="text-[8px] text-cyan-400/70 px-1 py-0.5 bg-cyan-900/30 rounded">
+                          <span className="text-[8px] text-stone-400/70 px-1 py-0.5 bg-stone-700/30 rounded">
                             {primaryCount}
                           </span>
                         ) : isLoading ? (
@@ -15910,13 +16036,13 @@ function DeerIntelContent() {
                       <button
                         onClick={() => setFlowVisibility(v => ({ ...v, flowSecondary: !v.flowSecondary }))}
                         className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                          flowVisibility.flowSecondary ? 'bg-cyan-900/20' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                          flowVisibility.flowSecondary ? 'bg-stone-700/20' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                         }`}
                       >
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.flowSecondary, opacity: flowVisibility.flowSecondary ? 1 : 0.4 }} />
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#4A5568', opacity: flowVisibility.flowSecondary ? 1 : 0.4 }} />
                         <span className={`flex-1 text-left ${flowVisibility.flowSecondary ? 'text-white' : 'text-stone-500'}`}>Secondary Flow</span>
                         {hasData && (
-                          <span className="text-[9px] text-cyan-300 px-1.5 py-0.5 bg-cyan-900/30 rounded">
+                          <span className="text-[9px] text-stone-300 px-1.5 py-0.5 bg-stone-700/30 rounded">
                             {secondaryCount}
                           </span>
                         )}

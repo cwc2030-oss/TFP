@@ -1,15 +1,16 @@
 /**
  * polyline-smooth.ts — Polyline smoothing utilities for map display.
  *
- * Uses Chaikin's corner-cutting algorithm to smooth jagged DEM-derived
- * polylines (ridge spines, flow lines) into visually clean curves
- * suitable for the Niehues ski-map aesthetic.
+ * Two smoothing pipelines:
+ * 1. Chaikin corner-cutting (for ridge spines) — fast, approximating
+ * 2. Catmull-Rom spline (for flow lines / primary path) — passes through
+ *    all waypoints for a truer representation of the terrain route
  *
- * Chaikin's algorithm: For each segment A→B, replace with two points
- * at 25% and 75% along the segment. Each pass roughly doubles the
- * point count while smoothing corners. The result converges toward
- * a quadratic B-spline.
+ * Both pipelines use Douglas-Peucker as a first pass to remove DEM micro-noise
+ * before applying the smooth interpolation.
  */
+
+// ============ Chaikin Corner-Cutting ============
 
 /**
  * Apply one pass of Chaikin's corner-cutting to a coordinate array.
@@ -89,6 +90,132 @@ export function smoothFeatureCollection(
   };
 }
 
+// ============ Catmull-Rom Spline Interpolation ============
+
+/**
+ * Compute a single point on a Catmull-Rom segment.
+ * Standard formulation (equivalent to tension = 0.5 cardinal spline).
+ * Passes through P1 and P2; P0 and P3 are neighboring control points.
+ */
+function catmullRomPoint(
+  p0: number[], p1: number[], p2: number[], p3: number[],
+  t: number, alpha: number
+): number[] {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const dims = Math.min(p0.length, p1.length, p2.length, p3.length);
+  const result: number[] = [];
+
+  // Cardinal spline with tension alpha (0.5 = standard Catmull-Rom)
+  for (let d = 0; d < dims; d++) {
+    result.push(
+      alpha * (
+        (-t3 + 2 * t2 - t) * p0[d] +
+        (3 * t3 - 5 * t2 + 2) * p1[d] +
+        (-3 * t3 + 4 * t2 + t) * p2[d] +
+        (t3 - t2) * p3[d]
+      )
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Catmull-Rom spline interpolation through control points.
+ * Produces a smooth curve that passes through every waypoint.
+ *
+ * @param coords - Control points [lng, lat] or [lng, lat, elev]
+ * @param tension - Curve tension. 0.5 = standard Catmull-Rom. Default 0.5
+ * @param segmentsPerSpan - Interpolated points between each pair. Default 8
+ * @returns Smoothed coordinate array passing through all original points
+ */
+export function catmullRomInterpolate(
+  coords: number[][],
+  tension: number = 0.5,
+  segmentsPerSpan: number = 8,
+): number[][] {
+  if (coords.length < 3) return coords;
+
+  const result: number[][] = [coords[0]];
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    // Use clamped boundary indices (repeat endpoints)
+    const p0 = coords[Math.max(0, i - 1)];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[Math.min(coords.length - 1, i + 2)];
+
+    // Interpolate between p1 and p2
+    for (let s = 1; s <= segmentsPerSpan; s++) {
+      result.push(catmullRomPoint(p0, p1, p2, p3, s / segmentsPerSpan, tension));
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Smooth flow lines for display using Douglas-Peucker + Catmull-Rom.
+ * This is the primary smoothing pipeline for deer flow lines and the
+ * Primary Path — produces curves that pass through terrain waypoints.
+ *
+ * The `pathSmoothing` parameter (0–1.0) controls aggressiveness:
+ * - 0: No smoothing (raw DEM-derived polylines)
+ * - 0.3: Light smoothing (removes micro-jitter, preserves detail)
+ * - 0.7: Default (good balance of readability and fidelity)
+ * - 1.0: Maximum smoothing (clean arcs, some terrain detail lost)
+ *
+ * @param fc - FeatureCollection of flow LineStrings
+ * @param pathSmoothing - 0 (raw) to 1.0 (max smooth). Default 0.7
+ * @returns New FeatureCollection with smoothed geometries (properties preserved)
+ */
+export function smoothFlowFeatureCollection(
+  fc: GeoJSON.FeatureCollection,
+  pathSmoothing: number = 0.7,
+): GeoJSON.FeatureCollection {
+  if (pathSmoothing <= 0) return fc;
+
+  // Scale Douglas-Peucker epsilon with smoothing level
+  // 0.3 → ~0.00006° ≈ 7m, 0.7 → ~0.00010° ≈ 11m, 1.0 → ~0.00013° ≈ 15m
+  const epsilon = 0.00004 + pathSmoothing * 0.00009;
+
+  // More segments for smoother curves (4 at low smoothing, 10 at max)
+  const segments = Math.max(4, Math.round(4 + pathSmoothing * 6));
+
+  return {
+    type: 'FeatureCollection',
+    features: fc.features.map(feature => {
+      if (feature.geometry.type !== 'LineString') return feature;
+
+      const coords = (feature.geometry as GeoJSON.LineString).coordinates;
+      if (coords.length < 3) return feature;
+
+      // Step 1: Douglas-Peucker to remove DEM micro-noise
+      const simplified = douglasPeucker(coords, epsilon);
+
+      // Need at least 3 points for Catmull-Rom
+      if (simplified.length < 3) {
+        return {
+          ...feature,
+          geometry: { type: 'LineString' as const, coordinates: simplified },
+        };
+      }
+
+      // Step 2: Catmull-Rom for smooth curves through terrain waypoints
+      const smoothed = catmullRomInterpolate(simplified, 0.5, segments);
+
+      return {
+        ...feature,
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: smoothed,
+        },
+      };
+    }),
+  };
+}
+
 // ============ Douglas-Peucker Simplification ============
 
 /**
@@ -119,7 +246,7 @@ function perpendicularDistance(p: number[], a: number[], b: number[]): number {
  * Douglas-Peucker polyline simplification.
  * Removes points that deviate less than `tolerance` from the simplified line.
  */
-function douglasPeucker(coords: number[][], tolerance: number): number[][] {
+export function douglasPeucker(coords: number[][], tolerance: number): number[][] {
   if (coords.length <= 2) return coords;
 
   // Find the point with the maximum distance from the line start→end
