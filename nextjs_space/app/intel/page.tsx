@@ -2970,6 +2970,8 @@ function DeerIntelContent() {
   // Centralized enforcer: the SOLE authority for styling territory boundary layers.
   // Principle: "Hunters don't think in parcels — Territory is the user-facing concept."
   // Multi-parcel: hull = outer boundary (gold), internal seams hidden by default.
+  //   tfp-parcel-outline/glow (the merged MultiPolygon) is ALSO hidden for multi-parcel
+  //   because parcelPolygon contains all internal ring boundaries.
   // Single-parcel: individual parcel outline = the boundary (no hull needed).
   const enforceTerritoryLineMode = useCallback((map: mapboxgl.Map, caller?: string) => {
     const mode = territoryLineModeRef.current;
@@ -2978,6 +2980,8 @@ function DeerIntelContent() {
     console.log(`[TERRITORY-ENFORCE] mode=${mode}, parcels=${count}, showInternal=${showInternal}, caller=${caller || 'unknown'}`);
     if (count === 0) return;
 
+    // Helper layer IDs
+    const SELECTED_PARCEL = ['tfp-parcel-outline', 'tfp-parcel-glow'] as const;
     const INTERNAL_LAYERS = ['tfp-territory-outline', 'tfp-territory-glow'] as const;
     const HULL_LAYERS = ['tfp-territory-hull-outline', 'tfp-territory-hull-glow'] as const;
     const LINK_LAYERS = ['tfp-territory-links-casing', 'tfp-territory-links-line'] as const;
@@ -2990,12 +2994,16 @@ function DeerIntelContent() {
     };
 
     if (mode === 'off') {
-      for (const id of [...INTERNAL_LAYERS, ...HULL_LAYERS, ...LINK_LAYERS]) setVis(id, 'none');
+      for (const id of [...SELECTED_PARCEL, ...INTERNAL_LAYERS, ...HULL_LAYERS, ...LINK_LAYERS]) setVis(id, 'none');
       return;
     }
 
     // ── Multi-parcel territory ──
     if (count > 1) {
+      // The merged MultiPolygon in tfp-parcel contains ALL internal ring
+      // boundaries — hide it completely. Hull handles outer boundary.
+      for (const id of SELECTED_PARCEL) setVis(id, 'none');
+
       // Hull = primary outer boundary
       if (mode === 'bold') {
         setVis('tfp-territory-hull-outline', 'visible');
@@ -3014,11 +3022,13 @@ function DeerIntelContent() {
       }
 
       // Internal parcel seams — hidden by default, opt-in via toggle
+      // When ON: muted slate (#5C7080), thin, quiet — NOT gold
       if (showInternal) {
         setVis('tfp-territory-outline', 'visible');
-        setPaint('tfp-territory-outline', 'line-width', 0.5);
-        setPaint('tfp-territory-outline', 'line-color', '#888888');
-        setPaint('tfp-territory-outline', 'line-opacity', 0.15);
+        setPaint('tfp-territory-outline', 'line-width', 0.7);
+        setPaint('tfp-territory-outline', 'line-color', '#5C7080');
+        setPaint('tfp-territory-outline', 'line-opacity', 0.25);
+        setPaint('tfp-territory-outline', 'line-dasharray', [4, 3]);
         setVis('tfp-territory-glow', 'none');
       } else {
         setVis('tfp-territory-outline', 'none');
@@ -3043,6 +3053,8 @@ function DeerIntelContent() {
     // ── Single parcel — individual outline IS the boundary ──
     // Hull hidden (no internal seams to worry about)
     for (const id of HULL_LAYERS) setVis(id, 'none');
+    // Restore selected parcel boundary for single-parcel mode
+    for (const id of SELECTED_PARCEL) setVis(id, 'visible');
 
     if (mode === 'bold') {
       setVis('tfp-territory-outline', 'visible');
@@ -6191,6 +6203,11 @@ function DeerIntelContent() {
           if (id === 'tfp-flow-nearest-highlight') {
             return !(_pm && (_fv.flowGreen || _fv.flowBlue || _fv.flowBlack));
           }
+          // Selected-parcel boundary layers — hide when multi-parcel territory
+          // (the merged MultiPolygon shows internal ring boundaries as gold lines)
+          if (id === 'tfp-parcel-outline' || id === 'tfp-parcel-glow') {
+            return territoryParcelsRef.current.length > 1;
+          }
           // Convergence zones
           if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
             return !(_pm && _fv.convergenceZones);
@@ -7961,8 +7978,11 @@ function DeerIntelContent() {
         // Restore adjacent parcel layers when territory is cleared
         map.setLayoutProperty('tfp-adjacent-parcels-fill', 'visibility', 'visible');
         map.setLayoutProperty('tfp-adjacent-parcels-outline', 'visibility', 'visible');
+        // Restore selected parcel boundary (hidden during multi-parcel territory)
+        try { map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible'); } catch {}
+        try { map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible'); } catch {}
       } catch { /* layers may not exist yet */ }
-      console.log('[TERRITORY] Cleared territory source (0 parcels) — adjacent layers restored');
+      console.log('[TERRITORY] Cleared territory source (0 parcels) — parcel+adjacent layers restored');
       return;
     }
 
@@ -12416,12 +12436,21 @@ function DeerIntelContent() {
         const parcelSrc = map.getSource('tfp-parcel') as mapboxgl.GeoJSONSource | undefined;
         if (parcelSrc) {
           parcelSrc.setData(parcelFeature);
-          // Ensure parcel layers are visible (gracefulClear may have faded them)
-          try { map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible'); } catch {}
-          try { map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible'); } catch {}
-          try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.95)); } catch {}
-          try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.35)); } catch {}
-          console.log('[PICK] Imperative paint: gold boundary visible immediately');
+          // Multi-parcel territory: the merged MultiPolygon in tfp-parcel shows
+          // internal ring boundaries — enforcer must hide it. Do NOT set visible.
+          const isMultiParcel = territoryParcelsRef.current.length > 1;
+          if (isMultiParcel) {
+            // Let the enforcer manage visibility (it hides tfp-parcel-outline/glow)
+            enforceTerritoryLineMode(map, 'pick-multi-parcel');
+            console.log('[PICK] Imperative paint: multi-parcel — enforcer manages visibility');
+          } else {
+            // Single parcel or first parcel — show gold boundary immediately
+            try { map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible'); } catch {}
+            try { map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible'); } catch {}
+            try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.95)); } catch {}
+            try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.35)); } catch {}
+            console.log('[PICK] Imperative paint: gold boundary visible immediately');
+          }
         }
       }
       
