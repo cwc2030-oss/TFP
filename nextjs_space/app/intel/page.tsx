@@ -488,8 +488,7 @@ const LAYER_COLORS = {
   ridgeCasing: '#EFEBE9',         // Off-white casing/halo for visibility over heat
   saddleNode: '#8D6E63',          // Warm taupe - saddle markers (subtle)
   // v3.5.1 — Animated Travel Corridor colors (teal/cyan movement palette)
-  flowPrimary: '#14b8a6',         // Teal-500: primary flow lines (animated)
-  flowSecondary: '#5eead4',       // Teal-300: secondary flow lines
+  // Phase B: flowPrimary/flowSecondary removed — see flowTierGreen/Blue/Black
   flowAnimated: '#2dd4bf',        // Teal-400: animated flow glow
   flowConvergenceBright: '#fbbf24', // Amber-400: brighter glow through convergence
   flowConvergence: '#f59e0b',     // Amber-500: convergence zone markers

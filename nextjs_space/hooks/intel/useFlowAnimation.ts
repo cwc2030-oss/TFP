@@ -2,14 +2,14 @@ import { useEffect, type MutableRefObject } from 'react';
 import type mapboxgl from 'mapbox-gl';
 
 /**
- * v3.9.2 — Unified dash animation for all movement-related layers.
- * Single setInterval (500ms) drives the entire animation hierarchy:
+ * v4.0 — Unified dash animation for movement-related layers.
+ * Single setInterval (500ms) drives the animation hierarchy:
  *
- *   Primary flow   — every tick   (500ms)  — dominant, fastest
- *   Secondary flow — every 3 ticks (1.5s)  — alive but background
- *   Corridors      — every 5 ticks (2.5s)  — subtle directional hint
- *   Draws          — every 8 ticks (4.0s)  — barely perceptible structural pulse
+ *   Corridors — every 5 ticks (2.5s) — subtle directional hint
+ *   Draws     — every 8 ticks (4.0s) — barely perceptible structural pulse
  *
+ * Phase B: Flow tier layers (green/blue/black) use static paint properties
+ * (green/blue solid, black dashed 8/4) — no animation needed.
  * All layers pause during camera motion (isMoving/isZooming) to avoid jank.
  */
 export function useFlowAnimation(
@@ -21,22 +21,8 @@ export function useFlowAnimation(
     const map = mapRef.current;
 
     let tick = 0;
-    let primaryStep = 0;
-    let secondaryStep = 0;
     let corridorStep = 0;
     let drawStep = 0;
-
-    // ── Primary flow: bold dash (10 unit cycle, 7 steps) ──
-    const primarySteps = [
-      [6, 4], [5, 4, 1], [4, 4, 2], [3, 4, 3],
-      [2, 4, 4], [1, 4, 5], [0.5, 4, 5.5]
-    ];
-
-    // ── Secondary flow: shorter dash (7 unit cycle, 5 steps) ──
-    const secondarySteps = [
-      [4, 3], [3, 3, 1], [2, 3, 2], [1, 3, 3],
-      [0.5, 3, 3.5]
-    ];
 
     // ── Corridors: long dash, subtle shift (11 unit cycle, 5 steps) ──
     // Looks nearly solid but with gentle directional crawl
@@ -80,16 +66,6 @@ export function useFlowAnimation(
         if (!idle) return;
 
         tick++;
-
-        // Primary flow: every tick (500ms)
-        setDash('tfp-flow-primary', primarySteps[primaryStep % primarySteps.length]);
-        primaryStep++;
-
-        // Secondary flow: every 3rd tick (~1.5s)
-        if (tick % 3 === 0) {
-          setDash('tfp-flow-secondary', secondarySteps[secondaryStep % secondarySteps.length]);
-          secondaryStep++;
-        }
 
         // Corridors: every 5th tick (~2.5s)
         if (tick % 5 === 0) {
