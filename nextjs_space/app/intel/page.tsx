@@ -4320,6 +4320,98 @@ function DeerIntelContent() {
     computeAlignmentScores();
   }, [layers?.standPoints, windDirection, season, parcelPolygon, computeAlignmentScores]);
 
+  // ═══ DEM-BASED STAND FALLBACK (single-parcel fix) ═══
+  // When Modal API returns no standPoints AND the fallback at lines 5674-5755 generates
+  // no candidates (because adapted.layers lacks terrain features like saddles/ridges),
+  // use DEM-pipeline terrain data (ridgeSpineData, tieredCorridorData, terrainFlowData)
+  // to generate stand candidates. These are the SAME features the anchor gate checks
+  // against, so they're guaranteed to pass.
+  useEffect(() => {
+    // Only fire when we have layers but standPoints is empty/missing
+    if (!layers) return;
+    if (layers.standPoints?.features?.length) return; // already have stands
+    // Need at least one DEM terrain pipeline to have data
+    if (!ridgeSpineData && !tieredCorridorData && !terrainFlowData) return;
+
+    const candidates: GeoJSON.Feature[] = [];
+
+    // 1. Saddle nodes from DEM — highest priority anchors
+    if (ridgeSpineData?.saddle_nodes?.features?.length) {
+      ridgeSpineData.saddle_nodes.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type === 'Point') {
+          candidates.push({
+            type: 'Feature',
+            geometry: f.geometry,
+            properties: { source: 'dem-saddle', priority: 1, id: `dem-saddle-${i}` },
+          });
+        }
+      });
+    }
+
+    // 2. Ridge spine vertices — sample every 3rd point to avoid clustering
+    const addRidgeVertices = (fc: GeoJSON.FeatureCollection | undefined, label: string) => {
+      if (!fc?.features) return;
+      fc.features.forEach((f: any, ri: number) => {
+        const coords = f.geometry?.coordinates ?? [];
+        if (f.geometry?.type === 'LineString') {
+          coords.forEach((c: any, ci: number) => {
+            if (ci % 3 === 0) {
+              candidates.push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: c },
+                properties: { source: label, priority: 2, id: `${label}-${ri}-${ci}` },
+              });
+            }
+          });
+        }
+      });
+    };
+    addRidgeVertices(ridgeSpineData?.ridges_primary, 'dem-ridge-p');
+    addRidgeVertices(ridgeSpineData?.ridges_secondary, 'dem-ridge-s');
+
+    // 3. Funnel/pinch centroids from tiered corridor data
+    const addFunnelCentroids = (fc: GeoJSON.FeatureCollection | undefined, label: string) => {
+      if (!fc?.features) return;
+      fc.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type === 'Polygon') {
+          const ring = f.geometry.coordinates[0] as number[][];
+          const cx = ring.reduce((s: number, c: number[]) => s + c[0], 0) / ring.length;
+          const cy = ring.reduce((s: number, c: number[]) => s + c[1], 0) / ring.length;
+          candidates.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [cx, cy] },
+            properties: { source: label, priority: 1, id: `${label}-${i}` },
+          });
+        }
+      });
+    };
+    addFunnelCentroids(tieredCorridorData?.funnels_hard, 'dem-funnel-hard');
+    addFunnelCentroids(tieredCorridorData?.funnels_slight, 'dem-funnel-slight');
+
+    // 4. Convergence zone points from terrain flow
+    if (terrainFlowData?.convergence_zones?.features?.length) {
+      terrainFlowData.convergence_zones.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type === 'Point') {
+          candidates.push({
+            type: 'Feature',
+            geometry: f.geometry,
+            properties: { source: 'dem-convergence', priority: 1, id: `dem-convergence-${i}` },
+          });
+        }
+      });
+    }
+
+    if (candidates.length > 0) {
+      console.log(`[DEM-FALLBACK] standPoints empty — generated ${candidates.length} candidates from DEM terrain features`);
+      setLayers((prev: any) => ({
+        ...prev,
+        standPoints: { type: 'FeatureCollection', features: candidates },
+      }));
+    } else {
+      console.log('[DEM-FALLBACK] No DEM terrain features available for stand generation');
+    }
+  }, [layers, ridgeSpineData, tieredCorridorData, terrainFlowData]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── SCALE-ADAPTIVE: Recompute when parcel/territory geometry changes ──
   useEffect(() => {
     if (!parcelPolygon?.geometry) return;
