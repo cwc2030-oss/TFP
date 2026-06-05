@@ -31,7 +31,7 @@ import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
-import { StandAlignmentPanel, type AlignedStand, type TerrainAnchor, type HunterType, type HunterStandType } from '@/components/intel/StandAlignmentPanel';
+import { StandAlignmentPanel, type AlignedStand, type TerrainAnchor, type HunterType, type HunterStandType, type HuntArchetype } from '@/components/intel/StandAlignmentPanel';
 import type {
   TerrainLayers,
   TerrainSummary,
@@ -2359,6 +2359,33 @@ function DeerIntelContent() {
     setDecisionCardIdx(0);
   }, [hunterType]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ========== HUNT ARCHETYPE SELECTOR ==========
+  const VALID_ARCHETYPES: HuntArchetype[] = ['trophy', 'meat', 'doe', 'teaching', 'all'];
+  const [huntArchetype, setHuntArchetype] = useState<HuntArchetype>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('hunt_archetype');
+      if (stored && VALID_ARCHETYPES.includes(stored as HuntArchetype)) return stored as HuntArchetype;
+    }
+    return 'all';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('hunt_archetype', huntArchetype);
+    }
+    // Apply archetype-specific flow tier defaults (user can override)
+    const defaults: Record<HuntArchetype, Partial<TerrainFlowVisibility>> = {
+      trophy:  { flowBlack: true,  flowBlue: false, flowGreen: false },
+      meat:    { flowBlack: false, flowBlue: false, flowGreen: true  },
+      doe:     { flowBlack: false, flowBlue: false, flowGreen: true  },
+      teaching:{ flowBlack: false, flowBlue: false, flowGreen: true  },
+      all:     { flowBlack: true,  flowBlue: true,  flowGreen: true  },
+    };
+    const d = defaults[huntArchetype];
+    setFlowVisibility(prev => ({ ...prev, ...d }));
+    // Reset decision card to first stand when switching archetype
+    setDecisionCardIdx(0);
+  }, [huntArchetype]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
   const selectedStandRef = useRef<number | null>(null);
   useEffect(() => { selectedStandRef.current = selectedStand; }, [selectedStand]);
@@ -3505,6 +3532,41 @@ function DeerIntelContent() {
       };
     }).sort((a, b) => b.alignment.score - a.alignment.score || a.props.rank - b.props.rank);
 
+    // ═══ ARCHETYPE SCORING MODIFIERS ═══
+    // Apply archetype-specific score adjustments BEFORE diversity selection.
+    // Trophy: boost saddle/convergence stands (mature bucks use pinch terrain).
+    // Meat/Doe: boost funnel/field-edge stands (high-traffic, high-probability).
+    // Teaching: boost stands with high resilience (forgiving setups).
+    // All: no modification.
+    const currentArchetype = huntArchetype;
+    if (currentArchetype !== 'all') {
+      const ARCHETYPE_MODIFIERS: Record<Exclude<HuntArchetype, 'all'>, { saddle: number; ridge: number; funnel: number; convergence: number; resilience: number }> = {
+        trophy:   { saddle: 1.20, ridge: 1.10, funnel: 0.95, convergence: 1.15, resilience: 1.0 },
+        meat:     { saddle: 1.0,  ridge: 0.95, funnel: 1.15, convergence: 1.10, resilience: 1.0 },
+        doe:      { saddle: 0.95, ridge: 0.90, funnel: 1.20, convergence: 1.10, resilience: 1.05 },
+        teaching: { saddle: 1.0,  ridge: 1.0,  funnel: 1.05, convergence: 1.0,  resilience: 1.25 },
+      };
+      const mods = ARCHETYPE_MODIFIERS[currentArchetype];
+      for (const s of allScored) {
+        // Determine which modifier to apply based on nearest anchor source
+        const src = s.props?.source ?? '';
+        let mult = 1.0;
+        if (src.includes('saddle')) mult = mods.saddle;
+        else if (src.includes('ridge')) mult = mods.ridge;
+        else if (src.includes('funnel')) mult = mods.funnel;
+        else if (src.includes('convergence')) mult = mods.convergence;
+        // Resilience bonus for teaching archetype
+        if (s.resilience && s.resilience.score >= 0.6) mult *= mods.resilience;
+        // Apply modifier to the alignment score
+        if (mult !== 1.0) {
+          (s.alignment as any).score = Math.round(s.alignment.score * mult * 100) / 100;
+        }
+      }
+      // Re-sort after archetype modifiers
+      allScored.sort((a, b) => b.alignment.score - a.alignment.score || a.props.rank - b.props.rank);
+      console.log(`[ARCHETYPE] Applied ${currentArchetype} modifiers to ${allScored.length} stands`);
+    }
+
     // ═══ v2.0: DIVERSITY SELECTION — prevent stand clustering ═══
     // Greedy selection: pick best, then for each subsequent pick, apply a
     // proximity penalty and terrain-similarity penalty so #2 and #3 represent
@@ -4300,7 +4362,7 @@ function DeerIntelContent() {
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData, terrainFlowData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData, terrainFlowData, huntArchetype]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stability invalidation: when the user explicitly cycles
   // wind direction or season, the stability anchor should
@@ -5186,7 +5248,7 @@ function DeerIntelContent() {
     'tfp-corridors-primary', 'tfp-corridors-possible', 'tfp-corridors-exploratory',
     'tfp-corridors-context-primary', 'tfp-corridors-context-possible',
     'tfp-funnels-hard', 'tfp-funnels-slight', 'tfp-intrusion-overlay',
-    'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes',
+    'tfp-ridges-primary', 'tfp-ridges-secondary', 'tfp-saddle-nodes', 'tfp-terrain-labels',
     'tfp-pressure-grid',
     'tfp-pressure-heatmap',
     'tfp-movement-delta',
@@ -8510,6 +8572,120 @@ function DeerIntelContent() {
     };
   }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, parcelPolygon, ridgeSpineData, season]);
 
+  // ========== TERRAIN STORY OVERLAY LABELS (Niehues-style) ==========
+  // Generate map labels at terrain feature centroids showing feature type + percentage.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+    const labelSource = map.getSource('tfp-terrain-labels') as mapboxgl.GeoJSONSource | undefined;
+    if (!labelSource) return;
+
+    const features: GeoJSON.Feature[] = [];
+
+    // Helper: compute centroid of a LineString
+    const lineCentroid = (coords: number[][]): [number, number] => {
+      const mid = Math.floor(coords.length / 2);
+      return coords[mid] as [number, number];
+    };
+
+    // 1. Saddle nodes — SMALL labels (always visible)
+    if (ridgeSpineData?.saddle_nodes?.features) {
+      const total = ridgeSpineData.saddle_nodes.features.length;
+      ridgeSpineData.saddle_nodes.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type !== 'Point') return;
+        const score = f.properties?.score ?? f.properties?.saddleScore ?? 1;
+        const pct = Math.round(score * 100);
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: f.geometry.coordinates },
+          properties: {
+            label: `Saddle ${pct > 0 && pct <= 100 ? pct + '%' : ''}`.trim(),
+            size: total <= 4 ? 'small' : 'medium',
+            priority: 1,
+            featureType: 'saddle',
+          },
+        });
+      });
+    }
+
+    // 2. Ridge spine midpoints — MEDIUM labels (hover-reveal)
+    if (ridgeSpineData?.ridges_primary?.features) {
+      ridgeSpineData.ridges_primary.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type !== 'LineString' || !f.geometry.coordinates?.length) return;
+        const coords = f.geometry.coordinates;
+        const center = lineCentroid(coords);
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: center },
+          properties: {
+            label: `Ridge`,
+            size: 'medium',
+            priority: 3,
+            featureType: 'ridge',
+          },
+        });
+      });
+    }
+
+    // 3. Convergence zones — SMALL labels
+    if (terrainFlowData?.convergence_zones?.features) {
+      terrainFlowData.convergence_zones.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type !== 'Point') return;
+        const score = f.properties?.convergence_score ?? f.properties?.score ?? 0;
+        const pct = Math.round(score * 100);
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: f.geometry.coordinates },
+          properties: {
+            label: `Convergence ${pct > 0 ? pct + '%' : ''}`.trim(),
+            size: 'small',
+            priority: 2,
+            featureType: 'convergence',
+          },
+        });
+      });
+    }
+
+    // 4. Funnel/pinch zones — MEDIUM labels
+    if (tieredCorridorData?.funnels_hard?.features) {
+      tieredCorridorData.funnels_hard.features.forEach((f: any, i: number) => {
+        if (f.geometry?.type !== 'Polygon') return;
+        const ring = f.geometry.coordinates[0] as number[][];
+        const cx = ring.reduce((s: number, c: number[]) => s + c[0], 0) / ring.length;
+        const cy = ring.reduce((s: number, c: number[]) => s + c[1], 0) / ring.length;
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [cx, cy] },
+          properties: {
+            label: 'Funnel',
+            size: 'medium',
+            priority: 2,
+            featureType: 'funnel',
+          },
+        });
+      });
+    }
+
+    // 5. Terrain story driver label at parcel centroid (LARGE — hover only)
+    if (terrainStory?.primaryDriver && parcelPolygon) {
+      const driverScore = terrainStory.primaryDriver.confidence;
+      const pct = Math.round(driverScore * 100);
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+        properties: {
+          label: `${terrainStory.primaryDriver.label} ${pct}%`,
+          size: 'large',
+          priority: 10,
+          featureType: 'driver',
+        },
+      });
+    }
+
+    labelSource.setData({ type: 'FeatureCollection', features });
+    console.log(`[TerrainLabels] Updated ${features.length} labels on map`);
+  }, [ridgeSpineData, terrainFlowData, tieredCorridorData, terrainStory, parcelPolygon, mapReady, lng, lat]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ========== NEAREST CORRIDOR HIGHLIGHT (selected stand) ==========
   // When a stand is selected, find the primary flow segment nearest to it
   // and push that single feature into the highlight source.
@@ -9479,6 +9655,39 @@ function DeerIntelContent() {
           });
         }
         
+        // ═══ TERRAIN STORY OVERLAY LABELS (Niehues-style) ═══
+        if (!map.getSource('tfp-terrain-labels')) {
+          map.addSource('tfp-terrain-labels', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-terrain-labels',
+            type: 'symbol',
+            source: 'tfp-terrain-labels',
+            layout: {
+              'text-field': ['get', 'label'],
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+              'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 14, 12, 16, 14],
+              'text-anchor': 'center',
+              'text-offset': [0, 0],
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+              'text-padding': 8,
+              'symbol-sort-key': ['get', 'priority'],
+              'text-max-width': 12,
+            },
+            paint: {
+              'text-color': '#2C3E50',
+              'text-halo-color': '#F5EDDC',
+              'text-halo-width': 2,
+              'text-halo-blur': 0.5,
+              'text-opacity': ['case',
+                ['==', ['get', 'size'], 'small'], 1,
+                ['boolean', ['feature-state', 'hover'], false], 1,
+                0
+              ],
+            },
+          });
+        }
+
         console.log('[DEBUG] checkpoint-2 — past parcel/QA/debug/V2 corridor/spine sources');
 
         // ========== PRESSURE POLYGON FILL GRID (HIDDEN — kept in code) ==========
@@ -15243,6 +15452,32 @@ function DeerIntelContent() {
                 </div>
               </div>
 
+              {/* ═══ HUNT ARCHETYPE SELECTOR ═══ */}
+              <div className="px-3 pt-1 pb-2">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Hunt Goal</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-white/[0.08] to-transparent" />
+                </div>
+                <div className="flex gap-1">
+                  {([['trophy', '🏆', 'Trophy'], ['meat', '🥩', 'Meat'], ['doe', '🦌', 'Doe'], ['teaching', '📚', 'Teach'], ['all', '🎯', 'All']] as const).map(([val, icon, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => setHuntArchetype(val as HuntArchetype)}
+                      className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all duration-200 border"
+                      style={{
+                        background: huntArchetype === val ? 'rgba(217,170,80,0.15)' : 'transparent',
+                        borderColor: huntArchetype === val ? 'rgba(217,170,80,0.4)' : 'rgba(255,255,255,0.06)',
+                        color: huntArchetype === val ? '#d9aa50' : '#888',
+                        boxShadow: huntArchetype === val ? '0 0 8px rgba(217,170,80,0.2)' : 'none',
+                      }}
+                    >
+                      <span className="text-xs leading-none">{icon}</span>
+                      <span className="leading-none">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* ═══ CHAPTER 2 — CONDITIONS ═══ */}
               <div className="px-3 pt-2 pb-2 border-t border-white/[0.04]">
                 <div className="flex items-center gap-2 mb-2.5">
@@ -15597,6 +15832,18 @@ function DeerIntelContent() {
                   }
                 }
 
+                // ═══ ARCHETYPE-SPECIFIC RATIONALE OVERLAY ═══
+                // Adds a brief archetype context sentence to the existing advice.
+                const archetypeTag: Record<HuntArchetype, string> = {
+                  trophy: '🏆 Trophy focus — mature bucks use pinch terrain like saddles and convergence zones. Patience is the weapon.',
+                  meat:   '🥩 Meat hunt — high-traffic travel lanes maximize encounter probability. First legal deer wins.',
+                  doe:    '🦌 Doe management — does follow the path of least resistance. Green-tier flow lines show their highway.',
+                  teaching: '📚 Teaching setup — forgiving stand with multiple escape routes if the wind shifts. Focus on the experience.',
+                  all:    '',
+                };
+                const archTag = archetypeTag[huntArchetype];
+                if (archTag) adviceText = `${archTag}\n\n${adviceText}`;
+
                 return (
                   <div className="px-3 pt-2 pb-3 border-t border-white/[0.04]">
                     <div className="flex items-center gap-2 mb-2.5">
@@ -15643,9 +15890,13 @@ function DeerIntelContent() {
                           </div>
                         </div>
                         {adviceText && (
-                          <p className="text-[10px] text-stone-300 italic leading-relaxed border-l-2 pl-2" style={{ borderColor: `${htColor}88` }}>
-                            &ldquo;{adviceText}&rdquo;
-                          </p>
+                          <div className="text-[10px] text-stone-300 italic leading-relaxed border-l-2 pl-2 space-y-1.5" style={{ borderColor: `${htColor}88` }}>
+                            {adviceText.split('\n\n').map((para, pi) => (
+                              <p key={pi} className={pi === 0 && archTag ? 'not-italic text-amber-400/80 font-medium text-[9px]' : ''}>
+                                {pi === 0 && !archTag ? '\u201C' : ''}{para}{pi === adviceText.split('\n\n').length - 1 ? '\u201D' : ''}
+                              </p>
+                            ))}
+                          </div>
                         )}
                         <div className="flex gap-2">
                           <button

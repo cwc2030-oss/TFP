@@ -285,6 +285,7 @@ export interface StandPointProperties {
   isEdgeStand?: boolean;          // true if stand is on a field/timber boundary
   fieldBearing?: number;          // bearing (0-360) toward the open field side
   edgeConfidence?: number;        // 0-1, strength of edge detection signal
+  source?: string;                // origin of the stand candidate (e.g., 'saddle', 'ridge', 'funnel', 'convergence', 'dem-saddle')
 }
 
 // ============ Ridge Spine Types (Structure-First, DEM-Only) ============

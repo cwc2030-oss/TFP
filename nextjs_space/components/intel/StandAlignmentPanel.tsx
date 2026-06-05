@@ -15,6 +15,9 @@ export type TerrainAnchor = {
 
 export type HunterType = 'bow' | 'gun' | 'both';
 
+/** Hunt archetype — controls scoring bias, flow tier defaults, and rationale language. */
+export type HuntArchetype = 'trophy' | 'meat' | 'doe' | 'teaching' | 'all';
+
 /** Classification of stand suitability by weapon type */
 export type HunterStandType = 'bow' | 'gun' | 'both';
 
