@@ -2462,13 +2462,13 @@ function DeerIntelContent() {
   });
   
   // Terrain Flow visibility (separate from main visibility for cleaner control)
-  // Phase 1 cleanup: all flow/interpretation layers default OFF — terrain features justify stands on their own
+  // v3.9.3: Deer Flow sub-toggles default ON — scale-adaptive rendering handles density
   const [flowVisibility, setFlowVisibility] = useState<TerrainFlowVisibility>({
     pressureHeatmap: false,  // PRIMARY: Terrain pressure heat map — opt-in
-    flowGreen: false,        // Phase B: Green tier — high-confidence (≥0.66) — opt-in
-    flowBlue: false,         // Phase B: Blue tier — moderate (0.33–0.66) — opt-in
-    flowBlack: false,        // Phase B: Black tier — low-confidence (<0.33) — opt-in
-    convergenceZones: false, // Convergence zone markers — opt-in
+    flowGreen: true,         // v3.9.3: Default ON — "Deer Flow is the whole show"
+    flowBlue: true,          // v3.9.3: Default ON
+    flowBlack: true,         // v3.9.3: Default ON
+    convergenceZones: true,  // v3.9.3: Default ON
   });
   
   // Derived: true when the Pressure Map master toggle is ON
@@ -3337,13 +3337,18 @@ function DeerIntelContent() {
 
   // ── Filtered stands by hunter type with per-type count caps ──
   // bow cap = max(5, floor(timberAcres/20)), gun cap = max(4, floor(fieldEdgeLen/150)), combined = max(6, floor(totalAcres/15))
+  // v3.9.3 BUG FIX: When gun filter yields 0 matching stands, fall back to showing all
+  // stands sorted by gun-friendliness rather than returning empty. Timber-heavy parcels
+  // have no pure-gun stands, but the user still needs stand recommendations.
   const filteredStands = useMemo(() => {
     let stands = alignedStands;
     if (hunterType !== 'both') {
-      stands = alignedStands.filter(s => {
+      const typed = alignedStands.filter(s => {
         const ht = s.hunterStandType || 'bow';
         return ht === hunterType || ht === 'both';
       });
+      // If type filter empties the list, fall back to all stands (no empty screen)
+      stands = typed.length > 0 ? typed : alignedStands;
     }
     // Apply hunter-type count caps when CDL data is available
     if (cdlData) {
@@ -3887,6 +3892,35 @@ function DeerIntelContent() {
       if (p.tpiLocal < -1.5) return 'draw';
       // v3.8.2: bedding_edge context removed — bedding is speculative
       return 'bench';
+    }
+
+    // ═══ v3.9.3: UNIVERSAL CONVERGENCE PROXIMITY BONUS ═══
+    // Convergence points are archetype-agnostic terrain truth — every stand benefits
+    // from being near where multiple flow lines meet ("inside corner of an ag field").
+    // Applied to anchoredPool AFTER anchor gate & sidehill bench, BEFORE diversity selection,
+    // so it compounds with archetype modifiers already applied to allScored.
+    if (anchorConvergencePoints.length > 0) {
+      const CONVERGENCE_BONUS_MAX = 1.12; // up to +12% for stands ON a convergence point
+      const CONVERGENCE_BONUS_RADIUS_M = 250; // linear decay within this radius
+      let boostedCount = 0;
+      for (const s of anchoredPool) {
+        let closestConvM = Infinity;
+        for (const cz of anchorConvergencePoints) {
+          const d = distanceMeters(s.coords, cz.coords);
+          if (d < closestConvM) closestConvM = d;
+        }
+        if (closestConvM <= CONVERGENCE_BONUS_RADIUS_M) {
+          // Linear decay: 1.12 at 0m → 1.0 at 250m
+          const t = 1 - (closestConvM / CONVERGENCE_BONUS_RADIUS_M);
+          const bonus = 1.0 + (CONVERGENCE_BONUS_MAX - 1.0) * t;
+          (s.alignment as any).score = Math.round(s.alignment.score * bonus * 100) / 100;
+          boostedCount++;
+        }
+      }
+      if (boostedCount > 0) {
+        anchoredPool.sort((a, b) => b.alignment.score - a.alignment.score);
+        console.log(`[CONVERGENCE-BOOST] Boosted ${boostedCount}/${anchoredPool.length} stands within ${CONVERGENCE_BONUS_RADIUS_M}m of convergence`);
+      }
     }
 
     const diverseStands: typeof anchoredPool = [];
