@@ -9784,11 +9784,7 @@ const archetypeInitializedRef = useRef(false);
               'text-halo-color': '#F5EDDC',
               'text-halo-width': 2,
               'text-halo-blur': 0.5,
-              'text-opacity': ['case',
-                ['==', ['get', 'size'], 'small'], 1,
-                ['boolean', ['feature-state', 'hover'], false], 1,
-                0
-              ],
+              'text-opacity': 1,
             },
           });
         }
