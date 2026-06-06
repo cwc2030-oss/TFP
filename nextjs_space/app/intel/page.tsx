@@ -4450,7 +4450,7 @@ const archetypeInitializedRef = useRef(false);
         }
       }
     }
-  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData, terrainFlowData, huntArchetype]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layers?.standPoints, windDirection, season, parcelPolygon, ridgeSpineData, tieredCorridorData, terrainFlowData, huntArchetype, acreageParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stability invalidation: when the user explicitly cycles
   // wind direction or season, the stability anchor should
@@ -14366,6 +14366,10 @@ const archetypeInitializedRef = useRef(false);
                   // v3.9.4: Auto-exit pick mode when user clicks Analyze/Re-Align.
                   // The user is done building — switch to explore/hover mode.
                   setParcelPickMode(false);
+
+                  // v3.9.5: Clear stale single-parcel CDL data so filteredStands
+                  // doesn't apply CDL-based count caps from the previous parcel.
+                  setCdlData(null);
 
                   setIsLoading(true);
                   setBackgroundAnalysis(true);
