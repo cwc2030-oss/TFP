@@ -429,8 +429,8 @@ async function fetchNHDWaterBodies(
 // Earth tones only: rust, sienna, umber, olive, ochre
 
 const LAYER_COLORS = {
-  bedding: '#22c55e',
-  beddingOutline: '#16a34a',
+  bedding: '#1a5c2a',
+  beddingOutline: '#145222',
   funnelSaddle: '#f97316',
   funnelDraw: '#3b82f6',           // Solid blue for draws
   // Legacy corridor colors (for backwards compatibility)
@@ -473,7 +473,7 @@ const LAYER_COLORS = {
   contourRegular: '#d6d3d1',       // Stone-300 — very muted for 20ft intervals
   // Edge Intelligence Layer colors
   edgeCorridorArrow: '#8B4513',    // Sienna for continuation arrows
-  edgeGhostBedding: '#22c55e',     // Semi-transparent green for ghost bedding
+  edgeGhostBedding: '#1a5c2a',     // Dark green matching actual bedding fill
   edgeGhostSaddle: '#f97316',      // Semi-transparent orange for ghost saddles
   edgeDrawExtension: '#3b82f6',    // Blue dashed for draw extensions
   edgePressureInbound: '#22c55e',  // Green for inbound pressure
@@ -13007,14 +13007,16 @@ const archetypeInitializedRef = useRef(false);
   }, [mapReady, parcelPickMode, handleParcelPick, territoryMode, territoryParcels.length]);
 
   // ========== TERRITORY MODE: CROSSHAIR CURSOR LOCK ==========
-  // When territory mode is active, force crosshair on the map canvas using CSS !important
-  // so that mouseenter/mouseleave handlers on terrain layers cannot override it to 'pointer'.
-  // Also disable pointer events on fill layers that intercept clicks before the pick handler.
+  // When territory mode AND pick mode are both active, force crosshair on the map canvas
+  // using CSS !important so mouseenter/mouseleave handlers on terrain layers can't override it.
+  // v3.9.4: Now gated on BOTH territoryMode AND parcelPickMode. When the user clicks
+  // Analyze Territory, pick mode auto-exits and the cursor releases to normal pointer,
+  // restoring hover intel on terrain features (saddles, corridors, convergence, etc.).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    if (!territoryMode) return; // Only active during territory mode
+    if (!territoryMode || !parcelPickMode) return; // Only active when BOTH are on
 
     const canvas = map.getCanvas();
 
@@ -13065,7 +13067,7 @@ const archetypeInitializedRef = useRef(false);
 
       console.log('[TERRITORY-DIAG] Cursor lock + layer visibility block REMOVED');
     };
-  }, [mapReady, territoryMode]);
+  }, [mapReady, territoryMode, parcelPickMode]);
 
   // Toggle debug layer visibility when geometryDebugMode changes
   useEffect(() => {
@@ -14303,6 +14305,10 @@ const archetypeInitializedRef = useRef(false);
                   analysisInFlightRef.current = true;
                   territoryAssemblyRef.current = true;
 
+                  // v3.9.4: Auto-exit pick mode when user clicks Analyze/Re-Align.
+                  // The user is done building — switch to explore/hover mode.
+                  setParcelPickMode(false);
+
                   setIsLoading(true);
                   setBackgroundAnalysis(true);
                   setError(null);
@@ -14320,12 +14326,15 @@ const archetypeInitializedRef = useRef(false);
                     const centerLat = (bounds[1] + bounds[3]) / 2;
                     const centerLng = (bounds[0] + bounds[2]) / 2;
 
-                    // Update map boundary and camera
+                    // Update map boundary, camera, AND acreage (for stand count scaling)
+                    const territoryTotalAcres = String(parcels.reduce((s, p) => s + (p.acreage || 0), 0));
                     setParcelPolygon(merged);
                     setActiveLat(centerLat);
                     setActiveLng(centerLng);
+                    setActiveAcreage(territoryTotalAcres);
                     activeLatRef.current = centerLat;
                     activeLngRef.current = centerLng;
+                    activeAcreageRef.current = territoryTotalAcres;
                     const _map = mapRef.current;
                     if (_map) {
                       try {
@@ -14940,7 +14949,7 @@ const archetypeInitializedRef = useRef(false);
                 title={showInternalParcels ? 'Hide internal parcel boundaries' : 'Show internal parcel boundaries'}
               >
                 <Grid3X3 className="h-3.5 w-3.5 mr-1" />
-                {showInternalParcels ? 'Parcels' : 'Parcels'}
+                {showInternalParcels ? 'Hide Parcels' : 'Show Parcels'}
               </Button>
             )}
             {/* Exploration Mode Toggle — admin/debug only */}
@@ -15077,7 +15086,7 @@ const archetypeInitializedRef = useRef(false);
               disabled={parcelPickLoading}
             >
               <MapPin className="h-4 w-4 mr-1" />
-              {parcelPickMode ? 'Picking…' : 'Pick Parcel'}
+              {parcelPickMode ? 'Exit Pick ✕' : 'Pick Parcel'}
             </Button>
             <Button
               size="sm"
