@@ -2962,6 +2962,8 @@ const archetypeInitializedRef = useRef(false);
   // Available to all users (not debug-gated). Separate from explorationMode (debug QA tool).
   const [parcelPickMode, setParcelPickMode] = useState(false);
   const [parcelPickLoading, setParcelPickLoading] = useState(false); // fetching parcel boundary
+  const parcelPickModeRef = useRef(false);
+  useEffect(() => { parcelPickModeRef.current = parcelPickMode; }, [parcelPickMode]);
 
   // ========== ONBOARDING / DEMO POLISH STATE ==========
   const [showOnboarding, setShowOnboarding] = useState(demoMode && !heroSlug);
@@ -3001,6 +3003,8 @@ const archetypeInitializedRef = useRef(false);
   const showInternalParcelsRef = useRef(false);
   useEffect(() => { showInternalParcelsRef.current = showInternalParcels; }, [showInternalParcels]);
 
+  // Two-way focus: which territory parcel is highlighted (sidebar ↔ map)
+  const [focusedTerritoryParcelId, setFocusedTerritoryParcelId] = useState<string | null>(null);
   // Centralized enforcer: the SOLE authority for styling territory boundary layers.
   // Principle: "Hunters don't think in parcels — Territory is the user-facing concept."
   // Multi-parcel: hull = outer boundary (gold), internal seams hidden by default.
@@ -5512,6 +5516,7 @@ const archetypeInitializedRef = useRef(false);
     territoryAssemblyRef.current = false;
 
     setTerritoryParcels([]);
+    setFocusedTerritoryParcelId(null);
     territoryParcelsRef.current = [];
     prefetchedParcelRef.current = null;
     setTerritoryMode(false);
@@ -8227,7 +8232,10 @@ const archetypeInitializedRef = useRef(false);
     try {
       const fc: GeoJSON.FeatureCollection = {
         type: 'FeatureCollection',
-        features: territoryParcels.map(p => p.polygon),
+        features: territoryParcels.map(p => ({
+          ...p.polygon,
+          properties: { ...((p.polygon as any).properties || {}), _tfpParcelId: p.id },
+        })),
       };
       console.log('[TERRITORY] Syncing territory source:', fc.features.length, 'features from', territoryParcels.length, 'parcels');
       source.setData(fc);
@@ -8277,6 +8285,19 @@ const archetypeInitializedRef = useRef(false);
     if (!map || !mapReady || territoryParcels.length === 0) return;
     enforceTerritoryLineMode(map, 'useEffect-trigger');
   }, [territoryLineMode, showInternalParcels, mapReady, territoryParcels.length, enforceTerritoryLineMode]);
+
+  // ========== FOCUSED TERRITORY PARCEL (two-way binding) ==========
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!map.getLayer('tfp-territory-parcel-focus')) return;
+    if (focusedTerritoryParcelId) {
+      map.setFilter('tfp-territory-parcel-focus', ['==', ['get', '_tfpParcelId'], focusedTerritoryParcelId]);
+      map.setLayoutProperty('tfp-territory-parcel-focus', 'visibility', 'visible');
+    } else {
+      map.setLayoutProperty('tfp-territory-parcel-focus', 'visibility', 'none');
+    }
+  }, [focusedTerritoryParcelId, mapReady]);
 
   // ========== AUTO-LOAD TERRITORY FROM URL PARAMS ==========
   // When ?territory=true&p1lat=..&p1lng=..&p2lat=..&p2lng=..&name=.. is in the URL,
@@ -10196,9 +10217,9 @@ const archetypeInitializedRef = useRef(false);
             layout: { visibility: 'none' },
             paint: {
               'line-color': '#fbbf24',          // Amber-400 — warm stand accent
-              'line-width': 6,                  // Slightly wider than primary (4–5)
-              'line-opacity': 0.70,
-              'line-blur': 1.5,                 // Soft edge so it reads as a glow, not a new line
+              'line-width': 5,                  // Slightly wider than primary (4–5)
+              'line-opacity': 0.80,
+              'line-dasharray': [6, 3],          // Dashed — visually distinct from solid corridors
             },
           });
         }
@@ -10281,8 +10302,20 @@ const archetypeInitializedRef = useRef(false);
               'line-blur': 3,
             }
           });
-        }
 
+          // Focused parcel highlight fill (two-way binding: sidebar ↔ map)
+          map.addLayer({
+            id: 'tfp-territory-parcel-focus',
+            type: 'fill',
+            source: 'tfp-territory-parcels',
+            layout: { visibility: 'none' },
+            paint: {
+              'fill-color': '#c9a84c',
+              'fill-opacity': 0.18,
+            },
+            filter: ['==', ['get', '_tfpParcelId'], ''],
+          });
+        }
         // ========== TERRITORY HULL (merged outer boundary) ==========
         if (!map.getSource('tfp-territory-hull')) {
           map.addSource('tfp-territory-hull', {
@@ -11535,6 +11568,15 @@ const archetypeInitializedRef = useRef(false);
         
         console.log('[MAP] Edge intelligence click handlers registered');
 
+        // ========== TERRITORY PARCEL FOCUS (two-way binding: map → sidebar) ==========
+        map.on('click', 'tfp-territory-fill', (e) => {
+          if (!territoryModeRef.current) return;
+          if (parcelPickModeRef.current) return; // don't interfere with pick mode
+          if (!e.features || !e.features[0]) return;
+          const clickedId = e.features[0].properties?._tfpParcelId;
+          if (!clickedId) return;
+          setFocusedTerritoryParcelId(prev => prev === clickedId ? null : clickedId);
+        });
         // ========== ADJACENT PARCELS CLICK + HOVER HANDLERS ==========
         map.on('click', 'tfp-adjacent-parcels-fill', (e) => {
           // TERRITORY FIREWALL: During territory mode, adjacent parcel clicks are
@@ -14237,31 +14279,47 @@ const archetypeInitializedRef = useRef(false);
             </div>
           ) : (
             <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
-              {territoryParcels.map((p, i) => (
-                <div key={p.id} style={{
-                  display:'flex',
-                  alignItems:'center',
-                  justifyContent:'space-between',
-                  background:'#1a3a2a',
-                  borderRadius:6,
-                  padding:'8px 10px',
-                }}>
+              {territoryParcels.map((p, i) => {
+                const isFocused = focusedTerritoryParcelId === p.id;
+                return (
+                <div key={p.id}
+                  onClick={() => {
+                    // Toggle focus — clicking the same row deselects
+                    const nextId = isFocused ? null : p.id;
+                    setFocusedTerritoryParcelId(nextId);
+                    // Fly to parcel on map when focusing
+                    if (nextId && mapRef.current) {
+                      mapRef.current.flyTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 14.5), duration: 800 });
+                    }
+                  }}
+                  style={{
+                    display:'flex',
+                    alignItems:'center',
+                    justifyContent:'space-between',
+                    background: isFocused ? '#2d6a4f' : '#1a3a2a',
+                    borderRadius:6,
+                    padding:'8px 10px',
+                    cursor:'pointer',
+                    border: isFocused ? '1px solid #c9a84c' : '1px solid transparent',
+                    transition: 'background 200ms, border-color 200ms',
+                  }}>
                   <div>
-                    <div style={{fontSize:12,color:'#c9a84c',fontWeight:'bold'}}>
+                    <div style={{fontSize:12,color: isFocused ? '#fbbf24' : '#c9a84c',fontWeight:'bold'}}>
                       Parcel {i + 1}
                     </div>
-                    <div style={{fontSize:11,color:'#aaa',marginTop:2}}>
+                    <div style={{fontSize:11,color: isFocused ? '#ccc' : '#aaa',marginTop:2}}>
                       {p.address.split(',')[0]} — {Math.round(p.acreage)} ac
                     </div>
                   </div>
                   <button
-                    onClick={() => removeParcelFromTerritory(p.id)}
+                    onClick={(e) => { e.stopPropagation(); removeParcelFromTerritory(p.id); if (isFocused) setFocusedTerritoryParcelId(null); }}
                     style={{fontSize:11,color:'#666',background:'none',border:'none',cursor:'pointer'}}
                   >
                     Remove
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -18488,6 +18546,16 @@ const archetypeInitializedRef = useRef(false);
           <span className="w-4 h-0.5 rounded-full opacity-70" style={{ background: LAYER_COLORS.corridorLow, borderTop: '2px dashed' }} />
           <span className="text-white/60">Low</span>
         </div>
+        
+        {selectedStand !== null && (
+          <>
+            <div className="h-5 w-px bg-white/20" />
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-0" style={{ borderTop: '2.5px dashed #fbbf24' }} />
+              <span className="text-amber-300/80">Approach</span>
+            </div>
+          </>
+        )}
         
         <div className="h-5 w-px bg-white/20" />
         
