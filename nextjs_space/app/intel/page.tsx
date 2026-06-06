@@ -2368,11 +2368,19 @@ function DeerIntelContent() {
     }
     return 'all';
   });
+const archetypeInitializedRef = useRef(false);
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('hunt_archetype', huntArchetype);
     }
-    // Apply archetype-specific flow tier defaults (user can override)
+    // v3.9.4: Only apply archetype-specific flow tier defaults on EXPLICIT user change,
+    // not on mount. This ensures Deer Flow sub-toggles always default ON for new page loads
+    // ("Deer Flow is the whole show"), regardless of previously-stored archetype.
+    if (!archetypeInitializedRef.current) {
+      archetypeInitializedRef.current = true;
+      // Skip flow override on mount — initial useState defaults are all ON
+      return;
+    }
     const defaults: Record<HuntArchetype, Partial<TerrainFlowVisibility>> = {
       trophy:  { flowBlack: true,  flowBlue: false, flowGreen: false },
       meat:    { flowBlack: false, flowBlue: false, flowGreen: true  },
@@ -2385,7 +2393,6 @@ function DeerIntelContent() {
     // Reset decision card to first stand when switching archetype
     setDecisionCardIdx(0);
   }, [huntArchetype]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const [selectedStand, setSelectedStand] = useState<number | null>(null);
   const selectedStandRef = useRef<number | null>(null);
   useEffect(() => { selectedStandRef.current = selectedStand; }, [selectedStand]);
@@ -3335,27 +3342,62 @@ function DeerIntelContent() {
   };
   const [alignedStands, setAlignedStands] = useState<AlignedStand[]>([]);
 
-  // ── Filtered stands by hunter type with per-type count caps ──
+// ── Filtered stands by hunter type with per-type count caps ──
   // bow cap = max(5, floor(timberAcres/20)), gun cap = max(4, floor(fieldEdgeLen/150)), combined = max(6, floor(totalAcres/15))
-  // v3.9.3 BUG FIX: When gun filter yields 0 matching stands, fall back to showing all
-  // stands sorted by gun-friendliness rather than returning empty. Timber-heavy parcels
-  // have no pure-gun stands, but the user still needs stand recommendations.
+  // v3.9.4 GUN FIX: Robust fallback — when gun filter yields 0 matching stands,
+  // fall back to ALL stands sorted by gun-friendliness (edge stands first, then by
+  // openness). Timber-heavy parcels have no pure-gun stands but still need recs.
   const filteredStands = useMemo(() => {
-    let stands = alignedStands;
+    if (!alignedStands.length) return [];
+    let stands = [...alignedStands]; // always work on a fresh copy
+
     if (hunterType !== 'both') {
       const typed = alignedStands.filter(s => {
         const ht = s.hunterStandType || 'bow';
         return ht === hunterType || ht === 'both';
       });
-      // If type filter empties the list, fall back to all stands (no empty screen)
-      stands = typed.length > 0 ? typed : alignedStands;
+
+      if (typed.length > 0) {
+        stands = typed;
+      } else {
+        // FALLBACK: no stands match the selected type.
+        // Sort all stands by gun/bow friendliness so best candidates surface first.
+        console.log(`[STAND-FILTER] No stands classified as '${hunterType}' — falling back to all ${alignedStands.length} stands sorted by ${hunterType}-friendliness`);
+        stands = [...alignedStands].sort((a, b) => {
+          if (hunterType === 'gun') {
+            // Gun-friendliness: edge stands > open cover > everything else
+            const gunScore = (s: AlignedStand) => {
+              let sc = 0;
+              if (s.props?.isEdgeStand) sc += 3;
+              if (s.props?.coverType === 'edge' || s.props?.coverType === 'open') sc += 2;
+              const anch = s.anchorFeature?.type;
+              if (anch === 'field_edge' || anch === 'inside_corner' || anch === 'field_saddle_combo') sc += 4;
+              return sc;
+            };
+            return gunScore(b) - gunScore(a);
+          } else {
+            // Bow-friendliness: corridor proximity + timber anchors
+            const bowScore = (s: AlignedStand) => {
+              let sc = 0;
+              const dist = s.props?.distToCorridorMeters ?? 999;
+              if (dist <= 150) sc += 3;
+              if (dist <= 80) sc += 2;
+              const anch = s.anchorFeature?.type;
+              if (anch === 'saddle' || anch === 'funnel' || anch === 'convergence' || anch === 'ridge') sc += 3;
+              return sc;
+            };
+            return bowScore(b) - bowScore(a);
+          }
+        });
+      }
     }
+
     // Apply hunter-type count caps when CDL data is available
-    if (cdlData) {
-      const res = cdlData.metadata.resolution;
-      const timberAcres = (cdlData.metadata.timberPixels * res * res) / 4046.86;
-      const fieldEdgeLen = cdlData.metadata.edgeSegments * res; // meters
-      const totalAcres = (cdlData.metadata.totalPixels * res * res) / 4046.86;
+    if (cdlData?.metadata) {
+      const res = cdlData.metadata.resolution || 1;
+      const timberAcres = ((cdlData.metadata.timberPixels || 0) * res * res) / 4046.86;
+      const fieldEdgeLen = (cdlData.metadata.edgeSegments || 0) * res; // meters
+      const totalAcres = ((cdlData.metadata.totalPixels || 0) * res * res) / 4046.86;
       let cap: number;
       if (hunterType === 'bow') {
         cap = Math.max(5, Math.floor(timberAcres / 20));
@@ -3364,7 +3406,15 @@ function DeerIntelContent() {
       } else {
         cap = Math.max(6, Math.floor(totalAcres / 15));
       }
+      // Safety: cap must be a valid number ≥ 1
+      if (!Number.isFinite(cap) || cap < 1) cap = alignedStands.length;
       if (stands.length > cap) stands = stands.slice(0, cap);
+    }
+
+    // FINAL SAFETY NET: never return empty when we have source stands
+    if (stands.length === 0 && alignedStands.length > 0) {
+      console.warn(`[STAND-FILTER] Safety net triggered — returning all ${alignedStands.length} stands`);
+      return [...alignedStands];
     }
     return stands;
   }, [alignedStands, hunterType, cdlData]);
