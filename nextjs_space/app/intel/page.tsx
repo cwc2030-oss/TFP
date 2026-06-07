@@ -6717,44 +6717,50 @@ const archetypeInitializedRef = useRef(false);
     const map = mapRef.current;
     if (!map || !mapReady || !overlaySourcesCreated.current || !edgeIntelData) return;
 
+    // Suppress edge-projection overlays in multi-parcel territory mode.
+    // These are single-parcel "movement continues past this boundary" features;
+    // in territory mode they fire at every internal parcel seam, creating
+    // non-interactive visual clutter that masquerades as flow lines.
+    const isMultiParcel = territoryParcelsRef.current.length > 1;
+
     try {
       // Update corridor arrows source
       const arrowsSource = map.getSource('tfp-edge-arrows') as mapboxgl.GeoJSONSource;
       if (arrowsSource) {
-        arrowsSource.setData(edgeIntelData.corridorArrows);
+        arrowsSource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.corridorArrows);
       }
 
       // Update ghost bedding source
       const ghostSource = map.getSource('tfp-edge-ghost') as mapboxgl.GeoJSONSource;
       if (ghostSource) {
-        ghostSource.setData(edgeIntelData.ghostBedding);
+        ghostSource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.ghostBedding);
       }
 
       // Update ghost saddles source
       const ghostSaddleSource = map.getSource('tfp-edge-ghost-saddles') as mapboxgl.GeoJSONSource;
       if (ghostSaddleSource) {
-        ghostSaddleSource.setData(edgeIntelData.ghostSaddles);
+        ghostSaddleSource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.ghostSaddles);
       }
 
       // Update draw extensions source
       const drawExtSource = map.getSource('tfp-edge-draw-extensions') as mapboxgl.GeoJSONSource;
       if (drawExtSource) {
-        drawExtSource.setData(edgeIntelData.drawExtensions);
+        drawExtSource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.drawExtensions);
       }
 
       // Update pressure arrows source
       const pressureSource = map.getSource('tfp-edge-pressure') as mapboxgl.GeoJSONSource;
       if (pressureSource) {
-        pressureSource.setData(edgeIntelData.pressureArrows);
+        pressureSource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.pressureArrows);
       }
 
       // Update adjacent boundary source
       const boundarySource = map.getSource('tfp-edge-boundary') as mapboxgl.GeoJSONSource;
       if (boundarySource) {
-        boundarySource.setData(edgeIntelData.adjacentBoundary);
+        boundarySource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.adjacentBoundary);
       }
 
-      console.log('[MAP] Updated edge intelligence sources');
+      console.log(`[MAP] Updated edge intelligence sources${isMultiParcel ? ' (suppressed — territory mode)' : ''}`);
     } catch (err) {
       console.error('[MAP] Error updating edge intel sources (non-fatal):', err);
     }
