@@ -9766,13 +9766,12 @@ const archetypeInitializedRef = useRef(false);
           map.addLayer({
             id: 'tfp-terrain-labels',
             type: 'symbol',
-            source: 'tfp-terrain-labels',
             layout: {
               'text-field': ['get', 'label'],
               'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
               'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 14, 12, 16, 14],
-              'text-anchor': 'center',
-              'text-offset': [0, 0],
+              'text-anchor': ['match', ['get', 'featureType'], 'convergence', 'bottom', 'center'],
+              'text-offset': ['match', ['get', 'featureType'], 'convergence', ['literal', [0, -1.2]], ['literal', [0, 0]]],
               'text-allow-overlap': false,
               'text-ignore-placement': false,
               'text-padding': 8,
@@ -9784,7 +9783,11 @@ const archetypeInitializedRef = useRef(false);
               'text-halo-color': '#F5EDDC',
               'text-halo-width': 2,
               'text-halo-blur': 0.5,
-              'text-opacity': 1,
+              'text-opacity': ['case',
+                ['==', ['get', 'size'], 'small'], 1,
+                ['boolean', ['feature-state', 'hover'], false], 1,
+                0
+              ],
             },
           });
         }
