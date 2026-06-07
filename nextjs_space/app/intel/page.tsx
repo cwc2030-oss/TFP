@@ -16593,11 +16593,11 @@ const archetypeInitializedRef = useRef(false);
                     <div className="flex-1 h-px bg-stone-700/50" />
                   </div>
                   
-                   {/* Phase B: Green/Blue/Black Flow Tier Toggles */}
-                   {([['flowGreen', 'Green Runs', LAYER_COLORS.flowTierGreen, flowTierCounts.green],
-                     ['flowBlue', 'Blue Runs', LAYER_COLORS.flowTierBlue, flowTierCounts.blue],
-                     ['flowBlack', 'Black Runs', LAYER_COLORS.flowTierBlack, flowTierCounts.black],
-                   ] as [keyof typeof flowVisibility, string, string, number][]).map(([key, label, color, count]) => (
+                   {/* Phase B: Green/Blue/Black Flow Tier Toggles — ski-sign glyphs */}
+                   {([['flowGreen', 'Green Runs', LAYER_COLORS.flowTierGreen, flowTierCounts.green, 'circle'],
+                     ['flowBlue', 'Blue Runs', LAYER_COLORS.flowTierBlue, flowTierCounts.blue, 'square'],
+                     ['flowBlack', 'Black Runs', LAYER_COLORS.flowTierBlack, flowTierCounts.black, 'diamond'],
+                   ] as [keyof typeof flowVisibility, string, string, number, string][]).map(([key, label, color, count, shape]) => (
                      <button
                        key={key}
                        onClick={() => setFlowVisibility(v => ({ ...v, [key]: !v[key] }))}
@@ -16605,11 +16605,27 @@ const archetypeInitializedRef = useRef(false);
                          flowVisibility[key] ? 'bg-stone-700/30' : 'bg-stone-800/20 hover:bg-stone-700/20'
                        }`}
                      >
-                       <span className="w-2.5 h-2.5 rounded" style={{
-                         background: color,
-                         opacity: flowVisibility[key] ? 1 : 0.3,
-                         ...(key === 'flowBlack' ? { border: '1px dashed rgba(255,255,255,0.3)' } : {}),
-                       }} />
+                       {shape === 'circle' && (
+                         <span className="w-2.5 h-2.5 rounded-full" style={{
+                           background: color,
+                           opacity: flowVisibility[key] ? 1 : 0.3,
+                         }} />
+                       )}
+                       {shape === 'square' && (
+                         <span className="w-2.5 h-2.5 rounded-[1px]" style={{
+                           background: color,
+                           opacity: flowVisibility[key] ? 1 : 0.3,
+                         }} />
+                       )}
+                       {shape === 'diamond' && (
+                         <span className="flex items-center justify-center w-2.5 h-2.5">
+                           <span className="w-[7px] h-[7px] rotate-45 rounded-[1px]" style={{
+                             background: color,
+                             opacity: flowVisibility[key] ? 1 : 0.3,
+                             border: '1px solid #F5EDDC',
+                           }} />
+                         </span>
+                       )}
                        <span className={`flex-1 text-left ${flowVisibility[key] ? 'text-stone-300' : 'text-stone-600'}`}>{label}</span>
                        {count > 0 ? (
                          <span className="text-[8px] text-stone-400/70 px-1 py-0.5 bg-stone-700/30 rounded">
@@ -16687,28 +16703,32 @@ const archetypeInitializedRef = useRef(false);
                             <div className="text-[10px] text-stone-400 space-y-0.5">
                               {greenCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-2 h-0.5 rounded" style={{background:'#2D6A4F'}}/>Green Runs</span>
+                                  <span className="flex items-center gap-1"><span className="inline-block w-[7px] h-[7px] rounded-full" style={{background:'#2D6A4F'}}/>Green Runs</span>
                                   <span style={{color:'#2D6A4F'}}>{greenCount}</span>
                                 </div>
                               )}
                               {blueCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-2 h-0.5 rounded" style={{background:'#3B6FA0'}}/>Blue Runs</span>
+                                  <span className="flex items-center gap-1"><span className="inline-block w-[7px] h-[7px] rounded-[1px]" style={{background:'#3B6FA0'}}/>Blue Runs</span>
                                   <span style={{color:'#3B6FA0'}}>{blueCount}</span>
                                 </div>
                               )}
                               {blackCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-2 h-0.5 rounded" style={{background:'#1A1A1A'}}/>Black Runs</span>
+                                  <span className="flex items-center gap-1"><span className="inline-block w-[6px] h-[6px] rotate-45 rounded-[1px]" style={{background:'#1A1A1A', border:'1px solid #F5EDDC'}}/>Black Runs</span>
                                   <span className="text-stone-300">{blackCount}</span>
                                 </div>
                               )}
                               {convergenceCount > 0 && (
                                 <div className="flex justify-between">
-                                  <span>Pinch Points</span>
+                                  <span className="flex items-center gap-1"><span className="inline-block w-[7px] h-[7px] rounded-full" style={{background: LAYER_COLORS.flowConvergence}}/>Pinch Points</span>
                                   <span className="text-amber-400">{convergenceCount}</span>
                                 </div>
                               )}
+                            </div>
+                            {/* Intensity key */}
+                            <div className="text-[8px] text-stone-600 text-center pt-0.5">
+                              Run intensity: <span className="inline-block w-[5px] h-[5px] rounded-full align-middle" style={{background:'#2D6A4F'}}/> steady <span className="mx-0.5">·</span> <span className="inline-block w-[5px] h-[5px] rounded-[1px] align-middle" style={{background:'#3B6FA0'}}/> building <span className="mx-0.5">·</span> <span className="inline-block w-[4px] h-[4px] rotate-45 rounded-[0.5px] align-middle" style={{background:'#1A1A1A', border:'0.5px solid #F5EDDC'}}/> peak
                             </div>
                             
                             {/* Click instruction - highlighted when inspect mode is on */}
