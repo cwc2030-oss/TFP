@@ -6436,26 +6436,25 @@ const archetypeInitializedRef = useRef(false);
           // Heatmap layers — always hidden
           if (id === 'tfp-movement-delta' || id === 'tfp-movement-post' || id === 'tfp-refuge-zones') return true;
           if (id === 'tfp-pressure-heatmap' && !_pm) return true;
-          // Phase B: Flow tier layers — gated on isPressureMode && per-tier flag
-          if (id === 'tfp-flow-green') return !(_pm && _fv.flowGreen);
-          if (id === 'tfp-flow-blue') return !(_pm && _fv.flowBlue);
-          if (id === 'tfp-flow-black') return !(_pm && _fv.flowBlack);
+          // Phase B: Flow tier layers — per-tier flag only (decoupled from isPressureMode)
+          if (id === 'tfp-flow-green') return !(_fv.flowGreen);
+          if (id === 'tfp-flow-blue') return !(_fv.flowBlue);
+          if (id === 'tfp-flow-black') return !(_fv.flowBlack);
           if (id === 'tfp-flow-tiers-glow' || id === 'tfp-flow-direction-chevrons') {
-            return !(_pm && (_fv.flowGreen || _fv.flowBlue || _fv.flowBlack));
+            return !(_fv.flowGreen || _fv.flowBlue || _fv.flowBlack);
           }
           if (id === 'tfp-flow-nearest-highlight') {
-            return !(_pm && (_fv.flowGreen || _fv.flowBlue || _fv.flowBlack));
+            return !(_fv.flowGreen || _fv.flowBlue || _fv.flowBlack);
           }
           // Selected-parcel boundary layers — hide when multi-parcel territory
           // (the merged MultiPolygon shows internal ring boundaries as gold lines)
           if (id === 'tfp-parcel-outline' || id === 'tfp-parcel-glow') {
             return territoryParcelsRef.current.length > 1;
           }
-          // Convergence zones
+          // Convergence zones — per-flag only (decoupled from isPressureMode)
           if (id === 'tfp-flow-convergence' || id === 'tfp-flow-convergence-pulse') {
-            return !(_pm && _fv.convergenceZones);
+            return !(_fv.convergenceZones);
           }
-          // Bedding layers — gated on showBeddingProbability
           if (id === 'tfp-bedding-fill' || id === 'tfp-bedding-outline' ||
               id === 'tfp-edge-ghost-fill' || id === 'tfp-edge-ghost-outline' ||
               id === 'tfp-bedding-probability-glow' || id === 'tfp-bedding-probability-fill' ||
@@ -8750,7 +8749,7 @@ const archetypeInitializedRef = useRef(false);
           properties: {
             label: `Convergence ${pct > 0 ? pct + '%' : ''}`.trim(),
             size: 'small',
-            priority: 2,
+            priority: 0,
             featureType: 'convergence',
           },
         });
@@ -8973,7 +8972,7 @@ const archetypeInitializedRef = useRef(false);
       });
 
       // Phase B: Green/Blue/Black flow tier visibility
-      // Each tier has independent visibility, all gated on isPressureMode
+      // Each tier has independent visibility (decoupled from isPressureMode so runs show on startup)
       const spFlow = scaleParamsRef.current;
       const tierVisMap: [string, boolean, number][] = [
         ['tfp-flow-green', flowVisibility.flowGreen, FLOW_TIER_WIDTH_MULT.green],
@@ -8982,7 +8981,7 @@ const archetypeInitializedRef = useRef(false);
       ];
       for (const [layerId, tierOn, wMult] of tierVisMap) {
         if (!map.getLayer(layerId)) continue;
-        if (isPressureMode && tierOn) {
+        if (tierOn) {
           map.setLayoutProperty(layerId, 'visibility', 'visible');
           const fw = spFlow.flowPrimaryWidth * wMult;
           map.setPaintProperty(layerId, 'line-width', [
@@ -9001,7 +9000,7 @@ const archetypeInitializedRef = useRef(false);
       // Glow layer follows any-tier-on
       const _anyOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack;
       if (map.getLayer('tfp-flow-tiers-glow')) {
-        if (isPressureMode && _anyOn) {
+        if (_anyOn) {
           fadeLayerIn(map, 'tfp-flow-tiers-glow', 0.22, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-tiers-glow', 'line-opacity', FADE_OUT);
@@ -9009,7 +9008,7 @@ const archetypeInitializedRef = useRef(false);
       }
       // Nearest corridor highlight follows any flow tier + stand selection
       if (map.getLayer('tfp-flow-nearest-highlight')) {
-        const showHighlight = isPressureMode && _anyOn && selectedStand !== null;
+        const showHighlight = _anyOn && selectedStand !== null;
         if (showHighlight) {
           fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', FADE_IN);
         } else {
@@ -9018,7 +9017,7 @@ const archetypeInitializedRef = useRef(false);
       }
       // Directional chevrons follow green tier (highest confidence)
       if (map.getLayer('tfp-flow-direction-chevrons')) {
-        if (isPressureMode && flowVisibility.flowGreen) {
+        if (flowVisibility.flowGreen) {
           map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'visible');
         } else {
           map.setLayoutProperty('tfp-flow-direction-chevrons', 'visibility', 'none');
@@ -9026,16 +9025,16 @@ const archetypeInitializedRef = useRef(false);
       }
       // Convergence zones — smooth fade with pressure-aware opacity
       if (map.getLayer('tfp-flow-convergence')) {
-        const convTarget = isPressureMode ? 0.1 : 0.85;
-        if (isPressureMode && flowVisibility.convergenceZones) {
+        const convTarget = 0.85;
+        if (flowVisibility.convergenceZones) {
           fadeLayerIn(map, 'tfp-flow-convergence', convTarget, 'circle-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-convergence', 'circle-opacity', FADE_OUT);
         }
       }
       if (map.getLayer('tfp-flow-convergence-pulse')) {
-        const pulseTarget = isPressureMode ? 0.1 : 0.15;
-        if (isPressureMode && flowVisibility.convergenceZones) {
+        const pulseTarget = 0.15;
+        if (flowVisibility.convergenceZones) {
           fadeLayerIn(map, 'tfp-flow-convergence-pulse', pulseTarget, 'circle-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-convergence-pulse', 'circle-opacity', FADE_OUT);
