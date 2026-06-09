@@ -5645,7 +5645,19 @@ const archetypeInitializedRef = useRef(false);
   // Used during Re-Align so the user still sees their land instead of a black screen.
   // Layers that must NEVER have their opacity raised above 0.
   // tfp-pressure-fill was replaced by the heatmap visual and is kept in code only.
-  const PERMANENTLY_HIDDEN_LAYERS = useRef(new Set(['tfp-pressure-fill']));
+  const PERMANENTLY_HIDDEN_LAYERS = useRef(new Set([
+    'tfp-pressure-fill',
+    // Huntability engine layers — debug/future toggle, must never be faded in
+    'tfp-huntability-favorability-heatmap',
+    'tfp-huntability-corridor-zones-primary',
+    'tfp-huntability-corridor-zones-primary-outline',
+    'tfp-huntability-corridor-zones-secondary',
+    'tfp-huntability-corridor-zones-secondary-outline',
+    'tfp-huntability-corridors-primary',
+    'tfp-huntability-corridors-secondary',
+    'tfp-huntability-convergence-glow',
+    'tfp-huntability-convergence',
+  ]));
 
   const dimOverlayLayers = useCallback((targetOpacity: number = 0.4) => {
     const map = mapRef.current;
@@ -12589,6 +12601,7 @@ const archetypeInitializedRef = useRef(false);
       for (const layer of style.layers) {
         if (!layer.id.startsWith('tfp-')) continue;
         if (TERRITORY_FADE_PRESERVE.some(p => layer.id.startsWith(p))) continue;
+        if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
         const prop = propMap[(layer as any).type] || 'line-opacity';
         if (direction === 'out') {
           fadeLayerOut(map, layer.id, prop, durationMs);
