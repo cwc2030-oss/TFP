@@ -188,9 +188,9 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-edge-boundary-context',   group: 'edgeBoundary', opacityProp: 'line-opacity', targetOpacity: 0.45, source: { kind: 'always' } },
   { id: 'tfp-edge-boundary-highlight', group: 'edgeBoundary', opacityProp: 'line-opacity', targetOpacity: 0.6,  source: { kind: 'interaction' } },
 
-  // ── Adjacent parcels (context always-on, hover is interaction) ──
-  { id: 'tfp-adjacent-parcels-fill',    group: 'adjacentParcels', opacityProp: 'fill-opacity', targetOpacity: 0.08, source: { kind: 'always' } },
-  { id: 'tfp-adjacent-parcels-outline',  group: 'adjacentParcels', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'always' } },
+  // ── Adjacent parcels (managed by territory/parcel effects — skip in reconcile) ──
+  { id: 'tfp-adjacent-parcels-fill',    group: 'adjacentParcels', opacityProp: 'fill-opacity', targetOpacity: 0.08, source: { kind: 'complex' } },
+  { id: 'tfp-adjacent-parcels-outline',  group: 'adjacentParcels', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'complex' } },
   { id: 'tfp-adjacent-parcels-hover',   group: 'adjacentParcels', opacityProp: 'line-opacity', targetOpacity: 0.8,  source: { kind: 'interaction' } },
 ];
 
