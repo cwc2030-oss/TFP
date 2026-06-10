@@ -26,6 +26,7 @@ import { lookupCentroid } from '@/lib/county-centroids';
 import GradeBadge from './_components/grade-badge';
 import CountyMap from './_components/county-map';
 import PhotoGallery from './_components/photo-gallery';
+import DeerFlowPreview from './_components/deer-flow-preview';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -187,7 +188,12 @@ export default async function PublicListingDetail({ params }: Props) {
         {/* Photos */}
         <PhotoGallery photos={safe.photos ?? []} title={titleStr} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+        {/* Deer Flow — signed-in tier (client component, fetches own data) */}
+        <div className="mt-8">
+          <DeerFlowPreview listingId={listing.id} grade={grade} />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Description */}
           <div className="lg:col-span-2 space-y-6">
             {safe.description && (

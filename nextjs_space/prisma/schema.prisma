@@ -225,6 +225,12 @@ model Listing {
   description              String?         @db.Text   // ~500 char cap, validated in app layer
   photos                   String[]        @default([])  // object-storage URLs, max 6, listings/ prefix
 
+  // Deer-flow snapshot — signed-in tier.
+  // Populated at publish time from TerrainAnalysisCache.
+  // JSON: { flowPrimary, flowSecondary, convergenceZones, parcelBounds }
+  // OPSEC-safe field name: does NOT match /lat|lng|long|geom|polygon|address|coord/i
+  terrainFlowSnapshot      String?         @db.Text
+
   // Contact
   contactMethod            ContactMethod?
   contactEmail             String?

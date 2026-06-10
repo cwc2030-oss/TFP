@@ -21,6 +21,7 @@ import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { snapshotFromSavedProperty, validateForPublish } from '@/lib/listings';
+import { buildFlowSnapshot } from '@/lib/listing-flow-snapshot';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,6 +84,16 @@ export async function POST(
     return NextResponse.json({ error: 'Validation failed', errors }, { status: 400 });
   }
 
+  // Build Deer-Flow snapshot for the signed-in listing tier.
+  // Best-effort: if the terrain cache has expired, the listing still publishes
+  // without flow data (field stays null).
+  let terrainFlowSnapshot: string | null = null;
+  try {
+    terrainFlowSnapshot = await buildFlowSnapshot(listing.savedProperty);
+  } catch (e) {
+    console.warn('[Publish] Flow snapshot failed (non-fatal):', e);
+  }
+
   const auto = autoApproveEnabled();
   const now = new Date();
   const updated = await prisma.listing.update({
@@ -95,6 +106,7 @@ export async function POST(
       bedAcres: snap.bedAcres,
       funnelCount: snap.funnelCount,
       savedPropertyUpdatedAt: snap.savedPropertyUpdatedAt,
+      terrainFlowSnapshot,
       // Status transition
       status: auto ? 'PUBLISHED' : 'PENDING_REVIEW',
       publishedAt: auto ? now : null,

@@ -33,9 +33,13 @@ import { prisma } from '../lib/db';
 // next-auth in. Mock it to a no-op to be safe.
 vi.mock('next-auth', () => ({ getServerSession: vi.fn(async () => null) }));
 
-// Navbar is \'use client\' and uses useSession(). Replace with a no-op so SSR
-// rendering doesn\'t require a SessionProvider in this node test context.
+// Navbar is 'use client' and uses useSession(). Replace with a no-op so SSR
+// rendering doesn't require a SessionProvider in this node test context.
 vi.mock('@/components/navbar', () => ({ default: () => null }));
+
+// DeerFlowPreview is 'use client' and uses useSession + mapbox-gl.
+// Mock to null so the OPSEC test only validates server-rendered public HTML.
+vi.mock('../app/listings/[slug]/_components/deer-flow-preview', () => ({ default: () => null }));
 
 import { renderToStaticMarkup } from 'react-dom/server';
 import PublicListingDetail from '../app/listings/[slug]/page';
