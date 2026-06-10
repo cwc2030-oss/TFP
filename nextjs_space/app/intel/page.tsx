@@ -2355,8 +2355,11 @@ function DeerIntelContent() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('hunter_type', hunterType);
     }
-    // Reset decision card to first stand when switching hunter type
+    // Reset decision card + visible stands when switching hunter type
     setDecisionCardIdx(0);
+    setVisibleStandRanks(new Set([0]));
+    setSoloStandMode(false);
+    setSelectedStand(null);
   }, [hunterType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== HUNT ARCHETYPE SELECTOR ==========
@@ -16175,7 +16178,7 @@ const archetypeInitializedRef = useRef(false);
                           console.warn('[ClearCache] Delete failed:', err);
                         }
                       }
-                      // Clear current analysis state and re-run
+                      // Clear current analysis state and map sources before re-run
                       setLayers(null as any);
                       setTieredCorridorData(null as any);
                       setRidgeSpineData(null as any);
@@ -16183,6 +16186,13 @@ const archetypeInitializedRef = useRef(false);
                       setSummary(null as any);
                       setTerrainStory(null);
                       setCdlData(null);
+                      setAlignedStands([]);
+                      setEdgeIntelData(null);
+                      previousStandsRef.current = [];
+                      // Force fresh analysis (not re-align) by clearing overlay flag
+                      overlaySourcesCreated.current = false;
+                      // Wipe stale map layers so nothing persists visually
+                      clearAllOverlaySources();
                       runAnalysis();
                     }}
                     className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] text-stone-500 hover:text-stone-300 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] rounded-lg transition-colors"
@@ -16584,22 +16594,31 @@ const archetypeInitializedRef = useRef(false);
                 
                 {/* Legacy V1/V2 toggle removed — V2 terrain-driven flow is permanent */}
                 <div className="space-y-1">
-                  {/* HEAT MAP Toggle (PRIMARY) */}
+                  {/* Master Deer Flow Toggle — shows/hides all tiers + convergence at once */}
                   <button
-                    onClick={() => setFlowVisibility(v => ({ ...v, pressureHeatmap: !v.pressureHeatmap }))}
+                    onClick={() => {
+                      const allOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack || flowVisibility.convergenceZones;
+                      if (allOn) {
+                        // Master OFF — hide all
+                        setFlowVisibility(v => ({ ...v, flowGreen: false, flowBlue: false, flowBlack: false, convergenceZones: false }));
+                      } else {
+                        // Master ON — show all
+                        setFlowVisibility(v => ({ ...v, flowGreen: true, flowBlue: true, flowBlack: true, convergenceZones: true }));
+                      }
+                    }}
                     className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                      flowVisibility.pressureHeatmap ? 'bg-amber-900/40 border border-amber-700/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                      (anyFlowTierOn || flowVisibility.convergenceZones) ? 'bg-amber-900/40 border border-amber-700/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                     }`}
                   >
                     <span className="w-2.5 h-2.5 rounded-full" style={{ 
                       background: 'linear-gradient(135deg, #0f766e, #06b6d4, #10b981, #f59e0b)', 
-                      opacity: flowVisibility.pressureHeatmap ? 1 : 0.4 
+                      opacity: (anyFlowTierOn || flowVisibility.convergenceZones) ? 1 : 0.4 
                     }} />
-                    <span className={`flex-1 text-left font-medium ${flowVisibility.pressureHeatmap ? 'text-amber-300' : 'text-stone-500'}`}>
+                    <span className={`flex-1 text-left font-medium ${(anyFlowTierOn || flowVisibility.convergenceZones) ? 'text-amber-300' : 'text-stone-500'}`}>
                       Deer Flow
                     </span>
                     <span className="text-[8px] text-amber-400 px-1 py-0.5 bg-amber-900/50 rounded uppercase tracking-wider">
-                      Primary
+                      Master
                     </span>
                   </button>
 
@@ -16859,7 +16878,7 @@ const archetypeInitializedRef = useRef(false);
                   {/* ========== STAND COMPARE SELECTORS (v1.2) ==========
                       Two compact dropdowns for selecting stands to compare.
                       State-only — no calculations or layer changes yet. */}
-                  {flowVisibility.pressureHeatmap && alignedStands.length >= 2 && (
+                  {(anyFlowTierOn || flowVisibility.convergenceZones) && alignedStands.length >= 2 && (
                     <div className="px-2 py-2 bg-white/[0.03] rounded-lg border border-white/[0.06] mt-1">
                       <span className="text-[10px] text-stone-500/70 uppercase tracking-wider font-medium block mb-1.5">Compare Stands</span>
                       <div className="grid grid-cols-2 gap-2">
