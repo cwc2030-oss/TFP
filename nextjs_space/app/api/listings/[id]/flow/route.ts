@@ -31,6 +31,7 @@ export async function GET(
     where: { id: params.id, status: 'PUBLISHED' },
     select: {
       id: true,
+      ownerUserId: true,
       terrainFlowSnapshot: true,
       terrainScore: true,
       acres: true,
@@ -39,6 +40,14 @@ export async function GET(
 
   if (!listing) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  // Gate: only the listing owner can view the full flow map for now
+  if (listing.ownerUserId !== session.user.id) {
+    return NextResponse.json(
+      { error: 'Full Terrain Brain map unlocks when you lease this parcel' },
+      { status: 403 },
+    );
   }
 
   if (!listing.terrainFlowSnapshot) {

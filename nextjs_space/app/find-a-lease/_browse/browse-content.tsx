@@ -22,6 +22,8 @@ interface Listing {
   seasonAvailability: string[];
   huntersMax: number | null;
   funnelCount: number | null;
+  corridorCount: number | null;
+  interceptCount: number | null;
   bedAcres: number | null;
 }
 

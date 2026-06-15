@@ -58,6 +58,8 @@ const BROWSE_SELECT = {
   seasonAvailability: true,
   huntersMax: true,
   funnelCount: true,
+  corridorCount: true,
+  interceptCount: true,
   bedAcres: true,
 } as const;
 

@@ -26,7 +26,7 @@ import { lookupCentroid } from '@/lib/county-centroids';
 import GradeBadge from './_components/grade-badge';
 import CountyMap from './_components/county-map';
 import PhotoGallery from './_components/photo-gallery';
-import DeerFlowPreview from './_components/deer-flow-preview';
+import TerrainBrainTeaser from './_components/terrain-brain-teaser';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -49,6 +49,8 @@ async function loadPublished(id: string) {
       primaryMovement: true,
       bedAcres: true,
       funnelCount: true,
+      corridorCount: true,
+      interceptCount: true,
       askingPriceMin: true,
       askingPriceMax: true,
       leaseType: true,
@@ -188,10 +190,21 @@ export default async function PublicListingDetail({ params }: Props) {
         {/* Photos */}
         <PhotoGallery photos={safe.photos ?? []} title={titleStr} />
 
-        {/* Deer Flow — signed-in tier (client component, fetches own data) */}
-        <div className="mt-8">
-          <DeerFlowPreview listingId={listing.id} grade={grade} />
-        </div>
+        {/* Terrain Brain teaser — public-safe abstract preview */}
+        <TerrainBrainTeaser
+          grade={grade}
+          terrainScore={safe.terrainScore ?? null}
+          corridorCount={(safe as any).corridorCount ?? null}
+          funnelCount={safe.funnelCount ?? null}
+          interceptCount={(safe as any).interceptCount ?? null}
+          seasonAvailability={seasons}
+          acres={safe.acres ?? null}
+          askingPriceMin={safe.askingPriceMin ?? null}
+          askingPriceMax={safe.askingPriceMax ?? null}
+          primaryMovement={safe.primaryMovement ?? null}
+          bedAcres={safe.bedAcres as number | null}
+          inquireHref={`/listings/${canonical}/inquire`}
+        />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Description */}

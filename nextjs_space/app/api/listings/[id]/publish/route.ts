@@ -84,12 +84,21 @@ export async function POST(
     return NextResponse.json({ error: 'Validation failed', errors }, { status: 400 });
   }
 
-  // Build Deer-Flow snapshot for the signed-in listing tier.
+  // Build Deer-Flow snapshot for the owner/lessee tier.
   // Best-effort: if the terrain cache has expired, the listing still publishes
   // without flow data (field stays null).
   let terrainFlowSnapshot: string | null = null;
+  let corridorCount: number | null = null;
+  let interceptCount: number | null = null;
   try {
     terrainFlowSnapshot = await buildFlowSnapshot(listing.savedProperty);
+    if (terrainFlowSnapshot) {
+      const parsed = JSON.parse(terrainFlowSnapshot);
+      corridorCount =
+        (parsed.flowPrimary?.features?.length ?? 0) +
+        (parsed.flowSecondary?.features?.length ?? 0);
+      interceptCount = parsed.convergenceZones?.features?.length ?? 0;
+    }
   } catch (e) {
     console.warn('[Publish] Flow snapshot failed (non-fatal):', e);
   }
@@ -107,6 +116,8 @@ export async function POST(
       funnelCount: snap.funnelCount,
       savedPropertyUpdatedAt: snap.savedPropertyUpdatedAt,
       terrainFlowSnapshot,
+      corridorCount,
+      interceptCount,
       // Status transition
       status: auto ? 'PUBLISHED' : 'PENDING_REVIEW',
       publishedAt: auto ? now : null,
