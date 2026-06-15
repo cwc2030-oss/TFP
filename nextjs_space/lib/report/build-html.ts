@@ -48,7 +48,7 @@ const css = `
   body { font-family: Georgia, serif; color: #1a1a1a; background: white; }
   .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; }
   /* Only the certificate gets its own page — everything else flows continuously */
-  .page-cert { page-break-before: always; }
+  .page-cert { page-break-before: always; page-break-inside: avoid; break-inside: avoid; }
   .border { border: 3px solid #1a3a2a; }
   .header { background: #1a3a2a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
   .header h1 { font-size: 22px; letter-spacing: 2px; }
@@ -645,20 +645,20 @@ ${mapImageBase64 ? `
 ` : ''}
 
 <div class="page page-cert border${wm}">
-  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px">
-    <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
-    <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px 48px">
+    <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:16px">Terra Firma Partners — Official Terrain Assessment</div>
+    <div style="border:3px solid #c9a84c;padding:32px 48px;width:100%;max-width:600px">
       <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">${certificateTitle}</div>
-      <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:32px"></div>
+      <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:20px"></div>
       <div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
-      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:32px">HUNTABILITY GRADE</div>
-      <div style="background:#f8f6f0;padding:20px;margin-bottom:24px;text-align:left">
+      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:20px">HUNTABILITY GRADE</div>
+      <div style="background:#f8f6f0;padding:16px;margin-bottom:16px;text-align:left">
         <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
         <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
         <div style="font-size:12px;color:#666">${Math.round(safeAcreage)} Acres${parsedCounty ? ` | ${parsedCounty} County, ${parsedState}` : ` | ${parsedState}`}</div>
       </div>
       ${territorySection}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${summary?.topStandScore ?? 0}</div>
           <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">HUNTABILITY SCORE</div>
@@ -672,19 +672,19 @@ ${mapImageBase64 ? `
           <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS${funnelHard + funnelSlight > 0 ? ' + FUNNELS' : ''}</div>
         </div>
       </div>
-      <div style="height:1px;background:#ddd;margin-bottom:16px"></div>
-      <div style="font-size:10px;color:#999;line-height:1.6;margin-bottom:16px">
+      <div style="height:1px;background:#ddd;margin-bottom:12px"></div>
+      <div style="font-size:10px;color:#999;line-height:1.6;margin-bottom:12px">
         This certificate confirms that the above property has been analyzed using satellite terrain 
         intelligence, elevation modeling, and deer movement prediction. 
         Assessment valid at time of generation. Adjacent parcel analysis available separately.
       </div>
       ${listPropertyCtaHTML}
-      <div style="padding-top:16px;border-top:1px solid #ddd">
+      <div style="padding-top:12px;border-top:1px solid #ddd">
         <div style="font-size:11px;font-weight:bold;color:#1a3a2a;letter-spacing:1px">TERRA FIRMA PARTNERS</div>
         <div style="font-size:10px;color:#888">terrafirma.partners | Terrain Intelligence for Serious Hunters</div>
       </div>
     </div>
-    <div style="margin-top:24px;font-size:10px;color:#ccc;letter-spacing:2px">Report ID: ${reportId}</div>
+    <div style="margin-top:16px;font-size:10px;color:#ccc;letter-spacing:2px">Report ID: ${reportId}</div>
   </div>
 </div>
 
