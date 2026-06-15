@@ -46,8 +46,9 @@ const seasonGradeColor = (s: number) => s >= 70 ? '#2d6a4f' : s >= 50 ? '#d4a017
 const css = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Georgia, serif; color: #1a1a1a; background: white; }
-  .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; page-break-after: always; }
-  .page:last-child { page-break-after: avoid; }
+  .page { width: 816px; padding: 48px; padding-bottom: 60px; position: relative; }
+  /* Only the certificate gets its own page — everything else flows continuously */
+  .page-cert { page-break-before: always; }
   .border { border: 3px solid #1a3a2a; }
   .header { background: #1a3a2a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
   .header h1 { font-size: 22px; letter-spacing: 2px; }
@@ -59,10 +60,10 @@ const css = `
   .score-sub { font-size: 12px; color: #666; margin-top: 8px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-  .stat-box { background: #f8f6f0; border: 1px solid #ddd; padding: 16px; text-align: center; }
+  .stat-box { background: #f8f6f0; border: 1px solid #ddd; padding: 16px; text-align: center; page-break-inside: avoid; break-inside: avoid; }
   .stat-value { font-size: 28px; font-weight: bold; color: #1a3a2a; }
   .stat-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-  .stand-card { border: 2px solid #1a3a2a; margin-bottom: 16px; page-break-inside: avoid; }
+  .stand-card { border: 2px solid #1a3a2a; margin-bottom: 16px; page-break-inside: avoid; break-inside: avoid; }
   .stand-header { padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
   .stand-rank { font-size: 24px; font-weight: bold; color: #c9a84c; margin-right: 12px; }
   .stand-name { font-size: 16px; font-weight: bold; }
@@ -87,8 +88,11 @@ const css = `
   .corridor-fill { height: 100%; background: #1a3a2a; border-radius: 2px; }
   .footer { display: flex; justify-content: space-between; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 24px; }
   .disclaimer { font-size: 9px; color: #999; line-height: 1.5; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
-  /* Keep only truly atomic blocks together. Let grids/sections flow to avoid orphan whitespace. */
-  .score-hero, .season-grid { page-break-inside: avoid; }
+  /* Keep atomic blocks together — avoids splitting a single card across pages */
+  .score-hero, .season-grid, .grid-2, .grid-3 { page-break-inside: avoid; break-inside: avoid; }
+  .section-title { page-break-after: avoid; break-after: avoid; }
+  .info-block { page-break-inside: avoid; break-inside: avoid; }
+  .map-container { page-break-inside: avoid; break-inside: avoid; }
   /* Page 1 density overrides — tightens vertical spacing so all content fits cleanly on one page. */
   .page-1 .header { margin-bottom: 20px; }
   .page-1 .gold-bar { margin-bottom: 14px; }
@@ -489,7 +493,7 @@ ${ogMeta}
           <div style="font-size:24px;font-weight:bold;color:#c9a84c">#${stand.rank}</div>
         </div>
         <div>
-          <div class="stand-name">${stand.name}</div>
+          <div class="stand-name">Intercept #${stand.rank}</div>
           <div class="stand-tier">${stand.tier} · ${stand.resilience}</div>
         </div>
       </div>
@@ -551,7 +555,7 @@ ${ogMeta}
       </div>
     </div>
   </div>
-  <div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:14px 16px;margin-top:12px;margin-bottom:12px">
+  <div class="info-block" style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:14px 16px;margin-top:12px;margin-bottom:12px">
     <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a;margin-bottom:6px">
       Understanding Funnel Zones
     </div>
@@ -591,13 +595,13 @@ ${mapImageBase64 ? `
 
   <div class="gold-bar"></div>
 
-  <div style="border:3px solid #1a3a2a;margin-bottom:20px;position:relative">
+  <div class="map-container" style="border:3px solid #1a3a2a;margin-bottom:20px;position:relative">
     <img src="${mapImageBase64}" style="width:100%;display:block" alt="Terrain Hunt Map"/>
     <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(26,58,42,0.85);padding:8px 12px;display:flex;gap:24px;align-items:center">
       <span style="color:white;font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:bold">Legend:</span>
-      <span style="color:white;font-size:10px">🎯 #1 Intercept — ${stands?.[0]?.name ?? 'Top Intercept'}</span>
-      ${stands?.[1] ? `<span style="color:white;font-size:10px">🎯 #2 Intercept — ${stands[1].name}</span>` : ''}
-      ${stands?.[2] ? `<span style="color:white;font-size:10px">🎯 #3 Intercept — ${stands[2].name}</span>` : ''}
+      <span style="color:white;font-size:10px">🎯 Intercept #1</span>
+      ${stands?.[1] ? `<span style="color:white;font-size:10px">🎯 Intercept #2</span>` : ''}
+      ${stands?.[2] ? `<span style="color:white;font-size:10px">🎯 Intercept #3</span>` : ''}
     </div>
   </div>
 
@@ -606,7 +610,7 @@ ${mapImageBase64 ? `
     ${(stands ?? []).slice(0,3).map((s: any, i: number) => `
     <div style="border:2px solid #1a3a2a;padding:12px;background:#f8f6f0">
       <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:2px">INTERCEPT</div>
-      <div style="font-size:11px;font-weight:bold;color:#c9a84c;margin-bottom:4px">#${s.rank} — ${s.name}</div>
+      <div style="font-size:11px;font-weight:bold;color:#c9a84c;margin-bottom:4px">Intercept #${s.rank}</div>
       <div style="font-size:10px;color:#666;margin-bottom:6px">${s.tier}</div>
       <div style="font-size:18px;font-weight:bold;color:#1a3a2a;margin-bottom:6px">${s.score}</div>
       <div style="font-size:10px;color:#333">${s.coords ? `${s.coords[1].toFixed(5)}°N ${Math.abs(s.coords[0]).toFixed(5)}°W` : 'Coords unavailable'}</div>
@@ -615,7 +619,7 @@ ${mapImageBase64 ? `
   </div>
 
   ${terrainNarrative ? `
-<div style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:14px 16px;margin-bottom:16px">
+<div class="info-block" style="background:#f8f6f0;border-left:4px solid #c9a84c;padding:14px 16px;margin-bottom:16px">
   <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#1a3a2a;margin-bottom:6px">
     Terrain Intelligence — ${terrainHeadline ?? 'Analysis Summary'}
   </div>
@@ -623,16 +627,16 @@ ${mapImageBase64 ? `
   ${terrainDriver ? `<div style="margin-top:8px"><span style="background:#1a3a2a;color:white;padding:2px 8px;font-size:9px;letter-spacing:1px">PRIMARY DRIVER: ${terrainDriver}</span></div>` : ''}
 </div>` : ''}
   <div class="section-title">Approach & Wind Strategy</div>
-  <div style="background:#f8f6f0;border:1px solid #ddd;padding:16px;margin-bottom:16px">
+  <div class="info-block" style="background:#f8f6f0;border:1px solid #ddd;padding:16px;margin-bottom:16px">
     <div style="font-size:12px;color:#333;line-height:1.8">
       <div style="margin-bottom:8px"><strong>Prevailing Wind:</strong> ${prevailingWind ?? 'Not set'} — plan entry routes to keep wind in your favor approaching each intercept point.</div>
-      <div style="margin-bottom:8px"><strong>Top Intercept (${stands?.[0]?.name ?? '—'}):</strong> Best hunted on ${(stands?.[0]?.windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands?.[0]?.approachRisk ?? '—'}.</div>
-      ${stands?.[1] ? `<div style="margin-bottom:8px"><strong>Intercept 2 (${stands[1].name}):</strong> Best hunted on ${(stands[1].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[1].approachRisk ?? '—'}.</div>` : ''}
-      ${stands?.[2] ? `<div><strong>Intercept 3 (${stands[2].name}):</strong> Best hunted on ${(stands[2].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[2].approachRisk ?? '—'}.</div>` : ''}
+      <div style="margin-bottom:8px"><strong>Intercept #1:</strong> Best hunted on ${(stands?.[0]?.windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands?.[0]?.approachRisk ?? '—'}.</div>
+      ${stands?.[1] ? `<div style="margin-bottom:8px"><strong>Intercept #2:</strong> Best hunted on ${(stands[1].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[1].approachRisk ?? '—'}.</div>` : ''}
+      ${stands?.[2] ? `<div><strong>Intercept #3:</strong> Best hunted on ${(stands[2].windOk ?? []).join(', ') || 'any'} winds. Approach risk: ${stands[2].approachRisk ?? '—'}.</div>` : ''}
     </div>
   </div>
 
-  <div style="background:#1a3a2a;color:white;padding:12px 16px;font-size:11px;line-height:1.6">
+  <div class="info-block" style="background:#1a3a2a;color:white;padding:12px 16px;font-size:11px;line-height:1.6">
     <strong>PRO TIP:</strong> Always approach intercept points from downwind. Check wind forecast the night before and select the intercept whose good wind directions match tomorrow's forecast. 
     Deer will smell you from 300+ yards — your entry route matters as much as your intercept position.
   </div>
@@ -640,7 +644,7 @@ ${mapImageBase64 ? `
 </div>
 ` : ''}
 
-<div class="page border${wm}">
+<div class="page page-cert border${wm}">
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:48px">
     <div style="font-size:11px;letter-spacing:4px;color:#888;text-transform:uppercase;margin-bottom:24px">Terra Firma Partners — Official Terrain Assessment</div>
     <div style="border:3px solid #c9a84c;padding:48px 64px;width:100%;max-width:600px">
