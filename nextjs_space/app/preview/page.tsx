@@ -130,7 +130,7 @@ function PreviewContent() {
   }, [lat, lng, address, router]);
   
   const handleUnlock = () => {
-    // Track terrain analyzer open & go to the Deer Intel page
+    // Track terrain analyzer open & go to the Terrain Brain page
     const finalLat = parcelInfo?.lat || lat;
     const finalLng = parcelInfo?.lng || lng;
     const finalAddress = parcelInfo?.address || address;

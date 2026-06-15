@@ -2112,7 +2112,7 @@ function LoadingFallback() {
     <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
       <div className="text-center">
         <Loader2 className="w-12 h-12 text-amber-500 animate-spin mx-auto mb-4" />
-        <p className="text-white text-lg">Loading Deer Intel...</p>
+        <p className="text-white text-lg">Loading Terrain Brain...</p>
       </div>
     </div>
   );
@@ -14953,7 +14953,7 @@ const archetypeInitializedRef = useRef(false);
             <div className="h-6 w-px bg-white/30" />
             <div className="flex items-center gap-2">
               <Target className="h-5 w-5 text-red-500" />
-              <span className="font-bold text-white text-lg">Deer Intel</span>
+              <span className="font-bold text-white text-lg">Terrain Brain</span>
             </div>
           </div>
 
@@ -15535,7 +15535,7 @@ const archetypeInitializedRef = useRef(false);
                   <div className="flex items-start gap-2.5 pr-4">
                     <span className="text-lg flex-shrink-0 mt-0.5">🦌</span>
                     <div>
-                      <p className="text-[11px] font-semibold text-amber-300">Welcome to Deer Intel</p>
+                      <p className="text-[11px] font-semibold text-amber-300">Welcome to Terrain Brain</p>
                       <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
                         {"You're viewing a live terrain analysis of a real Missouri parcel. Switch between demo parcels above to see different terrain features — funnels, ridges, bedding areas, and stand placements."}
                       </p>

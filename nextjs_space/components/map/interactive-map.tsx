@@ -929,7 +929,7 @@ export default function InteractiveMap({
             {/* Premium Layers Preview */}
             <div>
               <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2 flex items-center gap-1">
-                <Crown className="w-3 h-3 text-amber-500" /> Deer Intel Layers
+                <Crown className="w-3 h-3 text-amber-500" /> Terrain Brain Layers
               </p>
               <div className="space-y-1.5">
                 {premiumLayers.map((layer) => {

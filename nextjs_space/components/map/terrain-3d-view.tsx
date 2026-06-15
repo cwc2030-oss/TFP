@@ -515,7 +515,7 @@ export default function Terrain3DView({
                   onClick={() => {
                     // v4-fix: Stop animations and allow WebGL cleanup before navigating
                     stopSpin();
-                    console.log('[Terrain3D] Deer Intel clicked — cleaning up before navigation');
+                    console.log('[Terrain3D] Terrain Brain clicked — cleaning up before navigation');
                     // Proactively destroy map so WebGL context is released before intel page
                     if (mapRef.current) {
                       try { mapRef.current.remove(); } catch (e) { /* ignore */ }
@@ -525,10 +525,10 @@ export default function Terrain3DView({
                     setTimeout(() => onUnlockIntel(), 100);
                   }}
                   className="bg-amber-600 hover:bg-amber-500 text-white gap-1.5 text-xs font-semibold"
-                  title="View Deer Intel Analysis"
+                  title="View Terrain Brain Analysis"
                 >
                   <Crosshair className="w-4 h-4" />
-                  <span className="hidden sm:inline">Deer Intel</span>
+                  <span className="hidden sm:inline">Terrain Brain</span>
                 </Button>
               )}
               <Button
@@ -691,13 +691,13 @@ export default function Terrain3DView({
                     </p>
                   </div>
 
-                  {/* Deer Intel CTA */}
+                  {/* Terrain Brain CTA */}
                   {onUnlockIntel && (
                     <button
                       onClick={() => {
                         // v4-fix: Stop animations and allow WebGL cleanup before navigating
                         stopSpin();
-                        console.log('[Terrain3D] Deer Intel CTA clicked — cleaning up before navigation');
+                        console.log('[Terrain3D] Terrain Brain CTA clicked — cleaning up before navigation');
                         if (mapRef.current) {
                           try { mapRef.current.remove(); } catch (e) { /* ignore */ }
                           mapRef.current = null;
@@ -707,7 +707,7 @@ export default function Terrain3DView({
                       className="w-full mt-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-all shadow-lg"
                     >
                       <Crosshair className="w-5 h-5" />
-                      <span className="font-semibold">View Full Deer Intel Analysis</span>
+                      <span className="font-semibold">View Full Terrain Brain Analysis</span>
                     </button>
                   )}
 

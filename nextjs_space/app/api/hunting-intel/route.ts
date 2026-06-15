@@ -393,7 +393,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(184, 134, 11);
     doc.setFontSize(11);
     doc.setFont("helvetica", "italic");
-    doc.text("7 Layers of Terrain-Derived Deer Intel", pageWidth / 2, 115, { align: "center" });
+    doc.text("7 Layers of Terrain Brain Intelligence", pageWidth / 2, 115, { align: "center" });
 
     // Aerial map
     const heroMapHeight = 65;
@@ -437,11 +437,11 @@ export async function POST(request: NextRequest) {
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 1, totalPages);
 
     // ════════════════════════════════════════════════════
-    // PAGE 2: 7 LAYERS OF DEER INTEL — OVERVIEW
+    // PAGE 2: 7 LAYERS OF TERRAIN BRAIN — OVERVIEW
     // ════════════════════════════════════════════════════
     doc.addPage();
     drawCertificateBorder(doc, pageWidth, pageHeight);
-    drawPageHeader(doc, pageWidth, "7 LAYERS OF DEER INTEL", logoImage);
+    drawPageHeader(doc, pageWidth, "7 LAYERS OF TERRAIN BRAIN", logoImage);
 
     let yPos = 42;
 
