@@ -83,11 +83,13 @@ export default function SavedPropertyPickerForm({
           <p className="text-stone-300 text-sm mb-4">
             We prefilled the safe county-level listing facts from your report. Review and edit anything below before creating the draft.
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
             <Metric label="Acres" value={prefill.acres != null ? Math.round(prefill.acres).toString() : '—'} />
             <Metric label="Terrain score" value={prefill.terrainScore != null ? String(prefill.terrainScore) : '—'} />
+            <Metric label="Intercept points" value={prefill.standCount != null ? String(prefill.standCount) : '—'} />
+            <Metric label="Corridors" value={prefill.funnelCount != null ? String(prefill.funnelCount) : '—'} />
             <Metric label="Bedding acres" value={prefill.bedAcres != null ? prefill.bedAcres.toFixed(1) : '—'} />
-            <Metric label="Funnels" value={prefill.funnelCount != null ? String(prefill.funnelCount) : '—'} />
+            <Metric label="Est. Lease $/acre/yr" value={prefill.leaseEstimate ?? '—'} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label className="block">

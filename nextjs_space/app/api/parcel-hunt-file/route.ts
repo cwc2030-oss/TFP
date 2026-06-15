@@ -104,7 +104,10 @@ export async function POST(req: NextRequest) {
           pdf_options: {
             format: 'Letter',
             print_background: true,
-            margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' },
+            margin: { top: '0px', right: '0px', bottom: '30px', left: '0px' },
+            display_header_footer: true,
+            header_template: '<span></span>',
+            footer_template: `<div style="width:100%;font-size:9px;padding:0 48px;display:flex;justify-content:space-between;color:#999;font-family:Arial,sans-serif"><span>Report ID: ${reportId}</span><span>TERRA FIRMA PARTNERS</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`,
           },
           base_url: process.env.NEXTAUTH_URL || '',
         }),

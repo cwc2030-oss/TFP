@@ -134,6 +134,8 @@ describe('GET /api/listings/new/prefill', () => {
       primaryMovement: 'Creek-bottom funnels',
       bedAcres: 17.7,
       funnelCount: 9,
+      standCount: null,
+      leaseEstimate: '$18-25',
     });
     expect(listingPrefillResponseSchema.parse(body)).toEqual(body);
   });

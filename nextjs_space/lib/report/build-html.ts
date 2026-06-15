@@ -8,6 +8,8 @@
  * The route owns auth, Mapbox map fetch, and HTML2PDF conversion.
  */
 
+import { estimateLeasePerAcre } from '@/lib/lease-estimate';
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Escape HTML-special chars for safe attribute embedding */
@@ -214,10 +216,7 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   const wm = isFreeTier ? ' preview-watermark' : '';
 
   // ── Lease Intelligence ──
-  const leaseValuePerAcre = (summary?.topStandScore ?? 0) >= 80 ? '$18-25'
-    : (summary?.topStandScore ?? 0) >= 60 ? '$12-18'
-    : (summary?.topStandScore ?? 0) >= 40 ? '$8-12'
-    : '$4-8';
+  const leaseValuePerAcre = estimateLeasePerAcre({ topStandScore: summary?.topStandScore });
 
   const certifiedBadge = (summary?.topStandScore ?? 0) >= 70
     ? `<div style="background:#1a3a2a;color:#c9a84c;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10003; CERTIFIED HUNTABLE</div>`
@@ -333,7 +332,8 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   const parsedState = (stateZipMatch?.[1] ?? state ?? 'MO').toUpperCase();
 
   // ── Page count ──
-  const totalPages = mapImageBase64 ? 4 : 3;
+  // Footer is now rendered by Playwright's native display_header_footer
+  // using CSS pageNumber / totalPages classes, so we no longer hardcode.
 
   // ── Assemble HTML ─────────────────────────────────────────────────────────
   // ── Open Graph + Twitter Card meta ──
@@ -460,11 +460,6 @@ ${ogMeta}
       <div class="stat-label">Analysis Area</div>
     </div>
   </div>`}
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 1 of ${totalPages}</span>
-  </div>
 </div>
 
 <div class="page border${wm}">
@@ -577,11 +572,6 @@ ${ogMeta}
     historical deer movement patterns, and wind modeling. Always scout properties in person before committing to intercept positions.
     Terra Firma Partners is not responsible for hunting outcomes. Data sources: Regrid, USGS DEM, USDA. Report ID: ${reportId}
   </div>
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 2 of ${totalPages}</span>
-  </div>
 </div>
 
 ${mapImageBase64 ? `
@@ -647,11 +637,6 @@ ${mapImageBase64 ? `
     Deer will smell you from 300+ yards — your entry route matters as much as your intercept position.
   </div>
 
-  <div class="footer">
-    <span>Report ID: ${reportId}</span>
-    <span>TERRA FIRMA PARTNERS</span>
-    <span>Page 3 of ${totalPages}</span>
-  </div>
 </div>
 ` : ''}
 

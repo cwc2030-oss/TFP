@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { SavedProperty } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { snapshotFromSavedProperty } from '@/lib/listings';
+import { estimateLeasePerAcre } from '@/lib/lease-estimate';
 
 export const listingPrefillResponseSchema = z.object({
   savedPropertyId: z.string().min(1),
@@ -12,6 +13,8 @@ export const listingPrefillResponseSchema = z.object({
   primaryMovement: z.string().nullable(),
   bedAcres: z.number().nullable(),
   funnelCount: z.number().int().nullable(),
+  standCount: z.number().int().nullable(),
+  leaseEstimate: z.string().nullable(),
 }).strict();
 
 export type ListingPrefillResponse = z.infer<typeof listingPrefillResponseSchema>;
@@ -69,6 +72,8 @@ export function buildListingPrefill(sp: SavedProperty): ListingPrefillResponse {
     primaryMovement: snapshot.primaryMovement,
     bedAcres: snapshot.bedAcres,
     funnelCount: snapshot.funnelCount,
+    standCount: sp.standCount ?? null,
+    leaseEstimate: estimateLeasePerAcre({ topStandScore: snapshot.terrainScore }),
   });
 }
 
