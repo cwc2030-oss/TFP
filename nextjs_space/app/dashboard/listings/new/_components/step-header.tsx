@@ -2,11 +2,12 @@
  * Step indicator for the 3-step wizard.
  * Highlights the active step; collapsed on small screens.
  */
-export default function StepHeader({ currentStep }: { currentStep: 1 | 2 | 3 }) {
+export default function StepHeader({ currentStep }: { currentStep: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: 'Pick property' },
     { n: 2, label: 'Lease terms' },
     { n: 3, label: 'Photos & contact' },
+    { n: 4, label: 'Review & publish' },
   ];
   return (
     <nav aria-label="Wizard progress" className="flex items-center gap-2 text-sm">

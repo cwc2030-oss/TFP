@@ -17,14 +17,14 @@ import type { Listing, SavedProperty } from '@prisma/client';
 // ---------------------------------------------------------------------------
 // Wizard step typing
 // ---------------------------------------------------------------------------
-export type WizardStep = 1 | 2 | 3;
+export type WizardStep = 1 | 2 | 3 | 4;
 
-export const WIZARD_STEPS = [1, 2, 3] as const;
+export const WIZARD_STEPS = [1, 2, 3, 4] as const;
 
 export function getStepFromQuery(stepParam: string | string[] | undefined): WizardStep {
   const raw = Array.isArray(stepParam) ? stepParam[0] : stepParam;
   const n = Number(raw);
-  if (n === 2 || n === 3) return n;
+  if (n === 2 || n === 3 || n === 4) return n;
   return 1;
 }
 

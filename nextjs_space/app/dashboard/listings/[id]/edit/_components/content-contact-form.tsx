@@ -37,7 +37,7 @@ export default function ContentContactForm({
 
 
 
-  async function save(returnTo: 'index' | 'step2') {
+  async function save(returnTo: 'review' | 'step2' | 'index') {
     setSubmitting(true);
     setErr(null);
     try {
@@ -66,6 +66,8 @@ export default function ContentContactForm({
       }
       if (returnTo === 'step2') {
         router.push(`/dashboard/listings/${listingId}/edit?step=2`);
+      } else if (returnTo === 'review') {
+        router.push(`/dashboard/listings/${listingId}/edit?step=4`);
       } else {
         router.push('/dashboard/listings');
       }
@@ -79,7 +81,7 @@ export default function ContentContactForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        save('index');
+        save(isPublished ? 'index' : 'review');
       }}
       className="space-y-6"
     >
@@ -168,8 +170,18 @@ export default function ContentContactForm({
           disabled={submitting}
           className="inline-flex items-center justify-center bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium transition-colors"
         >
-          {submitting ? 'Saving…' : isPublished ? 'Done' : 'Save draft'}
+          {submitting ? 'Saving…' : isPublished ? 'Done' : 'Save and review →'}
         </button>
+        {!isPublished && (
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => save('index')}
+            className="inline-flex items-center justify-center bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-200 px-6 py-3 rounded-lg font-medium transition-colors"
+          >
+            Save draft
+          </button>
+        )}
       </div>
     </form>
   );

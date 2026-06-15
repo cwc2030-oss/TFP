@@ -15,6 +15,7 @@ import { gradeFromScore, getStepFromQuery } from '@/lib/listings';
 import StepHeader from '../../new/_components/step-header';
 import LeaseTermsForm from './_components/lease-terms-form';
 import ContentContactForm from './_components/content-contact-form';
+import ReviewPublish from './_components/review-publish';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +50,7 @@ export default async function EditListingPage({ params, searchParams }: Props) {
   if (!listing) notFound();
 
   // Non-DRAFT listings can only access step 3 (photos). All other steps
-  // are DRAFT-only. (Lifecycle transitions use the dedicated POST routes.)
+  // (including step 4 Review & Publish) are DRAFT-only.
   const isPublished = listing.status !== 'DRAFT';
   if (isPublished && getStepFromQuery(searchParams.step) !== 3) {
     redirect(`/dashboard/listings/${params.id}/edit?step=3`);
@@ -129,6 +130,36 @@ export default async function EditListingPage({ params, searchParams }: Props) {
                 title: listing.title,
                 description: listing.description,
                 photos: listing.photos ?? [],
+                contactMethod: listing.contactMethod,
+                contactEmail: listing.contactEmail,
+                contactPhone: listing.contactPhone,
+              }}
+            />
+          </>
+        )}
+
+        {step === 4 && (
+          <>
+            <h1 className="text-2xl font-bold text-stone-100 mt-8">
+              Review &amp; publish
+            </h1>
+            <p className="text-stone-400 mt-2 mb-6">
+              Confirm everything looks good, then publish to the marketplace.
+            </p>
+            <ReviewPublish
+              listing={{
+                id: listing.id,
+                savedPropertyId: listing.savedPropertyId,
+                state: listing.state,
+                county: listing.county,
+                acres: listing.acres,
+                askingPriceMin: listing.askingPriceMin,
+                askingPriceMax: listing.askingPriceMax,
+                leaseType: listing.leaseType,
+                huntersMax: listing.huntersMax,
+                seasonAvailability: listing.seasonAvailability,
+                description: listing.description,
+                photos: listing.photos,
                 contactMethod: listing.contactMethod,
                 contactEmail: listing.contactEmail,
                 contactPhone: listing.contactPhone,

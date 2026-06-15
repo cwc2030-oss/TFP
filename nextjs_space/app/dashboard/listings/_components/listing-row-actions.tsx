@@ -41,6 +41,13 @@ export default function ListingRowActions({ listingId, status, publicSlug }: Pro
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
+        // Parse field-level errors from publish endpoint
+        if (Array.isArray(j?.errors) && j.errors.length > 0) {
+          const detail = j.errors
+            .map((e: { field: string; message: string }) => e.message)
+            .join(' • ');
+          throw new Error(detail);
+        }
         const detail = j?.details?.fieldErrors
           ? Object.entries(j.details.fieldErrors)
               .map(([k, v]) => `${k}: ${(v as string[]).join(', ')}`)
@@ -69,19 +76,12 @@ export default function ListingRowActions({ listingId, status, publicSlug }: Pro
           >
             Edit
           </Link>
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() =>
-              callAction(
-                'publish',
-                'Publish this listing? Hunters will be able to find it on the marketplace.',
-              )
-            }
-            className="inline-flex items-center px-3 py-1.5 text-sm rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+          <Link
+            href={`/dashboard/listings/${listingId}/edit?step=4`}
+            className="inline-flex items-center px-3 py-1.5 text-sm rounded-md bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
           >
-            {busy === 'publish' ? 'Publishing…' : 'Publish'}
-          </button>
+            Review &amp; publish
+          </Link>
           <button
             type="button"
             disabled={busy !== null}
