@@ -48,10 +48,11 @@ export default async function EditListingPage({ params, searchParams }: Props) {
   });
   if (!listing) notFound();
 
-  // Once a listing leaves DRAFT it can no longer be edited via the wizard.
-  // (lifecycle changes use the dedicated POST /api/listings/[id]/{publish,withdraw,lease,relist} routes)
-  if (listing.status !== 'DRAFT') {
-    redirect('/dashboard/listings');
+  // Non-DRAFT listings can only access step 3 (photos). All other steps
+  // are DRAFT-only. (Lifecycle transitions use the dedicated POST routes.)
+  const isPublished = listing.status !== 'DRAFT';
+  if (isPublished && getStepFromQuery(searchParams.step) !== 3) {
+    redirect(`/dashboard/listings/${params.id}/edit?step=3`);
   }
 
   const step = getStepFromQuery(searchParams.step);
@@ -114,13 +115,16 @@ export default async function EditListingPage({ params, searchParams }: Props) {
         {step === 3 && (
           <>
             <h1 className="text-2xl font-bold text-stone-100 mt-8">
-              Photos, description &amp; contact
+              {isPublished ? 'Manage photos' : 'Photos, description & contact'}
             </h1>
             <p className="text-stone-400 mt-2 mb-6">
-              All fields optional at DRAFT. Up to 6 photos.
+              {isPublished
+                ? 'Add, remove, or reorder photos on your published listing.'
+                : 'All fields optional at DRAFT. Up to 6 photos.'}
             </p>
             <ContentContactForm
               listingId={listing.id}
+              isPublished={isPublished}
               initial={{
                 title: listing.title,
                 description: listing.description,

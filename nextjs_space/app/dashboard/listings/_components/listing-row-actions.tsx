@@ -120,6 +120,12 @@ export default function ListingRowActions({ listingId, status, publicSlug }: Pro
               View public ↗
             </Link>
           )}
+          <Link
+            href={`/dashboard/listings/${listingId}/edit?step=3`}
+            className="inline-flex items-center px-3 py-1.5 text-sm rounded-md bg-stone-800 hover:bg-stone-700 text-stone-200 transition-colors"
+          >
+            Photos
+          </Link>
           <button
             type="button"
             disabled={busy !== null}
