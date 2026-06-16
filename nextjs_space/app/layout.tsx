@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import LayoutWrapper from "@/components/layout-wrapper";
+import CanonicalHead from "@/components/canonical-head";
 
 const inter = Inter({ subsets: ["latin"] });
 const crimsonText = Crimson_Text({ subsets: ["latin"], weight: ["400", "600", "700"], variable: "--font-serif" });
@@ -70,6 +71,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script src="https://apps.abacus.ai/chatllm/appllm-lib.js"></script>
+        <CanonicalHead />
         <Script id="suppress-known-errors" strategy="beforeInteractive">
           {`
             (function() {
