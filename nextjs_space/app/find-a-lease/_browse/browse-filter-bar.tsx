@@ -15,6 +15,7 @@ const LEASE_TYPE_OPTIONS = [
 ] as const;
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest' },
+  { value: 'deerFlow', label: 'Deer flow (high → low)' },
   { value: 'highScore', label: 'Highest grade' },
   { value: 'lowPrice', label: 'Lowest price' },
   { value: 'largestAcres', label: 'Largest acres' },
@@ -40,6 +41,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
   const [acresMax, setAcresMax] = useState(params?.get('acresMax') ?? '');
   const [priceMin, setPriceMin] = useState(params?.get('priceMin') ?? '');
   const [priceMax, setPriceMax] = useState(params?.get('priceMax') ?? '');
+  const [flowMin, setFlowMin] = useState(params?.get('flowMin') ?? '');
   const [sort, setSort] = useState(params?.get('sort') ?? 'newest');
 
   function buildParams(): URLSearchParams {
@@ -52,6 +54,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
     if (acresMax) next.set('acresMax', acresMax);
     if (priceMin) next.set('priceMin', priceMin);
     if (priceMax) next.set('priceMax', priceMax);
+    if (flowMin) next.set('flowMin', flowMin);
     if (sort && sort !== 'newest') next.set('sort', sort);
     return next;
   }
@@ -69,6 +72,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
     setAcresMax('');
     setPriceMin('');
     setPriceMax('');
+    setFlowMin('');
     setSort('newest');
     onApply(new URLSearchParams());
   }
@@ -81,7 +85,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
     onApply(next);
   }
 
-  const activeCount = [state, county, grade, leaseType, acresMin, acresMax, priceMin, priceMax].filter(Boolean).length;
+  const activeCount = [state, county, grade, leaseType, acresMin, acresMax, priceMin, priceMax, flowMin].filter(Boolean).length;
 
   const selectClass =
     'w-full bg-stone-950 border border-stone-700 rounded-md px-2 py-1.5 text-stone-100 text-sm focus:border-emerald-500 focus:outline-none';
@@ -176,6 +180,17 @@ export default function BrowseFilterBar({ onApply }: Props) {
                 <label className="block text-xs text-stone-500 mb-1 uppercase tracking-wide">Acres max</label>
                 <input type="number" min={0} value={acresMax} onChange={(e) => setAcresMax(e.target.value)} className={inputClass} />
               </div>
+            </div>
+            <div>
+              <label className="block text-xs text-stone-500 mb-1 uppercase tracking-wide">Min deer flow</label>
+              <select value={flowMin} onChange={(e) => setFlowMin(e.target.value)} className={selectClass}>
+                <option value="">Any</option>
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <option key={s} value={String(s)}>
+                    {'\u2588'.repeat(s)}{'\u2591'.repeat(5 - s)} {s}/5
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:col-span-2">
               <div>

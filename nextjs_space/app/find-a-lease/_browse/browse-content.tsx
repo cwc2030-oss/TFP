@@ -23,6 +23,7 @@ interface Listing {
   funnelCount: number | null;
   corridorCount: number | null;
   interceptCount: number | null;
+  flowIndex: number | null;
   bedAcres: number | null;
 }
 

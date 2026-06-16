@@ -310,6 +310,35 @@ export function stripForPublic<T extends Record<string, unknown>>(o: T): Partial
 // ("min grade A-" \u2192 terrainScore >= 80). Returns 0 for unknown grades, so
 // the filter degrades gracefully to "no constraint" rather than blocking
 // listings that have no score yet.
+/**
+ * Deer Flow Index (0-100). Blend of terrain/huntability score, corridor
+ * density, funnel density, and intercept density. Stored on the Listing row
+ * at publish time so it can be sorted / filtered server-side.
+ *
+ * Uses `terrainScore` (the huntability score from Terrain Brain) as the
+ * terrain component.
+ */
+export function computeFlowIndex(opts: {
+  terrainScore: number | null | undefined;
+  corridorCount: number | null | undefined;
+  funnelCount: number | null | undefined;
+  interceptCount: number | null | undefined;
+}): number {
+  const terrain = Math.min(Math.max(opts.terrainScore ?? 0, 0), 100) / 100;
+  const corridors = Math.min(opts.corridorCount ?? 0, 5) / 5;
+  const funnels = Math.min(opts.funnelCount ?? 0, 4) / 4;
+  const intercepts = Math.min(opts.interceptCount ?? 0, 3) / 3;
+  return Math.round(
+    100 * (0.50 * terrain + 0.20 * corridors + 0.20 * funnels + 0.10 * intercepts),
+  );
+}
+
+/** Map a flow index to 1-5 segments for the meter UI. */
+export function flowSegments(flowIndex: number | null | undefined): number {
+  if (flowIndex == null || flowIndex <= 0) return 0;
+  return Math.max(1, Math.ceil(flowIndex / 20));
+}
+
 export function gradeMinScore(grade: string): number {
   switch (grade.toUpperCase()) {
     case 'A+':

@@ -15,6 +15,7 @@ interface Props {
   corridorCount: number | null;
   funnelCount: number | null;
   interceptCount: number | null;
+  flowIndex?: number | null;
 }
 
 export default function TerrainBrainCardVisual({
@@ -23,11 +24,13 @@ export default function TerrainBrainCardVisual({
   corridorCount,
   funnelCount,
   interceptCount,
+  flowIndex,
 }: Props) {
   const c = Math.min(corridorCount || 1, 8);
   const f = Math.min(funnelCount || 1, 4);
   const ip = Math.min(interceptCount || 1, 6);
-  const quality = Math.min((terrainScore ?? 0) / 100, 1);
+  // Scale corridor intensity with flowIndex when available, otherwise use terrainScore
+  const quality = Math.min((flowIndex ?? terrainScore ?? 0) / 100, 1);
   const hasCertified = terrainScore != null && terrainScore > 0;
 
   // Corridor paths (left → center convergence)

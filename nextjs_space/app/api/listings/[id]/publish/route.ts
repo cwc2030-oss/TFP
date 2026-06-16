@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { snapshotFromSavedProperty, validateForPublish } from '@/lib/listings';
+import { snapshotFromSavedProperty, validateForPublish, computeFlowIndex } from '@/lib/listings';
 import { buildFlowSnapshot } from '@/lib/listing-flow-snapshot';
 
 export const dynamic = 'force-dynamic';
@@ -118,6 +118,12 @@ export async function POST(
       terrainFlowSnapshot,
       corridorCount,
       interceptCount,
+      flowIndex: computeFlowIndex({
+        terrainScore: snap.terrainScore,
+        corridorCount,
+        funnelCount: snap.funnelCount,
+        interceptCount,
+      }),
       // Status transition
       status: auto ? 'PUBLISHED' : 'PENDING_REVIEW',
       publishedAt: auto ? now : null,

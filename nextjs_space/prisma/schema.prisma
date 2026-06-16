@@ -229,6 +229,7 @@ model Listing {
   // Public-safe Terrain Brain summary counts (populated at publish time)
   corridorCount            Int?            // # of classified flow corridors
   interceptCount           Int?            // # of convergence / intercept zones
+  flowIndex                Int?            // Deer Flow Index 0-100, computed at publish time
 
   // Deer-flow snapshot — owner/lessee tier.
   // Populated at publish time from TerrainAnalysisCache.

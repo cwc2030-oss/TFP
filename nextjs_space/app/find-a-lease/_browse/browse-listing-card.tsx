@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { gradeFromScore, listingSlug, listingTitleFallback } from '@/lib/listings';
+import { gradeFromScore, listingSlug, listingTitleFallback, flowSegments } from '@/lib/listings';
 import TerrainBrainCardVisual from './terrain-brain-card-visual';
 
 interface Listing {
@@ -19,6 +19,7 @@ interface Listing {
   corridorCount?: number | null;
   funnelCount?: number | null;
   interceptCount?: number | null;
+  flowIndex?: number | null;
 }
 
 function priceLabel(min: number | null, max: number | null): string | null {
@@ -28,6 +29,27 @@ function priceLabel(min: number | null, max: number | null): string | null {
     return min === max ? fmt(min) : `${fmt(min)} \u2013 ${fmt(max)}`;
   }
   return fmt((min ?? max) as number);
+}
+
+function FlowMeter({ flowIndex }: { flowIndex: number | null | undefined }) {
+  const segs = flowSegments(flowIndex);
+  if (segs <= 0) return null;
+  return (
+    <div className="flex items-center gap-1.5" aria-label={`Deer flow intensity ${segs} of 5`}>
+      <span className="text-[10px] text-stone-400 font-medium uppercase tracking-wide">Flow</span>
+      <div className="flex gap-[3px]">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div
+            key={i}
+            className="w-[14px] h-[6px] rounded-[2px]"
+            style={{
+              backgroundColor: i <= segs ? '#e0a528' : 'rgba(120,113,108,0.22)',
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function BrowseListingCard({ listing }: { listing: Listing }) {
@@ -59,6 +81,7 @@ export default function BrowseListingCard({ listing }: { listing: Listing }) {
           corridorCount={listing.corridorCount ?? null}
           funnelCount={listing.funnelCount ?? null}
           interceptCount={listing.interceptCount ?? null}
+          flowIndex={listing.flowIndex}
         />
       </div>
       <div className="p-4">
@@ -85,20 +108,24 @@ export default function BrowseListingCard({ listing }: { listing: Listing }) {
             </span>
           )}
         </div>
-        {/* Terrain Brain indicator */}
+        {/* Terrain Brain indicator + Flow meter */}
         {(listing.corridorCount != null || listing.funnelCount != null || listing.interceptCount != null) && (
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-stone-800">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-amber-400 shrink-0">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 16v-4" />
-              <path d="M12 8h.01" />
-            </svg>
-            <span className="text-[11px] text-stone-400">
-              <span className="text-amber-300 font-medium">Terrain Brain</span>
-              {listing.corridorCount != null && <> · {listing.corridorCount} corridor{listing.corridorCount !== 1 ? 's' : ''}</>}
-              {listing.funnelCount != null && <> · {listing.funnelCount} funnel{listing.funnelCount !== 1 ? 's' : ''}</>}
-              {listing.interceptCount != null && <> · {listing.interceptCount} intercept{listing.interceptCount !== 1 ? 's' : ''}</>}
-            </span>
+          <div className="mt-3 pt-3 border-t border-stone-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-amber-400 shrink-0">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+                <span className="text-[11px] text-stone-400">
+                  {listing.corridorCount != null && <>{listing.corridorCount} corr</>}
+                  {listing.funnelCount != null && <>{listing.corridorCount != null ? ' · ' : ''}{listing.funnelCount} fun</>}
+                  {listing.interceptCount != null && <>{(listing.corridorCount != null || listing.funnelCount != null) ? ' · ' : ''}{listing.interceptCount} int</>}
+                </span>
+              </div>
+              <FlowMeter flowIndex={listing.flowIndex} />
+            </div>
           </div>
         )}
       </div>

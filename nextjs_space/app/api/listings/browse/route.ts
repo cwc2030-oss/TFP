@@ -15,17 +15,18 @@
  *   grade         letter grade — maps to minimum terrainScore
  *   leaseType     enum
  *   season        string — matches any element in seasonAvailability[]
- *   sort          newest | highScore | lowPrice | largestAcres
+ *   flowMin       1–5 (minimum flow segments)
+ *   sort          newest | highScore | lowPrice | largestAcres | deerFlow
  *   cursor        id of last listing from previous page
  *   limit         1–48 (default 24)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { stripForPublic, gradeMinScore } from '@/lib/listings';
+import { stripForPublic, gradeMinScore, flowSegments } from '@/lib/listings';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_SORTS = ['newest', 'highScore', 'lowPrice', 'largestAcres'] as const;
+const ALLOWED_SORTS = ['newest', 'highScore', 'lowPrice', 'largestAcres', 'deerFlow'] as const;
 type SortKey = (typeof ALLOWED_SORTS)[number];
 
 function orderByClause(sort: SortKey) {
@@ -36,6 +37,8 @@ function orderByClause(sort: SortKey) {
       return [{ askingPriceMin: 'asc' as const }, { publishedAt: 'desc' as const }];
     case 'largestAcres':
       return [{ acres: 'desc' as const }, { publishedAt: 'desc' as const }];
+    case 'deerFlow':
+      return [{ flowIndex: 'desc' as const }, { publishedAt: 'desc' as const }];
     case 'newest':
     default:
       return [{ publishedAt: 'desc' as const }];
@@ -59,6 +62,7 @@ const BROWSE_SELECT = {
   funnelCount: true,
   corridorCount: true,
   interceptCount: true,
+  flowIndex: true,
   bedAcres: true,
 } as const;
 
@@ -74,6 +78,7 @@ export async function GET(req: NextRequest) {
   const gradeFilter = sp.get('grade') || undefined;
   const leaseType = sp.get('leaseType') || undefined;
   const season = sp.get('season') || undefined;
+  const flowMinRaw = sp.get('flowMin') || undefined;
   const sortRaw = sp.get('sort') || 'newest';
   const sort: SortKey = ALLOWED_SORTS.includes(sortRaw as SortKey)
     ? (sortRaw as SortKey)
@@ -114,6 +119,13 @@ export async function GET(req: NextRequest) {
   }
   if (season) {
     where.seasonAvailability = { has: season };
+  }
+  if (flowMinRaw) {
+    // flowMin is 1-5 segments; convert to minimum flowIndex threshold
+    const seg = Math.max(1, Math.min(5, Math.round(Number(flowMinRaw))));
+    // segment 1 → flowIndex ≥ 1, segment 2 → ≥ 21, segment 3 → ≥ 41, etc.
+    const minIndex = seg === 1 ? 1 : (seg - 1) * 20 + 1;
+    where.flowIndex = { gte: minIndex };
   }
 
   const findArgs: Record<string, unknown> = {
