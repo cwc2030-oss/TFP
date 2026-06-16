@@ -60,6 +60,9 @@ export default function Navbar() {
             <NavLink href="/map" active={pathname === "/map"}>
               Map Tool
             </NavLink>
+            <NavLink href="/flow-score" active={pathname === "/flow-score"}>
+              Flow Score
+            </NavLink>
             <NavLink href="/find-a-lease" active={pathname === "/find-a-lease"}>
               Find a Lease
             </NavLink>
@@ -157,11 +160,11 @@ export default function Navbar() {
               <MobileNavLink href="/" onClick={() => setIsMenuOpen(false)}>
                 Home
               </MobileNavLink>
+              <MobileNavLink href="/flow-score" onClick={() => setIsMenuOpen(false)}>
+                Flow Score
+              </MobileNavLink>
               <MobileNavLink href="/find-a-lease" onClick={() => setIsMenuOpen(false)}>
                 Find a Lease
-              </MobileNavLink>
-              <MobileNavLink href="/listings" onClick={() => setIsMenuOpen(false)}>
-                Marketplace
               </MobileNavLink>
               <MobileNavLink href="/listings" onClick={() => setIsMenuOpen(false)}>
                 Marketplace

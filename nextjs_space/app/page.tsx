@@ -273,10 +273,15 @@ function HeroSection() {
               )}
             </form>
 
-            {/* Secondary CTA \u2014 surfaces the Terrain Brain demo for hunters
-                who don't have an address in mind. Only 1.1% of homepage
-                visitors discover /demo today; this lifts that. */}
-            <div className="mb-6">
+            {/* Secondary CTAs — Flow Score lead magnet + Terrain Brain demo */}
+            <div className="mb-6 flex flex-wrap gap-4">
+              <Link
+                href="/flow-score"
+                className="inline-flex items-center gap-2 text-amber-300 hover:text-amber-200 underline-offset-4 hover:underline transition-colors text-base font-medium"
+              >
+                Get your free Flow Score
+                <ArrowRight className="w-4 h-4" />
+              </Link>
               <Link
                 href="/demo"
                 className="inline-flex items-center gap-2 text-emerald-300 hover:text-emerald-200 underline-offset-4 hover:underline transition-colors text-base font-medium"

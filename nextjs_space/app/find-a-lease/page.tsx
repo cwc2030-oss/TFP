@@ -7,6 +7,7 @@
  */
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import Link from 'next/link';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
 import BrowseContent from './_browse/browse-content';
@@ -22,6 +23,19 @@ export default function FindALeasePage() {
     <div className="min-h-screen bg-stone-950 text-stone-100">
       <Navbar />
       <main className="pt-24 pb-20">
+        {/* Flow Score banner */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8">
+          <Link href="/flow-score" className="block">
+            <div className="rounded-xl bg-gradient-to-r from-amber-900/40 via-emerald-900/30 to-stone-900/50 border border-amber-700/30 p-4 sm:p-5 flex items-center justify-between gap-4 hover:border-amber-600/50 transition-colors group">
+              <div>
+                <p className="text-amber-300 font-semibold text-sm sm:text-base">🎯 Got land you want scored?</p>
+                <p className="text-stone-400 text-sm mt-0.5">Enter any address and get a free Flow Score — instant 3D parcel preview included.</p>
+              </div>
+              <span className="shrink-0 text-amber-400 group-hover:translate-x-1 transition-transform text-lg">→</span>
+            </div>
+          </Link>
+        </div>
+
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-10">
             <h1 className="text-3xl sm:text-4xl font-bold text-white">

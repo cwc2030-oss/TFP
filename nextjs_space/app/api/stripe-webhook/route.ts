@@ -128,6 +128,7 @@ async function handleHuntPlanPurchase(session: Stripe.Checkout.Session) {
   const parcelLng = parseFloat(session.metadata?.parcelLng || '');
   const parcelAddress = session.metadata?.parcelAddress || null;
   const parcelAcreage = parseFloat(session.metadata?.parcelAcreage || '') || null;
+  const leadId = session.metadata?.leadId || null;
 
   if (!userId || isNaN(parcelLat) || isNaN(parcelLng)) {
     console.error('[webhook] hunt_plan purchase missing required metadata:', session.metadata);
@@ -152,13 +153,28 @@ async function handleHuntPlanPurchase(session: Stripe.Checkout.Session) {
       stripeSessionId: session.id,
       purchaseType: 'hunt_plan',
       amount: 1900,
+      ...(leadId ? { leadId } : {}),
     },
     update: {
       stripeSessionId: session.id,
+      ...(leadId ? { leadId } : {}),
     },
   });
 
-  console.log('[webhook] Hunt plan purchased for user', userId, 'parcel:', parcelAddress || `${parcelLat},${parcelLng}`);
+  // If this purchase came from a flow-score lead, mark conversion
+  if (leadId) {
+    try {
+      await prisma.lead.update({
+        where: { id: leadId },
+        data: { convertedAt: new Date() },
+      });
+      console.log('[webhook] Lead', leadId, 'marked as converted');
+    } catch (e: any) {
+      console.warn('[webhook] Could not update lead convertedAt:', e.message);
+    }
+  }
+
+  console.log('[webhook] Hunt plan purchased for user', userId, 'parcel:', parcelAddress || `${parcelLat},${parcelLng}`, leadId ? `lead:${leadId}` : '');
 }
 
 async function handleSubscriptionChange(eventType: string, subscription: Stripe.Subscription) {

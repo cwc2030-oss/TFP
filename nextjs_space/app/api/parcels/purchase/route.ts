@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Stripe not configured' }, { status: 500 });
     }
 
-    const { lat, lng, address, acreage } = await req.json();
+    const { lat, lng, address, acreage, leadId } = await req.json();
 
     if (!lat || !lng) {
       return NextResponse.json({ error: 'Missing parcel coordinates' }, { status: 400 });
@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
         parcelLng: String(lng),
         parcelAddress: address || '',
         parcelAcreage: String(acreage || ''),
+        ...(leadId ? { leadId } : {}),
       },
     });
 
