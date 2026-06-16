@@ -53,7 +53,6 @@ const BROWSE_SELECT = {
   leaseType: true,
   askingPriceMin: true,
   askingPriceMax: true,
-  photos: true,
   publishedAt: true,
   seasonAvailability: true,
   huntersMax: true,

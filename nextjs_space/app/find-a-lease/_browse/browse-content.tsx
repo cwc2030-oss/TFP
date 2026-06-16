@@ -17,7 +17,6 @@ interface Listing {
   leaseType: string | null;
   askingPriceMin: number | null;
   askingPriceMax: number | null;
-  photos: string[];
   publishedAt: string | null;
   seasonAvailability: string[];
   huntersMax: number | null;
