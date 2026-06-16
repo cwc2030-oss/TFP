@@ -13,6 +13,8 @@
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
 import Navbar from '@/components/navbar';
 import {
@@ -27,6 +29,7 @@ import GradeBadge from './_components/grade-badge';
 import CountyMap from './_components/county-map';
 import PhotoGallery from './_components/photo-gallery';
 import TerrainBrainTeaser from './_components/terrain-brain-teaser';
+import DeerFlowPreview from './_components/deer-flow-preview';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -40,6 +43,7 @@ async function loadPublished(id: string) {
     where: { id, status: 'PUBLISHED' },
     select: {
       id: true,
+      ownerUserId: true,
       title: true,
       description: true,
       state: true,
@@ -119,6 +123,23 @@ export default async function PublicListingDetail({ params }: Props) {
     redirect(`/listings/${canonical}`);
   }
 
+  // Determine if caller gets full Terrain Brain (owner or accepted lessee)
+  const session = await getServerSession(authOptions);
+  const callerId = session?.user?.id ?? null;
+  const isOwner = !!callerId && listing.ownerUserId === callerId;
+  let hasFullAccess = isOwner;
+  if (!hasFullAccess && callerId) {
+    const accepted = await prisma.inquiry.findFirst({
+      where: {
+        listingId: listing.id,
+        userId: callerId,
+        status: 'ACCEPTED',
+      },
+      select: { id: true },
+    });
+    hasFullAccess = !!accepted;
+  }
+
   // OPSEC defense in depth — strip any forbidden key names.
   const safe = stripForPublic(listing) as typeof listing;
   const titleStr = listingTitleFallback({
@@ -190,21 +211,25 @@ export default async function PublicListingDetail({ params }: Props) {
         {/* Photos */}
         <PhotoGallery photos={safe.photos ?? []} title={titleStr} />
 
-        {/* Terrain Brain teaser — public-safe abstract preview */}
-        <TerrainBrainTeaser
-          grade={grade}
-          terrainScore={safe.terrainScore ?? null}
-          corridorCount={(safe as any).corridorCount ?? null}
-          funnelCount={safe.funnelCount ?? null}
-          interceptCount={(safe as any).interceptCount ?? null}
-          seasonAvailability={seasons}
-          acres={safe.acres ?? null}
-          askingPriceMin={safe.askingPriceMin ?? null}
-          askingPriceMax={safe.askingPriceMax ?? null}
-          primaryMovement={safe.primaryMovement ?? null}
-          bedAcres={safe.bedAcres as number | null}
-          inquireHref={`/listings/${canonical}/inquire`}
-        />
+        {/* Full Terrain Brain for owner + accepted lessee; teaser for everyone else */}
+        {hasFullAccess ? (
+          <DeerFlowPreview listingId={listing.id} grade={grade} />
+        ) : (
+          <TerrainBrainTeaser
+            grade={grade}
+            terrainScore={safe.terrainScore ?? null}
+            corridorCount={(safe as any).corridorCount ?? null}
+            funnelCount={safe.funnelCount ?? null}
+            interceptCount={(safe as any).interceptCount ?? null}
+            seasonAvailability={seasons}
+            acres={safe.acres ?? null}
+            askingPriceMin={safe.askingPriceMin ?? null}
+            askingPriceMax={safe.askingPriceMax ?? null}
+            primaryMovement={safe.primaryMovement ?? null}
+            bedAcres={safe.bedAcres as number | null}
+            inquireHref={`/listings/${canonical}/inquire`}
+          />
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Description */}

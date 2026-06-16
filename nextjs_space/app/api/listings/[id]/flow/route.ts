@@ -42,8 +42,22 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  // Gate: only the listing owner can view the full flow map for now
-  if (listing.ownerUserId !== session.user.id) {
+  // Gate: listing owner OR hunter with an ACCEPTED inquiry on this listing
+  const isOwner = listing.ownerUserId === session.user.id;
+  let isAcceptedLessee = false;
+  if (!isOwner) {
+    const accepted = await prisma.inquiry.findFirst({
+      where: {
+        listingId: listing.id,
+        userId: session.user.id,
+        status: 'ACCEPTED',
+      },
+      select: { id: true },
+    });
+    isAcceptedLessee = !!accepted;
+  }
+
+  if (!isOwner && !isAcceptedLessee) {
     return NextResponse.json(
       { error: 'Full Terrain Brain map unlocks when you lease this parcel' },
       { status: 403 },

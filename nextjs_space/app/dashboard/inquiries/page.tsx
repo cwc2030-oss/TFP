@@ -19,10 +19,12 @@ import { listingSlug } from '@/lib/listings';
 
 export const dynamic = 'force-dynamic';
 
-function StatusBadge({ status }: { status: 'NEW' | 'REPLIED' | 'CLOSED' }) {
+function StatusBadge({ status }: { status: 'NEW' | 'REPLIED' | 'ACCEPTED' | 'CLOSED' }) {
   const styles =
     status === 'NEW'
       ? 'bg-emerald-900/60 border-emerald-700 text-emerald-200'
+      : status === 'ACCEPTED'
+      ? 'bg-amber-900/60 border-amber-600 text-amber-200'
       : status === 'REPLIED'
       ? 'bg-stone-800 border-stone-600 text-stone-200'
       : 'bg-stone-900 border-stone-700 text-stone-500';

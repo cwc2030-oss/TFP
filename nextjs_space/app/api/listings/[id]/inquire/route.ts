@@ -22,6 +22,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 import {
   inquiryInputSchema,
   ipHash as hashIp,
@@ -126,11 +128,18 @@ export async function POST(
   }
 
   // ---------------------------------------------------------------------
+  // Capture userId if caller is signed in (enables accepted-lessee gate).
+  // ---------------------------------------------------------------------
+  const session = await getServerSession(authOptions);
+  const callerUserId = session?.user?.id ?? null;
+
+  // ---------------------------------------------------------------------
   // Create the inquiry row.
   // ---------------------------------------------------------------------
   const inquiry = await prisma.inquiry.create({
     data: {
       listingId: listing.id,
+      userId: callerUserId,
       hunterName: data.hunterName,
       hunterEmail: data.hunterEmail,
       hunterPhone: data.hunterPhone ?? null,

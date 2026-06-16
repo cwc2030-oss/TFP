@@ -22,6 +22,7 @@ model User {
   savedProperties  SavedProperty[]
   parcelPurchases  ParcelPurchase[]
   listings         Listing[]
+  inquiries        Inquiry[]
   huntingReports   HuntingReport[]
   standSelections  StandSelection[]
   huntSessions     HuntSession[]
@@ -325,6 +326,11 @@ model Inquiry {
   listingId       String
   listing         Listing         @relation(fields: [listingId], references: [id])
 
+  // Optional link to a logged-in user. Captures userId at submission time
+  // so accepted lessees can be granted full Terrain Brain access.
+  userId          String?
+  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   hunterEmail     String          // lowercased on write
   hunterName      String
   hunterPhone     String?
@@ -345,14 +351,17 @@ model Inquiry {
   createdAt       DateTime        @default(now())
   repliedAt       DateTime?
   closedAt        DateTime?
+  acceptedAt      DateTime?
 
   @@index([listingId, status])
   @@index([hunterEmail])
+  @@index([listingId, userId, status])
 }
 
 enum InquiryStatus {
   NEW
   REPLIED
+  ACCEPTED
   CLOSED
 }
 

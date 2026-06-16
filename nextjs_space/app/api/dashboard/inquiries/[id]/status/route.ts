@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic';
 
 const schema = z
   .object({
-    status: z.enum(['REPLIED', 'CLOSED']),
+    status: z.enum(['REPLIED', 'ACCEPTED', 'CLOSED']),
   })
   .strict();
 
@@ -71,6 +71,8 @@ export async function POST(
         parsed.data.status === 'REPLIED'
           ? inquiry.repliedAt ?? now
           : inquiry.repliedAt,
+      acceptedAt:
+        parsed.data.status === 'ACCEPTED' ? now : inquiry.acceptedAt,
       closedAt: parsed.data.status === 'CLOSED' ? now : inquiry.closedAt,
     },
   });

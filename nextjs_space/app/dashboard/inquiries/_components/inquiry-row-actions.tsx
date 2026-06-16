@@ -15,15 +15,15 @@ import { useRouter } from 'next/navigation';
 
 interface Props {
   inquiryId: string;
-  status: 'NEW' | 'REPLIED' | 'CLOSED';
+  status: 'NEW' | 'REPLIED' | 'ACCEPTED' | 'CLOSED';
 }
 
 export default function InquiryRowActions({ inquiryId, status }: Props) {
   const router = useRouter();
-  const [busy, setBusy] = useState<'REPLIED' | 'CLOSED' | null>(null);
+  const [busy, setBusy] = useState<'REPLIED' | 'ACCEPTED' | 'CLOSED' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function setStatus(next: 'REPLIED' | 'CLOSED') {
+  async function setStatus(next: 'REPLIED' | 'ACCEPTED' | 'CLOSED') {
     setBusy(next);
     setError(null);
     try {
@@ -55,6 +55,26 @@ export default function InquiryRowActions({ inquiryId, status }: Props) {
     return <span className="text-stone-600 text-xs">No actions</span>;
   }
 
+  if (status === 'ACCEPTED') {
+    return (
+      <div className="inline-flex flex-wrap items-center gap-2 justify-end">
+        <button
+          type="button"
+          onClick={() => setStatus('CLOSED')}
+          disabled={busy != null}
+          className="text-xs font-medium px-3 py-1.5 rounded border border-stone-700 text-stone-300 hover:bg-stone-800 disabled:opacity-50"
+        >
+          {busy === 'CLOSED' ? 'Saving\u2026' : 'Close'}
+        </button>
+        {error && (
+          <span className="text-red-300 text-xs ml-1" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="inline-flex flex-wrap items-center gap-2 justify-end">
       {status === 'NEW' && (
@@ -65,6 +85,16 @@ export default function InquiryRowActions({ inquiryId, status }: Props) {
           className="text-xs font-medium px-3 py-1.5 rounded border border-emerald-700 text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-50"
         >
           {busy === 'REPLIED' ? 'Saving\u2026' : 'Mark Replied'}
+        </button>
+      )}
+      {(status === 'NEW' || status === 'REPLIED') && (
+        <button
+          type="button"
+          onClick={() => setStatus('ACCEPTED')}
+          disabled={busy != null}
+          className="text-xs font-medium px-3 py-1.5 rounded border border-amber-600 text-amber-200 hover:bg-amber-900/40 disabled:opacity-50"
+        >
+          {busy === 'ACCEPTED' ? 'Saving\u2026' : 'Accept'}
         </button>
       )}
       <button
