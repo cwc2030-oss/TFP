@@ -1,10 +1,15 @@
 'use client';
 
 /**
- * TerrainBrainCardVisual — stylized card visual for browse cards.
+ * TerrainBrainCardVisual — refined card schematic for browse cards.
  *
- * Renders a corridor→funnel→intercept schematic (abstract SVG) with
- * huntability grade badge and optional "Terrain Certified" badge.
+ * Gold converging corridor arrows + funnel >< pinch glyphs + crosshair
+ * intercept targets + bedding ellipses on dark terrain contours.
+ *
+ * Data-driven element counts:
+ *   corridors  2–5  (gold arrow paths converging right)
+ *   funnels    0–4  (>< pinch glyphs along corridor mid-points)
+ *   intercepts 1–3  (crosshair targets on right side)
  *
  * OPSEC: No coordinates, no satellite imagery, no photos, no map URLs.
  */
@@ -18,6 +23,36 @@ interface Props {
   flowIndex?: number | null;
 }
 
+// Corridor path definitions — each is a cubic bezier from left/bottom edge
+// converging toward the intercept zone on the right. Up to 5 paths available.
+const CORRIDOR_TEMPLATES = [
+  // top-left → right-center
+  { d: 'M0,150 C170,150 320,178 486,210', startEdge: 'left' },
+  // bottom-left → right-center
+  { d: 'M0,300 C180,300 350,250 486,214', startEdge: 'left' },
+  // bottom-center → right-center
+  { d: 'M232,440 C320,378 412,296 500,236', startEdge: 'bottom' },
+  // top sweep
+  { d: 'M0,90 C160,88 340,140 492,200', startEdge: 'left' },
+  // far bottom
+  { d: 'M100,440 C200,380 360,310 494,228', startEdge: 'bottom' },
+];
+
+// Funnel glyph positions along corridor paths
+const FUNNEL_POSITIONS = [
+  { x: 312, y: 181 },
+  { x: 240, y: 254 },
+  { x: 180, y: 168 },
+  { x: 360, y: 270 },
+];
+
+// Intercept crosshair positions
+const INTERCEPT_POSITIONS = [
+  { x: 516, y: 212 },
+  { x: 564, y: 150 },
+  { x: 552, y: 290 },
+];
+
 export default function TerrainBrainCardVisual({
   grade,
   terrainScore,
@@ -26,151 +61,104 @@ export default function TerrainBrainCardVisual({
   interceptCount,
   flowIndex,
 }: Props) {
-  const c = Math.min(corridorCount || 1, 8);
-  const f = Math.min(funnelCount || 1, 4);
-  const ip = Math.min(interceptCount || 1, 6);
-  // Scale corridor intensity with flowIndex when available, otherwise use terrainScore
+  const c = Math.max(2, Math.min(corridorCount ?? 2, 5));
+  const f = Math.max(0, Math.min(funnelCount ?? 0, 4));
+  const ip = Math.max(1, Math.min(interceptCount ?? 1, 3));
+  // Scale corridor opacity with flowIndex
   const quality = Math.min((flowIndex ?? terrainScore ?? 0) / 100, 1);
+  const corridorOpacity = 0.55 + quality * 0.37; // range 0.55 → 0.92
   const hasCertified = terrainScore != null && terrainScore > 0;
 
-  // Corridor paths (left → center convergence)
-  const corridorPaths: JSX.Element[] = [];
-  for (let i = 0; i < c; i++) {
-    const startY = 25 + (i * 190) / Math.max(c - 1, 1);
-    const midY = 90 + (i % 2 === 0 ? -12 : 12) * (i / c);
-    const endX = 175 + (i % 3) * 18;
-    const endY = 95 + (i - c / 2) * 11;
-    corridorPaths.push(
-      <path
-        key={`c-${i}`}
-        d={`M 15 ${startY} C 70 ${startY}, 125 ${midY}, ${endX} ${endY}`}
-        stroke={`rgba(45, 106, 79, ${0.25 + quality * 0.5})`}
-        strokeWidth={1.2 + quality * 0.6}
-        fill="none"
-        strokeLinecap="round"
-      />,
-    );
-  }
-
-  // Funnel pinch shapes (center)
-  const funnelShapes: JSX.Element[] = [];
-  for (let i = 0; i < f; i++) {
-    const cx = 175 + i * 30;
-    const cy = 88 + (i - f / 2) * 26;
-    funnelShapes.push(
-      <g key={`f-${i}`}>
-        <path
-          d={`M ${cx - 14} ${cy - 16} L ${cx} ${cy} L ${cx - 14} ${cy + 16}`}
-          stroke="rgba(201, 168, 76, 0.45)"
-          strokeWidth={1.2}
-          fill="rgba(201, 168, 76, 0.06)"
-          strokeLinejoin="round"
-        />
-        <path
-          d={`M ${cx + 14} ${cy - 16} L ${cx} ${cy} L ${cx + 14} ${cy + 16}`}
-          stroke="rgba(201, 168, 76, 0.45)"
-          strokeWidth={1.2}
-          fill="rgba(201, 168, 76, 0.06)"
-          strokeLinejoin="round"
-        />
-      </g>,
-    );
-  }
-
-  // Intercept dots (convergence zones, right side)
-  const interceptDots: JSX.Element[] = [];
-  for (let i = 0; i < ip; i++) {
-    const angle = (i / ip) * Math.PI * 2 - Math.PI / 2;
-    const r = 20 + (i % 2) * 12;
-    const cx = 290 + Math.cos(angle) * r;
-    const cy = 100 + Math.sin(angle) * r;
-    interceptDots.push(
-      <g key={`i-${i}`}>
-        <circle
-          cx={cx}
-          cy={cy}
-          r={6.5}
-          fill="rgba(201, 168, 76, 0.12)"
-          stroke="rgba(201, 168, 76, 0.35)"
-          strokeWidth={0.8}
-        />
-        <circle cx={cx} cy={cy} r={2.5} fill="rgba(201, 168, 76, 0.6)" />
-      </g>,
-    );
-  }
-
-  // Connector dashes center → intercept
-  const connectors: JSX.Element[] = [];
-  for (let i = 0; i < Math.min(ip, f); i++) {
-    const startX = 175 + i * 30;
-    const startY = 88 + (i - f / 2) * 26;
-    const angle = (i / ip) * Math.PI * 2 - Math.PI / 2;
-    const endX = 290 + Math.cos(angle) * (20 + (i % 2) * 12);
-    const endY = 100 + Math.sin(angle) * (20 + (i % 2) * 12);
-    connectors.push(
-      <path
-        key={`conn-${i}`}
-        d={`M ${startX} ${startY} Q ${(startX + endX) / 2} ${(startY + endY) / 2 - 8}, ${endX} ${endY}`}
-        stroke="rgba(45, 106, 79, 0.2)"
-        strokeWidth={0.8}
-        fill="none"
-        strokeDasharray="3 2.5"
-      />,
-    );
-  }
-
   return (
-    <div className="relative w-full h-full bg-stone-950">
-      {/* SVG schematic */}
+    <div className="relative w-full h-full">
       <svg
-        viewBox="0 0 350 200"
+        width="100%"
+        viewBox="0 0 680 440"
+        role="img"
+        aria-label={`Terrain schematic: ${c} corridors, ${f} funnels, ${ip} intercepts`}
+        xmlns="http://www.w3.org/2000/svg"
         className="w-full h-full"
         preserveAspectRatio="xMidYMid slice"
-        aria-hidden="true"
       >
-        {/* Background texture grid */}
-        {[50, 100, 150].map((y) => (
-          <line
-            key={`g-${y}`}
-            x1={8}
-            y1={y}
-            x2={342}
-            y2={y}
-            stroke="rgba(120,113,108,0.06)"
-            strokeWidth={0.5}
-          />
-        ))}
-        {[87, 175, 262].map((x) => (
-          <line
-            key={`gv-${x}`}
-            x1={x}
-            y1={8}
-            x2={x}
-            y2={192}
-            stroke="rgba(120,113,108,0.06)"
-            strokeWidth={0.5}
+        <defs>
+          <marker
+            id="gold-arrow"
+            viewBox="0 0 10 10"
+            refX="7"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M1 1 L9 5 L1 9 Z" fill="#e0a528" />
+          </marker>
+        </defs>
+
+        {/* Dark terrain background */}
+        <rect x="0" y="0" width="680" height="440" rx="14" fill="#0f1714" />
+
+        {/* Terrain contour lines */}
+        <path d="M0,118 Q200,82 400,128 T680,108" fill="none" stroke="#21392e" strokeWidth={1.2} />
+        <path d="M0,210 Q220,176 430,224 T680,206" fill="none" stroke="#21392e" strokeWidth={1.2} />
+        <path d="M0,306 Q200,278 420,322 T680,300" fill="none" stroke="#21392e" strokeWidth={1.2} />
+
+        {/* Bedding ellipses (timber cover) */}
+        <ellipse cx="118" cy="298" rx="78" ry="44" fill="#1f4d3a" opacity={0.5} />
+        <ellipse cx="150" cy="318" rx="52" ry="30" fill="#1f4d3a" opacity={0.45} />
+
+        {/* Gold corridor arrows — data-driven count */}
+        {CORRIDOR_TEMPLATES.slice(0, c).map((tmpl, i) => (
+          <path
+            key={`corr-${i}`}
+            d={tmpl.d}
+            fill="none"
+            stroke="#e0a528"
+            strokeWidth={3}
+            opacity={corridorOpacity}
+            markerEnd="url(#gold-arrow)"
           />
         ))}
 
-        {corridorPaths}
-        {connectors}
-        {funnelShapes}
-        {interceptDots}
+        {/* Funnel pinch glyphs — data-driven count */}
+        {FUNNEL_POSITIONS.slice(0, f).map((pos, i) => (
+          <g key={`fun-${i}`}>
+            <path
+              d={`M${pos.x - 12},${pos.y - 13} L${pos.x - 2},${pos.y} L${pos.x - 12},${pos.y + 13}`}
+              fill="none"
+              stroke="#f2cd80"
+              strokeWidth={2.4}
+              strokeLinecap="round"
+            />
+            <path
+              d={`M${pos.x + 12},${pos.y - 13} L${pos.x + 2},${pos.y} L${pos.x + 12},${pos.y + 13}`}
+              fill="none"
+              stroke="#f2cd80"
+              strokeWidth={2.4}
+              strokeLinecap="round"
+            />
+          </g>
+        ))}
 
-        {/* Labels */}
-        <text x={12} y={14} fill="rgba(168,162,158,0.4)" fontSize={7.5} fontFamily="sans-serif">
-          Corridors
-        </text>
-        <text x={165} y={14} fill="rgba(168,162,158,0.4)" fontSize={7.5} fontFamily="sans-serif">
-          Pinch Points
-        </text>
-        <text x={270} y={14} fill="rgba(168,162,158,0.4)" fontSize={7.5} fontFamily="sans-serif">
-          Intercepts
-        </text>
+        {/* Intercept crosshair targets — data-driven count */}
+        {INTERCEPT_POSITIONS.slice(0, ip).map((pos, i) => (
+          <g key={`int-${i}`}>
+            {/* Outer ring */}
+            <circle cx={pos.x} cy={pos.y} r={30} fill="none" stroke="#e0a528" strokeWidth={2} opacity={0.5} />
+            {/* Inner ring */}
+            <circle cx={pos.x} cy={pos.y} r={18} fill="none" stroke="#e0a528" strokeWidth={2} />
+            {/* Crosshair lines */}
+            <line x1={pos.x - 38} y1={pos.y} x2={pos.x - 18} y2={pos.y} stroke="#e0a528" strokeWidth={1.6} />
+            <line x1={pos.x + 18} y1={pos.y} x2={pos.x + 38} y2={pos.y} stroke="#e0a528" strokeWidth={1.6} />
+            <line x1={pos.x} y1={pos.y - 38} x2={pos.x} y2={pos.y - 18} stroke="#e0a528" strokeWidth={1.6} />
+            <line x1={pos.x} y1={pos.y + 18} x2={pos.x} y2={pos.y + 38} stroke="#e0a528" strokeWidth={1.6} />
+            {/* Center dot */}
+            <circle cx={pos.x} cy={pos.y} r={5.5} fill="#e0a528" />
+          </g>
+        ))}
       </svg>
 
-      {/* Gradient overlay at bottom */}
-      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-stone-950/90 to-transparent pointer-events-none" />
+      {/* Gradient overlay at bottom for text readability */}
+      <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#0f1714]/90 to-transparent pointer-events-none" />
 
       {/* Grade badge — top-left */}
       {grade !== '\u2014' && (
@@ -204,7 +192,7 @@ export default function TerrainBrainCardVisual({
       )}
 
       {/* Terrain Brain label — bottom center */}
-      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-900/80 border border-amber-800/30">
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#0f1714]/80 border border-amber-800/30">
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-amber-400">
           <circle cx="12" cy="12" r="10" />
           <path d="M12 16v-4" />
