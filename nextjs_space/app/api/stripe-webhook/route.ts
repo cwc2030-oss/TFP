@@ -8,6 +8,23 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-02-25.clover' as any,
 });
 
+/**
+ * Idempotency guard: Stripe can redeliver the same webhook event.
+ * Before writing a FunnelEvent, check whether one already exists
+ * for that (event, stripeSessionId) pair.  The metadata column is a
+ * JSON string, so we use Prisma `contains` on the session ID.
+ */
+async function funnelEventExists(event: string, stripeSessionId: string): Promise<boolean> {
+  const existing = await prisma.funnelEvent.findFirst({
+    where: {
+      event,
+      metadata: { contains: stripeSessionId },
+    },
+    select: { id: true },
+  });
+  return !!existing;
+}
+
 // Determine subscription tier from Stripe price ID
 function getTierFromPriceId(priceId: string | null): 'pro' | 'promax' {
   const promaxIds = [
@@ -102,20 +119,24 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     });
     console.log('[webhook] User', user.email, '→', resolvedTier, '(via checkout.session.completed)');
 
-    // Server-side funnel event — purchase_completed for subscription
+    // Server-side funnel event — purchase_completed for subscription (idempotent)
     const productType = resolvedTier === 'promax' ? 'pro_max' : 'pro';
     try {
-      await prisma.funnelEvent.create({
-        data: {
-          event: 'purchase_completed',
-          address: user.email,
-          metadata: JSON.stringify({
-            productType,
-            stripeSessionId: session.id,
-            subscriptionId: subscriptionId || null,
-          }),
-        },
-      });
+      if (await funnelEventExists('purchase_completed', session.id)) {
+        console.log('[webhook] purchase_completed already logged for session', session.id, '— skipping (idempotent)');
+      } else {
+        await prisma.funnelEvent.create({
+          data: {
+            event: 'purchase_completed',
+            address: user.email,
+            metadata: JSON.stringify({
+              productType,
+              stripeSessionId: session.id,
+              subscriptionId: subscriptionId || null,
+            }),
+          },
+        });
+      }
     } catch (funnelErr) {
       console.error('[webhook] purchase_completed funnel log failed:', funnelErr);
     }
@@ -194,19 +215,23 @@ async function handleHuntPlanPurchase(session: Stripe.Checkout.Session) {
 
   console.log('[webhook] Hunt plan purchased for user', userId, 'parcel:', parcelAddress || `${parcelLat},${parcelLng}`, leadId ? `lead:${leadId}` : '');
 
-  // Server-side funnel event — purchase_completed for $19 parcel unlock
+  // Server-side funnel event — purchase_completed for $19 parcel unlock (idempotent)
   try {
-    await prisma.funnelEvent.create({
-      data: {
-        event: 'purchase_completed',
-        address: parcelAddress || `${parcelLat}, ${parcelLng}`,
-        metadata: JSON.stringify({
-          productType: 'parcel_unlock',
-          price: 19,
-          stripeSessionId: session.id,
-        }),
-      },
-    });
+    if (await funnelEventExists('purchase_completed', session.id)) {
+      console.log('[webhook] purchase_completed already logged for session', session.id, '— skipping (idempotent)');
+    } else {
+      await prisma.funnelEvent.create({
+        data: {
+          event: 'purchase_completed',
+          address: parcelAddress || `${parcelLat}, ${parcelLng}`,
+          metadata: JSON.stringify({
+            productType: 'parcel_unlock',
+            price: 19,
+            stripeSessionId: session.id,
+          }),
+        },
+      });
+    }
   } catch (funnelErr) {
     console.error('[webhook] purchase_completed funnel log failed:', funnelErr);
   }
