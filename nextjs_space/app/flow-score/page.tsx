@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
+import { trackAddressSearch } from '@/lib/gtag';
 
 /* ─── lazy-load the 3-D map (SSR-unsafe) ────────────────────────── */
 const Terrain3DView = dynamic(
@@ -107,6 +108,7 @@ function FlowScoreContent() {
       setShowSuggestions(false);
       setIsSearching(true);
       setSearchError('');
+      trackAddressSearch(addr);
 
       let effectiveLat = lat || 0;
       let effectiveLng = lng || 0;

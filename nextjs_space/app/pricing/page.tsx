@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import PrivacyPromise from "@/components/privacy-promise";
-import { trackPricingPageViewed } from "@/lib/gtag";
+import { trackPricingPageViewed, trackAddressSearch } from "@/lib/gtag";
 
 export default function PricingPage() {
   const [billing, setBilling] = useState<"annual" | "monthly">("annual");
@@ -47,6 +47,7 @@ export default function PricingPage() {
   function handleSuggestionClick(s: any) {
     setAddress(s.description);
     setSuggestions([]);
+    trackAddressSearch(s.description);
     if (s.lat && s.lng) {
       router.push(`/preview?lat=${s.lat}&lng=${s.lng}`);
     }
@@ -57,6 +58,7 @@ export default function PricingPage() {
     if (!address.trim()) return;
     setIsSearching(true);
     setSearchError('');
+    trackAddressSearch(address.trim());
     try {
       const res = await fetch(`/api/places-autocomplete?input=${encodeURIComponent(address.trim())}`);
       const data = await res.json();
