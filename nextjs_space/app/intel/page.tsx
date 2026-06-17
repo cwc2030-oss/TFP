@@ -14940,20 +14940,21 @@ const archetypeInitializedRef = useRef(false);
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
-        <div className="flex items-center justify-between px-4 py-3 pointer-events-auto">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between px-4 md:px-2 lg:px-4 py-3 md:py-2 lg:py-3 pointer-events-auto">
+          <div className="flex items-center gap-3 md:gap-2 lg:gap-3">
             <Link href="/" className="text-white/80 hover:text-white transition-colors">
               <Home className="h-5 w-5" />
             </Link>
             {session?.user && (
               <Link href="/properties" className="text-white/50 hover:text-white text-[10px] font-medium transition-colors px-2 py-1 rounded border border-white/10 hover:border-white/20">
-                My Parcels
+                <span className="md:hidden lg:inline">My Parcels</span>
+                <span className="hidden md:inline lg:hidden">MP</span>
               </Link>
             )}
-            <div className="h-6 w-px bg-white/30" />
+            <div className="h-6 w-px bg-white/30 md:hidden lg:block" />
             <div className="flex items-center gap-2">
               <Target className="h-5 w-5 text-red-500" />
-              <span className="font-bold text-white text-lg">Terrain Brain</span>
+              <span className="font-bold text-white text-lg md:hidden lg:inline">Terrain Brain</span>
             </div>
           </div>
 
@@ -14965,13 +14966,13 @@ const archetypeInitializedRef = useRef(false);
               : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}
           `}>
             {mode === 'real' ? (
-              <><CheckCircle className="h-4 w-4" />Verified Terrain</>
+              <><CheckCircle className="h-4 w-4" /><span className="md:hidden lg:inline">Verified Terrain</span><span className="hidden md:inline lg:hidden">Verified</span></>
             ) : (
               <><Info className="h-4 w-4" />Preview</>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:gap-1 lg:gap-2">
             {/* Adjacent Parcels Toggle */}
             {adjacentParcels.length > 0 && (
               <Button
@@ -14990,8 +14991,8 @@ const archetypeInitializedRef = useRef(false);
                 }}
                 title={`${showAdjacentParcels ? 'Hide' : 'Show'} ${adjacentParcels.length} adjacent parcels`}
               >
-                <Grid3X3 className="h-4 w-4 mr-1" />
-                {adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}
+                <Grid3X3 className="h-4 w-4 lg:mr-1" />
+                <span className="md:hidden lg:inline">{adjacentParcelsLoading ? 'Loading…' : `${adjacentParcels.length} Neighbors`}</span>
               </Button>
             )}
             {/* Territory Boundary: Bold → Thin → Off cycle */}
@@ -15011,10 +15012,10 @@ const archetypeInitializedRef = useRef(false);
                 )}
                 title={`Territory boundary: ${territoryLineMode.toUpperCase()} — click to cycle`}
               >
-                <Layers className="h-4 w-4 mr-1" />
-                {territoryLineMode === 'bold' ? 'Boundary: Bold' 
+                <Layers className="h-4 w-4 lg:mr-1" />
+                <span className="md:hidden lg:inline">{territoryLineMode === 'bold' ? 'Boundary: Bold' 
                   : territoryLineMode === 'thin' ? 'Boundary: Thin' 
-                  : 'Boundary: Off'}
+                  : 'Boundary: Off'}</span>
               </Button>
             )}
             {/* Show Internal Parcel Seams — only for multi-parcel territories */}
@@ -15030,8 +15031,8 @@ const archetypeInitializedRef = useRef(false);
                 onClick={() => setShowInternalParcels(prev => !prev)}
                 title={showInternalParcels ? 'Hide internal parcel boundaries' : 'Show internal parcel boundaries'}
               >
-                <Grid3X3 className="h-3.5 w-3.5 mr-1" />
-                {showInternalParcels ? 'Hide Parcels' : 'Show Parcels'}
+                <Grid3X3 className="h-3.5 w-3.5 lg:mr-1" />
+                <span className="md:hidden lg:inline">{showInternalParcels ? 'Hide Parcels' : 'Show Parcels'}</span>
               </Button>
             )}
             {/* Exploration Mode Toggle — admin/debug only */}
@@ -15051,8 +15052,8 @@ const archetypeInitializedRef = useRef(false);
                 }}
                 title="Explore Mode - Click anywhere in KS/MO to analyze parcels"
               >
-                <Layers className="h-4 w-4 mr-1" />
-                {explorationMode ? 'Explore ON' : 'Explore'}
+                <Layers className="h-4 w-4 lg:mr-1" />
+                <span className="md:hidden lg:inline">{explorationMode ? 'Explore ON' : 'Explore'}</span>
               </Button>
             )}
             {/* Geometry Debug Toggle — admin/debug only */}
@@ -15067,8 +15068,8 @@ const archetypeInitializedRef = useRef(false);
                 onClick={() => setGeometryDebugMode(!geometryDebugMode)}
                 title="Show 3-boundary debug overlay"
               >
-                <Bug className="h-4 w-4 mr-1" />
-                {geometryDebugMode ? 'Debug ON' : 'Debug'}
+                <Bug className="h-4 w-4 lg:mr-1" />
+                <span className="md:hidden lg:inline">{geometryDebugMode ? 'Debug ON' : 'Debug'}</span>
               </Button>
             )}
             {/* Territory Builder toggle */}
@@ -15138,17 +15139,15 @@ const archetypeInitializedRef = useRef(false);
               }}
               title={isPro ? `Territory Builder — up to ${TERRITORY_PARCEL_CAP} parcels` : "Upgrade to Pro for Territory Builder"}
             >
-              <Layers className="h-4 w-4 mr-1" />
-              {territoryMode
+              <Layers className="h-4 w-4 lg:mr-1" />
+              <span className="md:hidden lg:inline">{territoryMode
                 ? (parcelPickLoading
                     ? 'Loading…'
-                    /* SHARED-TERRITORY FIX: show plain count for shared views since
-                       the cap was bypassed and "N/1" would misrepresent the state. */
                     : isViewingSharedTerritory
                       ? `Territory (${territoryParcels.length})`
                       : `Territory (${territoryParcels.length}/${TERRITORY_PARCEL_CAP})`)
-                : 'Territory'}
-              {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded">PRO</span>}
+                : 'Territory'}</span>
+              {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded md:hidden lg:inline">PRO</span>}
             </Button>
             {/* Parcel Pick Mode — de-emphasized in demo, available for exploration. */}
             <Button
@@ -15167,8 +15166,8 @@ const archetypeInitializedRef = useRef(false);
               title="Pick a Parcel — click any parcel on the map to analyze it"
               disabled={parcelPickLoading}
             >
-              <MapPin className="h-4 w-4 mr-1" />
-              {parcelPickMode ? 'Exit Pick ✕' : 'Pick Parcel'}
+              <MapPin className="h-4 w-4 lg:mr-1" />
+              <span className="md:hidden lg:inline">{parcelPickMode ? 'Exit Pick ✕' : 'Pick Parcel'}</span>
             </Button>
             <Button
               size="sm"
@@ -15176,8 +15175,8 @@ const archetypeInitializedRef = useRef(false);
               className="text-white/80 hover:text-white hover:bg-white/10"
               onClick={flyToCenter}
             >
-              <Crosshair className="h-4 w-4 mr-1" />
-              Re-center
+              <Crosshair className="h-4 w-4 lg:mr-1" />
+              <span className="md:hidden lg:inline">Re-center</span>
             </Button>
             <Button
               size="sm"
@@ -15189,8 +15188,8 @@ const archetypeInitializedRef = useRef(false);
               onClick={() => setExportMode(!exportMode)}
               title="Screenshot mode — clean map view"
             >
-              <Download className="h-4 w-4 mr-1" />
-              {exportMode ? 'Exit Screenshot' : 'Screenshot'}
+              <Download className="h-4 w-4 lg:mr-1" />
+              <span className="md:hidden lg:inline">{exportMode ? 'Exit Screenshot' : 'Screenshot'}</span>
             </Button>
           </div>
         </div>
