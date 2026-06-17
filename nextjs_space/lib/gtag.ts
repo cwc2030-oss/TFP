@@ -50,10 +50,15 @@ export function trackPricingPageViewed() {
   logFunnelEvent('pricing_page_viewed');
 }
 
-/** User initiates checkout (clicks "Get Report" on map page) */
+/**
+ * @deprecated checkout_initiated is now logged SERVER-SIDE in the Stripe
+ * checkout-session-creation API routes (/api/stripe/checkout and
+ * /api/parcels/purchase). Do NOT call this client-side — it would
+ * double-count. Kept for GA event only (no FunnelEvent write).
+ */
 export function trackCheckoutInitiated(productType: string, address: string, price: number) {
   trackEvent('checkout_initiated', { product_type: productType, address, value: price, currency: 'USD' });
-  logFunnelEvent('checkout_initiated', address, { productType, price });
+  // FunnelEvent is recorded server-side only — do not log here
 }
 
 /** User completes a purchase (reaches success page) */

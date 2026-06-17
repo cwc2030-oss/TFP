@@ -87,6 +87,26 @@ export async function POST(req: NextRequest) {
 
     console.log("[stripe/checkout] Session created:", checkoutSession.id, "for user:", user.email);
 
+    // Server-side funnel event — guarantees one checkout_initiated per real attempt
+    const productLabel = tier === 'promax' ? 'pro_max' : 'pro';
+    const priceLabel = tier === 'promax' ? (plan === 'annual' ? 199 : 24.99) : (plan === 'annual' ? 99 : 14.99);
+    try {
+      await prisma.funnelEvent.create({
+        data: {
+          event: 'checkout_initiated',
+          address: user.email,
+          metadata: JSON.stringify({
+            productType: productLabel,
+            price: priceLabel,
+            plan,
+            stripeSessionId: checkoutSession.id,
+          }),
+        },
+      });
+    } catch (funnelErr) {
+      console.error('[stripe/checkout] Funnel event log failed:', funnelErr);
+    }
+
     return NextResponse.json({ url: checkoutSession.url });
   } catch (err: any) {
     console.error("[stripe/checkout] Error:", err.message);

@@ -118,6 +118,23 @@ export async function POST(req: NextRequest) {
 
     console.log('[parcels/purchase] Checkout session:', checkoutSession.id, 'for', session.user.email, 'parcel:', address);
 
+    // Server-side funnel event — guarantees one checkout_initiated per real attempt
+    try {
+      await prisma.funnelEvent.create({
+        data: {
+          event: 'checkout_initiated',
+          address: address || `${lat}, ${lng}`,
+          metadata: JSON.stringify({
+            productType: 'parcel_unlock',
+            price: 19,
+            stripeSessionId: checkoutSession.id,
+          }),
+        },
+      });
+    } catch (funnelErr) {
+      console.error('[parcels/purchase] Funnel event log failed:', funnelErr);
+    }
+
     return NextResponse.json({ url: checkoutSession.url });
   } catch (err: any) {
     console.error('[parcels/purchase] Error:', {
