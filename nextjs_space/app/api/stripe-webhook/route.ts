@@ -102,6 +102,24 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     });
     console.log('[webhook] User', user.email, '→', resolvedTier, '(via checkout.session.completed)');
 
+    // Server-side funnel event — purchase_completed for subscription
+    const productType = resolvedTier === 'promax' ? 'pro_max' : 'pro';
+    try {
+      await prisma.funnelEvent.create({
+        data: {
+          event: 'purchase_completed',
+          address: user.email,
+          metadata: JSON.stringify({
+            productType,
+            stripeSessionId: session.id,
+            subscriptionId: subscriptionId || null,
+          }),
+        },
+      });
+    } catch (funnelErr) {
+      console.error('[webhook] purchase_completed funnel log failed:', funnelErr);
+    }
+
   } else if (session.metadata?.purchaseType === 'hunt_plan') {
     // ── $19 one-time parcel hunt plan purchase ──
     await handleHuntPlanPurchase(session);
@@ -175,6 +193,23 @@ async function handleHuntPlanPurchase(session: Stripe.Checkout.Session) {
   }
 
   console.log('[webhook] Hunt plan purchased for user', userId, 'parcel:', parcelAddress || `${parcelLat},${parcelLng}`, leadId ? `lead:${leadId}` : '');
+
+  // Server-side funnel event — purchase_completed for $19 parcel unlock
+  try {
+    await prisma.funnelEvent.create({
+      data: {
+        event: 'purchase_completed',
+        address: parcelAddress || `${parcelLat}, ${parcelLng}`,
+        metadata: JSON.stringify({
+          productType: 'parcel_unlock',
+          price: 19,
+          stripeSessionId: session.id,
+        }),
+      },
+    });
+  } catch (funnelErr) {
+    console.error('[webhook] purchase_completed funnel log failed:', funnelErr);
+  }
 }
 
 async function handleSubscriptionChange(eventType: string, subscription: Stripe.Subscription) {

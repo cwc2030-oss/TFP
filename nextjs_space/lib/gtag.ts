@@ -61,8 +61,13 @@ export function trackCheckoutInitiated(productType: string, address: string, pri
   // FunnelEvent is recorded server-side only — do not log here
 }
 
-/** User completes a purchase (reaches success page) */
+/**
+ * @deprecated purchase_completed is now logged SERVER-SIDE in the Stripe
+ * webhook (/api/stripe-webhook) when payment is confirmed. Do NOT call
+ * this client-side — it would double-count. Kept for GA event only
+ * (no FunnelEvent write).
+ */
 export function trackPurchaseCompleted(orderId: string, productType: string, address: string) {
   trackEvent('purchase', { transaction_id: orderId, product_type: productType, address });
-  logFunnelEvent('purchase_completed', address, { orderId, productType });
+  // FunnelEvent is recorded server-side only — do not log here
 }
