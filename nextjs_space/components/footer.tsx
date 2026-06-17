@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Map, Mail, MapPin } from "lucide-react";
+import PrivacyPromise from "@/components/privacy-promise";
 
 export default function Footer() {
   return (
@@ -87,7 +88,12 @@ export default function Footer() {
           </div>
         </div>
 
-        <div className="border-t border-stone-800 mt-8 pt-8 text-center text-sm text-stone-500">
+        {/* Privacy Promise */}
+        <div className="border-t border-stone-800 mt-8 pt-8 max-w-2xl mx-auto">
+          <PrivacyPromise className="text-stone-500 justify-center" />
+        </div>
+
+        <div className="mt-6 text-center text-sm text-stone-500">
           <p>© {new Date().getFullYear()} Terra Firma Partners™ LLC. All rights reserved.</p>
         </div>
       </div>
