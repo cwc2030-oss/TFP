@@ -15,10 +15,12 @@ import {
   Crosshair,
   TreePine,
   Mountain,
+  Crown,
+  Sparkles,
 } from 'lucide-react';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
-import { trackAddressSearch } from '@/lib/gtag';
+import { trackAddressSearch, trackCheckoutInitiated } from '@/lib/gtag';
 
 /* ─── lazy-load the 3-D map (SSR-unsafe) ────────────────────────── */
 const Terrain3DView = dynamic(
@@ -75,6 +77,7 @@ function FlowScoreContent() {
   const [leadId, setLeadId] = useState<string | null>(null);
 
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [proCheckoutLoading, setProCheckoutLoading] = useState(false);
 
   /* ────────────── autocomplete ───────────────────────────────── */
   const fetchSuggestions = useCallback(async (input: string) => {
@@ -266,10 +269,9 @@ function FlowScoreContent() {
     setEmailSubmitting(false);
   };
 
-  /* ────────────── $19 checkout ───────────────────────────────── */
+  /* ────────────── $19 parcel unlock checkout ─────────────────── */
   const handleCheckout = async () => {
     if (!session?.user) {
-      // Redirect to login with callback back here
       const cb = `/flow-score?lat=${parcel?.lat}&lng=${parcel?.lng}&address=${encodeURIComponent(
         parcel?.address || '',
       )}`;
@@ -277,6 +279,7 @@ function FlowScoreContent() {
       return;
     }
 
+    trackCheckoutInitiated('parcel_unlock', parcel?.address || '', 19);
     setCheckoutLoading(true);
     try {
       const res = await fetch('/api/parcels/purchase', {
@@ -293,7 +296,6 @@ function FlowScoreContent() {
       const data = await res.json();
 
       if (data.alreadyPurchased) {
-        // Already unlocked — go straight to intel
         router.push(
           `/intel?lat=${parcel?.lat}&lng=${parcel?.lng}&address=${encodeURIComponent(
             parcel?.address || '',
@@ -311,6 +313,61 @@ function FlowScoreContent() {
       setCheckoutLoading(false);
     }
   };
+
+  /* ────────────── Pro ($99/yr) subscription checkout ─────────── */
+  const handleProCheckout = async () => {
+    if (!session?.user) {
+      // Login redirect with autoUpgrade intent — resumes Pro checkout after sign-in
+      const cb = `/flow-score?lat=${parcel?.lat}&lng=${parcel?.lng}&address=${encodeURIComponent(
+        parcel?.address || '',
+      )}&autoUpgrade=pro_annual`;
+      router.push(`/login?callbackUrl=${encodeURIComponent(cb)}`);
+      return;
+    }
+
+    trackCheckoutInitiated('pro', parcel?.address || '', 99);
+    setProCheckoutLoading(true);
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'annual', tier: 'pro' }),
+      });
+      const data = await res.json();
+
+      if (data.alreadySubscribed) {
+        router.push(
+          `/intel?lat=${parcel?.lat}&lng=${parcel?.lng}&address=${encodeURIComponent(
+            parcel?.address || '',
+          )}&acreage=${parcel?.acreage || 80}`,
+        );
+        return;
+      }
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setProCheckoutLoading(false);
+      }
+    } catch {
+      setProCheckoutLoading(false);
+    }
+  };
+
+  /* ────────────── Auto-resume Pro checkout after login ───────── */
+  useEffect(() => {
+    if (!session?.user) return;
+    const params = new URLSearchParams(window.location.search);
+    const autoUp = params.get('autoUpgrade');
+    if (autoUp === 'pro_annual') {
+      // Clean the URL param, then fire checkout
+      const url = new URL(window.location.href);
+      url.searchParams.delete('autoUpgrade');
+      window.history.replaceState({}, '', url.toString());
+      handleProCheckout();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user]);
 
   /* ────────────── form submit (search) ──────────────────────── */
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -589,58 +646,114 @@ function FlowScoreContent() {
               </div>
             </div>
 
-            {/* $19 unlock card */}
-            <div className="rounded-2xl border-2 border-amber-600/60 bg-gradient-to-br from-stone-900 via-amber-950/30 to-stone-900 p-6 sm:p-8 mb-6">
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-12 h-12 rounded-xl bg-amber-900/60 border border-amber-700/50 flex items-center justify-center shrink-0">
-                  <Mountain className="w-6 h-6 text-amber-400" />
+            {/* ═══ TWO-OPTION UNLOCK CARD ═══ */}
+            <div className="space-y-4 mb-6">
+
+              {/* ── PRO OPTION — best value, highlighted ── */}
+              <div className="relative rounded-2xl border-2 border-amber-500/70 bg-gradient-to-br from-stone-900 via-amber-950/20 to-stone-900 p-6 sm:p-8">
+                {/* Best-value ribbon */}
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-amber-500 text-stone-950 text-xs font-bold px-4 py-1 rounded-full shadow-lg">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Where most hunters land
                 </div>
-                <div>
-                  <h3 className="text-xl font-bold text-white">
-                    Unlock Full Terrain Brain
-                  </h3>
-                  <p className="text-stone-400 text-sm mt-1">
-                    One-time purchase — this parcel, forever.
-                  </p>
+
+                <div className="flex items-start gap-4 mb-5 mt-2">
+                  <div className="w-12 h-12 rounded-xl bg-amber-900/60 border border-amber-600/50 flex items-center justify-center shrink-0">
+                    <Crown className="w-6 h-6 text-amber-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xl font-bold text-white">Pro</h3>
+                    <p className="text-stone-400 text-sm mt-0.5">
+                      Every parcel, Territory Mode, unlimited reports.
+                    </p>
+                  </div>
+                  <div className="ml-auto text-right shrink-0">
+                    <span className="text-3xl font-bold text-amber-400">$99</span>
+                    <span className="block text-stone-500 text-xs">/year</span>
+                  </div>
                 </div>
-                <div className="ml-auto text-right shrink-0">
-                  <span className="text-3xl font-bold text-amber-400">$19</span>
-                  <span className="block text-stone-500 text-xs">one-time</span>
-                </div>
+
+                <ul className="space-y-2 mb-6 text-sm">
+                  {[
+                    'Every parcel unlocked — analyze any property',
+                    'Territory Mode — deer flow across property lines',
+                    'Up to 25 parcels per territory',
+                    'Unlimited downloadable hunt reports (PDF)',
+                    'AI-analyzed corridors, funnels & stand sites',
+                    'Interactive satellite map with all layers',
+                  ].map((item) => (
+                    <li key={item} className="flex items-center gap-2.5 text-stone-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+
+                <button
+                  onClick={handleProCheckout}
+                  disabled={proCheckoutLoading || checkoutLoading}
+                  className="w-full inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:bg-stone-700 text-stone-950 px-8 py-4 rounded-xl font-bold text-lg transition-colors"
+                >
+                  {proCheckoutLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      Go Pro — $99/yr
+                      <ArrowRight className="w-5 h-5" />
+                    </>
+                  )}
+                </button>
               </div>
 
-              <ul className="space-y-2.5 mb-8 text-sm">
-                {[
-                  'AI-analyzed deer movement corridors',
-                  'Funnel points & convergence zones',
-                  'Optimal stand locations with wind strategy',
-                  'Interactive satellite map with all layers',
-                  'Downloadable hunt report (PDF)',
-                  'Never expires — access anytime',
-                ].map((item) => (
-                  <li key={item} className="flex items-center gap-2.5 text-stone-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
+              {/* ── $19 PARCEL UNLOCK OPTION ── */}
+              <div className="rounded-2xl border border-stone-700 bg-stone-800/40 p-5 sm:p-6">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-stone-700/60 border border-stone-600/50 flex items-center justify-center shrink-0">
+                    <Mountain className="w-5 h-5 text-stone-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-semibold text-stone-200">This Parcel Only</h3>
+                    <p className="text-stone-500 text-xs">
+                      One-time purchase — this parcel, forever.
+                    </p>
+                  </div>
+                  <div className="ml-auto text-right shrink-0">
+                    <span className="text-2xl font-bold text-stone-300">$19</span>
+                    <span className="block text-stone-500 text-xs">one-time</span>
+                  </div>
+                </div>
 
-              <button
-                onClick={handleCheckout}
-                disabled={checkoutLoading}
-                className="w-full inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-stone-700 text-white px-8 py-4 rounded-xl font-semibold text-lg transition-colors"
-              >
-                {checkoutLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    Unlock This Parcel — $19
-                    <ArrowRight className="w-5 h-5" />
-                  </>
-                )}
-              </button>
+                <ul className="space-y-1.5 mb-5 text-sm">
+                  {[
+                    'AI-analyzed corridors & stand sites',
+                    'Interactive map with all layers',
+                    'Downloadable hunt report (PDF)',
+                    'Never expires — access anytime',
+                  ].map((item) => (
+                    <li key={item} className="flex items-center gap-2 text-stone-400">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
 
-              <p className="text-stone-600 text-xs text-center mt-3">
+                <button
+                  onClick={handleCheckout}
+                  disabled={checkoutLoading || proCheckoutLoading}
+                  className="w-full inline-flex items-center justify-center gap-2 bg-stone-700 hover:bg-stone-600 disabled:bg-stone-800 text-stone-200 px-6 py-3 rounded-xl font-semibold text-sm transition-colors"
+                >
+                  {checkoutLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      Unlock This Parcel — $19
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <p className="text-stone-600 text-xs text-center">
                 Secure checkout via Stripe. No card data touches our servers.
               </p>
             </div>
