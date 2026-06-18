@@ -79,6 +79,12 @@ function FlowScoreContent() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [proCheckoutLoading, setProCheckoutLoading] = useState(false);
 
+  /* Subscription tier — hide upsells from paying users */
+  const subStatus = (session?.user as any)?.subscriptionStatus || 'free';
+  const isPro = subStatus === 'pro';
+  const isProMax = subStatus === 'promax';
+  const isSubscribed = isPro || isProMax;
+
   /* ────────────── autocomplete ───────────────────────────────── */
   const fetchSuggestions = useCallback(async (input: string) => {
     if (input.length < 3) {
@@ -504,7 +510,13 @@ function FlowScoreContent() {
                   parcelAddress={parcel.address}
                   acreage={parcel.acreage}
                   previewMode={true}
-                  onUnlockIntel={() => setStage('email')}
+                  onUnlockIntel={() => {
+                    if (isSubscribed && parcel) {
+                      router.push(`/intel?lat=${parcel.lat}&lng=${parcel.lng}&address=${encodeURIComponent(parcel.address || '')}&acreage=${parcel.acreage || 80}`);
+                    } else {
+                      setStage('email');
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -517,16 +529,22 @@ function FlowScoreContent() {
                     Your parcel has been identified
                   </h3>
                   <p className="text-stone-400 text-sm leading-relaxed">
-                    The Terrain Brain can analyze this {parcel.acreage > 0 ? `${Math.round(parcel.acreage)}-acre` : ''} parcel
-                    for deer movement corridors, funnel points, and optimal stand
-                    locations. Enter your email to continue.
+                    {isSubscribed
+                      ? `Your Pro subscription includes full Terrain Brain analysis for this ${parcel.acreage > 0 ? `${Math.round(parcel.acreage)}-acre` : ''} parcel — open it now.`
+                      : `The Terrain Brain can analyze this ${parcel.acreage > 0 ? `${Math.round(parcel.acreage)}-acre` : ''} parcel for deer movement corridors, funnel points, and optimal stand locations. Enter your email to continue.`}
                   </p>
                 </div>
                 <button
-                  onClick={() => setStage('email')}
+                  onClick={() => {
+                    if (isSubscribed && parcel) {
+                      router.push(`/intel?lat=${parcel.lat}&lng=${parcel.lng}&address=${encodeURIComponent(parcel.address || '')}&acreage=${parcel.acreage || 80}`);
+                    } else {
+                      setStage('email');
+                    }
+                  }}
                   className="shrink-0 inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                 >
-                  Continue <ArrowRight className="w-4 h-4" />
+                  {isSubscribed ? 'Open Terrain Brain' : 'Continue'} <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -705,8 +723,8 @@ function FlowScoreContent() {
                 </button>
               </div>
 
-              {/* ── $19 PARCEL UNLOCK OPTION ── */}
-              <div className="rounded-2xl border border-stone-700 bg-stone-800/40 p-5 sm:p-6">
+              {/* ── $19 PARCEL UNLOCK OPTION (hidden for Pro / ProMax) ── */}
+              {!isSubscribed && <div className="rounded-2xl border border-stone-700 bg-stone-800/40 p-5 sm:p-6">
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-10 h-10 rounded-lg bg-stone-700/60 border border-stone-600/50 flex items-center justify-center shrink-0">
                     <Mountain className="w-5 h-5 text-stone-400" />
@@ -740,7 +758,7 @@ function FlowScoreContent() {
                 <button
                   onClick={handleCheckout}
                   disabled={checkoutLoading || proCheckoutLoading}
-                  className="w-full inline-flex items-center justify-center gap-2 bg-stone-700 hover:bg-stone-600 disabled:bg-stone-800 text-stone-200 px-6 py-3 rounded-xl font-semibold text-sm transition-colors"
+                  className="w-full inline-flex items-center justify-center gap-2 border-2 border-emerald-600 bg-transparent hover:bg-emerald-900/30 disabled:border-stone-700 disabled:text-stone-600 text-emerald-400 px-6 py-3 rounded-xl font-semibold text-sm transition-colors"
                 >
                   {checkoutLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -751,7 +769,7 @@ function FlowScoreContent() {
                     </>
                   )}
                 </button>
-              </div>
+              </div>}
 
               <p className="text-stone-600 text-xs text-center">
                 Secure checkout via Stripe. No card data touches our servers.
