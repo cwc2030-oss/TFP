@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
       'pricing_page_viewed',
       'checkout_initiated',
       'purchase_completed',
+      'territory_teaser_shown',
+      'territory_teaser_clicked',
     ];
 
     if (!validEvents.includes(event)) {

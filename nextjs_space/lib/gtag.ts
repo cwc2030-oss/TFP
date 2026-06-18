@@ -71,3 +71,36 @@ export function trackPurchaseCompleted(orderId: string, productType: string, add
   trackEvent('purchase', { transaction_id: orderId, product_type: productType, address });
   // FunnelEvent is recorded server-side only — do not log here
 }
+
+/** Territory teaser rendered for a free user */
+export function trackTerritoryTeaserShown(address: string, lat: number, lng: number) {
+  trackEvent('territory_teaser_shown', { address, lat, lng });
+  logFunnelEvent('territory_teaser_shown', address, { lat, lng });
+}
+
+/**
+ * Territory teaser CTA clicked — uses sendBeacon / keepalive:true
+ * so the event fires reliably before the redirect to checkout.
+ */
+export function trackTerritoryTeaserClicked(address: string, lat: number, lng: number) {
+  trackEvent('territory_teaser_clicked', { address, lat, lng });
+  // Use sendBeacon for reliability before redirect
+  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    const payload = JSON.stringify({
+      event: 'territory_teaser_clicked',
+      address,
+      metadata: { lat, lng },
+    });
+    navigator.sendBeacon('/api/funnel-event', new Blob([payload], { type: 'application/json' }));
+  } else {
+    // Fallback: keepalive fetch
+    try {
+      fetch('/api/funnel-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: 'territory_teaser_clicked', address, metadata: { lat, lng } }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+  }
+}

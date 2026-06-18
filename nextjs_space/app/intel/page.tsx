@@ -27,6 +27,7 @@ import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs
 import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML, renderKeyIndicatorsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
+import { trackTerritoryTeaserShown, trackTerritoryTeaserClicked } from '@/lib/gtag';
 import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
@@ -2589,6 +2590,8 @@ const archetypeInitializedRef = useRef(false);
   // Refs for parcel access in closures (map event handlers, etc.)
   const parcelUnlockedRef = useRef(false);
   useEffect(() => { parcelUnlockedRef.current = parcelUnlocked; }, [parcelUnlocked]);
+  // Territory teaser: fire territory_teaser_shown only once per parcel
+  const territoryTeaserFiredRef = useRef(false);
   const isProRef = useRef(false);
   useEffect(() => {
     isProRef.current = isPro;
@@ -3140,7 +3143,16 @@ const archetypeInitializedRef = useRef(false);
     pressureArrows: GeoJSON.FeatureCollection;
     adjacentBoundary: GeoJSON.FeatureCollection;
   } | null>(null);
-  
+
+  // ── Territory Teaser tracking: fire territory_teaser_shown once per parcel ──
+  const showTerritoryTeaser = !isPro && !isProMax && !parcelUnlocked && !!edgeIntelData && (edgeIntelData?.corridorArrows?.features?.length ?? 0) > 0 && !!summary && !isLoading && !territoryMode;
+  useEffect(() => {
+    if (showTerritoryTeaser && !territoryTeaserFiredRef.current) {
+      territoryTeaserFiredRef.current = true;
+      trackTerritoryTeaserShown(activeAddress || '', activeLat, activeLng);
+    }
+  }, [showTerritoryTeaser, activeAddress, activeLat, activeLng]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // V2 Tiered Corridor Data state
   const [tieredCorridorData, setTieredCorridorData] = useState<{
     corridors_primary: GeoJSON.FeatureCollection;
@@ -12781,6 +12793,7 @@ const archetypeInitializedRef = useRef(false);
       previousSaddleNodesRef.current = EMPTY_FC; // Reset saddle node stability anchor on parcel change
       previousKillZonesRef.current = EMPTY_FC; // Reset kill zone stability anchor on parcel change
       setParcelUnlocked(false);
+      territoryTeaserFiredRef.current = false; // Reset territory teaser tracking on parcel change
       setLastSavedPropertyId(null);
       setSelectedStand(null);
       setHuntabilityData(null);
@@ -12992,6 +13005,7 @@ const archetypeInitializedRef = useRef(false);
     previousSaddleNodesRef.current = EMPTY_FC; // Reset saddle node stability anchor on parcel change
     previousKillZonesRef.current = EMPTY_FC; // Reset kill zone stability anchor on parcel change
     setParcelUnlocked(false);
+    territoryTeaserFiredRef.current = false; // Reset territory teaser tracking on parcel change
     setLastSavedPropertyId(null);
     setSelectedStand(null);
     setHuntabilityData(null);
@@ -14224,6 +14238,114 @@ const archetypeInitializedRef = useRef(false);
             ? `🎯 ${filteredStands.length} Stands Found — Unlock $19`
             : '🎯 Get My Hunt Plan — $19'}
         </button>
+      )}
+
+      {/* ═══ TERRITORY TEASER — non-subscriber only, visual-only flow continuation hint ═══ */}
+      {showTerritoryTeaser && (
+        <div
+          className="absolute z-50 pointer-events-auto"
+          style={{
+            bottom: 80,
+            right: 16,
+            maxWidth: 320,
+          }}
+        >
+          {/* Animated flow arrows — purely decorative CSS, no real terrain computation */}
+          <div className="relative mb-3" style={{ height: 48, overflow: 'hidden' }}>
+            {[0, 1, 2].map(i => (
+              <div
+                key={i}
+                style={{
+                  position: 'absolute',
+                  top: 8 + i * 14,
+                  left: 20 + i * 30,
+                  width: 80 - i * 10,
+                  height: 3,
+                  borderRadius: 2,
+                  background: `linear-gradient(90deg, ${LAYER_COLORS.edgeCorridorArrow}cc, ${LAYER_COLORS.edgeCorridorArrow}00)`,
+                  animation: `territoryTeaserFlow ${1.8 + i * 0.3}s ease-in-out infinite`,
+                  animationDelay: `${i * 0.4}s`,
+                  filter: 'blur(1px)',
+                }}
+              />
+            ))}
+            {/* Arrowheads */}
+            {[0, 1, 2].map(i => (
+              <div
+                key={`head-${i}`}
+                style={{
+                  position: 'absolute',
+                  top: 4 + i * 14,
+                  left: 95 + i * 15,
+                  width: 0,
+                  height: 0,
+                  borderLeft: `8px solid ${LAYER_COLORS.edgeCorridorArrow}88`,
+                  borderTop: '5px solid transparent',
+                  borderBottom: '5px solid transparent',
+                  animation: `territoryTeaserFlow ${1.8 + i * 0.3}s ease-in-out infinite`,
+                  animationDelay: `${i * 0.4}s`,
+                  opacity: 0.7,
+                  filter: 'blur(0.5px)',
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Lock badge + CTA card */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #0d1f17ee, #1a3a2aee)',
+              border: '1px solid #c9a84c88',
+              borderRadius: 12,
+              padding: '14px 16px',
+              backdropFilter: 'blur(12px)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div
+                style={{
+                  background: '#c9a84c',
+                  borderRadius: 6,
+                  padding: '4px 6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <Lock className="w-3.5 h-3.5 text-[#0d1f17]" />
+              </div>
+              <span style={{ color: '#c9a84c', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>
+                Territory
+              </span>
+            </div>
+            <p style={{ color: '#e8e0d0', fontSize: 14, fontWeight: 600, lineHeight: 1.4, marginBottom: 10 }}>
+              The deer don&apos;t stop at your property line.
+            </p>
+            <button
+              onClick={() => {
+                trackTerritoryTeaserClicked(activeAddress || '', activeLat, activeLng);
+                // Route to $19 parcel unlock or Pro checkout
+                if (!session?.user) {
+                  router.push(buildAuthRedirect('autoUnlock', '1'));
+                } else {
+                  handlePurchaseParcel();
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 text-sm font-bold rounded-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{
+                background: 'linear-gradient(135deg, #c9a84c, #a88a30)',
+                color: '#0d1f17',
+                padding: '10px 16px',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <Unlock className="w-4 h-4" />
+              Unlock Territory
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Map Container — double-div pattern: outer div owns layout (absolute inset-0),
