@@ -3145,7 +3145,7 @@ const archetypeInitializedRef = useRef(false);
   } | null>(null);
 
   // ── Territory Teaser tracking: fire territory_teaser_shown once per parcel ──
-  const showTerritoryTeaser = !isPro && !isProMax && !parcelUnlocked && !!edgeIntelData && (edgeIntelData?.corridorArrows?.features?.length ?? 0) > 0 && !!summary && !isLoading && !territoryMode;
+  const showTerritoryTeaser = !isPro && !isProMax && !!edgeIntelData && (edgeIntelData?.corridorArrows?.features?.length ?? 0) > 0 && !!summary && !isLoading && !territoryMode;
   useEffect(() => {
     if (showTerritoryTeaser && !territoryTeaserFiredRef.current) {
       territoryTeaserFiredRef.current = true;
@@ -14325,11 +14325,11 @@ const archetypeInitializedRef = useRef(false);
             <button
               onClick={() => {
                 trackTerritoryTeaserClicked(activeAddress || '', activeLat, activeLng);
-                // Route to $19 parcel unlock or Pro checkout
+                // Route to Pro ($99) subscription checkout
                 if (!session?.user) {
-                  router.push(buildAuthRedirect('autoUnlock', '1'));
+                  router.push(buildAuthRedirect('autoUpgrade', 'pro_annual'));
                 } else {
-                  handlePurchaseParcel();
+                  handleUpgrade('annual', 'pro');
                 }
               }}
               className="w-full flex items-center justify-center gap-2 text-sm font-bold rounded-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
