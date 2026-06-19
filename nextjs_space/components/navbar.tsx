@@ -63,17 +63,11 @@ export default function Navbar() {
             <NavLink href="/flow-score" active={pathname === "/flow-score"}>
               Flow Score
             </NavLink>
-            <NavLink href="/find-a-lease" active={pathname === "/find-a-lease"}>
-              Find a Lease
-            </NavLink>
-            <NavLink href="/listings" active={pathname?.startsWith("/listings")}>
+            <NavLink href="/marketplace-coming-soon" active={pathname === "/marketplace-coming-soon"}>
               Marketplace
             </NavLink>
             <NavLink href="/pricing" active={pathname === "/pricing"}>
               Pricing
-            </NavLink>
-            <NavLink href="/brokers" active={pathname === "/brokers"}>
-              For Brokers
             </NavLink>
             <NavLink href="/our-story" active={pathname === "/our-story"}>
               Our Story
@@ -163,17 +157,11 @@ export default function Navbar() {
               <MobileNavLink href="/flow-score" onClick={() => setIsMenuOpen(false)}>
                 Flow Score
               </MobileNavLink>
-              <MobileNavLink href="/find-a-lease" onClick={() => setIsMenuOpen(false)}>
-                Find a Lease
-              </MobileNavLink>
-              <MobileNavLink href="/listings" onClick={() => setIsMenuOpen(false)}>
+              <MobileNavLink href="/marketplace-coming-soon" onClick={() => setIsMenuOpen(false)}>
                 Marketplace
               </MobileNavLink>
               <MobileNavLink href="/pricing" onClick={() => setIsMenuOpen(false)}>
                 Pricing
-              </MobileNavLink>
-              <MobileNavLink href="/brokers" onClick={() => setIsMenuOpen(false)}>
-                For Brokers
               </MobileNavLink>
               <MobileNavLink href="/our-story" onClick={() => setIsMenuOpen(false)}>
                 Our Story

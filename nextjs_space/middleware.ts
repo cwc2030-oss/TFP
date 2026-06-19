@@ -8,6 +8,8 @@ const REDIRECTS: Record<string, string> = {
   '/api/sample-quick-look': '/api/free-look',
   '/quick-look': '/demo',
   '/sample-quick-look': '/demo',
+  '/find-a-lease': '/marketplace-coming-soon',
+  '/listings': '/marketplace-coming-soon',
 };
 
 export function middleware(request: NextRequest) {
@@ -19,6 +21,13 @@ export function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = destination;
     return NextResponse.redirect(url, 308);
+  }
+
+  // /listings/[slug] and /listings/[slug]/inquire → 404 so Google drops old listing URLs
+  if (pathname.startsWith('/listings/')) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/marketplace-coming-soon';
+    return NextResponse.redirect(url, 302);
   }
 
   const response = NextResponse.next();
