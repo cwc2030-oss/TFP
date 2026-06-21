@@ -2263,6 +2263,7 @@ function DeerIntelContent() {
   const urlP5Lat = parseFloat(searchParams.get('p5lat') || '0');
   const urlP5Lng = parseFloat(searchParams.get('p5lng') || '0');
   const urlTerritoryName = searchParams.get('name') || 'My Territory';
+  const urlSavedPropertyId = searchParams.get('savedPropertyId') || '';
   // If hero parcel is specified, use its coords; if demo mode, use Pineville; else URL
   const resolvedInitial = heroParcel
     ? { lat: heroParcel.lat, lng: heroParcel.lng, address: heroParcel.address, acreage: heroParcel.acreage }
@@ -8336,6 +8337,7 @@ const archetypeInitializedRef = useRef(false);
   // fetch each parcel's geometry from Regrid, add them to the territory, and auto-run analysis.
   // Fires exactly once per mount when the map is ready.
   const territoryUrlLoadedRef = useRef<boolean>(false);
+  const savedPropertyLoadedRef = useRef<boolean>(false);
   useEffect(() => {
     if (!urlTerritory || !mapReady) return;
     if (territoryUrlLoadedRef.current) return;
@@ -8461,6 +8463,131 @@ const archetypeInitializedRef = useRef(false);
     loadTerritoryFromURL();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, urlTerritory]);
+
+  // ========== LOAD TERRITORY FROM SAVED PROPERTY ID ==========
+  // When ?savedPropertyId=<id> is present, fetch the saved property from the DB
+  // and rebuild the full territory from each stored parcel's geometry.
+  useEffect(() => {
+    if (!urlSavedPropertyId || !mapReady) return;
+    if (savedPropertyLoadedRef.current) return;
+    savedPropertyLoadedRef.current = true;
+
+    const loadSavedTerritory = async () => {
+      console.error('[SAVED-TERRITORY] Loading saved property:', urlSavedPropertyId);
+      try {
+        const res = await fetch(`/api/properties/get?id=${encodeURIComponent(urlSavedPropertyId)}`);
+        if (!res.ok) {
+          console.error('[SAVED-TERRITORY] API error:', res.status);
+          return;
+        }
+        const { property } = await res.json();
+        if (!property) {
+          console.error('[SAVED-TERRITORY] No property returned');
+          return;
+        }
+
+        const savedParcels: Array<{ acres: number; address: string; geometry: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> }> =
+          typeof property.parcels === 'string' ? JSON.parse(property.parcels) : property.parcels;
+
+        if (!Array.isArray(savedParcels) || savedParcels.length === 0) {
+          console.warn('[SAVED-TERRITORY] No parcels in saved property');
+          // Fallback: single-parcel load at centroid
+          return;
+        }
+
+        // Switch into territory mode
+        setTerritoryMode(true);
+        setTerritoryName(property.name || 'My Territory');
+        setIsViewingSharedTerritory(false);
+
+        // Rebuild each parcel from its stored geometry (no re-fetch, no cap)
+        for (const sp of savedParcels) {
+          const geom = sp.geometry;
+          if (!geom || !geom.geometry) continue;
+
+          const geoType = geom.geometry.type;
+          const coords = geom.geometry.coordinates;
+          const props = (geom.properties || {}) as { parcelId?: string; address?: string; owner?: string; acreage?: number };
+
+          let parcelFeature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+          if (geoType === 'MultiPolygon') {
+            parcelFeature = {
+              type: 'Feature',
+              properties: { parcelId: props.parcelId, address: props.address, owner: props.owner, acreage: props.acreage },
+              geometry: { type: 'MultiPolygon', coordinates: coords as number[][][][] },
+            };
+          } else {
+            parcelFeature = {
+              type: 'Feature',
+              properties: { parcelId: props.parcelId, address: props.address, owner: props.owner, acreage: props.acreage },
+              geometry: { type: 'Polygon', coordinates: coords as number[][][] },
+            };
+          }
+
+          // Compute centroid from geometry for lat/lng
+          let cLat = 0, cLng = 0, count = 0;
+          const flatCoords = geoType === 'MultiPolygon'
+            ? (coords as number[][][][]).flat(2)
+            : (coords as number[][][]).flat(1);
+          for (const c of flatCoords) {
+            cLng += c[0]; cLat += c[1]; count++;
+          }
+          if (count > 0) { cLat /= count; cLng /= count; }
+
+          addParcelToTerritory({
+            id: props.parcelId || `sp_${cLat.toFixed(4)}_${cLng.toFixed(4)}`,
+            address: props.address || sp.address || `${cLat.toFixed(4)}, ${cLng.toFixed(4)}`,
+            lat: cLat,
+            lng: cLng,
+            acreage: props.acreage || sp.acres || 0,
+            polygon: parcelFeature,
+            owner: props.owner,
+          }, { bypassCap: true });
+
+          // Small delay between adds so React state settles
+          await new Promise(r => setTimeout(r, 150));
+        }
+
+        // Give React time to flush all setState calls, then merge and analyze
+        setTimeout(() => {
+          const loaded = territoryParcelsRef.current;
+          if (loaded.length === 0) {
+            console.warn('[SAVED-TERRITORY] No parcels loaded');
+            return;
+          }
+
+          const merged = loaded.length === 1 ? loaded[0].polygon : mergeParcelPolygons(loaded);
+          if (!merged) {
+            console.warn('[SAVED-TERRITORY] mergeParcelPolygons returned null');
+            return;
+          }
+
+          const bounds = getTerritoryBounds(loaded);
+          const centerLat = (bounds[1] + bounds[3]) / 2;
+          const centerLng = (bounds[0] + bounds[2]) / 2;
+          const totalAcres = String(loaded.reduce((s, p) => s + p.acreage, 0));
+
+          setParcelPolygon(merged);
+          setActiveLat(centerLat);
+          setActiveLng(centerLng);
+          setActiveAcreage(totalAcres);
+          setActiveAddress(property.name || 'My Territory');
+          activeLatRef.current = centerLat;
+          activeLngRef.current = centerLng;
+          activeAcreageRef.current = totalAcres;
+          prefetchedParcelRef.current = merged;
+          territoryFadeInPending.current = true;
+          console.error('[SAVED-TERRITORY] Auto-analyzing territory with', loaded.length, 'parcels');
+          setTimeout(() => runAnalysis(), 200);
+        }, 2000);
+      } catch (e) {
+        console.error('[SAVED-TERRITORY] Failed:', e);
+      }
+    };
+
+    loadSavedTerritory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, urlSavedPropertyId]);
 
   // ========== UPDATE TERRAIN FLOW MAP SOURCES ==========
   // v3.8.4 — debounce 300ms so rapid season/wind clicks coalesce into one setData pass

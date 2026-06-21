@@ -101,7 +101,11 @@ export default function PropertiesPage() {
   };
 
   const openInAnalyzer = (p: SavedParcel) => {
-    router.push(`/intel?lat=${p.centroidLat}&lng=${p.centroidLng}`);
+    if (p.type === 'territory') {
+      router.push(`/intel?savedPropertyId=${p.id}`);
+    } else {
+      router.push(`/intel?lat=${p.centroidLat}&lng=${p.centroidLng}`);
+    }
   };
 
   const hasAccess = (p: SavedParcel) => isPro || purchases[p.id];
