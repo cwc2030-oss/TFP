@@ -21,7 +21,7 @@ export default function Footer() {
               </div>
             </div>
             <p className="text-sm text-stone-400 max-w-xs">
-              Terrain-derived land intelligence for Missouri hunters, landowners, and brokers.
+              Terrain-derived land intelligence for Missouri hunters and landowners.
             </p>
           </div>
 
