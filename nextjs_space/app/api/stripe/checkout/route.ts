@@ -89,7 +89,9 @@ export async function POST(req: NextRequest) {
 
     // Server-side funnel event — guarantees one checkout_initiated per real attempt
     const productLabel = tier === 'promax' ? 'pro_max' : 'pro';
-    const priceLabel = tier === 'promax' ? (plan === 'annual' ? 199 : 24.99) : (plan === 'annual' ? 99 : 14.99);
+    // Labels must match the live Stripe prices (source of truth) and the /pricing page.
+    // Pro: $99/yr or $12/mo. Pro Max: $199/yr or $24/mo.
+    const priceLabel = tier === 'promax' ? (plan === 'annual' ? 199 : 24) : (plan === 'annual' ? 99 : 12);
     try {
       await prisma.funnelEvent.create({
         data: {
