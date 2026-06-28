@@ -52,7 +52,7 @@ export default function CountyMap({
   const lng = centroid.lng.toFixed(3);
   const lat = centroid.lat.toFixed(3);
   const markerSpec = `pin-l+059669(${lng},${lat})`;
-  const url = `https://cdn.prod.website-files.com/609ed46055e27a02ffc0749b/661948ed99dc192fe0ead6b9_6377ad5f7dad3909f056450d_hero%2520image%2520-%2520outdoors.png`;
+  const url = `https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/static/${markerSpec}/${lng},${lat},${zoom}/640x320@2x?access_token=${token}`;
   return (
     <div className="rounded-lg overflow-hidden border border-stone-800 bg-stone-900/60">
       <div className="relative aspect-[2/1] bg-stone-950">

@@ -38,6 +38,8 @@ export default function BrowseContent() {
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const fetchListings = useCallback(
     async (cursor?: string) => {
@@ -62,18 +64,30 @@ export default function BrowseContent() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchListings().then((data) => {
-      if (cancelled || !data) return;
-      setListings(data.listings);
-      setTotal(data.total);
-      setHasMore(data.hasMore);
-      setNextCursor(data.nextCursor);
-      setLoading(false);
-    });
+    setError(false);
+    fetchListings()
+      .then((data) => {
+        if (cancelled) return;
+        if (!data) {
+          setError(true);
+          setLoading(false);
+          return;
+        }
+        setListings(data.listings);
+        setTotal(data.total);
+        setHasMore(data.hasMore);
+        setNextCursor(data.nextCursor);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError(true);
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [fetchListings]);
+  }, [fetchListings, reloadKey]);
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
@@ -113,8 +127,27 @@ export default function BrowseContent() {
         </div>
       )}
 
+      {/* Error state */}
+      {!loading && error && (
+        <div className="text-center py-20">
+          <h3 className="text-stone-300 text-lg font-semibold mb-2">
+            Couldn&apos;t load listings
+          </h3>
+          <p className="text-stone-500 max-w-md mx-auto mb-4">
+            Something went wrong on our end. Please try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="inline-flex items-center gap-2 bg-stone-800 hover:bg-stone-700 text-stone-200 px-6 py-3 rounded-lg font-medium text-sm transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {!loading && listings.length === 0 && (
+      {!loading && !error && listings.length === 0 && (
         <div className="text-center py-20">
           <div className="mx-auto w-16 h-16 rounded-full bg-stone-900 flex items-center justify-center mb-4">
             <svg
