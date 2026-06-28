@@ -15,6 +15,13 @@ const REDIRECTS: Record<string, string> = {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Brokers page disabled (per Polsinelli). 307 = temporary, easy to revive.
+  if (pathname === '/brokers') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/';
+    return NextResponse.redirect(url, 307);
+  }
+
   // Legacy redirects first
   const destination = REDIRECTS[pathname];
   if (destination) {
