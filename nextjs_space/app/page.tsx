@@ -698,9 +698,6 @@ function CTASection() {
           <p className="text-emerald-100 text-xl mb-3">
             Let's find out what you're really looking at.
           </p>
-          <p className="text-emerald-200 mb-8">
-            One report. <span className="font-bold text-white text-2xl">$350.</span> Everything you need to know.
-          </p>
 
           <Link href="/map">
             <Button
