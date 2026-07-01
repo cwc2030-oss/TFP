@@ -20,6 +20,7 @@ export default function SignupPage() {
     password: "",
     company: "",
   });
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -30,13 +31,19 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!acceptTerms) {
+      setError("Please agree to the Terms of Service and Privacy Notice to continue.");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
       const response = await fetch("/api/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, acceptTerms }),
       });
 
       const data = await response.json();
@@ -164,9 +171,39 @@ export default function SignupPage() {
                 </div>
               </div>
 
+              <div className="flex items-start gap-2 pt-1">
+                <input
+                  id="acceptTerms"
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-stone-300 text-emerald-700 focus:ring-emerald-600"
+                  required
+                />
+                <label htmlFor="acceptTerms" className="text-sm text-stone-600 leading-snug">
+                  I agree to the{" "}
+                  <Link
+                    href="/terms"
+                    target="_blank"
+                    className="text-emerald-700 hover:text-emerald-800 font-medium underline underline-offset-2"
+                  >
+                    Terms of Service
+                  </Link>{" "}
+                  and{" "}
+                  <Link
+                    href="/privacy"
+                    target="_blank"
+                    className="text-emerald-700 hover:text-emerald-800 font-medium underline underline-offset-2"
+                  >
+                    Privacy Notice
+                  </Link>
+                  .
+                </label>
+              </div>
+
               <Button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || !acceptTerms}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white"
               >
                 {isLoading ? (

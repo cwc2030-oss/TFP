@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, name, company } = body;
+    const { email, password, name, company, acceptTerms } = body;
 
     if (!email || !password || !name) {
       return NextResponse.json(
@@ -15,6 +15,16 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    if (!acceptTerms) {
+      return NextResponse.json(
+        { error: "You must agree to the Terms of Service and Privacy Notice" },
+        { status: 400 }
+      );
+    }
+
+    const TERMS_VERSION = "v4-2026-06-29";
+    const PRIVACY_VERSION = "v1-2026-06-29";
 
     const existingUser = await prisma.user.findUnique({
       where: { email },
@@ -35,6 +45,9 @@ export async function POST(request: NextRequest) {
         passwordHash,
         name,
         company: company || null,
+        termsAcceptedAt: new Date(),
+        termsVersion: TERMS_VERSION,
+        privacyVersion: PRIVACY_VERSION,
       },
     });
 

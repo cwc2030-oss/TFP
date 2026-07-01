@@ -66,7 +66,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/privacy" className="text-sm hover:text-emerald-400 transition-colors">
-                  Privacy Policy
+                  Privacy Notice
                 </Link>
               </li>
             </ul>
