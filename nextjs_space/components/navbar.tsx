@@ -63,6 +63,9 @@ export default function Navbar() {
             <NavLink href="/flow-score" active={pathname === "/flow-score"}>
               Flow Score
             </NavLink>
+            <NavLink href="/deer-flow" active={pathname === "/deer-flow"}>
+              Deer Flow
+            </NavLink>
             <NavLink href="/marketplace-coming-soon" active={pathname === "/marketplace-coming-soon"}>
               Marketplace
             </NavLink>
@@ -156,6 +159,9 @@ export default function Navbar() {
               </MobileNavLink>
               <MobileNavLink href="/flow-score" onClick={() => setIsMenuOpen(false)}>
                 Flow Score
+              </MobileNavLink>
+              <MobileNavLink href="/deer-flow" onClick={() => setIsMenuOpen(false)}>
+                Deer Flow
               </MobileNavLink>
               <MobileNavLink href="/marketplace-coming-soon" onClick={() => setIsMenuOpen(false)}>
                 Marketplace

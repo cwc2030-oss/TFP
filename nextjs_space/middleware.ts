@@ -37,8 +37,6 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url, 302);
   }
 
-  const response = NextResponse.next();
-
   // Determine the serving host from headers
   const host = (
     request.headers.get('x-forwarded-host') ||
@@ -46,11 +44,34 @@ export function middleware(request: NextRequest) {
     ''
   ).split(':')[0].toLowerCase();
 
-  // Non-canonical hosts: tell search engines to ignore these mirrors.
-  // Human visitors still see the site normally (no redirect), but crawlers
-  // won't index the .abacusai.app mirrors, preventing duplicate-content
-  // dilution of the canonical terrafirma.partners domain.
-  if (host && host !== CANONICAL_HOST) {
+  // ── Hard 301 canonicalization ─────────────────────────────────────────────
+  // Permanently redirect every non-canonical PRODUCTION mirror
+  // (*.abacusai.app) to terrafirma.partners so all link equity and traffic
+  // consolidate on the canonical domain.
+  //
+  // IMPORTANT protections (do NOT redirect these):
+  //   - the canonical host itself
+  //   - the in-app preview environment (*.preview.abacusai.app) — redirecting
+  //     it would break the live editor/iframe preview
+  //   - localhost / 127.0.0.1 (local dev)
+  const isCanonical = host === CANONICAL_HOST;
+  const isPreview = host.includes('.preview.');
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.endsWith('.local');
+  const isProdMirror = host.endsWith('.abacusai.app') && !isPreview;
+
+  if (host && !isCanonical && !isPreview && !isLocal && isProdMirror) {
+    const url = request.nextUrl.clone();
+    url.protocol = 'https:';
+    url.host = CANONICAL_HOST;
+    url.port = '';
+    return NextResponse.redirect(url, 301);
+  }
+
+  const response = NextResponse.next();
+
+  // Any remaining non-canonical host (e.g. preview) should still never be
+  // indexed by search engines.
+  if (host && !isCanonical) {
     response.headers.set('X-Robots-Tag', 'noindex, nofollow');
   }
 

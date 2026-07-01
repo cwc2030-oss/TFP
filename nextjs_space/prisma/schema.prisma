@@ -480,3 +480,28 @@ model LaunchWaitlist {
 
   @@index([email])
 }
+// ─── County Deer Flow Rating (aggregated flow-by-area) ─────────────────────
+// Precomputed county-level roll-up of per-parcel Terrain Brain flow signals.
+// Powers the public "flow-by-area" view and the county flow-alerts signup.
+//
+// Source: TerrainAnalysisCache (per-parcel flow) joined to ParcelCache
+// (county/state by lat/lng). Recomputed by scripts/compute-county-flow.ts.
+//
+// OPSEC: county is the FINEST grain stored here — never any lat/lng/parcel id.
+model CountyFlowRating {
+  id             String   @id @default(cuid())
+  state          String   // 2-letter, e.g. "MO"
+  county         String   // normalized Title Case, e.g. "Johnson"
+  parcelCount    Int      @default(0)   // # analyzed parcels backing this score
+  avgFlowIndex   Int      @default(0)   // 0-100 Deer Flow Index (mean of parcels)
+  grade          String   @default("—") // A+ … C-
+  avgFunnelCount Float    @default(0)
+  avgBedAcres    Float    @default(0)
+  avgTopStand    Float    @default(0)   // avg top intercept/stand score
+  highFlowCount  Int      @default(0)   // # parcels with flow index >= 75
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@unique([state, county])
+  @@index([state, avgFlowIndex])
+}
