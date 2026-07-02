@@ -2174,12 +2174,13 @@ function DeerIntelContent() {
   // Admin accounts are treated as Pro Max automatically, regardless of subscriptionStatus.
   const isPro = subStatus === 'pro' || subStatus === 'promax' || role === 'admin';
   const isProMax = subStatus === 'promax' || role === 'admin';
-  // Guard against auth hydration race: default to the Pro/ProMax cap (25) until
+  // Guard against auth hydration race: default to the highest cap (100) until
   // session confirms the actual tier.  This prevents a stale 'free' default from
   // blocking Pro/ProMax users mid-session with cap=1.
-  // Pro and Pro Max both get 25 parcels per territory (matches pricing page:
-  // Pro = "Up to 25 parcels").  Free/unauthenticated get 1.
-  const TERRITORY_PARCEL_CAP = !sessionLoaded ? 25 : isProMax ? 25 : isPro ? 25 : 1;
+  // Pro = 25 parcels (matches pricing page "Up to 25 parcels").
+  // Pro Max = 100 — a fair-use ceiling behind the "Unlimited parcels" copy; no
+  // realistic territory approaches 100 parcels.  Free/unauthenticated get 1.
+  const TERRITORY_PARCEL_CAP = !sessionLoaded ? 100 : isProMax ? 100 : isPro ? 25 : 1;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const [showScoreCard, setShowScoreCard] = useState(false);

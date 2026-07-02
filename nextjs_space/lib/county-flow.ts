@@ -169,3 +169,36 @@ export function finalizeCounty(a: CountyAccumulator, priorMean: number) {
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
+
+/* --------------------------------------------------------------------------
+ * Display-layer tier labels (Green / Blue / Black) for the county pages.
+ * These map the numeric adjustedFlowIndex (0–100) onto the same visual
+ * language as the map's flow tiering. They DO NOT touch the ranking engine,
+ * gradeFromScore, or adjustedFlowIndex — purely a presentation helper.
+ * Cutoffs are provisional and easy to tweak.
+ * ------------------------------------------------------------------------ */
+export type FlowBand = 'green' | 'blue' | 'black';
+
+export interface FlowTier {
+  tier: string;   // one-word label
+  band: FlowBand; // color family
+  diamonds: number; // black-diamond count (ski metaphor); 0 for blue/green
+  min: number;    // lower bound of the band (for filter floors)
+}
+
+export function flowTier(index: number): FlowTier {
+  if (index >= 90) return { tier: 'Elite', band: 'black', diamonds: 3, min: 90 };
+  if (index >= 80) return { tier: 'Premium', band: 'black', diamonds: 2, min: 80 };
+  if (index >= 70) return { tier: 'Prime', band: 'black', diamonds: 1, min: 70 };
+  if (index >= 60) return { tier: 'Strong', band: 'blue', diamonds: 0, min: 60 };
+  if (index >= 50) return { tier: 'Solid', band: 'blue', diamonds: 0, min: 50 };
+  if (index >= 40) return { tier: 'Developing', band: 'green', diamonds: 0, min: 40 };
+  return { tier: 'Marginal', band: 'green', diamonds: 0, min: 0 };
+}
+
+// Palette borrowed from the map's FLOW_TIER_COLORS so the two views agree.
+export const FLOW_BAND_STYLE: Record<FlowBand, { bg: string; fg: string; ring: string }> = {
+  green: { bg: '#2D6A4F', fg: '#ffffff', ring: '#B7D9C6' },
+  blue:  { bg: '#3B6FA0', fg: '#ffffff', ring: '#B9CFE4' },
+  black: { bg: '#1A1A1A', fg: '#F5E6B8', ring: '#8b6b1f' },
+};

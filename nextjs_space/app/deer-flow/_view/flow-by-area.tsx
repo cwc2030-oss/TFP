@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { MapPin, Activity, Bell, CheckCircle, Search, TrendingUp, X, Info } from 'lucide-react';
-import { flowGradeColor } from '@/lib/county-flow';
+import { flowTier, FLOW_BAND_STYLE } from '@/lib/county-flow';
 
 export interface CountyRow {
   state: string;
@@ -18,14 +18,15 @@ export interface CountyRow {
   highFlowCount: number;
 }
 
-// Grade floors, high to low. We only render the ones that actually have
+// Tier floors, high to low. We only render the ones that actually have
 // matching counties so the filter never shows an empty preset.
 const GRADE_FLOORS: { label: string; min: number }[] = [
-  { label: 'A-', min: 80 },
-  { label: 'B', min: 70 },
-  { label: 'B-', min: 65 },
-  { label: 'C+', min: 60 },
-  { label: 'C', min: 55 },
+  { label: 'Elite', min: 90 },
+  { label: 'Premium', min: 80 },
+  { label: 'Prime', min: 70 },
+  { label: 'Strong', min: 60 },
+  { label: 'Solid', min: 50 },
+  { label: 'Developing', min: 40 },
 ];
 type SortKey = 'flow' | 'highflow';
 
@@ -112,7 +113,7 @@ export default function FlowByArea({
           </div>
           <div>
             <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wide mb-1.5">
-              Minimum flow grade
+              Minimum tier
             </label>
             <div className="flex gap-1.5">
               {availableGrades.map((g) => (
@@ -195,24 +196,37 @@ export default function FlowByArea({
                     </span>
                   )}
                 </div>
-                <div
-                  className={`flex flex-col items-center justify-center rounded-lg border px-3 py-2 ${flowGradeColor(
-                    c.grade,
-                  )}`}
-                >
-                  <span className="text-2xl font-black leading-none">{c.grade}</span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wide mt-0.5">
-                    {c.adjustedFlowIndex}/100
-                  </span>
-                </div>
+                {(() => {
+                  const t = flowTier(c.adjustedFlowIndex);
+                  const bs = FLOW_BAND_STYLE[t.band];
+                  return (
+                    <div
+                      className="flex flex-col items-center justify-center rounded-lg border px-3 py-2 min-w-[88px]"
+                      style={{ backgroundColor: bs.bg, color: bs.fg, borderColor: bs.ring }}
+                    >
+                      {t.diamonds > 0 && (
+                        <span className="text-[11px] leading-none tracking-[0.15em] mb-0.5">
+                          {'◆'.repeat(t.diamonds)}
+                        </span>
+                      )}
+                      <span className="text-base font-black leading-none">{t.tier}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide mt-0.5 opacity-90">
+                        {c.adjustedFlowIndex}/100
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Flow meter */}
               <div className="mt-4">
                 <div className="h-2 w-full rounded-full bg-stone-100 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-400 via-emerald-400 to-emerald-600"
-                    style={{ width: `${Math.max(4, c.adjustedFlowIndex)}%` }}
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.max(4, c.adjustedFlowIndex)}%`,
+                      backgroundColor: FLOW_BAND_STYLE[flowTier(c.adjustedFlowIndex).band].bg,
+                    }}
                   />
                 </div>
               </div>

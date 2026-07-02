@@ -115,7 +115,8 @@ export default async function DeerFlowPage() {
           <p className="text-stone-600 text-sm leading-relaxed">
             Each analyzed parcel earns a 0–100 Deer Flow Index — 50% terrain/huntability score,
             20% travel-corridor density, 20% funnel density, and 10% intercept-zone density. We roll
-            those parcels up to a county grade (A+ to C−). To keep the leaderboard honest, counties
+            those parcels up to a county tier on our Green / Blue / Black scale — Elite and Premium counties
+            earn the black-diamond mark, while the 0–100 index stays visible on every card. To keep the leaderboard honest, counties
             with only a handful of analyzed parcels are pulled toward the statewide average and
             flagged <span className="font-semibold text-stone-700">Limited data</span> — so a county
             can&apos;t top the board on the strength of a single parcel. The more ground we&apos;ve
