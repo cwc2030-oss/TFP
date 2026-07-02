@@ -493,8 +493,10 @@ model CountyFlowRating {
   state          String   // 2-letter, e.g. "MO"
   county         String   // normalized Title Case, e.g. "Johnson"
   parcelCount    Int      @default(0)   // # analyzed parcels backing this score
-  avgFlowIndex   Int      @default(0)   // 0-100 Deer Flow Index (mean of parcels)
-  grade          String   @default("—") // A+ … C-
+  avgFlowIndex   Int      @default(0)   // 0-100 Deer Flow Index (raw mean of parcels)
+  adjustedFlowIndex Int   @default(0)   // shrinkage-adjusted score (ranking + grade)
+  limitedData    Boolean  @default(false) // true when parcelCount below reliability floor
+  grade          String   @default("—") // A+ ... C-
   avgFunnelCount Float    @default(0)
   avgBedAcres    Float    @default(0)
   avgTopStand    Float    @default(0)   // avg top intercept/stand score
@@ -504,4 +506,6 @@ model CountyFlowRating {
 
   @@unique([state, county])
   @@index([state, avgFlowIndex])
+  @@index([adjustedFlowIndex])
+  @@index([highFlowCount])
 }

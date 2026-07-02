@@ -58,6 +58,7 @@ async function main() {
   const acc = new Map<string, CountyAccumulator>();
   let matched = 0;
   let unmatched = 0;
+  let globalFlowSum = 0; // for the shrinkage prior (global per-parcel mean)
 
   for (const t of tacRows) {
     const loc = findCounty(t.lat, t.lng);
@@ -73,6 +74,7 @@ async function main() {
     }
     const flow = parcelFlowIndex(signal);
     matched++;
+    globalFlowSum += flow;
     const key = `${loc.state}|${loc.county}`;
     let a = acc.get(key);
     if (!a) {
@@ -96,27 +98,34 @@ async function main() {
     if (flow >= 75) a.highFlow += 1;
   }
 
-  console.log(`[county-flow] parcels matched=${matched} unmatched=${unmatched} counties=${acc.size}`);
+  const priorMean = matched ? globalFlowSum / matched : 0;
+  console.log(
+    `[county-flow] parcels matched=${matched} unmatched=${unmatched} counties=${acc.size} priorMean=${priorMean.toFixed(1)}`,
+  );
+
+  // CountyFlowRating is fully derived/recomputable aggregate data (no user data).
+  // Clear it first so renamed counties (e.g. slug "St-francois" -> "St. Francois")
+  // don't leave stale duplicate rows behind.
+  const cleared = await prisma.countyFlowRating.deleteMany({});
+  console.log(`[county-flow] cleared ${cleared.count} stale rows.`);
 
   let written = 0;
   for (const a of acc.values()) {
-    const f = finalizeCounty(a);
-    await prisma.countyFlowRating.upsert({
-      where: { state_county: { state: f.state, county: f.county } },
-      create: f,
-      update: f,
-    });
+    const f = finalizeCounty(a, priorMean);
+    await prisma.countyFlowRating.create({ data: f });
     written++;
   }
-  console.log(`[county-flow] upserted ${written} county rows.`);
+  console.log(`[county-flow] wrote ${written} county rows.`);
 
   const top = await prisma.countyFlowRating.findMany({
-    orderBy: { avgFlowIndex: 'desc' },
-    take: 10,
+    orderBy: { adjustedFlowIndex: 'desc' },
+    take: 12,
   });
-  console.log('[county-flow] top counties:');
+  console.log('[county-flow] top counties (by adjusted score):');
   for (const c of top) {
-    console.log(`  ${c.county}, ${c.state}: ${c.avgFlowIndex} (${c.grade}) · ${c.parcelCount} parcels · ${c.highFlowCount} high-flow`);
+    console.log(
+      `  ${c.county}, ${c.state}: adj ${c.adjustedFlowIndex} (${c.grade}) raw ${c.avgFlowIndex} · ${c.parcelCount} parcels · ${c.highFlowCount} high-flow${c.limitedData ? ' · LIMITED' : ''}`,
+    );
   }
 
   await prisma.$disconnect();

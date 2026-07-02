@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { MapPin, Activity, Bell, CheckCircle, Search, TrendingUp, X } from 'lucide-react';
+import { MapPin, Activity, Bell, CheckCircle, Search, TrendingUp, X, Info } from 'lucide-react';
 import { flowGradeColor } from '@/lib/county-flow';
 
 export interface CountyRow {
@@ -9,6 +9,8 @@ export interface CountyRow {
   county: string;
   parcelCount: number;
   avgFlowIndex: number;
+  adjustedFlowIndex: number;
+  limitedData: boolean;
   grade: string;
   avgFunnelCount: number;
   avgBedAcres: number;
@@ -16,7 +18,16 @@ export interface CountyRow {
   highFlowCount: number;
 }
 
-const GRADE_FILTERS = ['All', 'A-', 'B', 'B-', 'C+'] as const;
+// Grade floors, high to low. We only render the ones that actually have
+// matching counties so the filter never shows an empty preset.
+const GRADE_FLOORS: { label: string; min: number }[] = [
+  { label: 'A-', min: 80 },
+  { label: 'B', min: 70 },
+  { label: 'B-', min: 65 },
+  { label: 'C+', min: 60 },
+  { label: 'C', min: 55 },
+];
+type SortKey = 'flow' | 'highflow';
 
 export default function FlowByArea({
   counties,
@@ -27,27 +38,41 @@ export default function FlowByArea({
 }) {
   const [stateFilter, setStateFilter] = useState<string>('All');
   const [gradeFilter, setGradeFilter] = useState<string>('All');
+  const [sortBy, setSortBy] = useState<SortKey>('flow');
   const [query, setQuery] = useState('');
   const [alertTarget, setAlertTarget] = useState<CountyRow | null>(null);
 
-  const gradeFloor: Record<string, number> = {
-    'A-': 80,
-    B: 70,
-    'B-': 65,
-    'C+': 60,
-  };
+  const gradeFloor: Record<string, number> = Object.fromEntries(
+    GRADE_FLOORS.map((g) => [g.label, g.min]),
+  );
+
+  // Only offer grade floors that at least one county actually reaches.
+  const availableGrades = useMemo(() => {
+    const maxAdj = counties.reduce((m, c) => Math.max(m, c.adjustedFlowIndex), 0);
+    return ['All', ...GRADE_FLOORS.filter((g) => maxAdj >= g.min).map((g) => g.label)];
+  }, [counties]);
 
   const filtered = useMemo(() => {
-    return counties.filter((c) => {
+    const rows = counties.filter((c) => {
       if (stateFilter !== 'All' && c.state !== stateFilter) return false;
-      if (gradeFilter !== 'All' && c.avgFlowIndex < (gradeFloor[gradeFilter] ?? 0)) return false;
+      if (gradeFilter !== 'All' && c.adjustedFlowIndex < (gradeFloor[gradeFilter] ?? 0)) return false;
       if (query.trim()) {
         const q = query.trim().toLowerCase();
         if (!`${c.county} ${c.state}`.toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [counties, stateFilter, gradeFilter, query]);
+    rows.sort((a, b) => {
+      if (sortBy === 'highflow') {
+        if (b.highFlowCount !== a.highFlowCount) return b.highFlowCount - a.highFlowCount;
+        return b.adjustedFlowIndex - a.adjustedFlowIndex;
+      }
+      if (b.adjustedFlowIndex !== a.adjustedFlowIndex)
+        return b.adjustedFlowIndex - a.adjustedFlowIndex;
+      return b.parcelCount - a.parcelCount;
+    });
+    return rows;
+  }, [counties, stateFilter, gradeFilter, query, sortBy]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -90,7 +115,7 @@ export default function FlowByArea({
               Minimum flow grade
             </label>
             <div className="flex gap-1.5">
-              {GRADE_FILTERS.map((g) => (
+              {availableGrades.map((g) => (
                 <button
                   key={g}
                   onClick={() => setGradeFilter(g)}
@@ -106,10 +131,37 @@ export default function FlowByArea({
             </div>
           </div>
         </div>
-        <p className="mt-3 text-sm text-stone-500">
-          {filtered.length} {filtered.length === 1 ? 'county' : 'counties'} rated · ranked by Deer
-          Flow Index
-        </p>
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p className="text-sm text-stone-500">
+            {filtered.length} {filtered.length === 1 ? 'county' : 'counties'} rated
+          </p>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-stone-500 uppercase tracking-wide mr-1">
+              Sort by
+            </span>
+            <button
+              onClick={() => setSortBy('flow')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition ${
+                sortBy === 'flow'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-stone-600 border-stone-300 hover:border-emerald-400'
+              }`}
+            >
+              Flow Index
+            </button>
+            <button
+              onClick={() => setSortBy('highflow')}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-semibold border transition ${
+                sortBy === 'highflow'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-stone-600 border-stone-300 hover:border-emerald-400'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              High-flow parcels
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* County cards */}
@@ -136,6 +188,12 @@ export default function FlowByArea({
                   <h3 className="text-xl font-bold text-stone-900 truncate">
                     {c.county} County
                   </h3>
+                  {c.limitedData && (
+                    <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-stone-100 border border-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-500 uppercase tracking-wide">
+                      <Info className="w-3 h-3" />
+                      Limited data · {c.parcelCount} {c.parcelCount === 1 ? 'parcel' : 'parcels'}
+                    </span>
+                  )}
                 </div>
                 <div
                   className={`flex flex-col items-center justify-center rounded-lg border px-3 py-2 ${flowGradeColor(
@@ -144,7 +202,7 @@ export default function FlowByArea({
                 >
                   <span className="text-2xl font-black leading-none">{c.grade}</span>
                   <span className="text-[10px] font-semibold uppercase tracking-wide mt-0.5">
-                    {c.avgFlowIndex}/100
+                    {c.adjustedFlowIndex}/100
                   </span>
                 </div>
               </div>
@@ -154,7 +212,7 @@ export default function FlowByArea({
                 <div className="h-2 w-full rounded-full bg-stone-100 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-amber-400 via-emerald-400 to-emerald-600"
-                    style={{ width: `${Math.max(4, c.avgFlowIndex)}%` }}
+                    style={{ width: `${Math.max(4, c.adjustedFlowIndex)}%` }}
                   />
                 </div>
               </div>

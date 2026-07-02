@@ -68,18 +68,38 @@ function featureLen(x: any): number {
   return 0;
 }
 
-/** Normalize a raw county string (e.g. "johnson", "ST. LOUIS") to Title Case. */
+/**
+ * Normalize a raw county string to a clean display name.
+ *   "johnson"        -> "Johnson"
+ *   "st-francois"    -> "St. Francois"
+ *   "ste-genevieve"  -> "Ste. Genevieve"
+ *   "mcdonald"       -> "McDonald"
+ *   "ST. LOUIS"      -> "St. Louis"
+ * Splits on spaces AND hyphens (source data often arrives slugified).
+ */
 export function normalizeCounty(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const cleaned = raw
-    .replace(/\bcounty\b/i, '')
-    .trim()
-    .toLowerCase();
+  const cleaned = raw.replace(/\bcounty\b/i, '').trim();
   if (!cleaned) return null;
-  return cleaned
-    .split(/\s+/)
-    .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(' ');
+  const tokens = cleaned.split(/[\s\-]+/).filter(Boolean);
+  if (!tokens.length) return null;
+  return tokens.map((t) => titleToken(t.toLowerCase())).join(' ');
+}
+
+function cap(w: string): string {
+  return w.length ? w[0].toUpperCase() + w.slice(1) : w;
+}
+
+function titleToken(t: string): string {
+  // Strip any stray trailing period so "st." and "st" collapse together.
+  const bare = t.replace(/\.$/, '');
+  if (bare === 'st') return 'St.';
+  if (bare === 'ste') return 'Ste.';
+  // Mc / Mac Scottish prefixes: "mcdonald" -> "McDonald".
+  if (bare.startsWith('mc') && bare.length > 2) return 'Mc' + cap(bare.slice(2));
+  // O' names: "o'brien" -> "O'Brien".
+  if (bare.startsWith("o'") && bare.length > 2) return "O'" + cap(bare.slice(2));
+  return cap(bare);
 }
 
 export function flowGrade(avgFlowIndex: number): string {
@@ -106,14 +126,39 @@ export interface CountyAccumulator {
   highFlow: number;
 }
 
-export function finalizeCounty(a: CountyAccumulator) {
+/**
+ * Shrinkage strength (pseudo-parcels). A county's score is pulled toward the
+ * global per-parcel mean as if it also had K parcels sitting exactly at the
+ * mean. With K=8, a 1-parcel county lands near the mean (untrustworthy), while
+ * a 20+ parcel county keeps most of its earned score. This is what stops a
+ * single-parcel county from topping the leaderboard, without flattening the
+ * counties that genuinely have a lot of analyzed ground behind them.
+ */
+export const SHRINKAGE_K = 8;
+
+/** Counties backed by fewer than this many analyzed parcels get a "limited data" flag. */
+export const LIMITED_DATA_FLOOR = 5;
+
+/**
+ * Finalize a county row.
+ * @param a       accumulated per-parcel sums for this county
+ * @param priorMean  global per-parcel mean flow index (the shrinkage target)
+ */
+export function finalizeCounty(a: CountyAccumulator, priorMean: number) {
   const avgFlowIndex = a.count ? Math.round(a.flowSum / a.count) : 0;
+  // Empirical-Bayes shrinkage toward the global mean.
+  const adjustedFlowIndex = Math.round(
+    (a.flowSum + SHRINKAGE_K * priorMean) / (a.count + SHRINKAGE_K),
+  );
   return {
     state: a.state,
     county: a.county,
     parcelCount: a.count,
     avgFlowIndex,
-    grade: flowGrade(avgFlowIndex),
+    adjustedFlowIndex,
+    limitedData: a.count < LIMITED_DATA_FLOOR,
+    // Grade + ranking follow the trustworthy adjusted score, not the raw mean.
+    grade: flowGrade(adjustedFlowIndex),
     avgFunnelCount: a.count ? round1(a.funnelSum / a.count) : 0,
     avgBedAcres: a.count ? round1(a.bedSum / a.count) : 0,
     avgTopStand: a.count ? round1(a.topSum / a.count) : 0,

@@ -25,13 +25,15 @@ export const metadata: Metadata = {
 async function getData(): Promise<{ counties: CountyRow[]; states: string[] }> {
   try {
     const rows = await prisma.countyFlowRating.findMany({
-      orderBy: [{ avgFlowIndex: 'desc' }, { parcelCount: 'desc' }],
+      orderBy: [{ adjustedFlowIndex: 'desc' }, { parcelCount: 'desc' }],
       take: 300,
       select: {
         state: true,
         county: true,
         parcelCount: true,
         avgFlowIndex: true,
+        adjustedFlowIndex: true,
+        limitedData: true,
         grade: true,
         avgFunnelCount: true,
         avgBedAcres: true,
@@ -112,10 +114,13 @@ export default async function DeerFlowPage() {
           <h3 className="text-lg font-bold text-stone-900 mb-2">How the Deer Flow Index works</h3>
           <p className="text-stone-600 text-sm leading-relaxed">
             Each analyzed parcel earns a 0–100 Deer Flow Index — 50% terrain/huntability score,
-            20% travel-corridor density, 20% funnel density, and 10% intercept-zone density. We
-            average those parcels up to a county grade (A+ to C−). Grades reflect the ground we&apos;ve
-            actually run through Terrain Brain, so counties with more analyzed parcels carry more
-            weight. County is the finest location we ever publish — exact parcels stay private.
+            20% travel-corridor density, 20% funnel density, and 10% intercept-zone density. We roll
+            those parcels up to a county grade (A+ to C−). To keep the leaderboard honest, counties
+            with only a handful of analyzed parcels are pulled toward the statewide average and
+            flagged <span className="font-semibold text-stone-700">Limited data</span> — so a county
+            can&apos;t top the board on the strength of a single parcel. The more ground we&apos;ve
+            actually run through Terrain Brain in a county, the more its own score stands on its own.
+            County is the finest location we ever publish — exact parcels stay private.
           </p>
         </div>
       </section>
