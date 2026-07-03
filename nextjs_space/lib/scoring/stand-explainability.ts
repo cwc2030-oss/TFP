@@ -358,3 +358,157 @@ export function renderKeyIndicatorsHTML(indicators: KeyIndicator[]): string {
     }).join('') +
   `</div>`;
 }
+
+// ========== PER-STAND TACTICAL NARRATIVE (V4 Step 10) ==========
+// Replaces the old anchor-keyed canned template. Every sentence is composed
+// from THIS stand's real data (corridor distance, wind alignment for the
+// current wind, interior TPI, and the scoring input vector) so that no two
+// stands — even two that share an anchor type — read identically.
+
+export interface StandNarrativeCtx {
+  weapon: 'bow' | 'gun';        // effective weapon this narrative is written for
+  anchor?: string;             // anchorFeature.type
+  isSidehillBench?: boolean;
+  season: 'early' | 'rut' | 'late';
+  windDirection: string;       // current wind, e.g. 'NW'
+  windAligned: boolean;        // current wind is in this stand's windOk set
+  bearingLabel?: string;       // compass label toward the open field side
+}
+
+export function buildStandNarrative(
+  inputs: StandInputs,
+  props: StandPointProperties,
+  _alignment: StandScore,
+  ctx: StandNarrativeCtx,
+  resilience?: { score: number; label: string }
+): string {
+  const dist = props.distToCorridorMeters ?? 999;
+  const distR = Math.round(dist);
+  const bearing = ctx.bearingLabel || 'adjacent';
+  const tpi = props.tpiLandscape ?? 0;
+  const sentences: string[] = [];
+
+  // ── 1. Tactical opener — hunting voice, keyed on weapon + this stand's feature.
+  //    Each feature carries 2-3 phrasings; a per-stand seed (score + corridor
+  //    distance) picks one deterministically so two same-type stands don't open
+  //    with the identical sentence. ──
+  const seed = Math.round(
+    (_alignment?.score ?? 0) * 2 +
+    distR +
+    tpi * 7 +
+    inputs.movement * 31 +
+    inputs.wind_overlap * 53 +
+    inputs.intrusion * 17
+  );
+  const pick = (arr: string[]) => arr[Math.abs(seed) % arr.length];
+  let opener: string;
+  if (ctx.weapon === 'bow') {
+    if (ctx.isSidehillBench) {
+      opener = pick([
+        `Sidehill bench — a flat shelf caught between the ridge and the draw. Hang 20 ft in the biggest oak on the downhill edge; deer traversing the slope thread this shelf to keep from skylining.`,
+        `This is a bench set — deer working the sidehill hold to this flat shelf instead of topping out. Get 20 ft up on the downhill lip and let them walk the contour to you.`,
+      ]);
+    } else if (ctx.anchor === 'saddle') {
+      opener = pick([
+        `Set 20–25 ft on the downwind side of this saddle — the low gap gathers every cruising deer into one gate. Slip in from the low side and never cross the spine.`,
+        `Saddle stand — the dip in the ridge is the path of least resistance and deer pour through it. Hang the downwind shoulder and keep your approach below the crest.`,
+        `Hunt the low side of this saddle. Anything crossing the ridge necks down through the gap here; a downwind hang puts them in your lap without pegging you.`,
+      ]);
+    } else if (ctx.anchor === 'funnel') {
+      opener = pick([
+        `Draw intersection where trails knot together. Get in tight; morning thermal lift carries your scent up and off the travel lane below.`,
+        `This funnel squeezes several trails into one lane through the draw. Hang close and let the first-light thermal pull your wind uphill and away.`,
+      ]);
+    } else if (ctx.anchor === 'ridge') {
+      opener = pick([
+        `Hang on the downwind lip of this ridge finger. Deer sliding off the bench have one lane past your tree — a close, quartering-away look.`,
+        `Ridge-finger set — deer spilling off the high ground follow the spine down and thread right past this point. Hang the leeward edge for a tight shot.`,
+        `Get up on the downwind side of this spine. The finger points deer straight through the shooting lane as they drop off the top — expect them close.`,
+      ]);
+    } else if (ctx.anchor === 'convergence') {
+      opener = pick([
+        `Several travel lanes braid together here; hang where the timber thickens and deer commit to a single line inside bow range. Scout two exit routes before season.`,
+        `Convergence stand — multiple trails collapse into one at this knot. Hang in the heavier cover so deer settle onto a single lane within range.`,
+      ]);
+    } else {
+      opener = pick([
+        `Timber-corridor set — hang 20 ft in the largest tree on the downwind edge of the trail and let deer pass close.`,
+        `This is a travel-corridor hang. Pick the biggest tree on the downwind side of the trail and stay high; deer file through within easy range.`,
+      ]);
+    }
+  } else {
+    if (ctx.isSidehillBench) {
+      opener = pick([
+        `Sidehill bench with a long broadside lane across the slope. Sit the uphill edge with the wind quartering downhill and glass the contour at first light.`,
+        `Bench set for the rifle — deer working the contour give you a steady broadside across the slope. Take the uphill edge and glass the shelf early.`,
+      ]);
+    } else if (ctx.anchor === 'inside_corner') {
+      opener = pick([
+        `Inside corner of the ${bearing} field — deer stepping out at last light pour through this pinch. A long poke to the far timber edge; park on the nearest lane and walk in quiet.`,
+        `Play the inside corner on the ${bearing} field. Deer edging out to feed cut this notch first; you've got the whole opening to the far timber for a shot.`,
+        `This is the ${bearing}-field inside corner — the last-light staging spot. Set where the two edges meet and cover the open ground out to the tree line.`,
+      ]);
+    } else if (ctx.anchor === 'field_edge') {
+      opener = pick([
+        `Timber edge over the ${bearing} opening. Deer pushed off neighboring ground cross this gap early and late — be settled well before shooting light.`,
+        `Field-edge seat on the ${bearing} opening. Watch the whole gap; deer bumped from adjacent ground spill across it at first and last light.`,
+      ]);
+    } else if (ctx.anchor === 'field_saddle_combo') {
+      opener = pick([
+        `Saddle riding just above the field edge — a long shot into the open or a close one back in the timber, whichever the deer hands you.`,
+        `This combo sits where a saddle drops onto the field edge. You can reach across the opening or catch one tight in the timber — cover both.`,
+      ]);
+    } else {
+      opener = pick([
+        `Field-edge set with open shooting lanes. Sit the timber line with the field downwind; first light and last light are the movement windows.`,
+        `Open-country stand along the field edge. Keep the field to your downwind, settle into the tree line, and hunt the first and last light windows.`,
+      ]);
+    }
+  }
+  sentences.push(opener);
+  // ── 2. Corridor-distance read (a real per-stand number) ──
+  if (dist <= 40) {
+    sentences.push(`You're right on the primary trail — about ${distR} m — so encounters come fast; stay drawn-ready.`);
+  } else if (dist <= 120) {
+    sentences.push(`The main corridor runs roughly ${distR} m off, close enough that deer filter into range as they work it.`);
+  } else if (dist < 900) {
+    sentences.push(`Heaviest travel sits about ${distR} m out — treat this as a cutoff and let deer commit before you shift.`);
+  }
+
+  // ── 3. Wind read for the ACTUAL current wind ──
+  if (ctx.windAligned) {
+    sentences.push(`Today's ${ctx.windDirection} wind runs clean off this stand — your scent drifts away from where deer travel.`);
+  } else {
+    sentences.push(`Mind the wind: a ${ctx.windDirection} today edges toward the deer's side, so lean on the morning thermal and keep motion to nothing.`);
+  }
+
+  // ── 4. Interior / elevation context from real TPI ──
+  if (tpi < -2) {
+    sentences.push(`The interior, low-lying position hides your approach and settles scent toward the ground.`);
+  } else if (tpi > 3) {
+    sentences.push(`The elevated seat buys visibility but costs cover — move only when every head is down.`);
+  }
+
+  // ── 5. What earns the score — strongest factors for THIS stand's input vector ──
+  const factors: { key: string; pos: string; neg: string; v: number }[] = [
+    { key: 'movement', pos: 'sits tight to deer movement',        neg: 'sits a step off the main movement',            v: inputs.movement },
+    { key: 'wind',     pos: 'holds a clean downwind edge',        neg: 'lives with fickle wind',                       v: 1 - inputs.wind_overlap },
+    { key: 'intrusion',pos: 'stays off the pressure map',          neg: 'carries some pressure exposure',               v: 1 - inputs.intrusion },
+    { key: 'season',   pos: 'fits the current season pattern',     neg: `runs a touch out of phase for ${ctx.season === 'early' ? 'early season' : ctx.season === 'rut' ? 'the rut' : 'late season'}`, v: inputs.season_fit },
+  ];
+  const strong = factors.filter(f => f.v >= 0.6).sort((a, b) => b.v - a.v);
+  const weak = factors.filter(f => f.v < 0.32).sort((a, b) => a.v - b.v);
+  if (strong.length >= 2) {
+    sentences.push(`It earns its rank because it ${strong[0].pos} and ${strong[1].pos}.`);
+  } else if (strong.length === 1) {
+    sentences.push(`Its edge: it ${strong[0].pos}.`);
+  }
+  if (resilience && resilience.score >= 60) {
+    sentences.push(`Resilience reads ${resilience.label.toLowerCase()} — deer lean on this ground across conditions, not just one setup.`);
+  }
+  if (weak.length > 0) {
+    sentences.push(`Soft spot to respect: it ${weak[0].neg}.`);
+  }
+
+  return sentences.join(' ');
+}

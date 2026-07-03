@@ -24,7 +24,7 @@ import {
   type StandScore,
 } from '@/lib/scoring/stand-alignment';
 import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs';
-import { getStandExplainability, renderChipsHTML, renderQualityBarsHTML, renderKeyIndicatorsHTML } from '@/lib/scoring/stand-explainability';
+import { getStandExplainability, buildStandNarrative, renderChipsHTML, renderQualityBarsHTML, renderKeyIndicatorsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
 import { trackTerritoryTeaserShown, trackTerritoryTeaserClicked } from '@/lib/gtag';
@@ -16229,33 +16229,18 @@ const archetypeInitializedRef = useRef(false);
                 const fieldBearing = stand.props?.fieldBearing;
                 const bearingLabel = fieldBearing != null ? (['N','NE','E','SE','S','SW','W','NW'])[Math.round(fieldBearing / 45) % 8] : '';
                 const distToCorridor = stand.props?.distToCorridorMeters ?? 999;
+                const effectiveWeapon: 'bow' | 'gun' = (ht === 'gun' || (ht === 'both' && hunterType === 'gun')) ? 'gun' : 'bow';
                 let adviceText = reasonText; // fallback to existing reasoning
-                if (ht === 'bow' || (ht === 'both' && hunterType === 'bow')) {
-                  if (stand.isSidehillBench) {
-                    adviceText = `Sidehill bench — flat shelf between the ridge and the draw. Hang 20 feet in the biggest white oak on the downhill edge. Deer traversing the slope funnel along this bench to avoid skylining. 15-yard chip shot. Approach from below, stay tight to the contour.`;
-                  } else if (anchor === 'saddle') {
-                    adviceText = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
-                  } else if (anchor === 'funnel') {
-                    adviceText = `Set up at this draw intersection where trails converge. Thermal lift carries scent above the travel lane at first light. Multiple encounter opportunities. Come in from the field road in the dark.`;
-                  } else if (anchor === 'ridge') {
-                    adviceText = `Hang on the downwind lip of this ridge finger. Deer funneled off the bench have one route — right past your tree. 18-yard window. Wind in your face all morning.`;
-                  } else if (anchor === 'convergence') {
-                    adviceText = `Convergence zone where multiple travel lanes intersect. Hang at 22 feet where timber thickens — deer commit to a single lane within bow range. Plan two exit routes.`;
-                  } else if (distToCorridor <= 150) {
-                    adviceText = `Timber corridor stand ${Math.round(distToCorridor)}m from the primary travel lane. Hang at 20 feet in the largest available tree. Deer moving through this corridor pass within 25 yards.`;
-                  }
-                } else if (ht === 'gun' || (ht === 'both' && hunterType === 'gun')) {
-                  if (stand.isSidehillBench) {
-                    adviceText = `Sidehill bench with 80-120 yard shooting lane across the slope. Deer moving along the contour are broadside at a predictable distance. Set up on the uphill edge with the wind quartering downhill. Glass the bench at first light.`;
-                  } else if (anchor === 'inside_corner') {
-                    adviceText = `Inside corner of the ${bearingLabel || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
-                  } else if (anchor === 'field_edge') {
-                    adviceText = `Timber edge overlooking the ${bearingLabel || 'open'} pasture. 100-150 yard shot across open ground to the far tree line. Opening weekend deer pushed from adjacent parcels cross here at first light. Position before 5:30 AM.`;
-                  } else if (anchor === 'field_saddle_combo') {
-                    adviceText = `Saddle crossing above the field edge — rut bucks funnel through here before hitting the pasture. Long shot available into the open or close shot in the timber. Best of both worlds.`;
-                  } else if (stand.props?.isEdgeStand) {
-                    adviceText = `Field edge stand with open shooting lanes. 60-150 yard encounter distance across the field. Set up in the timber edge with the field downwind. Early morning and last light are peak movement windows.`;
-                  }
+                if (stand.inputs && stand.props && stand.alignment) {
+                  adviceText = buildStandNarrative(stand.inputs, stand.props, stand.alignment, {
+                    weapon: effectiveWeapon,
+                    anchor,
+                    isSidehillBench: stand.isSidehillBench,
+                    season,
+                    windDirection,
+                    windAligned,
+                    bearingLabel,
+                  }, stand.resilience);
                 }
 
                 // ═══ ARCHETYPE-SPECIFIC RATIONALE OVERLAY ═══
@@ -18104,20 +18089,18 @@ const archetypeInitializedRef = useRef(false);
                 const fieldBearing2 = stand.props?.fieldBearing;
                 const bearingLabel2 = fieldBearing2 != null ? (['N','NE','E','SE','S','SW','W','NW'])[Math.round(fieldBearing2 / 45) % 8] : '';
                 const distToCorridor2 = stand.props?.distToCorridorMeters ?? 999;
+                const effectiveWeapon2: 'bow' | 'gun' = (ht2 === 'gun' || (ht2 === 'both' && hunterType === 'gun')) ? 'gun' : 'bow';
                 let adviceText2 = reasonText;
-                if (ht2 === 'bow' || (ht2 === 'both' && hunterType === 'bow')) {
-                  if (stand.isSidehillBench) adviceText2 = `Sidehill bench — flat shelf between the ridge and the draw. Hang 20 feet in the biggest white oak on the downhill edge. Deer traversing the slope funnel along this bench to avoid skylining. 15-yard chip shot. Approach from below, stay tight to the contour.`;
-                  else if (anchor2 === 'saddle') adviceText2 = `Hang 20-25 feet on the downwind side of this saddle. A cruising rut buck will be nose-down on the scrape line — expect a 15-20 yard shot. Approach from the low side, never cross the ridge.`;
-                  else if (anchor2 === 'funnel') adviceText2 = `Set up at this draw intersection where trails converge. Thermal lift carries scent above the travel lane at first light. Multiple encounter opportunities. Come in from the field road in the dark.`;
-                  else if (anchor2 === 'ridge') adviceText2 = `Hang on the downwind lip of this ridge finger. Deer funneled off the bench have one route — right past your tree. 18-yard window. Wind in your face all morning.`;
-                  else if (anchor2 === 'convergence') adviceText2 = `Convergence zone where multiple travel lanes intersect. Hang at 22 feet where timber thickens — deer commit to a single lane within bow range. Plan two exit routes.`;
-                  else if (distToCorridor2 <= 150) adviceText2 = `Timber corridor stand ${Math.round(distToCorridor2)}m from the primary travel lane. Hang at 20 feet in the largest available tree. Deer moving through this corridor pass within 25 yards.`;
-                } else if (ht2 === 'gun' || (ht2 === 'both' && hunterType === 'gun')) {
-                  if (stand.isSidehillBench) adviceText2 = `Sidehill bench with 80-120 yard shooting lane across the slope. Deer moving along the contour are broadside at a predictable distance. Set up on the uphill edge with the wind quartering downhill. Glass the bench at first light.`;
-                  else if (anchor2 === 'inside_corner') adviceText2 = `Inside corner of the ${bearingLabel2 || 'adjacent'} field. Deer entering the field at last light funnel through this pinch. 80-120 yard shot to the opposite timber edge. Park on the nearest lane, walk in.`;
-                  else if (anchor2 === 'field_edge') adviceText2 = `Timber edge overlooking the ${bearingLabel2 || 'open'} pasture. 100-150 yard shot across open ground to the far tree line. Opening weekend deer pushed from adjacent parcels cross here at first light. Position before 5:30 AM.`;
-                  else if (anchor2 === 'field_saddle_combo') adviceText2 = `Saddle crossing above the field edge — rut bucks funnel through here before hitting the pasture. Long shot available into the open or close shot in the timber. Best of both worlds.`;
-                  else if (stand.props?.isEdgeStand) adviceText2 = `Field edge stand with open shooting lanes. 60-150 yard encounter distance across the field. Set up in the timber edge with the field downwind. Early morning and last light are peak movement windows.`;
+                if (stand.inputs && stand.props && stand.alignment) {
+                  adviceText2 = buildStandNarrative(stand.inputs, stand.props, stand.alignment, {
+                    weapon: effectiveWeapon2,
+                    anchor: anchor2,
+                    isSidehillBench: stand.isSidehillBench,
+                    season,
+                    windDirection,
+                    windAligned,
+                    bearingLabel: bearingLabel2,
+                  }, stand.resilience);
                 }
 
                 // Is this stand already locked today?
