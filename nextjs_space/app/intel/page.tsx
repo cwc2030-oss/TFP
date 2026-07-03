@@ -4461,7 +4461,7 @@ const archetypeInitializedRef = useRef(false);
           if (mostAlignedDebounceRef.current) clearTimeout(mostAlignedDebounceRef.current);
           mostAlignedDebounceRef.current = setTimeout(() => {
             if (aligned[0].rank === newTop.rank && scoreDiff >= 5) {
-              setMostAlignedHint({ standRank: newTop.rank, name: newTop.rank === 1 ? "Today's Sit" : newTop.rank === 2 ? 'Alternate Sit' : newTop.rank === 3 ? 'Backup Sit' : `Stand #${newTop.rank}` });
+              setMostAlignedHint({ standRank: newTop.rank, name: `#${newTop.rank} Stand` });
               if (hintFadeTimeoutRef.current) clearTimeout(hintFadeTimeoutRef.current);
               hintFadeTimeoutRef.current = setTimeout(() => setMostAlignedHint(null), 6000);
             }
@@ -13698,8 +13698,8 @@ const archetypeInitializedRef = useRef(false);
       }
 
       // ── Populate tfp-stands GeoJSON source ──
-      // v3.9.2: Only show stand ranks that are in visibleStandRanks (default: Today's Sit only)
-      const SIT_LABELS = ["Today's Sit", 'Alternate Sit', 'Backup Sit'];
+      // v3.9.2: Only show stand ranks that are in visibleStandRanks (default: #1 Stand only)
+      const SIT_LABELS = ["#1 Stand", '#2 Stand', '#3 Stand'];
       const standsToShow = filteredStands; // filtered by hunter type
       // v3.9.3: Read fresh state directly (deps array includes visibleStandRanks).
       const activeRanks = visibleStandRanks.size > 0
@@ -13725,7 +13725,7 @@ const archetypeInitializedRef = useRef(false);
           geometry: { type: 'Point' as const, coordinates: stand.coords },
           properties: {
             rank: idx + 1,
-            label: SIT_LABELS[idx] || `Sit #${idx + 1}`,
+            label: SIT_LABELS[idx] || `#${idx + 1} Stand`,
             rankLabel: idx === 0 ? '★' : String(idx + 1),
             color: colors.fill,
             strokeColor: colors.stroke,
@@ -14108,12 +14108,12 @@ const archetypeInitializedRef = useRef(false);
     const faceDeg = Math.round(faceBearing);
 
     // Sit labels for top 3
-    const SIT_LABELS_POPUP = ["Today's Sit", 'Alternate Sit', 'Backup Sit'] as const;
+    const SIT_LABELS_POPUP = ["#1 Stand", '#2 Stand', '#3 Stand'] as const;
     const isTodaysSit = props.rank === 1;
     const sitIdx = props.rank - 1; // 0-based
     const popupBadgeColor = isTodaysSit ? `linear-gradient(135deg, ${LAYER_COLORS.standPrimary}, ${LAYER_COLORS.standPrimaryRing})` : 
       sitIdx === 1 ? '#3b82f6' : '#6b7280';
-    const popupBadgeLabel = sitIdx < 3 ? (isTodaysSit ? `★ ${SIT_LABELS_POPUP[0]}` : `#${props.rank} ${SIT_LABELS_POPUP[sitIdx]}`) : `Stand #${props.rank}`;
+    const popupBadgeLabel = SIT_LABELS_POPUP[sitIdx] ?? `#${props.rank} Stand`;
     const badgeTextColor = isTodaysSit ? '#1a1a1a' : 'white';
 
     // Explainability data (if stand data available)
@@ -16197,7 +16197,7 @@ const archetypeInitializedRef = useRef(false);
               )}
               {filteredStands.length > 0 && (() => {
                 const top3 = filteredStands; // filtered by hunter type
-                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand', 'Stand #4', 'Stand #5'];
+                const STAND_TITLES = ["#1 Stand", '#2 Stand', '#3 Stand', '#4 Stand', '#5 Stand'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
                 const stand = top3[cardIdx];
                 if (!stand) return null;
@@ -16290,6 +16290,7 @@ const archetypeInitializedRef = useRef(false);
                             </span>
                           </div>
                           <div className="text-sm font-bold text-white leading-tight">{standName}</div>
+                          <div className="text-[8.5px] text-stone-400/80 leading-snug mt-0.5">Terrain-ranked estimate — sharpens as you log sits</div>
                         </div>
                         <div className="px-2.5 py-1 rounded text-white text-base font-bold min-w-[52px] text-center" style={{ background: sColor }}>
                           {s}%
@@ -18064,7 +18065,7 @@ const archetypeInitializedRef = useRef(false);
 
               {/* ══ v3.9.2 — Stand Decision Card (cycles Today → Alternate → Backup) ══ */}
               {(() => {
-                const STAND_TITLES = ["Today\u2019s Stand", 'Alternate Stand', 'Backup Stand', 'Stand #4', 'Stand #5'];
+                const STAND_TITLES = ["#1 Stand", '#2 Stand', '#3 Stand', '#4 Stand', '#5 Stand'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
                 const stand = top3[cardIdx];
                 if (!stand) return null;
@@ -18146,6 +18147,7 @@ const archetypeInitializedRef = useRef(false);
                         <div style={{ fontSize: '16px', fontWeight: 'bold' }}>
                           {stand.name ?? stand.props?.name ?? `Stand ${cardIdx + 1}`}
                         </div>
+                        <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', marginTop: '2px' }}>Terrain-ranked estimate — sharpens as you log sits</div>
                       </div>
                       <div style={{
                         padding: '8px 16px',
@@ -18437,7 +18439,7 @@ const archetypeInitializedRef = useRef(false);
               </p>
               <ul style={{ color: '#94a3b8', fontSize: '12px', lineHeight: 1.8, margin: '8px 0 0', paddingLeft: '16px', textAlign: 'left' as const }}>
                 <li>Top 3 stand locations with approach routes</li>
-                <li>Today&apos;s Sit recommendation</li>
+                <li>#1 Stand recommendation</li>
                 <li>Full terrain & corridor intelligence</li>
                 <li>Downloadable Hunt Report PDF</li>
                 <li>Permanent access — never re-locked</li>

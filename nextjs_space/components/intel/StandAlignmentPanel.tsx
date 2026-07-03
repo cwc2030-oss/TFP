@@ -168,8 +168,8 @@ export function StandAlignmentPanel({
 
             // Explainability
             const explain = getStandExplainability(stand.inputs, stand.props, stand.alignment, stand.resilience);
-            const SIT_LABELS_PANEL = ["Today's Sit", 'Alternate Sit', 'Backup Sit'] as const;
-            const sitLabel = SIT_LABELS_PANEL[standIdx] || `Stand #${standIdx + 1}`;
+            const SIT_LABELS_PANEL = ['#1 Stand', '#2 Stand', '#3 Stand'] as const;
+            const sitLabel = SIT_LABELS_PANEL[standIdx] || `#${standIdx + 1} Stand`;
             const isTodaysSit = standIdx === 0;
             const badgeBg = isTodaysSit ? 'bg-amber-500/20' : standIdx === 1 ? 'bg-sky-500/15' : 'bg-stone-500/15';
             const badgeText = isTodaysSit ? 'text-amber-400' : standIdx === 1 ? 'text-sky-400' : 'text-stone-400';
@@ -197,7 +197,7 @@ export function StandAlignmentPanel({
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0 flex items-center gap-1.5">
                       <span className={`text-[8px] ${badgeBg} ${badgeText} px-1.5 py-0.5 rounded font-semibold whitespace-nowrap`}>
-                        {isTodaysSit ? '★' : `#${standIdx + 1}`} {sitLabel.split(' ').slice(-1)[0].toUpperCase()}
+                        {sitLabel.toUpperCase()}
                       </span>
                       <span className="text-white text-sm font-medium truncate block">{stand.name}</span>
                       {stand.unverified && (

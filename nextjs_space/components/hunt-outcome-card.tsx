@@ -38,6 +38,8 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
   const [mode, setMode] = useState<'full' | 'banner' | 'hidden'>('hidden');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  // True when the panel is surfacing on a later day than the sit ("next app open")
+  const [nextOpenPrompt, setNextOpenPrompt] = useState(false);
 
   // On mount, check localStorage for active hunt session
   useEffect(() => {
@@ -68,10 +70,21 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
           return;
         }
 
-        // Auto-show full panel after 2 hours
-        const hoursSince = (Date.now() - new Date(data.huntStartTime).getTime()) / 36e5;
-        if (hoursSince >= 2) {
+        // Retimed capture (2026-07): never interrupt mid-hunt. The full panel
+        // only auto-opens at a natural juncture — the NEXT app open on a later
+        // calendar day than the sit ("How'd yesterday's sit go?"). A same-day /
+        // still-fresh sit stays as the unobtrusive tap-to-record banner.
+        const start = new Date(data.huntStartTime);
+        const now = new Date();
+        const isLaterDay =
+          start.getFullYear() !== now.getFullYear() ||
+          start.getMonth() !== now.getMonth() ||
+          start.getDate() !== now.getDate();
+        if (isLaterDay) {
+          setNextOpenPrompt(true);
           setMode('full');
+        } else {
+          setMode('banner');
         }
       })
       .catch(err => {
@@ -155,7 +168,7 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
       }}>
         <div style={{ fontSize: 28 }}>✓</div>
         <div style={{ color: '#c9a84c', fontSize: 14, fontWeight: 600 }}>Outcome recorded</div>
-        <div style={{ color: '#9ca3af', fontSize: 11 }}>Thanks — this makes the model smarter.</div>
+        <div style={{ color: '#9ca3af', fontSize: 11 }}>Your input sharpens the read.</div>
       </div>
     );
   }
@@ -210,7 +223,7 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Crosshair style={{ width: 16, height: 16, color: '#c9a84c' }} />
-          <span style={{ color: '#c9a84c', fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Record Outcome</span>
+          <span style={{ color: '#c9a84c', fontSize: 13, fontWeight: 700, letterSpacing: nextOpenPrompt ? '0.02em' : '0.05em', textTransform: nextOpenPrompt ? 'none' : 'uppercase' }}>{nextOpenPrompt ? "How'd yesterday's sit go?" : 'Record Outcome'}</span>
         </div>
         <button onClick={handleSkip} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <X style={{ width: 16, height: 16, color: '#6b7280' }} />
@@ -250,6 +263,12 @@ export default function HuntOutcomeCard({ onDismiss, forceShow }: HuntOutcomeCar
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Flywheel line — the outcome sharpens future reads */}
+      <div style={{ color: '#9ca3af', fontSize: 11, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: '#c9a84c' }}>›</span>
+        <span>Your input sharpens the read.</span>
       </div>
 
       {/* Outcome buttons — 5 buttons: 2×2 grid + full-width 5th */}
