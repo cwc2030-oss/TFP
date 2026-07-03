@@ -4114,12 +4114,24 @@ const archetypeInitializedRef = useRef(false);
       }
       console.log(`[STAND-DIAG] final stand count in parcel = ${aligned.length} (snapped ${snapped.length}, rejected ${rejected.length})`);
 
-      // ═══ OPTION B FALLBACK — if parcel-safe enforcement rejected ALL stands
-      // but the engine DID return anchored candidates, show the raw top-3 anchored stands
-      // with an "unverified" flag so the user still sees actionable data.
-      // Phase 2: Uses anchoredPool instead of allScored to respect terrain anchor gate.
-      if (aligned.length === 0 && anchoredPool.length > 0) {
-        console.warn(`[STAND-DIAG] OPTION-B FALLBACK: all ${anchoredPool.length} anchored candidates rejected by parcel-safe. Falling back to raw top-3 with unverified flag.`);
+      // ═══ OPTION B / SINGLE-PARCEL TOP-UP ═══
+      // Parcel-safe enforcement discards terrain-anchored candidates that fall
+      // outside the parcel boundary. On a SINGLE parcel much of the analyzed
+      // terrain sits in the surrounding buffer, so those candidates get dropped —
+      // which could collapse the set to 1 stand even though TARGET_COUNT is 8-12.
+      // The SAME candidates are retained once the user adds parcels, because the
+      // larger merged territory polygon contains them. That asymmetry is exactly
+      // what made the full ranked set + cycling appear "territory-gated": it was
+      // never a territory flag, just the interior filter relaxing as the polygon grew.
+      // Fix: whenever the verified set is short of TARGET_COUNT, refill the
+      // remaining slots from the anchored pool (candidates that PASSED the terrain
+      // anchor gate) by snapping them to the parcel interior, flagged unverified —
+      // so single-parcel users get their complete acreage-appropriate stand set
+      // and Next/cycling, capped honestly at the number of anchored candidates.
+      if (aligned.length < TARGET_COUNT && anchoredPool.length > aligned.length) {
+        const usedRanks = new Set(aligned.map(a => a.rank));
+        const need = TARGET_COUNT - aligned.length;
+        console.warn(`[STAND-DIAG] TOP-UP: aligned=${aligned.length} < TARGET_COUNT=${TARGET_COUNT}; refilling up to ${need} slot(s) from ${anchoredPool.length} anchored candidates (interior-snap, unverified).`);
         const fallbackInset = computeParcelInset(geom);
         // Compute centroid for interior snap
         const fbRings = getParcelRings(geom);
@@ -4128,22 +4140,33 @@ const archetypeInitializedRef = useRef(false);
         fbCx /= fbN; fbCy /= fbN;
         const fbCentroid: [number, number] = [fbCx, fbCy];
 
-        aligned = anchoredPool.slice(0, TARGET_COUNT).map(s => {
+        const topUp: AlignedStand[] = [];
+        for (const s of anchoredPool) {
+          if (topUp.length >= need) break;
+          if (usedRanks.has(s.rank)) continue;
           const sd = signedDistanceToParcel(s.coords, geom);
-          if (sd.distance >= fallbackInset) return { ...s, unverified: true };
+          if (sd.distance >= fallbackInset) { topUp.push({ ...s, unverified: true }); continue; }
+          let placed = false;
           // Move toward centroid until inside with buffer
           for (let step = 1; step <= 15; step++) {
             const candidate = movePointToward(s.coords, fbCentroid, fallbackInset * step * 0.5);
             const cd = signedDistanceToParcel(candidate, geom);
             if (cd.distance >= fallbackInset) {
-              console.log(`[STAND-DIAG] OPTION-B interior-snap rank=${s.rank} "${s.name}" → ${Math.round(cd.distance)}m inside`);
-              return { ...s, coords: candidate, unverified: true };
+              console.log(`[STAND-DIAG] TOP-UP interior-snap rank=${s.rank} "${s.name}" → ${Math.round(cd.distance)}m inside`);
+              topUp.push({ ...s, coords: candidate, unverified: true });
+              placed = true;
+              break;
             }
           }
-          // Last resort: centroid
-          console.log(`[STAND-DIAG] OPTION-B centroid-fallback rank=${s.rank} "${s.name}"`);
-          return { ...s, coords: fbCentroid, unverified: true };
-        });
+          if (!placed && pointInParcelGeometry(fbCentroid, geom)) {
+            console.log(`[STAND-DIAG] TOP-UP centroid-fallback rank=${s.rank} "${s.name}"`);
+            topUp.push({ ...s, coords: fbCentroid, unverified: true });
+          }
+        }
+        if (topUp.length > 0) {
+          aligned = [...aligned, ...topUp];
+          console.log(`[STAND-DIAG] TOP-UP added ${topUp.length} stand(s); aligned now ${aligned.length}`);
+        }
       }
     } else {
       // No parcel geometry available — use diversity-selected stands (fallback)
