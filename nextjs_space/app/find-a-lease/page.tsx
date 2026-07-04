@@ -7,10 +7,14 @@
  */
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
+import { isMarketplaceOpen, COMING_SOON_PATH } from '@/lib/marketplace-gate';
 import BrowseContent from './_browse/browse-content';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Find a Hunt Lease | Terra Firma Partners',
@@ -19,6 +23,9 @@ export const metadata: Metadata = {
 };
 
 export default function FindALeasePage() {
+  if (!isMarketplaceOpen()) {
+    redirect(COMING_SOON_PATH);
+  }
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
       <Navbar />

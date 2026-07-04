@@ -37,6 +37,7 @@ import {
 } from '@/lib/inquiry';
 import { sendEmail } from '@/lib/email';
 import { listingSlug } from '@/lib/listings';
+import { isMarketplaceOpen } from '@/lib/marketplace-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  if (!isMarketplaceOpen()) {
+    return NextResponse.json(
+      { error: 'The marketplace is not open yet.' },
+      { status: 403 },
+    );
+  }
   // ---------------------------------------------------------------------
   // Parse + validate
   // ---------------------------------------------------------------------

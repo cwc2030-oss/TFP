@@ -25,6 +25,7 @@ import {
   gradeFromScore,
 } from '@/lib/listings';
 import { lookupCentroid } from '@/lib/county-centroids';
+import { isMarketplaceOpen, COMING_SOON_PATH } from '@/lib/marketplace-gate';
 import GradeBadge from './_components/grade-badge';
 import CountyMap from './_components/county-map';
 import PhotoGallery from './_components/photo-gallery';
@@ -105,6 +106,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function PublicListingDetail({ params }: Props) {
+  if (!isMarketplaceOpen()) {
+    redirect(COMING_SOON_PATH);
+  }
   const id = extractIdFromSlugId(params.slug);
   if (!id) notFound();
 

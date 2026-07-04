@@ -23,6 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { stripForPublic, gradeMinScore, flowSegments } from '@/lib/listings';
+import { isMarketplaceOpen } from '@/lib/marketplace-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,12 @@ const BROWSE_SELECT = {
 } as const;
 
 export async function GET(req: NextRequest) {
+  if (!isMarketplaceOpen()) {
+    return NextResponse.json(
+      { error: 'The marketplace is not open yet.' },
+      { status: 403 },
+    );
+  }
   const sp = req.nextUrl.searchParams;
 
   const stateFilter = sp.get('state')?.toUpperCase() || undefined;

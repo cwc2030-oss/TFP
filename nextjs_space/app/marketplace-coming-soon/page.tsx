@@ -1,230 +1,103 @@
-"use client";
+/**
+ * /marketplace-coming-soon — the launch wall.
+ *
+ * Where the gated public marketplace surfaces (/find-a-lease, public listing
+ * detail, /brokers) send visitors while TFP_MARKETPLACE_OPEN is not "true".
+ * Captures early-access interest on both sides (hunter + landowner) via
+ * /api/waitlist.
+ *
+ * Once the marketplace opens, this page forwards to the live browse page so
+ * the URL never dead-ends post-launch.
+ */
+import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
+import Navbar from '@/components/navbar';
+import Footer from '@/components/footer';
+import { Target, MapPin, Route } from 'lucide-react';
+import { isMarketplaceOpen } from '@/lib/marketplace-gate';
+import EarlyAccess from './_form/early-access';
 
-import { useState } from "react";
-import Navbar from "@/components/navbar";
-import { motion } from "framer-motion";
-import { MapPin, Trees, Target, ArrowRight, CheckCircle, Loader2 } from "lucide-react";
+export const dynamic = 'force-dynamic';
 
-type SignupSide = "HUNTER" | "LANDOWNER";
+export const metadata: Metadata = {
+  title: 'The Marketplace for Data-Backed Hunt Leases | Terra Firma Partners',
+  description:
+    'Certified hunt leases are coming. Every listing carries a Flow Score — a terrain-verified deer-movement grade. Get early access as a hunter or a landowner.',
+};
 
-export default function MarketplaceComingSoon() {
-  const [side, setSide] = useState<SignupSide | null>(null);
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [state, setState] = useState("");
-  const [acres, setAcres] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+const FEATURES = [
+  {
+    icon: Target,
+    title: 'Flow Score on Every Listing',
+    blurb: 'Terrain-verified deer movement data, not just a pretty photo.',
+  },
+  {
+    icon: MapPin,
+    title: 'Verified Boundaries',
+    blurb: "Parcel-level accuracy so you know exactly what you're leasing.",
+  },
+  {
+    icon: Route,
+    title: 'Habitat Intel',
+    blurb: 'Bedding areas, funnels, and travel corridors mapped for each property.',
+  },
+];
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!side || !email) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch("/api/marketplace-waitlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ side, email: email.trim(), name: name.trim(), state: state || undefined, acres: acres || undefined }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Something went wrong");
-      setSubmitted(true);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+export default function MarketplaceComingSoonPage() {
+  // Post-launch: forward this URL to the live browse page instead of a wall.
+  if (isMarketplaceOpen()) {
+    redirect('/find-a-lease');
+  }
 
   return (
-    <>
+    <div className="min-h-screen bg-white text-stone-900">
       <Navbar />
-      <main className="min-h-screen bg-gradient-to-b from-stone-50 via-white to-emerald-50/30 pt-20">
-        {/* Hero */}
-        <section className="max-w-4xl mx-auto px-4 sm:px-6 pt-12 sm:pt-20 pb-8 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <div className="inline-flex items-center gap-2 bg-emerald-100 text-emerald-800 px-4 py-1.5 rounded-full text-sm font-medium mb-6">
-              <Target className="w-4 h-4" />
-              Coming Soon
-            </div>
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-stone-900 tracking-tight leading-tight">
-              The Marketplace for{" "}
-              <span className="text-emerald-700">Data-Backed</span>{" "}
-              Hunt Leases
-            </h1>
-            <p className="mt-6 text-lg sm:text-xl text-stone-600 max-w-2xl mx-auto leading-relaxed">
-              Every listing comes with a{" "}
-              <span className="font-semibold text-emerald-700">Flow Score</span>{" "}
-              — our proprietary deer-movement rating powered by terrain intelligence.
-              No more guessing. Know exactly what you&apos;re leasing before you sign.
-            </p>
-          </motion.div>
+      <main className="pt-24 pb-24">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 text-emerald-700 text-sm font-medium px-4 py-1.5 border border-emerald-100">
+            <Target className="w-4 h-4" /> Coming Soon
+          </span>
 
-          {/* Value props */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto"
-          >
-            {[
-              { icon: Target, title: "Flow Score on Every Listing", desc: "Terrain-verified deer movement data, not just a pretty photo." },
-              { icon: MapPin, title: "Verified Boundaries", desc: "Parcel-level accuracy so you know exactly what you're leasing." },
-              { icon: Trees, title: "Habitat Intel", desc: "Bedding areas, funnels, and travel corridors mapped for each property." },
-            ].map((item) => (
-              <div key={item.title} className="bg-white rounded-xl p-6 shadow-sm border border-stone-100">
-                <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center mb-3 mx-auto">
-                  <item.icon className="w-5 h-5 text-emerald-700" />
+          <h1 className="mt-6 text-4xl sm:text-5xl font-bold tracking-tight text-stone-900">
+            The Marketplace for{' '}
+            <span className="text-emerald-700">Data-Backed</span> Hunt Leases
+          </h1>
+
+          <p className="mt-5 text-lg text-stone-600 max-w-2xl mx-auto leading-relaxed">
+            Every listing comes with a <span className="font-semibold text-stone-900">Flow Score</span> —
+            our proprietary deer-movement rating powered by terrain intelligence. No more
+            guessing. Know exactly what you&apos;re leasing before you sign.
+          </p>
+
+          {/* Feature trio */}
+          <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-5 text-left">
+            {FEATURES.map((f) => {
+              const Icon = f.icon;
+              return (
+                <div
+                  key={f.title}
+                  className="rounded-xl border border-stone-200 bg-white p-6"
+                >
+                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-emerald-50 text-emerald-700 mb-4">
+                    <Icon className="w-5 h-5" />
+                  </span>
+                  <h2 className="font-semibold text-stone-900">{f.title}</h2>
+                  <p className="mt-1.5 text-sm text-stone-600 leading-relaxed">{f.blurb}</p>
                 </div>
-                <h3 className="font-semibold text-stone-900 text-sm">{item.title}</h3>
-                <p className="text-stone-500 text-sm mt-1">{item.desc}</p>
-              </div>
-            ))}
-          </motion.div>
-        </section>
+              );
+            })}
+          </div>
 
-        {/* Signup Section */}
-        <section className="max-w-xl mx-auto px-4 sm:px-6 pb-24">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.35 }}
-            className="bg-white rounded-2xl shadow-lg border border-stone-200 p-6 sm:p-8"
-          >
-            {submitted ? (
-              <div className="text-center py-8">
-                <CheckCircle className="w-12 h-12 text-emerald-600 mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-stone-900 mb-2">You&apos;re on the list!</h2>
-                <p className="text-stone-600">
-                  {side === "HUNTER"
-                    ? "We'll email you the moment leases go live."
-                    : "We'll reach out soon to get your property set up."}
-                </p>
-              </div>
-            ) : (
-              <>
-                <h2 className="text-xl font-bold text-stone-900 text-center mb-1">Get Early Access</h2>
-                <p className="text-stone-500 text-center text-sm mb-6">Choose your path below</p>
-
-                {/* Side picker */}
-                <div className="grid grid-cols-2 gap-3 mb-6">
-                  <button
-                    type="button"
-                    onClick={() => setSide("HUNTER")}
-                    className={`p-4 rounded-xl border-2 text-left transition-all ${
-                      side === "HUNTER"
-                        ? "border-emerald-600 bg-emerald-50 shadow-sm"
-                        : "border-stone-200 hover:border-stone-300"
-                    }`}
-                  >
-                    <Target className={`w-5 h-5 mb-2 ${side === "HUNTER" ? "text-emerald-700" : "text-stone-400"}`} />
-                    <div className={`font-semibold text-sm ${side === "HUNTER" ? "text-emerald-800" : "text-stone-700"}`}>I&apos;m a Hunter</div>
-                    <div className="text-xs text-stone-500 mt-0.5">Notify me when leases go live</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSide("LANDOWNER")}
-                    className={`p-4 rounded-xl border-2 text-left transition-all ${
-                      side === "LANDOWNER"
-                        ? "border-emerald-600 bg-emerald-50 shadow-sm"
-                        : "border-stone-200 hover:border-stone-300"
-                    }`}
-                  >
-                    <Trees className={`w-5 h-5 mb-2 ${side === "LANDOWNER" ? "text-emerald-700" : "text-stone-400"}`} />
-                    <div className={`font-semibold text-sm ${side === "LANDOWNER" ? "text-emerald-800" : "text-stone-700"}`}>I Own Land</div>
-                    <div className="text-xs text-stone-500 mt-0.5">List your ground — be first in line</div>
-                  </button>
-                </div>
-
-                {side && (
-                  <motion.form
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    transition={{ duration: 0.3 }}
-                    onSubmit={handleSubmit}
-                    className="space-y-4"
-                  >
-                    <div>
-                      <label htmlFor="name" className="block text-sm font-medium text-stone-700 mb-1">Name</label>
-                      <input
-                        id="name"
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Your name"
-                        className="w-full px-4 py-2.5 rounded-lg border border-stone-300 text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="email" className="block text-sm font-medium text-stone-700 mb-1">Email <span className="text-red-500">*</span></label>
-                      <input
-                        id="email"
-                        type="email"
-                        required
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="you@example.com"
-                        className="w-full px-4 py-2.5 rounded-lg border border-stone-300 text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="state" className="block text-sm font-medium text-stone-700 mb-1">
-                        {side === "HUNTER" ? "State(s) you're interested in" : "State where your land is"}
-                      </label>
-                      <input
-                        id="state"
-                        type="text"
-                        value={state}
-                        onChange={(e) => setState(e.target.value)}
-                        placeholder={side === "HUNTER" ? "e.g. Missouri, Kansas" : "e.g. Missouri"}
-                        className="w-full px-4 py-2.5 rounded-lg border border-stone-300 text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-                    {side === "LANDOWNER" && (
-                      <div>
-                        <label htmlFor="acres" className="block text-sm font-medium text-stone-700 mb-1">Approximate Acreage</label>
-                        <input
-                          id="acres"
-                          type="text"
-                          value={acres}
-                          onChange={(e) => setAcres(e.target.value)}
-                          placeholder="e.g. 200"
-                          className="w-full px-4 py-2.5 rounded-lg border border-stone-300 text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        />
-                      </div>
-                    )}
-
-                    {error && (
-                      <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={loading || !email}
-                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-stone-300 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-                    >
-                      {loading ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <>
-                          {side === "HUNTER" ? "Notify Me" : "Get My Land Listed"}
-                          <ArrowRight className="w-4 h-4" />
-                        </>
-                      )}
-                    </button>
-                  </motion.form>
-                )}
-              </>
-            )}
-          </motion.div>
-        </section>
+          {/* Early access capture */}
+          <div className="mt-14 max-w-xl mx-auto rounded-2xl border border-stone-200 bg-stone-50 p-6 sm:p-8">
+            <Suspense fallback={<div className="h-40" />}>
+              <EarlyAccess />
+            </Suspense>
+          </div>
+        </div>
       </main>
-    </>
+      <Footer />
+    </div>
   );
 }

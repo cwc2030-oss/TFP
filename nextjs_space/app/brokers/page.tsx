@@ -1,8 +1,12 @@
 import { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
 import { MapPin, FileText, Clock, Users, CheckCircle, Phone, ArrowRight } from 'lucide-react';
+import { isMarketplaceOpen } from '@/lib/marketplace-gate';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'For Land Brokers | Terra Firma Partners™',
@@ -11,6 +15,9 @@ export const metadata: Metadata = {
 };
 
 export default function BrokersPage() {
+  if (!isMarketplaceOpen()) {
+    redirect('/');
+  }
   const benefits = [
     {
       icon: Users,
