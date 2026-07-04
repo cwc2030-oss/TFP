@@ -107,7 +107,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function PublicListingDetail({ params }: Props) {
   if (!isMarketplaceOpen()) {
-    redirect(COMING_SOON_PATH);
+    const gateSession = await getServerSession(authOptions);
+    if ((gateSession?.user as any)?.role !== 'admin') {
+      redirect(COMING_SOON_PATH);
+    }
   }
   const id = extractIdFromSlugId(params.slug);
   if (!id) notFound();

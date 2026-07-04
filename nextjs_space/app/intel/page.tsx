@@ -2180,7 +2180,7 @@ function DeerIntelContent() {
   // Pro = 25 parcels (matches pricing page "Up to 25 parcels").
   // Pro Max = 100 — a fair-use ceiling behind the "Unlimited parcels" copy; no
   // realistic territory approaches 100 parcels.  Free/unauthenticated get 1.
-  const TERRITORY_PARCEL_CAP = !sessionLoaded ? 100 : isProMax ? 100 : isPro ? 25 : 1;
+  const TERRITORY_PARCEL_CAP = !sessionLoaded ? 100 : role === 'admin' ? 100 : isProMax ? 100 : isPro ? 25 : 1;
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null); // 'monthly' | 'annual' | null
   const [showScoreCard, setShowScoreCard] = useState(false);

@@ -24,6 +24,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { stripForPublic, gradeMinScore, flowSegments } from '@/lib/listings';
 import { isMarketplaceOpen } from '@/lib/marketplace-gate';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,10 +71,13 @@ const BROWSE_SELECT = {
 
 export async function GET(req: NextRequest) {
   if (!isMarketplaceOpen()) {
-    return NextResponse.json(
-      { error: 'The marketplace is not open yet.' },
-      { status: 403 },
-    );
+    const session = await getServerSession(authOptions);
+    if ((session?.user as any)?.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'The marketplace is not open yet.' },
+        { status: 403 },
+      );
+    }
   }
   const sp = req.nextUrl.searchParams;
 

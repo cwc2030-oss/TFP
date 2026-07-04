@@ -8,6 +8,8 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
 import Link from 'next/link';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
@@ -22,9 +24,12 @@ export const metadata: Metadata = {
     'Browse certified hunt leases. Filter by state, county, acreage, and price. Every property is terrain-graded by Terra Firma Partners.',
 };
 
-export default function FindALeasePage() {
+export default async function FindALeasePage() {
   if (!isMarketplaceOpen()) {
-    redirect(COMING_SOON_PATH);
+    const gateSession = await getServerSession(authOptions);
+    if ((gateSession?.user as any)?.role !== 'admin') {
+      redirect(COMING_SOON_PATH);
+    }
   }
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
