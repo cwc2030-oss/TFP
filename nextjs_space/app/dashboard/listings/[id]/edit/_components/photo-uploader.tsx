@@ -21,38 +21,78 @@ export default function PhotoUploader({ listingId, photos, onChange, maxPhotos =
   const [urlInput, setUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   const MAX_SIZE = 10 * 1024 * 1024;
+
+  // Normalize any picked file into an uploadable JPG/PNG/WebP under the size
+  // cap. Handles Apple HEIC/HEIF (iPhone/Mac default) by converting to JPEG,
+  // and downscales oversized high-megapixel phone photos so they don't get
+  // rejected. All conversion happens in the browser — no server dependency.
+  async function normalizeFile(file: File): Promise<File> {
+    const name = file.name || 'photo';
+    const lower = name.toLowerCase();
+    // Browsers often report an EMPTY mime type for HEIC, so also sniff the ext.
+    const isHeic =
+      file.type === 'image/heic' ||
+      file.type === 'image/heif' ||
+      lower.endsWith('.heic') ||
+      lower.endsWith('.heif');
+
+    let working: Blob = file;
+    let outName = name;
+
+    if (isHeic) {
+      const heic2any = (await import('heic2any')).default as (
+        opts: { blob: Blob; toType?: string; quality?: number },
+      ) => Promise<Blob | Blob[]>;
+      const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+      working = Array.isArray(converted) ? converted[0] : converted;
+      outName = name.replace(/\.(heic|heif)$/i, '') + '.jpg';
+    }
+
+    const okType =
+      working.type === 'image/jpeg' ||
+      working.type === 'image/png' ||
+      working.type === 'image/webp';
+    if (!okType) {
+      throw new Error('Unsupported type. Use JPG, PNG, WebP, or HEIC.');
+    }
+
+    // Compress/downscale if over the size cap (common with 48MP iPhone photos).
+    if (working.size > MAX_SIZE) {
+      const imageCompression = (await import('browser-image-compression')).default;
+      const asFile =
+        working instanceof File
+          ? working
+          : new File([working], outName, { type: working.type });
+      const compressed = await imageCompression(asFile, {
+        maxSizeMB: 9,
+        maxWidthOrHeight: 2560,
+        useWebWorker: true,
+        initialQuality: 0.85,
+      });
+      return new File([compressed], outName, { type: compressed.type || 'image/jpeg' });
+    }
+
+    return new File([working], outName, { type: working.type });
+  }
 
   const uploadFiles = useCallback(async (files: File[]) => {
     setError(null);
 
-    // Filter and validate
-    const valid: File[] = [];
-    for (const f of files) {
-      if (!ALLOWED_TYPES.includes(f.type)) {
-        setError(`${f.name}: Invalid type. Use JPG, PNG, or WebP.`);
-        return;
-      }
-      if (f.size > MAX_SIZE) {
-        setError(`${f.name}: Too large (${(f.size / 1024 / 1024).toFixed(1)} MB). Max 10 MB.`);
-        return;
-      }
-      valid.push(f);
-    }
-
-    if (photos.length + valid.length > maxPhotos) {
-      setError(`Can't exceed ${maxPhotos} photos. You have ${photos.length}, tried to add ${valid.length}.`);
+    if (photos.length + files.length > maxPhotos) {
+      setError(`Can't exceed ${maxPhotos} photos. You have ${photos.length}, tried to add ${files.length}.`);
       return;
     }
 
     setUploading(true);
     const newPhotos = [...photos];
+    const failed: string[] = [];
 
-    for (const file of valid) {
+    for (const file of files) {
       try {
+        const prepared = await normalizeFile(file);
         const form = new FormData();
-        form.append('file', file);
+        form.append('file', prepared);
         const res = await fetch(`/api/listings/${listingId}/photos`, {
           method: 'POST',
           body: form,
@@ -64,12 +104,19 @@ export default function PhotoUploader({ listingId, photos, onChange, maxPhotos =
         const data = await res.json();
         newPhotos.push(data.url);
       } catch (e: any) {
-        setError(e.message ?? 'Upload failed');
-        break;
+        // One bad file should never drop the ones that DID upload.
+        failed.push(`${file.name || 'photo'}: ${e?.message ?? 'upload failed'}`);
       }
     }
 
     onChange(newPhotos);
+    if (failed.length > 0) {
+      setError(
+        failed.length === 1
+          ? failed[0]
+          : `${failed.length} photos couldn't be added — ${failed.join(' · ')}`,
+      );
+    }
     setUploading(false);
   }, [photos, listingId, maxPhotos, onChange]);
 
@@ -234,7 +281,7 @@ export default function PhotoUploader({ listingId, photos, onChange, maxPhotos =
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
             multiple
             onChange={handleFileSelect}
             className="hidden"
@@ -257,7 +304,7 @@ export default function PhotoUploader({ listingId, photos, onChange, maxPhotos =
                   : `Add more photos (${remaining} remaining)`}
               </p>
               <p className="text-stone-500 text-xs">
-                JPG, PNG, or WebP · Max 10 MB each · Up to {maxPhotos} photos
+                JPG, PNG, WebP, or HEIC · iPhone photos welcome · Up to {maxPhotos} photos
               </p>
             </div>
           )}
