@@ -14671,6 +14671,7 @@ const archetypeInitializedRef = useRef(false);
                   setError(null);
                   setProgress(10);
                   setProgressStep('Assembling territory from cache...');
+                  console.time('[TerrainBrain] territory build (total)');
 
                   try {
                     const parcels = territoryParcelsRef.current;
@@ -15020,6 +15021,7 @@ const archetypeInitializedRef = useRef(false);
 
                     setProgress(100);
                     setProgressStep(`Territory assembled — ${allTerrain.length} parcels, ${assembled.territoryLinks.features.length} links`);
+                    console.timeEnd('[TerrainBrain] territory build (total)');
                     console.log('[TerritoryAssembly] COMPLETE:', allTerrain.length, 'parcels,', assembled.territoryLinks.features.length, 'cross-parcel links');
 
                     // Re-apply territory hull data + enforce boundary styling
@@ -18594,6 +18596,7 @@ const archetypeInitializedRef = useRef(false);
               <Target className="absolute inset-0.5 h-4 w-4 text-amber-500" />
             </div>
             <div className="flex-1 min-w-0">
+              <p className="text-amber-400/70 text-[8px] uppercase tracking-[0.2em] font-semibold leading-none mb-0.5">Terrain Brain</p>
               <p className="text-white text-xs font-medium truncate">{progressStep}</p>
               <div className="relative w-full h-1 bg-white/[0.08] rounded-full overflow-hidden mt-1">
                 <div

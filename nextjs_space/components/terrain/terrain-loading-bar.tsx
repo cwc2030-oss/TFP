@@ -3,10 +3,15 @@
 import { useState, useEffect, useRef } from 'react';
 
 const STATUS_MESSAGES = [
-  { text: '⟳ Reading elevation data...', until: 8 },
-  { text: '⟳ Mapping ridges and corridors...', until: 16 },
-  { text: '⟳ Calculating deer flow...', until: 24 },
-  { text: '⟳ Placing stand locations...', until: 30 },
+  { text: 'Terrain Brain · reading elevation data…', until: 8 },
+  { text: 'Terrain Brain · mapping ridges & corridors…', until: 16 },
+  { text: 'Terrain Brain · calculating deer flow…', until: 24 },
+  { text: 'Terrain Brain · placing stand locations…', until: 30 },
+];
+const ROLLOVER_MESSAGES = [
+  'Terrain Brain · assembling your territory…',
+  'Terrain Brain · merging terrain features…',
+  'Terrain Brain · crunching the big picture…',
 ];
 
 interface TerrainLoadingBarProps {
@@ -41,17 +46,18 @@ export default function TerrainLoadingBar({ visible }: TerrainLoadingBarProps) {
 
   if (!visible) return null;
 
-  // Determine current status message (cycle through, last one sticks)
-  const currentMsg =
-    STATUS_MESSAGES.find(m => elapsed < m.until) ??
-    STATUS_MESSAGES[STATUS_MESSAGES.length - 1];
+  // Determine current status message: scripted through 30s, then cycle rollover messages
+  const scripted = STATUS_MESSAGES.find(m => elapsed < m.until);
+  const currentText = scripted
+    ? scripted.text
+    : ROLLOVER_MESSAGES[Math.floor((elapsed - 30) / 4) % ROLLOVER_MESSAGES.length];
 
   return (
     <div className="w-full px-3 pt-3 pb-2">
       <div className="bg-gray-900/80 border border-teal-500/20 rounded-lg px-3 py-2.5 space-y-2">
         {/* Status text */}
         <p className="text-[11px] text-teal-400 font-medium tracking-wide animate-pulse">
-          {currentMsg.text}
+          {currentText}
         </p>
 
         {/* Indeterminate progress bar */}
@@ -70,7 +76,9 @@ export default function TerrainLoadingBar({ visible }: TerrainLoadingBarProps) {
         {/* First-time hint */}
         {showHint && (
           <p className="text-[9px] text-stone-500 leading-relaxed">
-            This may take ~30 seconds
+            {elapsed < 30
+              ? 'A single parcel takes ~30 seconds'
+              : 'Large territory — this can take a minute or two'}
           </p>
         )}
       </div>
