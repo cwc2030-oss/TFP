@@ -358,6 +358,17 @@ export function getHarvestData(county: string): CountyHarvestData | null {
   return { county: normalizedCounty, ...data };
 }
 
+// Year the harvest records reflect (MDC reported season)
+export const HARVEST_DATA_YEAR = 2024;
+
+// Returns true only when the county has a real harvest record in HARVEST_DATA.
+// getHarvestData() silently returns "moderate" defaults for missing counties,
+// so use this to distinguish data-backed counties from estimated ones in the UI.
+export function isHarvestDataBacked(county: string): boolean {
+  const normalizedCounty = county?.replace(/ County$/i, "").trim() ?? "";
+  return !!HARVEST_DATA[normalizedCounty];
+}
+
 export function getHarvestPressureLabel(density: "low" | "moderate" | "high" | "very high"): string {
   switch (density) {
     case "low": return "Low Pressure";

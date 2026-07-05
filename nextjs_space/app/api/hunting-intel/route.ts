@@ -7,7 +7,7 @@ import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid
 import { regridFetch } from "@/lib/regrid-client";
 import { geocodeAddress } from "@/lib/geocode-address";
 import { fetchSoilData } from "@/lib/usda-soil";
-import { getCWDStatus, getDroughtStatus, getHarvestData, getHarvestPressureLabel, DEER_SEASONS_2025_2026 } from "@/lib/missouri-hunting";
+import { getCWDStatus, getDroughtStatus, getHarvestData, getHarvestPressureLabel, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026 } from "@/lib/missouri-hunting";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -347,6 +347,7 @@ export async function POST(request: NextRequest) {
     const soilData = await fetchSoilData(order.parcelLat, order.parcelLng);
     const cwdStatus = getCWDStatus(parcelData.county);
     const harvestData = getHarvestData(parcelData.county);
+    const harvestBacked = isHarvestDataBacked(parcelData.county);
 
     const acreage = parcelData.acreage || 80;
     let optimalZoom = 15;
@@ -675,8 +676,8 @@ export async function POST(request: NextRequest) {
       yPos += 4;
     });
 
-    // Harvest data box if available
-    if (harvestData) {
+    // Harvest data box
+    {
       doc.setFillColor(34, 83, 60);
       doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
       doc.setTextColor(255, 255, 255);
@@ -685,19 +686,41 @@ export async function POST(request: NextRequest) {
       doc.text(`${parcelData.county.toUpperCase()} COUNTY HARVEST DATA`, 25, yPos + 5.5);
       yPos += 11;
 
-      const harvestItems = [
-        `Total Deer Harvested: ${harvestData.totalDeer.toLocaleString()}`,
-        `Antlered: ${harvestData.antlered.toLocaleString()}`,
-        `Antlerless: ${harvestData.antlerless.toLocaleString()}`,
-        `Harvest Pressure: ${getHarvestPressureLabel(harvestData.harvestDensity)}`,
-      ];
+      // Data-confidence badge
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(60, 60, 60);
-      harvestItems.forEach((item) => {
-        doc.text(`•  ${item}`, 25, yPos);
+      if (harvestBacked) {
+        doc.setTextColor(22, 163, 74);
+        doc.text(`Data-backed - MDC ${HARVEST_DATA_YEAR}`, 25, yPos);
+      } else {
+        doc.setTextColor(217, 119, 6);
+        doc.text("Estimated - limited county data", 25, yPos);
+      }
+      yPos += 6;
+
+      if (harvestBacked) {
+        const harvestItems = [
+          `Total Deer Harvested: ${harvestData!.totalDeer.toLocaleString()}`,
+          `Antlered: ${harvestData!.antlered.toLocaleString()}`,
+          `Antlerless: ${harvestData!.antlerless.toLocaleString()}`,
+          `Harvest Pressure: ${getHarvestPressureLabel(harvestData!.harvestDensity)}`,
+        ];
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(60, 60, 60);
+        harvestItems.forEach((item) => {
+          doc.text(`\u2022  ${item}`, 25, yPos);
+          yPos += 5.5;
+        });
+      } else {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(60, 60, 60);
+        doc.text("MDC has not published a county-specific harvest record for this", 25, yPos);
         yPos += 5.5;
-      });
+        doc.text("county. Regional estimates apply - treat as directional only.", 25, yPos);
+        yPos += 5.5;
+      }
     }
 
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 4, totalPages);

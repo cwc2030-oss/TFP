@@ -7,7 +7,7 @@ import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid
 import { regridFetch } from "@/lib/regrid-client";
 import { geocodeAddress } from "@/lib/geocode-address";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
-import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
+import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -1636,6 +1636,7 @@ export async function POST(request: NextRequest) {
     const cwdStatus = getCWDStatus(parcelData.county);
     const droughtStatus = getDroughtStatus(parcelData.county);
     const harvestData = getHarvestData(parcelData.county);
+    const harvestBacked = isHarvestDataBacked(parcelData.county);
     const mdcRegion = getMDCRegion(parcelData.county);
     const nearbyMRAP = getNearbyMRAPAreas(parcelData.county, 3);
     
@@ -1720,9 +1721,11 @@ export async function POST(request: NextRequest) {
     doc.text(droughtStatus.isAffected ? "Food plots may struggle" : "Healthy forage expected", 30 + cardW, yPos + 51);
     
     // CARD 3: HARVEST PRESSURE
-    const harvestColor: [number, number, number] = harvestData ? getHarvestPressureColor(harvestData.harvestDensity) : [234, 179, 8];
-    const isHighPressure = harvestData?.harvestDensity === "high" || harvestData?.harvestDensity === "very high";
-    const harvestBg: [number, number, number] = isHighPressure ? [255, 240, 240] : [240, 255, 240];
+    const harvestGreen: [number, number, number] = [22, 163, 74];
+    const harvestAmber: [number, number, number] = [217, 119, 6];
+    const harvestColor: [number, number, number] = harvestBacked ? getHarvestPressureColor(harvestData!.harvestDensity) : harvestAmber;
+    const isHighPressure = harvestBacked && (harvestData!.harvestDensity === "high" || harvestData!.harvestDensity === "very high");
+    const harvestBg: [number, number, number] = !harvestBacked ? [255, 251, 235] : (isHighPressure ? [255, 240, 240] : [240, 255, 240]);
     
     doc.setFillColor(...harvestBg);
     doc.roundedRect(30 + cardW * 2, yPos, cardW, cardH, 4, 4, "F");
@@ -1738,20 +1741,27 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(11);
     doc.text("HARVEST PRESSURE", 35 + cardW * 2, yPos + 12);
     
-    doc.setFontSize(26);
-    const pressureLabel = harvestData ? getHarvestPressureLabel(harvestData.harvestDensity).toUpperCase() : "MODERATE";
+    doc.setFontSize(harvestBacked ? 26 : 22);
+    const pressureLabel = harvestBacked ? getHarvestPressureLabel(harvestData!.harvestDensity).toUpperCase() : "ESTIMATE";
     doc.text(pressureLabel, 35 + cardW * 2, yPos + 32);
     
-    doc.setTextColor(80, 80, 80);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    const harvestNote = harvestData 
-      ? `${harvestData.totalDeer.toLocaleString()} deer taken (2024)`
-      : "County data pending";
-    doc.text(harvestNote, 35 + cardW * 2, yPos + 42);
-    
+    // Data-confidence badge line
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    const pressureTip = isHighPressure ? "High competition area" : "Lower hunting pressure";
+    if (harvestBacked) {
+      doc.setTextColor(...harvestGreen);
+      doc.text(`Data-backed - MDC ${HARVEST_DATA_YEAR}`, 35 + cardW * 2, yPos + 42);
+    } else {
+      doc.setTextColor(...harvestAmber);
+      doc.text("Estimated - limited county data", 35 + cardW * 2, yPos + 42);
+    }
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 80);
+    const pressureTip = harvestBacked
+      ? `${harvestData!.totalDeer.toLocaleString()} deer taken - ${isHighPressure ? "high competition" : "lower pressure"}`
+      : "County-specific record pending";
     doc.text(pressureTip, 35 + cardW * 2, yPos + 51);
     
     yPos += cardH + 10;
