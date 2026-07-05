@@ -8,9 +8,13 @@ const REDIRECTS: Record<string, string> = {
   '/api/sample-quick-look': '/api/free-look',
   '/quick-look': '/demo',
   '/sample-quick-look': '/demo',
-  '/find-a-lease': '/marketplace-coming-soon',
-  '/listings': '/marketplace-coming-soon',
 };
+
+// NOTE: /listings and /find-a-lease are intentionally NOT redirected here.
+// Their coming-soon gate now lives in the page layer (app/listings/page.tsx
+// and app/find-a-lease/page.tsx) so admins can preview them pre-launch and so
+// the marketplace launch flip (TFP_MARKETPLACE_OPEN) takes effect at request
+// time — neither of which edge middleware can do (it inlines env at build).
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
