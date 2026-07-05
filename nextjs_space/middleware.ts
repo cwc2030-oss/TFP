@@ -30,12 +30,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url, 308);
   }
 
-  // /listings/[slug] and /listings/[slug]/inquire → 404 so Google drops old listing URLs
-  if (pathname.startsWith('/listings/')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/marketplace-coming-soon';
-    return NextResponse.redirect(url, 302);
-  }
+  // NOTE: /listings/[slug] and /listings/[slug]/inquire are intentionally NOT
+  // gated here. Edge middleware can't do the owner DB lookup, so gating lives
+  // in the page layer (see app/listings/[slug]/page.tsx + .../inquire/page.tsx):
+  // while the marketplace is closed, an admin OR the listing's owner may view a
+  // PUBLISHED listing; everyone else is redirected to /marketplace-coming-soon,
+  // and any non-published/legacy id 404s (which also drops old URLs from Google).
 
   // Determine the serving host from headers
   const host = (

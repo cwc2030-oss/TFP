@@ -8,9 +8,12 @@
  * are shown to the hunter. Listing detail page already enforces this via
  * stripForPublic; we re-apply the same allowlist here.
  */
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
+import { isMarketplaceOpen, COMING_SOON_PATH } from '@/lib/marketplace-gate';
 import { prisma } from '@/lib/db';
 import Navbar from '@/components/navbar';
 import {
@@ -41,6 +44,7 @@ export default async function InquirePage({ params }: Props) {
     where: { id, status: 'PUBLISHED' },
     select: {
       id: true,
+      ownerUserId: true,
       title: true,
       state: true,
       county: true,
@@ -52,6 +56,19 @@ export default async function InquirePage({ params }: Props) {
     },
   });
   if (!listing) notFound();
+
+  // Coming-soon gate: while the marketplace is closed, only admins and the
+  // listing's own owner may reach the inquiry flow. Everyone else is bounced
+  // to the coming-soon wall. (Submission is separately gated at the API.)
+  if (!isMarketplaceOpen()) {
+    const session = await getServerSession(authOptions);
+    const callerId = session?.user?.id ?? null;
+    const isAdmin = (session?.user as any)?.role === 'admin';
+    const isOwner = !!callerId && listing.ownerUserId === callerId;
+    if (!isAdmin && !isOwner) {
+      redirect(COMING_SOON_PATH);
+    }
+  }
 
   const safe = stripForPublic(listing) as typeof listing;
   const titleStr = listingTitleFallback({
