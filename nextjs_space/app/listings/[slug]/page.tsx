@@ -106,17 +106,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function PublicListingDetail({ params }: Props) {
-  if (!isMarketplaceOpen()) {
-    const gateSession = await getServerSession(authOptions);
-    if ((gateSession?.user as any)?.role !== 'admin') {
-      redirect(COMING_SOON_PATH);
-    }
-  }
   const id = extractIdFromSlugId(params.slug);
   if (!id) notFound();
 
   const listing = await loadPublished(id);
   if (!listing) notFound();
+
+  const session = await getServerSession(authOptions);
+  const callerId = session?.user?.id ?? null;
+  const isOwner = !!callerId && listing.ownerUserId === callerId;
+
+  // Coming-soon gate: while the marketplace is closed, only admins and the
+  // listing's own owner may preview a published listing. Everyone else hits
+  // the wall.
+  if (!isMarketplaceOpen()) {
+    const isAdmin = (session?.user as any)?.role === 'admin';
+    if (!isAdmin && !isOwner) {
+      redirect(COMING_SOON_PATH);
+    }
+  }
 
   // Canonical-redirect cosmetic-slug drift
   const canonical = `${listingSlug({
@@ -131,9 +139,6 @@ export default async function PublicListingDetail({ params }: Props) {
   }
 
   // Determine if caller gets full Terrain Brain (owner or accepted lessee)
-  const session = await getServerSession(authOptions);
-  const callerId = session?.user?.id ?? null;
-  const isOwner = !!callerId && listing.ownerUserId === callerId;
   let hasFullAccess = isOwner;
   if (!hasFullAccess && callerId) {
     const accepted = await prisma.inquiry.findFirst({
