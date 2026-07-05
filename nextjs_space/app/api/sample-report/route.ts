@@ -3,7 +3,7 @@ import { jsPDF } from "jspdf";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { regridFetch } from "@/lib/regrid-client";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
-import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
+import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS, isMissouriState, getStateDisplayName } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -1424,7 +1424,10 @@ export async function GET() {
     const harvestBacked = isHarvestDataBacked(parcelData.county);
     const mdcRegion = getMDCRegion(parcelData.county);
     const nearbyMRAP = getNearbyMRAPAreas(parcelData.county, 3);
-    
+    const isMO = isMissouriState(parcelData.state);
+    const stateName = getStateDisplayName(parcelData.state);
+
+    if (isMO) {
     // ========================================
     // THREE KEY INDICATORS - Understated but powerful
     // ========================================
@@ -1665,6 +1668,24 @@ export async function GET() {
     doc.setFontSize(6);
     doc.text("MDC: mdc.mo.gov | Drought Monitor: droughtmonitor.unl.edu | Report Poaching: 1-800-392-1111", 25, yPos + 11);
     doc.text("CWD Info: mdc.mo.gov/cwd | USDA Service Center: farmers.gov/service-locator", 25, yPos + 15);
+    } else {
+      // Non-Missouri: neutral placeholder (state-specific hunting data not yet available)
+      yPos = 60;
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(20, yPos, pageWidth - 40, 70, 4, 4, "FD");
+      doc.setTextColor(71, 85, 105);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text("State-specific hunting data coming soon", pageWidth / 2, yPos + 24, { align: "center" });
+      doc.setTextColor(100, 116, 139);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(`Harvest, CWD, drought, MDC region, and season data for ${stateName}`, pageWidth / 2, yPos + 38, { align: "center" });
+      doc.text("is in development. We only show verified state data - wrong data is", pageWidth / 2, yPos + 45, { align: "center" });
+      doc.text("worse than no data. Consult your state wildlife agency in the meantime.", pageWidth / 2, yPos + 52, { align: "center" });
+    }
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
 

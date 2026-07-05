@@ -7,7 +7,7 @@ import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid
 import { regridFetch } from "@/lib/regrid-client";
 import { geocodeAddress } from "@/lib/geocode-address";
 import { fetchSoilData } from "@/lib/usda-soil";
-import { getCWDStatus, getDroughtStatus, getHarvestData, getHarvestPressureLabel, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026 } from "@/lib/missouri-hunting";
+import { getCWDStatus, getDroughtStatus, getHarvestData, getHarvestPressureLabel, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026, isMissouriState, getStateDisplayName } from "@/lib/missouri-hunting";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -348,6 +348,8 @@ export async function POST(request: NextRequest) {
     const cwdStatus = getCWDStatus(parcelData.county);
     const harvestData = getHarvestData(parcelData.county);
     const harvestBacked = isHarvestDataBacked(parcelData.county);
+    const isMO = isMissouriState(parcelData.state);
+    const stateName = getStateDisplayName(parcelData.state);
 
     const acreage = parcelData.acreage || 80;
     let optimalZoom = 15;
@@ -424,8 +426,8 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(8);
     doc.text(`Report ID: ${reportNumber}  |  Generated: ${formatDate(new Date())}`, pageWidth / 2, infoY, { align: "center" });
 
-    // CWD alert if in zone
-    if (cwdStatus.inZone) {
+    // CWD alert if in zone (Missouri-only)
+    if (isMO && cwdStatus.inZone) {
       infoY += 8;
       doc.setFillColor(254, 243, 199);
       doc.roundedRect(30, infoY, pageWidth - 60, 10, 2, 2, "F");
@@ -603,7 +605,7 @@ export async function POST(request: NextRequest) {
     const stats = [
       { label: "Total Acres", value: `${parcelData.acreage.toFixed(1)}` },
       { label: "County", value: parcelData.county },
-      { label: "CWD Zone", value: cwdStatus.inZone ? "YES — Mandatory Testing" : "No" },
+      { label: "CWD Zone", value: isMO ? (cwdStatus.inZone ? "YES — Mandatory Testing" : "No") : "See state resources" },
     ];
     stats.forEach((s, i) => {
       const sx = 20 + i * (statsW + 5);
@@ -676,8 +678,8 @@ export async function POST(request: NextRequest) {
       yPos += 4;
     });
 
-    // Harvest data box
-    {
+    // Harvest data box (Missouri-only)
+    if (isMO) {
       doc.setFillColor(34, 83, 60);
       doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
       doc.setTextColor(255, 255, 255);
@@ -721,6 +723,24 @@ export async function POST(request: NextRequest) {
         doc.text("county. Regional estimates apply - treat as directional only.", 25, yPos);
         yPos += 5.5;
       }
+    } else {
+      // Non-Missouri: neutral placeholder
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(0.4);
+      doc.roundedRect(20, yPos, pageWidth - 40, 34, 3, 3, "FD");
+      drawDeerSilhouette(doc, 34, yPos + 15, 7, [148, 163, 184]);
+      doc.setTextColor(71, 85, 105);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("State-specific hunting data coming soon", 48, yPos + 12);
+      doc.setTextColor(100, 116, 139);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.text(`Harvest, CWD, and season data for ${stateName} is in development.`, 48, yPos + 19);
+      doc.text("We only show verified state data - wrong data is worse than", 48, yPos + 24.5);
+      doc.text("no data. Consult your state wildlife agency in the meantime.", 48, yPos + 30);
+      yPos += 40;
     }
 
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 4, totalPages);
@@ -734,26 +754,44 @@ export async function POST(request: NextRequest) {
 
     yPos = 42;
 
-    // Season dates
-    doc.setFillColor(34, 83, 60);
-    doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("MISSOURI DEER SEASON DATES 2025-2026", 25, yPos + 5.5);
-    yPos += 12;
-
-    doc.setFontSize(7.5);
-    DEER_SEASONS_2025_2026.forEach((s) => {
-      doc.setTextColor(34, 83, 60);
+    // Season dates (Missouri-only)
+    if (isMO) {
+      doc.setFillColor(34, 83, 60);
+      doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
+      doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
-      doc.text(s.season, 25, yPos);
-      doc.setTextColor(80, 80, 80);
+      doc.setFontSize(9);
+      doc.text("MISSOURI DEER SEASON DATES 2025-2026", 25, yPos + 5.5);
+      yPos += 12;
+
+      doc.setFontSize(7.5);
+      DEER_SEASONS_2025_2026.forEach((s) => {
+        doc.setTextColor(34, 83, 60);
+        doc.setFont("helvetica", "bold");
+        doc.text(s.season, 25, yPos);
+        doc.setTextColor(80, 80, 80);
+        doc.setFont("helvetica", "normal");
+        doc.text(s.dates, 90, yPos);
+        yPos += 5.5;
+      });
+      yPos += 6;
+    } else {
+      doc.setFillColor(34, 83, 60);
+      doc.roundedRect(20, yPos, pageWidth - 40, 8, 2, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(`${stateName.toUpperCase()} SEASON DATES`, 25, yPos + 5.5);
+      yPos += 12;
+
+      doc.setTextColor(100, 116, 139);
       doc.setFont("helvetica", "normal");
-      doc.text(s.dates, 90, yPos);
+      doc.setFontSize(8);
+      doc.text(`Season dates for ${stateName} are coming soon. Consult your state`, 25, yPos);
       yPos += 5.5;
-    });
-    yPos += 6;
+      doc.text("wildlife agency for current regulations and season calendars.", 25, yPos);
+      yPos += 8;
+    }
 
     // Field Notes section — blank area for the hunter
     doc.setFillColor(34, 83, 60);

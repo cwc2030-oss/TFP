@@ -7,7 +7,7 @@ import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid
 import { regridFetch } from "@/lib/regrid-client";
 import { geocodeAddress } from "@/lib/geocode-address";
 import { fetchSoilData, SoilData, getFarmlandRating, getDrainageRating, getCapabilityDescription } from "@/lib/usda-soil";
-import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, isHarvestDataBacked, HARVEST_DATA_YEAR, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
+import { getCWDStatus, getMDCRegion, getNearbyMRAPAreas, getDroughtStatus, getHarvestData, getHarvestPressureLabel, getHarvestPressureColor, isHarvestDataBacked, HARVEST_DATA_YEAR, isMissouriState, getStateDisplayName, DEER_SEASONS_2025_2026, TURKEY_SEASONS_2025_2026, CONSERVATION_PROGRAMS } from "@/lib/missouri-hunting";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -1632,6 +1632,11 @@ export async function POST(request: NextRequest) {
     
     yPos = 42;
     
+    // Missouri-specific hunting data (seasons, CWD, drought, MDC region, harvest)
+    // only applies to MO parcels. Gate the entire dashboard so out-of-state
+    // parcels never render Missouri regulations as if they applied here.
+    const isMO = isMissouriState(parcelData.state);
+
     // Get hunting data for this county
     const cwdStatus = getCWDStatus(parcelData.county);
     const droughtStatus = getDroughtStatus(parcelData.county);
@@ -1640,6 +1645,7 @@ export async function POST(request: NextRequest) {
     const mdcRegion = getMDCRegion(parcelData.county);
     const nearbyMRAP = getNearbyMRAPAreas(parcelData.county, 3);
     
+    if (isMO) {
     // ========================================
     // THREE BIG DASHBOARD CARDS WITH DEER SILHOUETTES
     // ========================================
@@ -1880,6 +1886,34 @@ export async function POST(request: NextRequest) {
     doc.setFontSize(6);
     doc.text("MDC: mdc.mo.gov | Drought Monitor: droughtmonitor.unl.edu | Report Poaching: 1-800-392-1111", 25, yPos + 11);
     doc.text("CWD Info: mdc.mo.gov/cwd | USDA Service Center: farmers.gov/service-locator", 25, yPos + 15);
+    } else {
+      // Non-MO parcel: Missouri hunting regulations do not apply. Show a neutral
+      // placeholder rather than another state's data dressed up as verified.
+      const stateName = getStateDisplayName(parcelData.state);
+      const boxW = pageWidth - 40;
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(20, yPos, boxW, 92, 4, 4, "F");
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(1);
+      doc.roundedRect(20, yPos, boxW, 92, 4, 4, "S");
+
+      drawDeerSilhouette(doc, pageWidth / 2, yPos + 20, 16, [148, 163, 184]);
+
+      doc.setTextColor(71, 85, 105);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.text("State-specific hunting data coming soon", pageWidth / 2, yPos + 42, { align: "center" });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text("Season dates, CWD zones, drought status, harvest records, and conservation", pageWidth / 2, yPos + 56, { align: "center" });
+      doc.text("office details are currently published for Missouri parcels only.", pageWidth / 2, yPos + 63, { align: "center" });
+      doc.text(`Coverage for ${stateName} is in development. We don't show another state's`, pageWidth / 2, yPos + 75, { align: "center" });
+      doc.text("regulations here, because wrong data is worse than no data.", pageWidth / 2, yPos + 82, { align: "center" });
+
+      yPos += 100;
+    }
     
     drawPageFooter(doc, pageWidth, pageHeight, reportNumber, 9, totalPages);
 

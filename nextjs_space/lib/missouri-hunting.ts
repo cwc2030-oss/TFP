@@ -369,6 +369,31 @@ export function isHarvestDataBacked(county: string): boolean {
   return !!HARVEST_DATA[normalizedCounty];
 }
 
+// ============================================
+// STATE GATING
+// ============================================
+// All hunting data in this module (seasons, CWD, drought, MDC regions, harvest)
+// is Missouri-only. Use these helpers to gate MO-specific sections so that
+// out-of-state parcels never render Missouri's regulations as if they applied.
+const STATE_DISPLAY_NAMES: { [abbr: string]: string } = {
+  MO: "Missouri", KS: "Kansas", OK: "Oklahoma", IA: "Iowa",
+  NE: "Nebraska", AR: "Arkansas", CO: "Colorado", TX: "Texas",
+  IL: "Illinois", KY: "Kentucky", TN: "Tennessee",
+};
+
+export function isMissouriState(state: string | null | undefined): boolean {
+  if (!state) return false;
+  const s = state.trim().toUpperCase();
+  return s === "MO" || s === "MISSOURI";
+}
+
+export function getStateDisplayName(state: string | null | undefined): string {
+  if (!state) return "this state";
+  const s = state.trim();
+  if (s.length > 2) return s; // already a full name (e.g. "Kansas")
+  return STATE_DISPLAY_NAMES[s.toUpperCase()] || s.toUpperCase();
+}
+
 export function getHarvestPressureLabel(density: "low" | "moderate" | "high" | "very high"): string {
   switch (density) {
     case "low": return "Low Pressure";
