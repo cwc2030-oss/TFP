@@ -12,6 +12,7 @@ import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
 import { prisma } from '@/lib/db';
 import { Activity, MapPin, Bell } from 'lucide-react';
+import { LAUNCH_STATES } from '@/lib/county-flow';
 import FlowByArea, { type CountyRow } from './_view/flow-by-area';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +26,9 @@ export const metadata: Metadata = {
 async function getData(): Promise<{ counties: CountyRow[]; states: string[] }> {
   try {
     const rows = await prisma.countyFlowRating.findMany({
+      // Public view is scoped to launch states only. A stray analyzed parcel
+      // in a non-launch state (e.g. a single WY county) never leaks here.
+      where: { state: { in: [...LAUNCH_STATES] } },
       orderBy: [{ adjustedFlowIndex: 'desc' }, { parcelCount: 'desc' }],
       take: 300,
       select: {
@@ -41,11 +45,13 @@ async function getData(): Promise<{ counties: CountyRow[]; states: string[] }> {
         highFlowCount: true,
       },
     });
-    const states = Array.from(new Set(rows.map((r) => r.state))).sort();
-    return { counties: rows, states };
+    // Always expose all launch states in the filter, in launch order — even
+    // ones with zero rated counties yet (Iowa), so a launch state is never
+    // silently missing. The view renders a "coming soon" state for empties.
+    return { counties: rows, states: [...LAUNCH_STATES] };
   } catch (e) {
     console.error('[deer-flow] getData error:', e);
-    return { counties: [], states: [] };
+    return { counties: [], states: [...LAUNCH_STATES] };
   }
 }
 

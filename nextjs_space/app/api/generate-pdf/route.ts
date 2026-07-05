@@ -502,6 +502,10 @@ export async function POST(request: NextRequest) {
     
     const regridData = await fetchRegridParcelData(order.parcelLat, order.parcelLng, order.parcelAddress);
     const parcelData = regridData || getDefaultSampleData();
+    // State gating: Missouri-calibrated data (tax ratios, watershed, timber, hunting
+    // regulations) must not render as authoritative on out-of-state parcels.
+    const isMO = isMissouriState(parcelData.state);
+    const stateName = getStateDisplayName(parcelData.state);
     const logoImage = await loadLogoImage();
     const funFacts = generateFunFacts(parcelData.acreage, parcelData.county, parcelData.state);
     
@@ -662,7 +666,9 @@ export async function POST(request: NextRequest) {
     
     yPos += 12;
     
-    // Calculate tax values - Missouri agricultural land assessment
+    // Calculate tax values - agricultural land assessment (Missouri-calibrated ratios).
+    // These assessment ratios/rates are Missouri-specific, so only present them as an
+    // estimate on MO parcels; other states use different assessment ratios.
     const estimatedMarketValue = Math.round(parcelData.acreage * 4500); // ~$4,500/acre for ag land
     const assessedValue = parcelData.marketValue || Math.round(estimatedMarketValue * 0.12); // Agricultural = 12% of market
     const classificationPct = 12; // Agricultural classification in Missouri
@@ -678,11 +684,16 @@ export async function POST(request: NextRequest) {
     doc.roundedRect(20, yPos, pageWidth - 40, 52, 3, 3, "S");
     
     // Tax details - clean bullet list format
-    const taxItems = [
+    const taxItems = isMO ? [
       { label: "Assessed Value (Tax Basis):", value: `$${assessedValue.toLocaleString()}${isEstimated ? "*" : ""}` },
       { label: "Classification:", value: `Agricultural (${classificationPct}%)` },
       { label: "Effective Tax Rate:", value: `$${effectiveTaxRate.toFixed(2)} / $100` },
       { label: "Estimated Annual Property Tax:", value: `~$${estimatedAnnualTax.toLocaleString()}` },
+    ] : [
+      { label: "Est. Market Value:", value: `$${estimatedMarketValue.toLocaleString()}*` },
+      { label: "Classification:", value: `Agricultural` },
+      { label: "Assessment Ratio:", value: `Varies by state` },
+      { label: "Annual Property Tax:", value: `See county assessor` },
     ];
     
     let taxY = yPos + 10;
@@ -915,7 +926,7 @@ export async function POST(request: NextRequest) {
       ["FEMA Zone:", "Zone X - Minimal Risk"],
       ["Flood Insurance:", "Not Required"],
       ["Nearest Water:", "1.2 miles to creek"],
-      ["Watershed:", "Missouri River Basin"],
+      ["Watershed:", isMO ? "Missouri River Basin" : "Regional drainage basin"],
       ["Wetlands:", "None designated"],
       ["Water Rights:", "Riparian may apply"],
     ];
@@ -974,7 +985,7 @@ export async function POST(request: NextRequest) {
     const takeaways = [
       "• Zone X designation = no federal flood insurance requirement, excellent for building",
       "• Electric at road means lower utility extension costs vs. remote properties",
-      "• Missouri River watershed provides reliable groundwater for well drilling",
+      "• Regional watershed provides reliable groundwater for well drilling",
       "• Paved road access increases property value and year-round accessibility",
     ];
     
@@ -1375,7 +1386,7 @@ export async function POST(request: NextRequest) {
     yPos += 12;
     
     const marketContext = [
-      "• Agricultural land in west-central Missouri appreciates 3-5% annually",
+      isMO ? "• Agricultural land in west-central Missouri appreciates 3-5% annually" : "• Agricultural land in this region appreciates 3-5% annually on average",
       "• Parcels over 80 acres command premium pricing for farming/hunting",
       `• ${parcelData.county} County has strong demand for tillable acreage`,
       "• Hunting leases average $10-15 per acre annually in this region",
@@ -1414,7 +1425,7 @@ export async function POST(request: NextRequest) {
     doc.setTextColor(80, 80, 80);
     doc.setFont("helvetica", "italic");
     doc.setFontSize(8);
-    doc.text("Missouri Stumpage (per MBF)", 28, yPos + 22);
+    doc.text(isMO ? "Missouri Stumpage (per MBF)" : "Regional Stumpage (per MBF)", 28, yPos + 22);
     
     const timberPrices = [
       ["White Oak (veneer)", "$800 - $2,500+"],
@@ -1633,9 +1644,7 @@ export async function POST(request: NextRequest) {
     yPos = 42;
     
     // Missouri-specific hunting data (seasons, CWD, drought, MDC region, harvest)
-    // only applies to MO parcels. Gate the entire dashboard so out-of-state
-    // parcels never render Missouri regulations as if they applied here.
-    const isMO = isMissouriState(parcelData.state);
+    // only applies to MO parcels. isMO/stateName are computed at the top of the handler.
 
     // Get hunting data for this county
     const cwdStatus = getCWDStatus(parcelData.county);
@@ -1889,7 +1898,6 @@ export async function POST(request: NextRequest) {
     } else {
       // Non-MO parcel: Missouri hunting regulations do not apply. Show a neutral
       // placeholder rather than another state's data dressed up as verified.
-      const stateName = getStateDisplayName(parcelData.state);
       const boxW = pageWidth - 40;
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(20, yPos, boxW, 92, 4, 4, "F");
@@ -2035,7 +2043,7 @@ export async function POST(request: NextRequest) {
     doc.setFont("helvetica", "italic");
     doc.setFontSize(11);
     doc.setTextColor(100, 100, 100);
-    doc.text("A Missouri Field Guide to Neighboring Well", pageWidth / 2, yPos, { align: "center" });
+    doc.text(isMO ? "A Missouri Field Guide to Neighboring Well" : "A Field Guide to Neighboring Well", pageWidth / 2, yPos, { align: "center" });
     
     yPos += 15;
     
@@ -2225,7 +2233,9 @@ export async function POST(request: NextRequest) {
     
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    const aboutText = "Understanding land means understanding how it's been lived on. This guide was written for buyers, investors, and newcomers navigating the unwritten customs of rural Missouri.";
+    const aboutText = isMO
+      ? "Understanding land means understanding how it's been lived on. This guide was written for buyers, investors, and newcomers navigating the unwritten customs of rural Missouri."
+      : "Understanding land means understanding how it's been lived on. This guide was written for buyers, investors, and newcomers navigating the unwritten customs of rural America.";
     const aboutLines = doc.splitTextToSize(aboutText, pageWidth - 60);
     let aboutY = yPos + 18;
     aboutLines.forEach((line: string) => {

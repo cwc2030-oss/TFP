@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { MapPin, Activity, Bell, CheckCircle, Search, TrendingUp, X, Info } from 'lucide-react';
-import { flowTier, FLOW_BAND_STYLE } from '@/lib/county-flow';
+import { flowTier, FLOW_BAND_STYLE, LAUNCH_STATE_NAMES } from '@/lib/county-flow';
 
 export interface CountyRow {
   state: string;
@@ -106,7 +106,7 @@ export default function FlowByArea({
               <option value="All">All states</option>
               {states.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {LAUNCH_STATE_NAMES[s] ? `${LAUNCH_STATE_NAMES[s]} (${s})` : s}
                 </option>
               ))}
             </select>
@@ -167,9 +167,29 @@ export default function FlowByArea({
 
       {/* County cards */}
       {filtered.length === 0 ? (
-        <div className="text-center py-16 text-stone-500">
-          No counties match your filters yet. Try widening the grade or state.
-        </div>
+        stateFilter !== 'All' && counties.every((c) => c.state !== stateFilter) ? (
+          <div className="max-w-2xl mx-auto text-center py-16">
+            <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-8">
+              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 border border-emerald-400/30 px-4 py-1.5 text-emerald-700 text-sm font-semibold mb-4">
+                <MapPin className="w-4 h-4" />
+                {LAUNCH_STATE_NAMES[stateFilter] ?? stateFilter} · launch state
+              </div>
+              <h3 className="text-2xl font-bold text-stone-900 mb-2">
+                {LAUNCH_STATE_NAMES[stateFilter] ?? stateFilter} — counties coming soon
+              </h3>
+              <p className="text-stone-600">
+                {LAUNCH_STATE_NAMES[stateFilter] ?? stateFilter} is a launch state, but we
+                haven&apos;t published county Deer Flow ratings there yet — we&apos;re running
+                ground through Terrain Brain now. Set a free alert on a rated county in the
+                meantime, and check back soon.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-16 text-stone-500">
+            No counties match your filters yet. Try widening the grade or state.
+          </div>
+        )
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-16">
           {filtered.map((c, i) => (

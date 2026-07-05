@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { gradeMinScore } from '@/lib/listings';
+import { LAUNCH_STATES } from '@/lib/county-flow';
 
 /**
  * GET /api/county-flow
@@ -24,8 +25,15 @@ export async function GET(req: NextRequest) {
     const sort = (searchParams.get('sort') || 'flow').toLowerCase().trim();
     const limit = Math.min(Number(searchParams.get('limit')) || 200, 500);
 
+    // Public API is scoped to launch states only. A specific state filter
+    // must itself be a launch state; otherwise we constrain to the full set
+    // so stray non-launch-state parcels (e.g. WY) never leak out.
     const where: any = {};
-    if (/^[A-Z]{2}$/.test(state)) where.state = state;
+    if (/^[A-Z]{2}$/.test(state) && (LAUNCH_STATES as readonly string[]).includes(state)) {
+      where.state = state;
+    } else {
+      where.state = { in: [...LAUNCH_STATES] };
+    }
     if (minGrade) {
       // Grade floor applies to the trustworthy adjusted score (matches ranking).
       const floor = gradeMinScore(minGrade);
@@ -57,16 +65,11 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    // Distinct state list for the filter UI.
-    const stateRows = await prisma.countyFlowRating.findMany({
-      distinct: ['state'],
-      select: { state: true },
-      orderBy: { state: 'asc' },
-    });
-
+    // Filter UI always offers the full launch-state set, in launch order —
+    // including states with zero rated counties yet (e.g. Iowa).
     return NextResponse.json({
       counties,
-      states: stateRows.map((s) => s.state),
+      states: [...LAUNCH_STATES],
     });
   } catch (e) {
     console.error('[county-flow] GET error:', e);

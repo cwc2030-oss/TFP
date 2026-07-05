@@ -10,6 +10,29 @@
  */
 import { gradeFromScore } from '@/lib/listings';
 
+/**
+ * Launch states, in priority order. The public /deer-flow filter only ever
+ * exposes these — so a stray analyzed parcel in a non-launch state (e.g. a
+ * single WY county someone ran through Terrain Brain) never leaks into the
+ * public view. Iowa is intentionally included even before it has any rated
+ * counties, so a launch state is never silently missing from the dropdown.
+ */
+export const LAUNCH_STATES = ['MO', 'KS', 'IA', 'OK'] as const;
+export type LaunchState = (typeof LAUNCH_STATES)[number];
+
+export const LAUNCH_STATE_NAMES: Record<string, string> = {
+  MO: 'Missouri',
+  KS: 'Kansas',
+  IA: 'Iowa',
+  OK: 'Oklahoma',
+};
+
+/** Whether a 2-letter code is one of our launch states (case/space tolerant). */
+export function isLaunchState(state: string | null | undefined): boolean {
+  if (!state) return false;
+  return (LAUNCH_STATES as readonly string[]).includes(state.trim().toUpperCase());
+}
+
 export interface ParcelFlowSignal {
   topStandScore: number | null | undefined;
   funnelCount: number | null | undefined;
