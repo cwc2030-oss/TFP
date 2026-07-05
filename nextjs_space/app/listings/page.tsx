@@ -120,7 +120,7 @@ export default function FoundingPropertyLanding() {
             Your hunting land deserves better than Facebook.
           </h1>
           <p className="mt-6 text-lg sm:text-xl text-stone-600 max-w-2xl mx-auto leading-relaxed">
-            Be one of the first 50 Founding Properties on the TFP Hunting Marketplace — Terrain Certified, free listing for life, and connected to vetted hunters who&apos;ll treat your land like it&apos;s theirs.
+            Be one of the first 50 Founding Properties on the TFP Hunting Marketplace — Terrain Certified, free listing for life, never pay the 4% landowner fee, and connected to vetted hunters who&apos;ll treat your land like it&apos;s theirs.
           </p>
           <button
             onClick={scrollToForm}
