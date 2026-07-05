@@ -291,12 +291,6 @@ function HeroSection() {
               </Link>
             </div>
 
-            <p className="text-stone-400 text-sm mb-6">
-              Try: <button type="button" onClick={() => setAddress('425 SE 850th Rd, Leeton, MO')} className="text-emerald-400 hover:underline">425 SE 850th Rd, Leeton, MO</button>
-              {' '} or {' '}
-              <button type="button" onClick={() => setAddress('761 Schlessman Rd, Pineville, MO')} className="text-emerald-400 hover:underline">761 Schlessman Rd, Pineville, MO</button>
-            </p>
-
             <div className="flex flex-wrap gap-4 text-stone-400 text-sm">
               <span className="flex items-center gap-1">
                 <CheckCircle className="w-4 h-4 text-emerald-500" />
