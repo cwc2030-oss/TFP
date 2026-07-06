@@ -9,22 +9,26 @@ import { trackEvent } from "@/lib/gtag";
 // ─── Demo Parcels ───────────────────────────────────────
 const DEMO_PARCELS = [
   {
-    id: "parcel-1",
-    slug: "big-acreage-property",
-    label: "310-Acre Property",
-    subtitle: "Large Private Parcel · 310 ac · Washington County",
-    address: "Liberty, MO 63664",
-    lat: 38.004409,
-    lng: -90.889326,
-    acreage: 310,
-    owner: "DICKEY STEVE H",
-    emoji: "🦌",
-    gradient: "from-amber-600 to-orange-700",
-    borderColor: "border-amber-500/30",
+    id: "territory-osage",
+    slug: "osage-county-territory",
+    label: "717-Acre Territory",
+    subtitle: "4-Parcel Hunting Territory · 717 ac · Osage County, OK",
+    address: "Osage County, Oklahoma",
+    lat: 36.934637,
+    lng: -96.214819,
+    acreage: 717,
+    owner: "",
+    isTerritory: true,
+    parcelCount: 4,
+    territoryUrl:
+      "/intel?territory=true&name=Osage%20County%20Territory&p1lat=36.929885&p1lng=-96.206485&p2lat=36.934760&p2lng=-96.210069&p3lat=36.939034&p3lng=-96.215077&p4lat=36.932875&p4lng=-96.220187&p5lat=36.936633&p5lng=-96.222278",
+    emoji: "🗺️",
+    gradient: "from-sky-600 to-indigo-700",
+    borderColor: "border-sky-500/30",
     tags: [
-      { text: "Private — permission required", type: "good" as const },
-      { text: "310+ acres of terrain to analyze", type: "good" as const },
-      { text: "Washington County", type: "good" as const },
+      { text: "4 adjoining parcels stitched together", type: "good" as const },
+      { text: "717 acres of terrain analyzed", type: "good" as const },
+      { text: "Osage County, OK", type: "good" as const },
     ],
   },
   {
@@ -94,6 +98,11 @@ export default function DemoPage() {
       parcel_label: parcel.label,
       address: parcel.address,
     });
+    // Territory cards launch the multi-parcel analysis; single parcels use lat/lng.
+    if ("territoryUrl" in parcel && parcel.territoryUrl) {
+      router.push(parcel.territoryUrl);
+      return;
+    }
     router.push(
       `/intel?lat=${parcel.lat}&lng=${parcel.lng}&address=${encodeURIComponent(parcel.address)}&acreage=${parcel.acreage}`
     );
@@ -160,9 +169,15 @@ export default function DemoPage() {
                 <MapPin className="w-3.5 h-3.5 text-stone-500 flex-shrink-0" />
                 <span className="truncate">{parcel.address}</span>
               </div>
-              <p className="text-stone-500 text-xs pl-5 truncate">
-                Owner: {parcel.owner}
-              </p>
+              {"isTerritory" in parcel && parcel.isTerritory ? (
+                <p className="text-stone-500 text-xs pl-5 truncate">
+                  {(parcel as any).parcelCount} adjoining parcels · {parcel.acreage} total acres
+                </p>
+              ) : (
+                <p className="text-stone-500 text-xs pl-5 truncate">
+                  Owner: {parcel.owner}
+                </p>
+              )}
             </div>
 
             {/* Tags */}
@@ -190,7 +205,7 @@ export default function DemoPage() {
             Ready to scout your own land?
           </h2>
           <p className="text-stone-400 text-sm sm:text-base mb-6 max-w-md mx-auto">
-            Unlock property data, terrain analysis, and CWD zone status for any Missouri parcel.
+            Unlock property data, terrain analysis, and hunting intel for any parcel.
           </p>
           <Link href="/pricing">
             <Button
