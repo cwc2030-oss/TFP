@@ -7,7 +7,7 @@ import { regridFetch } from "@/lib/regrid-client";
 
 export const dynamic = "force-dynamic";
 
-const ADMIN_EMAIL = "cwc2030@gmail.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "clark@terrafirma.partners";
 
 // Sampling regions per state (same as in random endpoint)
 const SAMPLING_REGIONS: Record<string, { minLat: number; maxLat: number; minLng: number; maxLng: number; weight: number }[]> = {

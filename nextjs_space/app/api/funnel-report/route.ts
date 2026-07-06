@@ -219,7 +219,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    const recipientEmail = body.recipientEmail || 'cwc2030@gmail.com';
+    const recipientEmail = body.recipientEmail || process.env.ADMIN_EMAIL || 'clark@terrafirma.partners';
 
     const now = new Date();
     const thisWeekStart = new Date(now);

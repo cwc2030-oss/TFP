@@ -432,7 +432,7 @@ export default function FoundingPropertyLanding() {
             © 2026 Terra Firma Partners. Terrain Brain™ and Terrain Certified™ are trademarks of Terra Firma Partners.
           </p>
           <div className="mt-3 flex items-center justify-center gap-4 text-sm">
-            <Link href="mailto:cwc2030@gmail.com" className="hover:text-stone-200 transition-colors">Contact</Link>
+            <Link href="mailto:clark@terrafirma.partners" className="hover:text-stone-200 transition-colors">Contact</Link>
             <span className="text-stone-600">·</span>
             <Link href="/terms" className="hover:text-stone-200 transition-colors">Privacy</Link>
             <span className="text-stone-600">·</span>

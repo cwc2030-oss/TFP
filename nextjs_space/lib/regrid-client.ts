@@ -152,7 +152,7 @@ async function sendUsageAlert(
         subject: `⚠ Regrid API: ${total} calls today (${dateStr})`,
         body: htmlBody,
         is_html: true,
-        recipient_email: 'cwc2030@gmail.com',
+        recipient_email: process.env.ADMIN_EMAIL || 'clark@terrafirma.partners',
         sender_email: `noreply@${appUrl ? new URL(appUrl).hostname : 'terrafirma.partners'}`,
         sender_alias: appName,
       }),
