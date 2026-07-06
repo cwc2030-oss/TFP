@@ -12,6 +12,7 @@ import { prisma } from '@/lib/db';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { createListingSchema } from '@/lib/listings';
+import { ensureAutoListingImage } from '@/lib/parcel-listing-image';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,5 +80,16 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return NextResponse.json({ listing }, { status: 201 });
+  // Auto-generate a parcel-shape listing image from the anchored territory
+  // geometry and attach it as photo #1, so a landowner can reach the publish
+  // step with ZERO uploaded photos. Best-effort / non-fatal: a failure here
+  // never blocks listing creation (the owner can still upload their own).
+  let photos = listing.photos;
+  const generated = await ensureAutoListingImage(
+    { id: listing.id, photos: listing.photos, county: listing.county, state: listing.state },
+    sp,
+  );
+  if (generated) photos = generated;
+
+  return NextResponse.json({ listing: { ...listing, photos } }, { status: 201 });
 }

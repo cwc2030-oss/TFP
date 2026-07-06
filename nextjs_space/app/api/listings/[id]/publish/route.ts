@@ -22,6 +22,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { snapshotFromSavedProperty, validateForPublish, computeFlowIndex } from '@/lib/listings';
 import { buildFlowSnapshot } from '@/lib/listing-flow-snapshot';
+import { ensureAutoListingImage } from '@/lib/parcel-listing-image';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +64,24 @@ export async function POST(
   // the listing's owner-supplied values (set via the wizard PATCH).
   const snap = snapshotFromSavedProperty(listing.savedProperty);
 
+  // ZERO-PHOTO PUBLISH: if the owner uploaded no photos, auto-generate a
+  // parcel-shape listing image (or data-only card fallback) from the anchored
+  // territory geometry and attach it as photo #1 so the "at least one photo"
+  // requirement is satisfied with no uploads. Best-effort / non-fatal.
+  let photos = listing.photos;
+  if (!photos || photos.length === 0) {
+    const generated = await ensureAutoListingImage(
+      {
+        id: listing.id,
+        photos: listing.photos,
+        county: listing.county,
+        state: listing.state,
+      },
+      listing.savedProperty,
+    );
+    if (generated) photos = generated;
+  }
+
   const candidate = {
     savedPropertyId: listing.savedPropertyId,
     state: listing.state,
@@ -74,7 +93,7 @@ export async function POST(
     huntersMax: listing.huntersMax,
     seasonAvailability: listing.seasonAvailability,
     description: listing.description,
-    photos: listing.photos,
+    photos,
     contactMethod: listing.contactMethod,
     contactEmail: listing.contactEmail,
     contactPhone: listing.contactPhone,
