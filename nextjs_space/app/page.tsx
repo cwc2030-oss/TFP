@@ -307,31 +307,77 @@ function HeroSection() {
             </div>
           </motion.div>
 
-          {/* Right side - Mascot GIF */}
+          {/* Right side - Auto-playing terrain flyover (the magic, before we ask for an address) */}
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.8, delay: 0.2 }}
-            className="hidden lg:flex justify-center items-center"
+            className="flex justify-center items-center"
           >
-            <div className="relative">
-              <div className="absolute -inset-4 bg-emerald-500/20 rounded-full blur-3xl" />
-              <Image
-                src="/tfp-social.gif"
-                alt="Terra Firma Partners - Deer and Turkey"
-                width={400}
-                height={400}
-                className="relative rounded-2xl shadow-2xl"
-                unoptimized
-              />
-              <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-stone-800 px-4 py-2 rounded-full border border-stone-600">
-                <p className="text-stone-300 text-sm font-medium">Missouri&apos;s Land Intel Folks</p>
-              </div>
-            </div>
+            <HeroFlyover />
           </motion.div>
         </div>
       </div>
     </section>
+  );
+}
+
+// Auto-playing, muted, seamlessly-looping 3D terrain flyover for the hero.
+// Shows the product's magic instantly on load. Falls back to a still poster
+// for users who prefer reduced motion, and never blocks page load (lazy metadata).
+function HeroFlyover() {
+  const [motionOk, setMotionOk] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    // Respect prefers-reduced-motion: only enable the video when motion is OK.
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setMotionOk(!mq.matches);
+    const onChange = () => setMotionOk(!mq.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    // Ensure autoplay kicks off on mount (some browsers need an explicit play()).
+    if (motionOk && videoRef.current) {
+      const p = videoRef.current.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+  }, [motionOk]);
+
+  return (
+    <div className="relative w-full max-w-xl">
+      <div className="absolute -inset-4 bg-emerald-500/20 rounded-full blur-3xl" aria-hidden="true" />
+      <div className="relative aspect-video w-full overflow-hidden rounded-2xl shadow-2xl ring-1 ring-emerald-500/20 bg-stone-900">
+        {motionOk ? (
+          <video
+            ref={videoRef}
+            className="absolute inset-0 h-full w-full object-cover"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            poster="/terrain-flyover-poster.jpg"
+            aria-label="3D terrain flyover of a representative property"
+          >
+            <source src="/terrain-flyover.webm" type="video/webm" />
+            <source src="/terrain-flyover.mp4" type="video/mp4" />
+          </video>
+        ) : (
+          // Reduced-motion (and pre-hydration) fallback: a still hero frame.
+          <Image
+            src="/terrain-flyover-poster.jpg"
+            alt="3D terrain flyover of a representative property"
+            fill
+            sizes="(max-width: 1024px) 100vw, 576px"
+            className="object-cover"
+            priority
+          />
+        )}
+      </div>
+    </div>
   );
 }
 
