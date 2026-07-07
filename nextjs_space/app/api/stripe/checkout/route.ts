@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
-      success_url: `${origin}/intel?upgrade=success`,
+      success_url: `${origin}/intel?upgrade=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/intel?upgrade=cancelled`,
       metadata: {
         userId: user.id,

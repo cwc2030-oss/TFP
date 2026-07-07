@@ -62,14 +62,53 @@ export function trackCheckoutInitiated(productType: string, address: string, pri
 }
 
 /**
- * @deprecated purchase_completed is now logged SERVER-SIDE in the Stripe
- * webhook (/api/stripe-webhook) when payment is confirmed. Do NOT call
- * this client-side — it would double-count. Kept for GA event only
- * (no FunnelEvent write).
+ * Fire the GA4 ecommerce `purchase` event with the REAL confirmed amount
+ * read from the Stripe checkout session (never a hardcoded map — if the
+ * price changes in Stripe, GA4 revenue follows automatically).
+ *
+ * Call this exactly once per completed Stripe session on the browser
+ * success return. Callers MUST dedupe by transactionId (session id) so a
+ * refresh / back-button can't double-count. This is INDEPENDENT of the
+ * server-side `purchase_completed` funnel-table write in the Stripe
+ * webhook — GA4 and the internal report are two separate ledgers.
+ *
+ * Payload: { transaction_id, value, currency:'USD', items:[{ item_id: tier }] }
  */
-export function trackPurchaseCompleted(orderId: string, productType: string, address: string) {
-  trackEvent('purchase', { transaction_id: orderId, product_type: productType, address });
-  // FunnelEvent is recorded server-side only — do not log here
+export function trackPurchase(params: {
+  transactionId: string;
+  value: number;
+  currency?: string;
+  tier: string;
+}) {
+  gtag('event', 'purchase', {
+    transaction_id: params.transactionId,
+    value: params.value,
+    currency: params.currency || 'USD',
+    items: [{ item_id: params.tier }],
+  });
+  // No FunnelEvent write — purchase_completed is recorded server-side in the webhook.
+}
+
+/**
+ * Fire the GA4 `listing_created` event on a CONFIRMED successful publish.
+ * The real publish happens server-side (/api/listings/[id]/publish); this
+ * fires client-side on the success response back in the browser.
+ *
+ * NO PII — never pass address, owner name, or coordinates.
+ * Payload: { acres, state, county, tier }  (tier = owner's account tier)
+ */
+export function trackListingCreated(params: {
+  acres?: number | null;
+  state?: string | null;
+  county?: string | null;
+  tier?: string | null;
+}) {
+  trackEvent('listing_created', {
+    acres: typeof params.acres === 'number' ? Math.round(params.acres) : 0,
+    state: params.state || '',
+    county: params.county || '',
+    tier: params.tier || 'free',
+  });
 }
 
 /** Territory teaser rendered for a free user */

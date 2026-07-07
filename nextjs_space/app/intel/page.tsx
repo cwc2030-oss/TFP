@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import ScoreCard from '@/components/ScoreCard';
 import Link from 'next/link';
 import IntelEmptyState from '@/components/intel-empty-state';
+import PurchaseTracker from '@/components/purchase-tracker';
 import {
   scoreStandsWithExceptional,
   type StandInputs,
@@ -14392,6 +14393,7 @@ const archetypeInitializedRef = useRef(false);
   if (!hasValidParcel && !territoryMode) {
     return (
       <>
+        <PurchaseTracker />
         <Toaster position="top-center" richColors />
         <IntelEmptyState />
       </>
@@ -14400,6 +14402,7 @@ const archetypeInitializedRef = useRef(false);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
+      <PurchaseTracker />
       <Toaster position="top-center" richColors />
 
       {/* ═══ HUNT PLAN BANNER — top of viewport ═══ */}

@@ -2,7 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
+import { useSession } from 'next-auth/react';
 import Link from 'next/link';
+import { trackListingCreated } from '@/lib/gtag';
 
 interface Listing {
   id: string;
@@ -139,6 +141,7 @@ function buildChecklist(l: Listing): CheckItem[] {
 
 export default function ReviewPublish({ listing }: { listing: Listing }) {
   const router = useRouter();
+  const { data: session } = useSession() || {};
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -166,7 +169,17 @@ export default function ReviewPublish({ listing }: { listing: Listing }) {
         }
         throw new Error(j?.error ?? `HTTP ${res.status}`);
       }
-      // Success — go to listings dashboard
+      // Success — fire GA4 listing_created (confirmed publish). No PII.
+      // acres comes from the fresh server snapshot; state/county from the
+      // owner-supplied listing; tier = owner's account tier.
+      const published = await res.json().catch(() => ({} as any));
+      trackListingCreated({
+        acres: published?.listing?.acres ?? listing.acres,
+        state: listing.state,
+        county: listing.county,
+        tier: (session?.user as any)?.subscriptionStatus || 'free',
+      });
+      // Go to listings dashboard
       startTransition(() => {
         router.push('/dashboard/listings');
         router.refresh();

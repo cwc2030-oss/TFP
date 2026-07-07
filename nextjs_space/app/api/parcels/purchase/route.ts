@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
-      success_url: `${origin}/intel?parcel_unlocked=true&lat=${lat}&lng=${lng}`,
+      success_url: `${origin}/intel?parcel_unlocked=true&lat=${lat}&lng=${lng}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/intel?parcel_unlocked=cancelled`,
       metadata: {
         userId: session.user.id,
