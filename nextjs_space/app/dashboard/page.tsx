@@ -38,6 +38,20 @@ export default function DashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // BUG 2b FIX: show a friendly banner when an already-subscribed user was
+  // redirected here from the pricing page (?sub=pro|promax) instead of a blank map.
+  const [subNotice, setSubNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sub = new URLSearchParams(window.location.search).get("sub");
+    if (sub === "promax") setSubNotice("You're already on Pro Max — you have full access to everything.");
+    else if (sub === "pro") setSubNotice("You're already on Pro — you have full access to your plan.");
+    if (sub) {
+      // Clean the URL so the banner doesn't reappear on refresh.
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, []);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -184,6 +198,22 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen pt-16 bg-stone-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* BUG 2b: already-subscribed notice */}
+        {subNotice && (
+          <div className="mb-6 flex items-start justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-emerald-800 font-medium">{subNotice}</p>
+            </div>
+            <button
+              onClick={() => setSubNotice(null)}
+              className="text-emerald-700 hover:text-emerald-900 text-sm font-semibold flex-shrink-0"
+              aria-label="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}

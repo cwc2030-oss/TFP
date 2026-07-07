@@ -91,7 +91,9 @@ export default function PricingPage() {
       });
       const data = await res.json();
       if (data.alreadySubscribed) {
-        router.push("/intel?upgrade=already");
+        // BUG 2b FIX: already-subscribed users used to land on a blank /intel map.
+        // Send them to their dashboard with a friendly "you're already subscribed" note.
+        router.push(`/dashboard?sub=${data.currentTier || 'pro'}`);
         return;
       }
       if (data.url) {
@@ -240,7 +242,7 @@ export default function PricingPage() {
                 ))}
               </ul>
               <div className="mt-8">
-                <Link href="/intel" className="block">
+                <Link href="/" className="block">
                   <Button className="w-full bg-stone-600 hover:bg-stone-700 text-white py-4 text-sm font-semibold">
                     Start free
                   </Button>
@@ -283,7 +285,7 @@ export default function PricingPage() {
                 ))}
               </ul>
               <div className="mt-8">
-                <Link href="/intel" className="block">
+                <Link href="/" className="block">
                   <Button className="w-full bg-amber-700 hover:bg-amber-800 text-amber-50 py-4 text-base font-semibold">
                     Unlock my parcel
                   </Button>

@@ -18,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import ScoreCard from '@/components/ScoreCard';
 import Link from 'next/link';
+import IntelEmptyState from '@/components/intel-empty-state';
 import {
   scoreStandsWithExceptional,
   type StandInputs,
@@ -2283,6 +2284,17 @@ function DeerIntelContent() {
   const [activeAcreage, setActiveAcreage] = useState(resolvedInitial.acreage);
   // Track which hero parcel is currently active (for highlighting)
   const [activeHeroSlug, setActiveHeroSlug] = useState<string | null>(heroSlug || (demoMode ? 'pineville' : null));
+
+  // BUG 1 FIX: Determine whether we have a real parcel/context to analyze.
+  // When /intel is opened with no parcel (lat/lng 0,0 or missing) we must NOT
+  // run the 0,0 region-gate lookup (which renders a blank/null map). Instead we
+  // show the address-entry empty state.
+  const hasValidParcel = Boolean(
+    heroParcel ||
+    demoMode ||
+    urlTerritory ||
+    (resolvedInitial.lat !== 0 && resolvedInitial.lng !== 0)
+  );
   
   // Derived aliases for backward compatibility throughout the file
   const lat = activeLat;
@@ -12370,7 +12382,15 @@ const archetypeInitializedRef = useRef(false);
       console.warn('[TERRITORY-URL] Mount: clearing stale territory parcels from ref (count:', territoryParcelsRef.current.length, ')');
       clearTerritory();
     }
-    runAnalysis();
+    // BUG 1 FIX: Only run analysis when we actually have a parcel/context.
+    // With no parcel (lat/lng 0,0), running the region-gate lookup renders a
+    // blank/null map and throws the 0,0 console error. Skip it — the empty
+    // state (address entry) is rendered instead.
+    if (hasValidParcel) {
+      runAnalysis();
+    } else {
+      setIsLoading(false);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stall watchdog: detect if progress hasn't advanced → surface manual retry UI.
@@ -14366,6 +14386,17 @@ const archetypeInitializedRef = useRef(false);
     );
   } // end else (non-502 globalError)
   } // end if (globalError && !territoryMode)
+
+  // BUG 1 FIX: No parcel provided → render the address-entry empty state instead
+  // of a blank 0,0 map. Territory mode is exempt (it builds its own multi-parcel view).
+  if (!hasValidParcel && !territoryMode) {
+    return (
+      <>
+        <Toaster position="top-center" richColors />
+        <IntelEmptyState />
+      </>
+    );
+  }
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-gray-900 relative">
