@@ -8,6 +8,7 @@ import {
   AMENITY_KEYS,
 } from '@/lib/listings';
 import { US_STATES } from '@/app/_landing-shared/states';
+import { useAutosave, AutosaveIndicator } from './use-autosave';
 
 type Amenities = Record<string, boolean>;
 
@@ -57,20 +58,31 @@ export default function LeaseTermsForm({
     setAmenities((prev) => ({ ...prev, [k]: !prev[k] }));
   }
 
+  // Single source of truth for the PATCH body — used by both the manual
+  // Save buttons and the debounced auto-save.
+  function buildBody(): Record<string, unknown> {
+    return {
+      state: stateCode || null,
+      county: county.trim() || null,
+      askingPriceMin: askingPriceMin ? Number(askingPriceMin) : null,
+      askingPriceMax: askingPriceMax ? Number(askingPriceMax) : null,
+      leaseType: leaseType || null,
+      huntersMax: huntersMax ? Number(huntersMax) : null,
+      seasonAvailability: seasons,
+      amenities: Object.values(amenities).some(Boolean) ? amenities : null,
+    };
+  }
+
+  const { status, dirty, flush, markSaved } = useAutosave({
+    listingId,
+    body: buildBody(),
+  });
+
   async function save(nextStep: number | 'index') {
     setSubmitting(true);
     setErr(null);
     try {
-      const body: Record<string, unknown> = {
-        state: stateCode || null,
-        county: county.trim() || null,
-        askingPriceMin: askingPriceMin ? Number(askingPriceMin) : null,
-        askingPriceMax: askingPriceMax ? Number(askingPriceMax) : null,
-        leaseType: leaseType || null,
-        huntersMax: huntersMax ? Number(huntersMax) : null,
-        seasonAvailability: seasons,
-        amenities: Object.values(amenities).some(Boolean) ? amenities : null,
-      };
+      const body = buildBody();
       const res = await fetch(`/api/listings/${listingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -80,6 +92,7 @@ export default function LeaseTermsForm({
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error ?? `HTTP ${res.status}`);
       }
+      markSaved(JSON.stringify(body));
       if (nextStep === 'index') {
         router.push('/dashboard/listings');
       } else {
@@ -97,6 +110,7 @@ export default function LeaseTermsForm({
         e.preventDefault();
         save(3);
       }}
+      onBlur={flush}
       className="space-y-6"
     >
       <div className="rounded-lg border border-stone-700 bg-stone-900/50 p-4">
@@ -226,7 +240,11 @@ export default function LeaseTermsForm({
 
       {err && <p className="text-red-400 text-sm">{err}</p>}
 
-      <div className="flex flex-col sm:flex-row gap-3 pt-2">
+      <div className="flex items-center gap-2 pt-2 min-h-[1rem]">
+        <AutosaveIndicator status={status} dirty={dirty} />
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-3">
         <button
           type="submit"
           disabled={submitting}

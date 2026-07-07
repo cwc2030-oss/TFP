@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { CONTACT_METHODS } from '@/lib/listings';
 import PhotoUploader from './photo-uploader';
+import { useAutosave, AutosaveIndicator } from './use-autosave';
 
 interface Initial {
   title: string | null;
@@ -35,7 +36,26 @@ export default function ContentContactForm({
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Single source of truth for the PATCH body — used by both the manual
+  // Save buttons and the debounced auto-save.
+  function buildBody(): Record<string, unknown> {
+    return {
+      title: title || null,
+      description: description || null,
+      photos,
+      contactMethod: contactMethod || null,
+      contactEmail: contactEmail || null,
+      contactPhone: contactPhone || null,
+    };
+  }
 
+  // Auto-save only applies to DRAFT editing. For PUBLISHED listings this form
+  // is photos-only and never PATCHes (photos persist via their own endpoint).
+  const { status, dirty, flush, markSaved } = useAutosave({
+    listingId,
+    body: buildBody(),
+    enabled: !isPublished,
+  });
 
   async function save(returnTo: 'review' | 'step2' | 'index') {
     setSubmitting(true);
@@ -46,14 +66,7 @@ export default function ContentContactForm({
         // /api/listings/[id]/photos endpoint (upload/delete/reorder).
         // No PATCH needed — just navigate back.
       } else {
-        const body: Record<string, unknown> = {
-          title: title || null,
-          description: description || null,
-          photos,
-          contactMethod: contactMethod || null,
-          contactEmail: contactEmail || null,
-          contactPhone: contactPhone || null,
-        };
+        const body = buildBody();
         const res = await fetch(`/api/listings/${listingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -63,6 +76,7 @@ export default function ContentContactForm({
           const j = await res.json().catch(() => ({}));
           throw new Error(j?.error ?? `HTTP ${res.status}`);
         }
+        markSaved(JSON.stringify(body));
       }
       if (returnTo === 'step2') {
         router.push(`/dashboard/listings/${listingId}/edit?step=2`);
@@ -83,6 +97,7 @@ export default function ContentContactForm({
         e.preventDefault();
         save(isPublished ? 'index' : 'review');
       }}
+      onBlur={flush}
       className="space-y-6"
     >
       {!isPublished && (
@@ -153,6 +168,12 @@ export default function ContentContactForm({
       </div>}
 
       {err && <p className="text-red-400 text-sm">{err}</p>}
+
+      {!isPublished && (
+        <div className="flex items-center gap-2 pt-2 min-h-[1rem]">
+          <AutosaveIndicator status={status} dirty={dirty} />
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-3 pt-2">
         {!isPublished && (
