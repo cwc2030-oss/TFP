@@ -5,7 +5,7 @@ const SITE_URL = "https://terrafirma.partners";
 export const metadata: Metadata = {
   title: "Demo | See What Your Land Is Hiding — Terra Firma Partners",
   description:
-    "Explore real Missouri hunting properties with LiDAR-powered terrain analysis. See deer movement corridors, funnel zones, and intercept placements — then unlock your own parcel intel.",
+    "Enter your own address and watch LiDAR-powered terrain analysis reveal deer movement corridors, funnel zones, and intercept placements on your land — then unlock your own parcel intel.",
   openGraph: {
     type: "website",
     locale: "en_US",
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     siteName: "Terra Firma Partners™",
     title: "See What Your Land Is Hiding — Free Terrain Demo",
     description:
-      "Tap a property and watch LiDAR terrain analysis reveal deer movement corridors in real time. Try it free, then get your own Hunt Report.",
+      "Enter your address and watch LiDAR terrain analysis reveal deer movement corridors in real time. Try it free, then get your own Hunt Report.",
     images: [
       {
         url: `${SITE_URL}/og-demo.png`,
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "See What Your Land Is Hiding — Free Terrain Demo",
     description:
-      "LiDAR-powered deer movement analysis on real Missouri hunting properties. Try it free.",
+      "LiDAR-powered deer movement analysis on your own land. Enter an address and try it free.",
     images: [`${SITE_URL}/og-demo.png`],
   },
 };

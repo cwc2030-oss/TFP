@@ -1,111 +1,178 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Shield, AlertTriangle, TreePine, ChevronRight, Search } from "lucide-react";
+import { MapPin, Search, Shield, Layers, Target, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { trackEvent } from "@/lib/gtag";
+import { trackAddressSearch } from "@/lib/gtag";
 
-// ─── Demo Parcels ───────────────────────────────────────
-const DEMO_PARCELS = [
-  {
-    id: "territory-osage",
-    slug: "osage-county-territory",
-    label: "717-Acre Territory",
-    subtitle: "4-Parcel Hunting Territory · 717 ac · Osage County, OK",
-    address: "Osage County, Oklahoma",
-    lat: 36.934637,
-    lng: -96.214819,
-    acreage: 717,
-    owner: "",
-    isTerritory: true,
-    parcelCount: 4,
-    territoryUrl:
-      "/intel?territory=true&name=Osage%20County%20Territory&p1lat=36.929885&p1lng=-96.206485&p2lat=36.934760&p2lng=-96.210069&p3lat=36.939034&p3lng=-96.215077&p4lat=36.932875&p4lng=-96.220187&p5lat=36.936633&p5lng=-96.222278",
-    emoji: "🗺️",
-    gradient: "from-sky-600 to-indigo-700",
-    borderColor: "border-sky-500/30",
-    tags: [
-      { text: "4 adjoining parcels stitched together", type: "good" as const },
-      { text: "717 acres of terrain analyzed", type: "good" as const },
-      { text: "Osage County, OK", type: "good" as const },
-    ],
-  },
-  {
-    id: "parcel-kirksville",
-    slug: "kirksville-140",
-    label: "140 Hunting Acres",
-    subtitle: "Mid-Size Hunting Tract · 140 ac · Adair County",
-    address: "27934 Yager Trl, Kirksville, MO 63501",
-    lat: 40.083338,
-    lng: -92.6373,
-    acreage: 140.37995,
-    owner: "Private landowner",
-    emoji: "🏕️",
-    gradient: "from-emerald-600 to-teal-700",
-    borderColor: "border-emerald-500/30",
-    tags: [
-      { text: "Private — permission required", type: "good" as const },
-      { text: "Mid-size hunting tract", type: "good" as const },
-      { text: "Adair County", type: "good" as const },
-    ],
-  },
-  {
-    id: "parcel-3",
-    slug: "hunting-35-acres",
-    label: "35 Hunting Acres",
-    subtitle: "Compact Hunting Parcel · 35 ac · Ste. Genevieve County",
-    address: "19189 Pleasant Valley Dr, Ste. Genevieve, MO 63670",
-    lat: 37.909137,
-    lng: -90.096130,
-    acreage: 35,
-    owner: "GEGG THOMAS RUSSELL & MELODECE D",
-    emoji: "🎯",
-    gradient: "from-red-600 to-rose-700",
-    borderColor: "border-red-500/30",
-    tags: [
-      { text: "Private — permission required", type: "good" as const },
-      { text: "Compact hunting property", type: "good" as const },
-      { text: "Ste. Genevieve County", type: "good" as const },
-    ],
-  },
-];
-
-function TagBadge({ text, type }: { text: string; type: "good" | "warn" }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
-        type === "good"
-          ? "bg-emerald-500/15 text-emerald-400"
-          : "bg-amber-500/15 text-amber-400"
-      }`}
-    >
-      {type === "good" ? (
-        <Shield className="w-3 h-3" />
-      ) : (
-        <AlertTriangle className="w-3 h-3" />
-      )}
-      {text}
-    </span>
-  );
-}
+// ─────────────────────────────────────────────────────────────
+// /demo — address-first terrain demo.
+//
+// PRIVACY: This page intentionally contains NO browsable sample
+// parcels. It never surfaces a real street address or owner name.
+// The only action is "enter your own address," consistent with the
+// homepage — you only ever see terrain for land you look up yourself.
+// ─────────────────────────────────────────────────────────────
 
 export default function DemoPage() {
   const router = useRouter();
 
-  const handleCardClick = (parcel: (typeof DEMO_PARCELS)[number]) => {
-    trackEvent("demo_parcel_clicked", {
-      parcel_label: parcel.label,
-      address: parcel.address,
-    });
-    // Territory cards launch the multi-parcel analysis; single parcels use lat/lng.
-    if ("territoryUrl" in parcel && parcel.territoryUrl) {
-      router.push(parcel.territoryUrl);
+  const [address, setAddress] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [suggestions, setSuggestions] = useState<
+    Array<{ description: string; place_id: string; lat?: number; lng?: number }>
+  >([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const fetchSuggestions = async (input: string) => {
+    if (input.length < 3) {
+      setSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
-    router.push(
-      `/intel?lat=${parcel.lat}&lng=${parcel.lng}&address=${encodeURIComponent(parcel.address)}&acreage=${parcel.acreage}`
-    );
+    try {
+      const res = await fetch(
+        `/api/places-autocomplete?input=${encodeURIComponent(input)}`
+      );
+      const data = await res.json();
+      if (data.predictions) {
+        setSuggestions(data.predictions.slice(0, 5));
+        setShowSuggestions(true);
+      }
+    } catch (err) {
+      console.error("Autocomplete error:", err);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setAddress(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(value), 300);
+  };
+
+  const handleSuggestionClick = async (suggestion: {
+    description: string;
+    place_id: string;
+    lat?: number;
+    lng?: number;
+  }) => {
+    setAddress(suggestion.description);
+    setShowSuggestions(false);
+    setIsSearching(true);
+    setSearchError("");
+
+    try {
+      if (suggestion.lat && suggestion.lng) {
+        trackAddressSearch(suggestion.description);
+        router.push(
+          `/preview?lat=${suggestion.lat}&lng=${suggestion.lng}&address=${encodeURIComponent(
+            suggestion.description
+          )}`
+        );
+        return;
+      }
+
+      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+        suggestion.description
+      )}.json?access_token=${mapboxToken}&country=us&limit=1`;
+      const res = await fetch(geocodeUrl);
+      const data = await res.json();
+
+      if (data.features && data.features.length > 0) {
+        const [lng, lat] = data.features[0].center;
+        trackAddressSearch(suggestion.description);
+        router.push(
+          `/preview?lat=${lat}&lng=${lng}&address=${encodeURIComponent(
+            suggestion.description
+          )}`
+        );
+      } else {
+        setSearchError("Could not locate address.");
+        setIsSearching(false);
+      }
+    } catch (err) {
+      setSearchError("Search failed. Please try again.");
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!address.trim()) return;
+
+    setIsSearching(true);
+    setSearchError("");
+    setShowSuggestions(false);
+
+    // Coordinate shortcut: "lat, lng" jumps straight to the analyzer.
+    const coordPattern = /^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/;
+    const coordMatch = address.trim().match(coordPattern);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lng = parseFloat(coordMatch[2]);
+      if (
+        !Number.isNaN(lat) &&
+        !Number.isNaN(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180
+      ) {
+        trackAddressSearch(`${lat}, ${lng}`);
+        router.push(`/intel?lat=${lat}&lng=${lng}`);
+        return;
+      }
+    }
+
+    try {
+      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+        address
+      )}.json?access_token=${mapboxToken}&country=us&limit=1`;
+      const res = await fetch(geocodeUrl);
+      const data = await res.json();
+
+      if (data.features && data.features.length > 0) {
+        const [lng, lat] = data.features[0].center;
+        const formattedAddress = data.features[0].place_name;
+        trackAddressSearch(formattedAddress);
+        router.push(
+          `/preview?lat=${lat}&lng=${lng}&address=${encodeURIComponent(
+            formattedAddress
+          )}`
+        );
+      } else {
+        setSearchError("Address not found. Try including city and state.");
+        setIsSearching(false);
+      }
+    } catch (err) {
+      setSearchError("Search failed. Please try again.");
+      setIsSearching(false);
+    }
   };
 
   return (
@@ -117,85 +184,128 @@ export default function DemoPage() {
             Demo Mode
           </p>
           <p className="text-stone-300 text-sm sm:text-base mt-1">
-            Enter your own address to get your Hunt Report.
+            Enter your own address to see The Terrain Brain in action.
           </p>
-          <Link href="/" className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-sm mt-2 transition-colors">
-            <Search className="w-4 h-4" />
-            Search your address
-            <ChevronRight className="w-3 h-3" />
-          </Link>
         </div>
       </div>
 
       {/* ─── Hero ──────────────────────────────────────────── */}
-      <div className="max-w-4xl mx-auto px-4 pt-8 sm:pt-12 pb-4 text-center">
+      <div className="max-w-2xl mx-auto px-4 pt-10 sm:pt-16 pb-4 text-center">
         <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white">
           See What Your Land Is Hiding
         </h1>
         <p className="text-stone-400 mt-3 text-sm sm:text-base max-w-xl mx-auto">
-          Tap a property below to explore real terrain intelligence — deer movement corridors, funnel zones, and optimal intercept placements — powered by LiDAR elevation data.
+          Enter any address and watch LiDAR-powered terrain analysis reveal deer
+          movement corridors, funnel zones, and optimal intercept placements —
+          right on your own land.
+        </p>
+
+        {/* ─── Address Search ──────────────────────────────── */}
+        <form onSubmit={handleSearch} className="mt-6 sm:mt-8">
+          <div className="relative">
+            <div className="relative flex items-center">
+              <MapPin className="absolute left-4 w-5 h-5 text-stone-500 pointer-events-none" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={address}
+                onChange={handleInputChange}
+                onFocus={() => {
+                  if (suggestions.length > 0) setShowSuggestions(true);
+                }}
+                placeholder="Enter your property address…"
+                autoComplete="off"
+                className="w-full bg-stone-900/90 border border-stone-700 focus:border-emerald-500 rounded-xl pl-12 pr-4 py-4 text-white placeholder-stone-500 outline-none transition-colors text-base"
+              />
+            </div>
+
+            {/* Autocomplete suggestions */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div
+                ref={suggestionsRef}
+                className="absolute z-20 left-0 right-0 mt-2 bg-stone-900 border border-stone-700 rounded-xl overflow-hidden shadow-2xl text-left"
+              >
+                {suggestions.map((s) => (
+                  <button
+                    key={s.place_id}
+                    type="button"
+                    onClick={() => handleSuggestionClick(s)}
+                    className="w-full flex items-center gap-2 px-4 py-3 text-stone-300 hover:bg-stone-800 hover:text-white transition-colors text-sm"
+                  >
+                    <MapPin className="w-4 h-4 text-stone-500 flex-shrink-0" />
+                    <span className="truncate">{s.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Button
+            type="submit"
+            size="lg"
+            disabled={isSearching}
+            className="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-base sm:text-lg px-8 py-4 h-auto rounded-xl shadow-lg shadow-emerald-900/30 disabled:opacity-60"
+          >
+            {isSearching ? (
+              "Locating…"
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                <Search className="w-5 h-5" />
+                Analyze My Land
+              </span>
+            )}
+          </Button>
+
+          {searchError && (
+            <p className="text-red-400 text-sm mt-3">{searchError}</p>
+          )}
+        </form>
+
+        <p className="text-stone-600 text-xs mt-4">
+          No signup required · You only ever see terrain for land you look up
+          yourself.
         </p>
       </div>
 
-      {/* ─── Parcel Cards ─────────────────────────────────── */}
-      <div className="max-w-4xl mx-auto px-4 pb-8 space-y-4 sm:space-y-5">
-        {DEMO_PARCELS.map((parcel) => (
-          <button
-            key={parcel.id}
-            onClick={() => handleCardClick(parcel)}
-            className={`w-full text-left bg-stone-900/80 backdrop-blur border ${parcel.borderColor} rounded-xl p-4 sm:p-5 hover:bg-stone-800/90 hover:border-emerald-500/50 transition-all duration-200 active:scale-[0.99] group`}
-          >
-            {/* Card Header */}
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xl sm:text-2xl">{parcel.emoji}</span>
-                  <h2 className="text-lg sm:text-xl font-bold text-white truncate">
-                    {parcel.label}
-                  </h2>
-                </div>
-                <p className="text-stone-400 text-xs sm:text-sm">
-                  {parcel.subtitle}
-                </p>
-              </div>
-              <div className={`flex-shrink-0 bg-gradient-to-br ${parcel.gradient} rounded-lg p-2.5 sm:p-3 group-hover:scale-105 transition-transform`}>
-                <TreePine className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-              </div>
+      {/* ─── What You'll See ──────────────────────────────── */}
+      <div className="max-w-4xl mx-auto px-4 pt-8 sm:pt-12 pb-8">
+        <div className="grid sm:grid-cols-3 gap-4">
+          <div className="bg-stone-900/80 backdrop-blur border border-stone-800 rounded-xl p-5 text-center">
+            <div className="inline-flex bg-gradient-to-br from-emerald-600 to-teal-700 rounded-lg p-3 mb-3">
+              <Layers className="w-6 h-6 text-white" />
             </div>
-
-            {/* Address & Owner */}
-            <div className="mt-3 space-y-1">
-              <div className="flex items-center gap-1.5 text-stone-300 text-xs sm:text-sm">
-                <MapPin className="w-3.5 h-3.5 text-stone-500 flex-shrink-0" />
-                <span className="truncate">{parcel.address}</span>
-              </div>
-              {"isTerritory" in parcel && parcel.isTerritory ? (
-                <p className="text-stone-500 text-xs pl-5 truncate">
-                  {(parcel as any).parcelCount} adjoining parcels · {parcel.acreage} total acres
-                </p>
-              ) : (
-                <p className="text-stone-500 text-xs pl-5 truncate">
-                  Owner: {parcel.owner}
-                </p>
-              )}
+            <h3 className="text-white font-semibold text-sm sm:text-base">
+              Movement Corridors
+            </h3>
+            <p className="text-stone-400 text-xs sm:text-sm mt-1">
+              See how deer travel your terrain, derived from LiDAR elevation.
+            </p>
+          </div>
+          <div className="bg-stone-900/80 backdrop-blur border border-stone-800 rounded-xl p-5 text-center">
+            <div className="inline-flex bg-gradient-to-br from-sky-600 to-indigo-700 rounded-lg p-3 mb-3">
+              <Target className="w-6 h-6 text-white" />
             </div>
-
-            {/* Tags */}
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {parcel.tags.map((tag, i) => (
-                <TagBadge key={i} text={tag.text} type={tag.type} />
-              ))}
+            <h3 className="text-white font-semibold text-sm sm:text-base">
+              Intercept Placements
+            </h3>
+            <p className="text-stone-400 text-xs sm:text-sm mt-1">
+              Ranked stand and blind locations for the way the land actually
+              funnels.
+            </p>
+          </div>
+          <div className="bg-stone-900/80 backdrop-blur border border-stone-800 rounded-xl p-5 text-center">
+            <div className="inline-flex bg-gradient-to-br from-amber-600 to-orange-700 rounded-lg p-3 mb-3">
+              <Shield className="w-6 h-6 text-white" />
             </div>
-
-            {/* CTA hint */}
-            <div className="mt-3 flex items-center justify-between">
-              <span className="text-emerald-500 text-xs sm:text-sm font-medium group-hover:text-emerald-400 transition-colors">
-                Tap to explore terrain →
-              </span>
-              <ChevronRight className="w-4 h-4 text-stone-600 group-hover:text-emerald-500 transition-colors" />
-            </div>
-          </button>
-        ))}
+            <h3 className="text-white font-semibold text-sm sm:text-base">
+              Your Land, Your Privacy
+            </h3>
+            <p className="text-stone-400 text-xs sm:text-sm mt-1">
+              We never publish owner names or addresses. Your lookups stay
+              yours.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* ─── CTA Section ──────────────────────────────────── */}
@@ -205,7 +315,8 @@ export default function DemoPage() {
             Ready to scout your own land?
           </h2>
           <p className="text-stone-400 text-sm sm:text-base mb-6 max-w-md mx-auto">
-            Unlock property data, terrain analysis, and hunting intel for any parcel.
+            Unlock property data, terrain analysis, and hunting intel for any
+            parcel.
           </p>
           <Link href="/pricing">
             <Button
@@ -218,6 +329,16 @@ export default function DemoPage() {
           <p className="text-stone-600 text-xs mt-3">
             Single-parcel unlock or unlimited with Pro
           </p>
+          <div className="mt-4">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-sm transition-colors"
+            >
+              <Search className="w-4 h-4" />
+              Search from the homepage
+              <ChevronRight className="w-3 h-3" />
+            </Link>
+          </div>
         </div>
       </div>
     </div>
