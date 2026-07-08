@@ -8,6 +8,8 @@
  * OPSEC: county is the finest geographic grain shown. No lat/lng/parcel data.
  */
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
+import { isCountyDeerFlowEnabled } from '@/lib/deerflow-gate';
 import Navbar from '@/components/navbar';
 import Footer from '@/components/footer';
 import { prisma } from '@/lib/db';
@@ -56,6 +58,12 @@ async function getData(): Promise<{ counties: CountyRow[]; states: string[] }> {
 }
 
 export default async function DeerFlowPage() {
+  // County Deer Flow is gated behind a launch flag. When it's off, the page is
+  // not reachable by URL — bounce direct hits back to the main screen.
+  if (!isCountyDeerFlowEnabled()) {
+    redirect('/');
+  }
+
   const { counties, states } = await getData();
   const totalParcels = counties.reduce((s, c) => s + c.parcelCount, 0);
 

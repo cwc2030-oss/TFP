@@ -7,9 +7,11 @@ import { useSession, signOut } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Map, User, LogOut, Menu, X, Shield, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useFeatureFlags } from "@/components/feature-flags-provider";
 
 export default function Navbar() {
   const pathname = usePathname();
+  const { countyDeerFlowEnabled } = useFeatureFlags();
   const sessionData = useSession();
   const session = sessionData?.data;
   const status = sessionData?.status ?? "loading";
@@ -63,9 +65,11 @@ export default function Navbar() {
             <NavLink href="/flow-score" active={pathname === "/flow-score"}>
               Flow Score
             </NavLink>
-            <NavLink href="/deer-flow" active={pathname === "/deer-flow"}>
-              Deer Flow
-            </NavLink>
+            {countyDeerFlowEnabled && (
+              <NavLink href="/deer-flow" active={pathname === "/deer-flow"}>
+                Deer Flow
+              </NavLink>
+            )}
             <NavLink href="/marketplace-coming-soon" active={pathname === "/marketplace-coming-soon"}>
               Marketplace
             </NavLink>
@@ -160,9 +164,11 @@ export default function Navbar() {
               <MobileNavLink href="/flow-score" onClick={() => setIsMenuOpen(false)}>
                 Flow Score
               </MobileNavLink>
-              <MobileNavLink href="/deer-flow" onClick={() => setIsMenuOpen(false)}>
-                Deer Flow
-              </MobileNavLink>
+              {countyDeerFlowEnabled && (
+                <MobileNavLink href="/deer-flow" onClick={() => setIsMenuOpen(false)}>
+                  Deer Flow
+                </MobileNavLink>
+              )}
               <MobileNavLink href="/marketplace-coming-soon" onClick={() => setIsMenuOpen(false)}>
                 Marketplace
               </MobileNavLink>

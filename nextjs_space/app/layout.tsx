@@ -5,6 +5,8 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 import LayoutWrapper from "@/components/layout-wrapper";
 import CanonicalHead from "@/components/canonical-head";
+import { FeatureFlagsProvider } from "@/components/feature-flags-provider";
+import { isCountyDeerFlowEnabled } from "@/lib/deerflow-gate";
 
 const inter = Inter({ subsets: ["latin"] });
 const crimsonText = Crimson_Text({ subsets: ["latin"], weight: ["400", "600", "700"], variable: "--font-serif" });
@@ -103,7 +105,11 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} ${crimsonText.variable} antialiased`} suppressHydrationWarning>
         <Providers>
-          <LayoutWrapper>{children}</LayoutWrapper>
+          <FeatureFlagsProvider
+            value={{ countyDeerFlowEnabled: isCountyDeerFlowEnabled() }}
+          >
+            <LayoutWrapper>{children}</LayoutWrapper>
+          </FeatureFlagsProvider>
         </Providers>
       </body>
     </html>

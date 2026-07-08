@@ -1,9 +1,14 @@
 import { MetadataRoute } from 'next';
+import { isCountyDeerFlowEnabled } from '@/lib/deerflow-gate';
+
+// Read the county Deer Flow gate at request time so the sitemap reflects the
+// current flag without a rebuild.
+export const dynamic = 'force-dynamic';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://terrafirma.partners';
-  
-  return [
+
+  const entries: MetadataRoute.Sitemap = [
     {
       url: baseUrl,
       lastModified: new Date(),
@@ -21,12 +26,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: new Date(),
       changeFrequency: 'weekly',
       priority: 0.9,
-    },
-    {
-      url: `${baseUrl}/deer-flow`,
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 0.8,
     },
     {
       url: `${baseUrl}/pricing`,
@@ -59,4 +58,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.3,
     },
   ];
+
+  // Only surface the county Deer Flow page to search engines while it's live.
+  if (isCountyDeerFlowEnabled()) {
+    entries.push({
+      url: `${baseUrl}/deer-flow`,
+      lastModified: new Date(),
+      changeFrequency: 'weekly',
+      priority: 0.8,
+    });
+  }
+
+  return entries;
 }
