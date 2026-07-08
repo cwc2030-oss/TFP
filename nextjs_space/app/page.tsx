@@ -359,16 +359,15 @@ function HeroFlyover() {
             loop
             playsInline
             preload="metadata"
-            poster="/terrain-flyover-poster.jpg"
+            poster="/tfp-hero-poster.jpg"
             aria-label="3D terrain flyover of a representative property"
           >
-            <source src="/terrain-flyover.webm" type="video/webm" />
-            <source src="/terrain-flyover.mp4" type="video/mp4" />
+            <source src="/tfp-hero-loop.mp4" type="video/mp4" />
           </video>
         ) : (
           // Reduced-motion (and pre-hydration) fallback: a still hero frame.
           <Image
-            src="/terrain-flyover-poster.jpg"
+            src="/tfp-hero-poster.jpg"
             alt="3D terrain flyover of a representative property"
             fill
             sizes="(max-width: 1024px) 100vw, 576px"
