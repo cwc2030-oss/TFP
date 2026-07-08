@@ -6256,6 +6256,18 @@ const archetypeInitializedRef = useRef(false);
   const showBeddingProbRef = useRef(showBeddingProbability);
   showBeddingProbRef.current = showBeddingProbability;
 
+  // ========== CLEAN MAP — one-tap hide of ALL overlay lines ==========
+  // When ON: every tfp-* overlay layer (deer-flow tiers, terrain-flow base,
+  // corridors, approach routes, convergence, funnels, saddles, ridges, edge
+  // intel, stands, bedding) is hidden, leaving only satellite imagery +
+  // parcel/territory boundaries. One tap to clean, one tap to restore.
+  const [cleanMap, setCleanMap] = useState(false);
+  const cleanMapRef = useRef(cleanMap);
+  cleanMapRef.current = cleanMap;
+  // Bumped when Clean Map is switched OFF, to force the specialized visibility
+  // effects (stand dots, AG edges) to re-run and restore their proper state.
+  const [overlayRestoreEpoch, setOverlayRestoreEpoch] = useState(0);
+
   // ========== UPDATE NATIVE MAPBOX SOURCES WHEN DATA CHANGES ==========
   useEffect(() => {
     const map = mapRef.current;
@@ -7841,6 +7853,16 @@ const archetypeInitializedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
+    // Clean Map ON: keep AG edge lines hidden (data still updated below).
+    if (cleanMapRef.current) {
+      const edgeSrcCM = map.getSource('tfp-ag-edges') as mapboxgl.GeoJSONSource | undefined;
+      if (edgeSrcCM) edgeSrcCM.setData(cdlData?.agEdgeLines ?? EMPTY_FC);
+      const cornerSrcCM = map.getSource('tfp-inside-corners') as mapboxgl.GeoJSONSource | undefined;
+      if (cornerSrcCM) cornerSrcCM.setData(cdlData?.insideCorners ?? EMPTY_FC);
+      if (map.getLayer('tfp-ag-edge-lines')) map.setLayoutProperty('tfp-ag-edge-lines', 'visibility', 'none');
+      if (map.getLayer('tfp-inside-corner-markers')) map.setLayoutProperty('tfp-inside-corner-markers', 'visibility', 'none');
+      return;
+    }
 
     try {
       const edgeSrc = map.getSource('tfp-ag-edges') as mapboxgl.GeoJSONSource | undefined;
@@ -7861,7 +7883,7 @@ const archetypeInitializedRef = useRef(false);
     } catch (err) {
       console.warn('[CDL-MAP] Layer update failed (non-fatal):', err);
     }
-  }, [cdlData, showTerrainReasons, mapReady]);
+  }, [cdlData, showTerrainReasons, mapReady, overlayRestoreEpoch]);
 
   // ========== CDL AG STAND SCORING + MERGE ==========
   // Score inside corners, build synthetic AlignedStand objects with AG stand types,
@@ -9082,6 +9104,9 @@ const archetypeInitializedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !overlaySourcesCreated.current) return;
+    // Clean Map ON: do NOT re-show any overlays. State still updates in the
+    // background so it can be restored when Clean Map is switched OFF.
+    if (cleanMapRef.current) return;
 
     try {
       // V4 Step 11b: Smooth fade transitions with improved timing
@@ -9133,7 +9158,18 @@ const archetypeInitializedRef = useRef(false);
         { id: 'tfp-corridors-context-possible', targetOpacity: 0.15 },
         { id: 'tfp-intrusion-overlay', targetOpacity: 0.3, opacityProp: 'fill-opacity' },
       ], FADE_IN, 50);
-      
+
+      // Edge-intel approach lines (yellow/tan approach + pressure + arrows) now
+      // follow the corridors toggle so the master Deer Flow / corridors control
+      // governs them too. Boundary context line also follows corridors.
+      fadeToggleLayers(map, visibility.corridors, [
+        { id: 'tfp-edge-arrows-lines', targetOpacity: 0.5 },
+        { id: 'tfp-edge-arrows-heads', targetOpacity: 0.6, opacityProp: 'fill-opacity' },
+        { id: 'tfp-edge-draw-extensions-lines', targetOpacity: 0.5 },
+        { id: 'tfp-edge-pressure-lines', targetOpacity: 0.7 },
+        { id: 'tfp-edge-boundary-context', targetOpacity: 0.45 },
+      ], FADE_IN);
+
       // V2 Tiered funnel visibility — smooth fade
       fadeToggleLayers(map, visibility.funnels, [
         { id: 'tfp-funnels-hard-fill', targetOpacity: 0.35, opacityProp: 'fill-opacity' },
@@ -9252,6 +9288,66 @@ const archetypeInitializedRef = useRef(false);
       console.error('[MAP] Error updating visibility (non-fatal):', err);
     }
   }, [visibility, flowVisibility, showBeddingProbability, isPressureMode, mapReady, selectedStand, visibilityEpoch, huntabilityData]); // v4-fix8: visibilityEpoch forces re-run after reload; huntabilityData re-fires when bedding source populates
+
+  // ========== CLEAN MAP — hide/restore ALL overlay lines ==========
+  // Territory-scale offenders (yellow/tan corridor + approach lines, deer-flow
+  // tiers, convergence) blanket the map. Clean Map hides EVERY tfp-* overlay
+  // layer except parcel/territory/adjacent boundaries. Restoring re-applies the
+  // per-toggle state via reconcileVisibility + the specialized effects.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overlaySourcesCreated.current) return;
+
+    // Boundary layers stay visible in Clean Map mode (satellite + parcel lines).
+    const isBoundaryLayer = (id: string) =>
+      (id.includes('parcel') || id.includes('territory') || id.includes('adjacent')) &&
+      !id.includes('qa-parcel');
+
+    try {
+      if (cleanMap) {
+        const style = map.getStyle();
+        if (style?.layers) {
+          for (const layer of style.layers) {
+            if (!layer.id.startsWith('tfp-')) continue;
+            if (isBoundaryLayer(layer.id)) continue;
+            try { map.setLayoutProperty(layer.id, 'visibility', 'none'); } catch { /* noop */ }
+          }
+        }
+        console.log('[CLEAN-MAP] ON — all overlay lines hidden (satellite + boundaries only)');
+      } else {
+        // Restore registry-driven layers (corridors, funnels, saddles, ridges,
+        // flow tiers, convergence, edge intel, bedding, stand support, hunt pockets).
+        const vis = visibilityRef.current;
+        const fv = flowVisibilityRef.current;
+        reconcileVisibility(map, {
+          toggles: {
+            bedding: vis.bedding,
+            draws: vis.draws,
+            saddles: vis.saddles,
+            corridors: vis.corridors,
+            funnels: vis.funnels,
+            ridgeSpines: vis.ridgeSpines,
+            stands: vis.stands,
+            pressureHeatmap: fv.pressureHeatmap,
+            flowGreen: fv.flowGreen,
+            flowBlue: fv.flowBlue,
+            flowBlack: fv.flowBlack,
+            convergenceZones: fv.convergenceZones,
+            beddingProbability: showBeddingProbRef.current,
+          },
+          pressureView: 'pressure',
+          hasParcelData: !!parcelPolygonRef.current,
+        });
+        // Re-run the animated visibility effect + specialized effects (stand
+        // dots, AG edges) so every non-registry overlay returns to toggle state.
+        setVisibilityEpoch(e => e + 1);
+        setOverlayRestoreEpoch(e => e + 1);
+        console.log('[CLEAN-MAP] OFF — overlays restored to per-toggle state');
+      }
+    } catch (err) {
+      console.error('[CLEAN-MAP] Error toggling clean map (non-fatal):', err);
+    }
+  }, [cleanMap, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== PRESSURE FOCUS — DISABLED ==========
   // Pressure heatmap + fill grid permanently dark. Overrides removed.
@@ -13942,7 +14038,8 @@ const archetypeInitializedRef = useRef(false);
 
     // PAYWALL GATE: force stands hidden when parcel not purchased
     const canShowStands = parcelUnlockedRef.current || isProRef.current;
-    const globalShow = canShowStands && visibility.stands;
+    // Clean Map ON overrides everything: stands hidden until restored.
+    const globalShow = !cleanMapRef.current && canShowStands && visibility.stands;
 
     const applyVisibility = () => {
       // Toggle stand GeoJSON layers — deterministic, immediate
@@ -14008,7 +14105,7 @@ const archetypeInitializedRef = useRef(false);
       map.once('style.load', onStyleLoad);
       return () => { map.off('style.load', onStyleLoad); };
     }
-  }, [visibility.stands, selectedStand, soloStandMode, alignedStands, mapReady, parcelUnlocked, isPro]);
+  }, [visibility.stands, selectedStand, soloStandMode, alignedStands, mapReady, parcelUnlocked, isPro, overlayRestoreEpoch]);
 
   // vNext: Cleanup — clear GeoJSON source + popup (no HTML markers to remove)
   const cleanupMarkers = () => {
@@ -15284,6 +15381,22 @@ const archetypeInitializedRef = useRef(false);
           </div>
 
           <div className="flex items-center gap-2 md:gap-1 lg:gap-2">
+            {/* CLEAN MAP — one-tap off switch for ALL overlay lines */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`${cleanMap
+                ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+                : 'bg-white/10 text-white/90 border border-white/20 hover:bg-white/20 hover:text-white'
+              }`}
+              onClick={() => setCleanMap(v => !v)}
+              title={cleanMap
+                ? 'Clean Map ON — all overlay lines hidden. Click to restore your layers.'
+                : 'Clean Map — hide ALL overlay lines (deer flow, terrain flow, corridors, approach routes, convergence) in one tap. Leaves satellite + parcel boundaries.'}
+            >
+              {cleanMap ? <EyeOff className="h-4 w-4 lg:mr-1" /> : <Eye className="h-4 w-4 lg:mr-1" />}
+              <span className="md:hidden lg:inline">{cleanMap ? 'Clean: ON' : 'Clean Map'}</span>
+            </Button>
             {/* Adjacent Parcels Toggle */}
             {adjacentParcels.length > 0 && (
               <Button
@@ -16893,24 +17006,29 @@ const archetypeInitializedRef = useRef(false);
                   {/* Master Deer Flow Toggle — shows/hides all tiers + convergence at once */}
                   <button
                     onClick={() => {
-                      const allOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack || flowVisibility.convergenceZones;
+                      // Master now also governs the yellow/tan terrain-flow /
+                      // corridor + approach lines (visibility.corridors) so it
+                      // truly kills EVERY flow line, not just green/blue/black.
+                      const allOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack || flowVisibility.convergenceZones || visibility.corridors;
                       if (allOn) {
-                        // Master OFF — hide all
+                        // Master OFF — hide all flow tiers, convergence AND corridors/approach lines
                         setFlowVisibility(v => ({ ...v, flowGreen: false, flowBlue: false, flowBlack: false, convergenceZones: false }));
+                        setVisibility(v => ({ ...v, corridors: false }));
                       } else {
-                        // Master ON — show all
+                        // Master ON — show all flow tiers, convergence AND corridors/approach lines
                         setFlowVisibility(v => ({ ...v, flowGreen: true, flowBlue: true, flowBlack: true, convergenceZones: true }));
+                        setVisibility(v => ({ ...v, corridors: true }));
                       }
                     }}
                     className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                      (anyFlowTierOn || flowVisibility.convergenceZones) ? 'bg-amber-900/40 border border-amber-700/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
+                      (anyFlowTierOn || flowVisibility.convergenceZones || visibility.corridors) ? 'bg-amber-900/40 border border-amber-700/30' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
                     }`}
                   >
                     <span className="w-2.5 h-2.5 rounded-full" style={{ 
                       background: 'linear-gradient(135deg, #0f766e, #06b6d4, #10b981, #f59e0b)', 
-                      opacity: (anyFlowTierOn || flowVisibility.convergenceZones) ? 1 : 0.4 
+                      opacity: (anyFlowTierOn || flowVisibility.convergenceZones || visibility.corridors) ? 1 : 0.4 
                     }} />
-                    <span className={`flex-1 text-left font-medium ${(anyFlowTierOn || flowVisibility.convergenceZones) ? 'text-amber-300' : 'text-stone-500'}`}>
+                    <span className={`flex-1 text-left font-medium ${(anyFlowTierOn || flowVisibility.convergenceZones || visibility.corridors) ? 'text-amber-300' : 'text-stone-500'}`}>
                       Deer Flow
                     </span>
                     <span className="text-[8px] text-amber-400 px-1 py-0.5 bg-amber-900/50 rounded uppercase tracking-wider">

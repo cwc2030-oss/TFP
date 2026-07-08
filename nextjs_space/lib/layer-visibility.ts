@@ -174,18 +174,18 @@ export const LAYER_REGISTRY: LayerEntry[] = [
   { id: 'tfp-bedding-probability-outline',  group: 'beddingProb', opacityProp: 'line-opacity',   targetOpacity: 0,  source: { kind: 'toggle', key: 'beddingProbability' } },
 
   // ── Edge intelligence (always-on when TERRAIN_WORK_MODE = false) ──
-  { id: 'tfp-edge-arrows-lines',          group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'always' } },
-  { id: 'tfp-edge-arrows-heads',          group: 'edgeIntel', opacityProp: 'fill-opacity', targetOpacity: 0.6,  source: { kind: 'always' } },
+  { id: 'tfp-edge-arrows-lines',          group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'toggle', key: 'corridors' } },
+  { id: 'tfp-edge-arrows-heads',          group: 'edgeIntel', opacityProp: 'fill-opacity', targetOpacity: 0.6,  source: { kind: 'toggle', key: 'corridors' } },
   { id: 'tfp-edge-ghost-fill',            group: 'edgeIntel', opacityProp: 'fill-opacity', targetOpacity: 0.15, source: { kind: 'always' } },
   { id: 'tfp-edge-ghost-outline',         group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.4,  source: { kind: 'always' } },
   { id: 'tfp-edge-ghost-saddles-fill',    group: 'edgeIntel', opacityProp: 'fill-opacity', targetOpacity: 0.2,  source: { kind: 'always' } },
   { id: 'tfp-edge-ghost-saddles-outline',  group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'always' } },
-  { id: 'tfp-edge-draw-extensions-lines',  group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'always' } },
-  { id: 'tfp-edge-pressure-lines',        group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.7,  source: { kind: 'always' } },
+  { id: 'tfp-edge-draw-extensions-lines',  group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.5,  source: { kind: 'toggle', key: 'corridors' } },
+  { id: 'tfp-edge-pressure-lines',        group: 'edgeIntel', opacityProp: 'line-opacity', targetOpacity: 0.7,  source: { kind: 'toggle', key: 'corridors' } },
 
   // ── Edge boundary (context line always-on, hitbox/highlight are interaction) ──
   { id: 'tfp-edge-boundary-fill',      group: 'edgeBoundary', opacityProp: 'fill-opacity', targetOpacity: 0,    source: { kind: 'always' } },  // invisible hit area
-  { id: 'tfp-edge-boundary-context',   group: 'edgeBoundary', opacityProp: 'line-opacity', targetOpacity: 0.45, source: { kind: 'always' } },
+  { id: 'tfp-edge-boundary-context',   group: 'edgeBoundary', opacityProp: 'line-opacity', targetOpacity: 0.45, source: { kind: 'toggle', key: 'corridors' } },
   { id: 'tfp-edge-boundary-highlight', group: 'edgeBoundary', opacityProp: 'line-opacity', targetOpacity: 0.6,  source: { kind: 'interaction' } },
 
   // ── Adjacent parcels (managed by territory/parcel effects — skip in reconcile) ──
