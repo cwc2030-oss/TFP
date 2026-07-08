@@ -205,13 +205,13 @@ function HeroSection() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
-              See your land
-              <span className="block text-emerald-400 mt-2">in 3D. Free.</span>
+              See where
+              <span className="block text-emerald-400 mt-2">the deer move.</span>
             </h1>
             
             <p className="text-xl text-stone-300 mb-8 leading-relaxed">
-              Enter any address. We&apos;ll show you the terrain — ridges, valleys, 
-              creek bottoms — in a spinning 3D flyover. Takes 10 seconds.
+              Enter any address. The Terrain Brain&trade; maps the ridges, funnels, 
+              and deer flow in seconds — free, no signup.
             </p>
 
             {/* Address Search Form */}
