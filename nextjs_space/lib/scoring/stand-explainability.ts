@@ -41,6 +41,15 @@ export interface StandExplainability {
 
 // ========== CHIP GENERATORS ==========
 
+function getInsideCornerChip(inputs: StandInputs): ReasonChip | null {
+  const ic = inputs.inside_corner;
+  // null/undefined = parcel has no inside corners → no chip.
+  if (ic === null || ic === undefined) return null;
+  if (ic >= 0.7) return { icon: '🎯', label: 'Inside Corner', tone: 'positive' };
+  if (ic >= 0.45) return { icon: '🎯', label: 'Near Inside Corner', tone: 'positive' };
+  return null; // far from any corner → don't clutter with a weak chip
+}
+
 function getInterceptChip(inputs: StandInputs): ReasonChip {
   if (inputs.movement >= 0.75) return { icon: '🎯', label: 'Prime Intercept', tone: 'positive' };
   if (inputs.movement >= 0.5)  return { icon: '🎯', label: 'Good Intercept', tone: 'positive' };
@@ -282,6 +291,7 @@ export function getStandExplainability(
 ): StandExplainability {
   // Build chips — pick the most relevant 3-4
   const allChips: (ReasonChip | null)[] = [
+    getInsideCornerChip(inputs),
     getCorridorChip(props),
     getInterceptChip(inputs),
     getWindChip(inputs),

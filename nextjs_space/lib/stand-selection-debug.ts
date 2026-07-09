@@ -106,11 +106,12 @@ export interface StandCandidateDebug {
 
   // === WEIGHT BREAKDOWN (alignment engine weights × inputs) ===
   weight_breakdown: {
-    wind_contribution: number;      // 0.35 × wind_fit
-    movement_contribution: number;  // 0.30 × movement
-    intrusion_contribution: number; // 0.20 × intrusion_fit
-    time_contribution: number;      // 0.10 × time_fit
-    season_contribution: number;    // 0.05 × season_fit
+    wind_contribution: number;          // 0.35 × wind_fit
+    inside_corner_contribution: number; // 0.20 × inside_corner (0 if N/A)
+    movement_contribution: number;      // 0.17 × movement
+    intrusion_contribution: number;     // 0.20 × intrusion_fit
+    time_contribution: number;          // 0.05 × time_fit
+    season_contribution: number;        // 0.03 × season_fit
   };
 
   // === REASON LIST ===
@@ -222,12 +223,15 @@ export function buildStandSelectionDebug(opts: {
     // === Weight breakdown (alignment engine) ===
     const windFit = windScore;  // 1 - wind_overlap
     const intrusionFit = accessScore;  // 1 - intrusion
+    // v1.1 alignment weights (see lib/scoring/stand-alignment.ts).
+    const cornerApplies = inputs.inside_corner !== null && inputs.inside_corner !== undefined;
     const windContrib = 0.35 * windFit;
-    const movementContrib = 0.30 * inputs.movement;
+    const insideCornerContrib = cornerApplies ? 0.20 * (inputs.inside_corner as number) : 0;
+    const movementContrib = 0.17 * inputs.movement;
     const intrusionContrib = 0.20 * intrusionFit;
-    const timeContrib = 0.10 * inputs.time_fit;
-    const seasonContrib = 0.05 * inputs.season_fit;
-    const totalRaw = windContrib + movementContrib + intrusionContrib + timeContrib + seasonContrib;
+    const timeContrib = 0.05 * inputs.time_fit;
+    const seasonContrib = 0.03 * inputs.season_fit;
+    const totalRaw = windContrib + insideCornerContrib + movementContrib + intrusionContrib + timeContrib + seasonContrib;
 
     // === Reasons ===
     const reasons: string[] = [];
@@ -269,6 +273,7 @@ export function buildStandSelectionDebug(opts: {
       alignment_inputs: inputs,
       weight_breakdown: {
         wind_contribution: Math.round(windContrib * 1000) / 1000,
+        inside_corner_contribution: Math.round(insideCornerContrib * 1000) / 1000,
         movement_contribution: Math.round(movementContrib * 1000) / 1000,
         intrusion_contribution: Math.round(intrusionContrib * 1000) / 1000,
         time_contribution: Math.round(timeContrib * 1000) / 1000,
@@ -293,12 +298,13 @@ export function buildStandSelectionDebug(opts: {
 
   if (topCandidate) {
     const wb = topCandidate.weight_breakdown;
-    const totalWeight = wb.wind_contribution + wb.movement_contribution +
+    const totalWeight = wb.wind_contribution + wb.inside_corner_contribution + wb.movement_contribution +
       wb.intrusion_contribution + wb.time_contribution + wb.season_contribution;
 
     if (totalWeight > 0) {
       const factors: { name: string; value: number }[] = [
         { name: 'wind', value: wb.wind_contribution },
+        { name: 'inside_corner', value: wb.inside_corner_contribution },
         { name: 'movement_corridor', value: wb.movement_contribution },
         { name: 'intrusion_access', value: wb.intrusion_contribution },
         { name: 'time_fit', value: wb.time_contribution },

@@ -1,0 +1,60 @@
+# ============================================================
+# STAND-ALIGNMENT ENGINE WEIGHTS — v1.1
+# ============================================================
+# NOTE: This file DOCUMENTS the stand-alignment engine weights.
+# The runtime source of truth is STAND_ALIGNMENT_WEIGHTS_V1_1 in
+# lib/scoring/stand-alignment.ts (kept deterministic in code).
+#
+# This is a DIFFERENT system from lib/scoring/weights/v1_0.yaml,
+# which holds PARCEL-LEVEL scoring weights (bedding_quality,
+# funnel_density, corridor_coverage, ...). Do not conflate them.
+# ============================================================
+
+version: "1.1"
+engine: stand-alignment
+description: >
+  Per-stand alignment score. Wind stays king. v1.1 introduces the
+  concave inside-corner factor and shifts weight mostly out of movement
+  (an inside corner is itself a movement signal, so this avoids
+  double-counting / structural triple-dipping).
+
+# Weights must sum to 1.00 when inside_corner applies.
+weights:
+  wind:          0.35   # king (unchanged from v1.0)
+  inside_corner: 0.20   # NEW — concave field-edge corner geometry
+  movement:      0.17   # was 0.25 (v3.8) → pulled here for inside_corner
+  intrusion:     0.20   # was 0.25
+  time:          0.05   # was 0.10
+  season:        0.03   # was 0.05
+
+# What each factor rewards.
+factor_notes:
+  wind:          "Leeward advantage for the current wind (1 - wind_overlap)."
+  inside_corner: >
+    Proximity to the nearest concave ag-edge corner from
+    findInsideCorners(). Distance-decayed (~70 m falloff), scaled by
+    corner sharpness (tighter interior angle = higher) and boosted when
+    a travel corridor passes the corner mouth (rewards corners deer
+    actually use). Concave geometry ONLY — distinct from the raster
+    edge_stand_score / isEdgeStand cover-transition signal.
+  movement:      "Corridor-proximity decay (exp(-d/falloff))."
+  intrusion:     "Access safety (1 - approach risk)."
+  time:          "Time-of-day fit."
+  season:        "Season pattern fit."
+
+# Adaptive renormalization guard (REQUIRED).
+renormalization_guard:
+  when: "parcel has NO inside corners (all-timber, no ag edges)"
+  action: >
+    Drop the 0.20 inside_corner weight and redistribute it proportionally
+    across the remaining 5 factors (which sum to 0.80). Timber parcels are
+    then scored purely on their own merits and never penalized for the
+    absence of corners.
+  distinction: >
+    A parcel that HAS corners but where a given stand is far from all of
+    them keeps the full 6-factor weighting and simply scores a low (near-0)
+    inside_corner value — NO renormalization in that case.
+
+curve:
+  generosity: "Math.pow(raw, 0.85)"
+  display: "Math.round(score * 100)  # whole numbers"

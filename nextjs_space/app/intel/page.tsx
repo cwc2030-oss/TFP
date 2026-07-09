@@ -604,6 +604,46 @@ function closestPointOnLineString(
   return { point: closestPt, dist: minDist, segIndex: segIdx };
 }
 
+// ── v1.1 inside-corner factor ─────────────────────────────────────────────
+// Score (0..1) for how well a candidate stand sits in a concave ag-edge
+// corner produced by findInsideCorners(). Distance-decayed to the nearest
+// corner, scaled by corner sharpness (tighter interior angle = higher), and
+// boosted when a travel corridor passes the corner mouth (rewards corners
+// deer actually use). Concave geometry ONLY — deliberately distinct from the
+// raster cover-transition edge_stand_score so structural weight isn't inflated.
+type InsideCornerLite = { coords: [number, number]; interiorAngle: number };
+
+function computeInsideCornerScore(
+  standCoords: [number, number],
+  corners: InsideCornerLite[],
+  corridorLines: [number, number][][],
+  falloffM = 70,
+): number {
+  if (!corners.length) return 0;
+  let best = 0;
+  for (const corner of corners) {
+    const d = distanceMeters(standCoords, corner.coords);
+    const decay = Math.exp(-d / falloffM); // 1 at the corner → decays with distance
+    // interiorAngle is < 160° (concave). 60° (very sharp) → 1, 160° → 0.
+    const sharp = Math.max(0, Math.min(1, (160 - corner.interiorAngle) / 100));
+    let cornerScore = decay * (0.55 + 0.45 * sharp);
+    // Corridor-mouth boost: reward corners a travel corridor actually passes.
+    if (corridorLines.length) {
+      let minCorridorDist = Infinity;
+      for (const line of corridorLines) {
+        if (line.length < 2) continue;
+        const r = closestPointOnLineString(corner.coords, line);
+        if (r.dist < minCorridorDist) minCorridorDist = r.dist;
+      }
+      if (minCorridorDist <= 60) {
+        cornerScore *= 1 + 0.25 * (1 - minCorridorDist / 60);
+      }
+    }
+    if (cornerScore > best) best = cornerScore;
+  }
+  return Math.max(0, Math.min(1, best));
+}
+
 // Check if a point is inside a Polygon or MultiPolygon GeoJSON geometry
 function pointInParcelGeometry(
   point: [number, number],
@@ -3239,6 +3279,10 @@ const archetypeInitializedRef = useRef(false);
   const [ahaCaptured, setAhaCaptured] = useState(false);
   const ahaFiredRef = useRef(false);
 
+  // v1.1 inside-corner factor: keep the latest concave ag-edge corners in a ref
+  // so the alignment scorer can read them without adding cdlData to its deps.
+  const cdlCornersRef = useRef<InsideCornerLite[]>([]);
+
   // Derive county/state the same way the report builder does (OPSEC: only the
   // user's OWN parcel location — never any other party's data).
   const ahaCounty = useMemo(() => {
@@ -3674,6 +3718,32 @@ const archetypeInitializedRef = useRef(false);
         }
       );
     });
+
+    // ═══ v1.1 INSIDE-CORNER FACTOR ═══
+    // If this parcel HAS concave ag-edge corners, score every stand's
+    // proximity to the nearest one and feed it as inside_corner (0..1) so
+    // stands snap to corners. If the parcel has NO corners (all-timber),
+    // leave inside_corner undefined → computeStandScore renormalizes the
+    // remaining factors (guard), so timber parcels are never penalized.
+    const cornerList = cdlCornersRef.current;
+    const parcelHasCorners = cornerList.length > 0;
+    if (parcelHasCorners) {
+      // Travel corridors (corridor + draw) for the corner-mouth boost.
+      const cornerCorridorLines: [number, number][][] = [];
+      if (layers?.funnels?.features) {
+        for (const f of layers.funnels.features) {
+          if (f.geometry?.type !== 'LineString') continue;
+          const ft = f.properties?.funnelType;
+          if (ft === 'corridor' || ft === 'draw') {
+            cornerCorridorLines.push((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+          }
+        }
+      }
+      stands.forEach((f, i) => {
+        const coords = f.geometry.coordinates as [number, number];
+        inputs[i].inside_corner = computeInsideCornerScore(coords, cornerList, cornerCorridorLines);
+      });
+    }
 
     const { scores, parcelStrength: ps, exceptionalIndex: ei } = scoreStandsWithExceptional(inputs);
 
@@ -4610,6 +4680,23 @@ const archetypeInitializedRef = useRef(false);
     if (!layers?.standPoints) return;
     computeAlignmentScores();
   }, [layers?.standPoints, windDirection, season, parcelPolygon, computeAlignmentScores]);
+
+  // v1.1: sync the inside-corner ref and re-score when CDL corner data arrives
+  // or is enriched, so terrain stands snap to concave ag-edge corners.
+  useEffect(() => {
+    const feats = cdlData?.insideCorners?.features ?? [];
+    cdlCornersRef.current = feats
+      .filter(f => f.geometry?.type === 'Point')
+      .map(f => {
+        const p = (f.properties || {}) as Record<string, unknown>;
+        const angle = (p.interiorAngle as number) ?? (p.angle as number) ?? 150;
+        return {
+          coords: (f.geometry as GeoJSON.Point).coordinates as [number, number],
+          interiorAngle: angle,
+        };
+      });
+    if (layers?.standPoints) computeAlignmentScores();
+  }, [cdlData?.insideCorners]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ═══ DEM-BASED STAND FALLBACK (single-parcel fix) ═══
   // When Modal API returns no standPoints AND the fallback at lines 5674-5755 generates
@@ -8071,6 +8158,9 @@ const archetypeInitializedRef = useRef(false);
         intrusion: 0.3, // field edges have moderate intrusion
         time_fit: 0.6,
         season_fit: isRut ? 0.9 : isLate ? 0.7 : 0.5,
+        // This synthetic stand SITS in the corner — inside_corner is high,
+        // scaled by the corner's sharpness so the chip/factor reflect geometry.
+        inside_corner: Math.max(0.6, Math.min(1, 0.55 + 0.45 * (Math.max(0, 160 - cornerAngle) / 100))),
       };
 
       const standScore: StandScore = {
