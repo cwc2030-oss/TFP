@@ -122,7 +122,11 @@ export default function Navbar() {
             ) : (
               <div className="flex items-center gap-2">
                 <Link href="/login">
-                  <Button variant="ghost" size="sm">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-stone-700 hover:text-emerald-700"
+                  >
                     Sign In
                   </Button>
                 </Link>
