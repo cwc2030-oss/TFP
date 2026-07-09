@@ -103,7 +103,7 @@ export default function RootLayout({
           </>
         )}
       </head>
-      <body className={`${inter.className} ${crimsonText.variable} antialiased`} suppressHydrationWarning>
+      <body className={`${inter.className} ${crimsonText.variable} antialiased bg-[#0c0a09]`} suppressHydrationWarning>
         <Providers>
           <FeatureFlagsProvider
             value={{ countyDeerFlowEnabled: isCountyDeerFlowEnabled() }}
