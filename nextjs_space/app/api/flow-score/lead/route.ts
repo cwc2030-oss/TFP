@@ -6,18 +6,25 @@ import { prisma } from '@/lib/db';
 /**
  * POST /api/flow-score/lead
  *
- * Creates a Lead record from the flow-score email gate.
- * Body: { email, address?, lat?, lng?, county?, state?, teaserScore?, alertCounty? }
+ * Creates a Lead record from an email gate. Reused by both the /flow-score
+ * page (source: 'flow_score') and the Terrain Brain aha-moment capture
+ * (source: 'terrain_brain_aha'). The `source` field lets us tell these
+ * captures apart in the funnel.
+ * Body: { email, address?, lat?, lng?, county?, state?, teaserScore?, alertCounty?, source? }
  * Returns: { leadId }
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { email, address, lat, lng, county, state, teaserScore, alertCounty } = body;
+    const { email, address, lat, lng, county, state, teaserScore, alertCounty, source } = body;
 
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return NextResponse.json({ error: 'Valid email required' }, { status: 400 });
     }
+
+    // Only accept known sources; default to the original flow-score gate.
+    const allowedSources = ['flow_score', 'terrain_brain_aha'];
+    const leadSource = allowedSources.includes(source) ? source : 'flow_score';
 
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -27,7 +34,7 @@ export async function POST(req: NextRequest) {
     const existingLead = await prisma.lead.findFirst({
       where: {
         email: normalizedEmail,
-        source: 'flow_score',
+        source: leadSource,
         ...(lat != null && lng != null
           ? {
               lat: { gte: lat - 0.0001, lte: lat + 0.0001 },
@@ -64,7 +71,7 @@ export async function POST(req: NextRequest) {
           county: county || null,
           state: state || null,
           teaserScore: teaserScore ?? null,
-          source: 'flow_score',
+          source: leadSource,
           alertCounty: alertCounty === true,
         },
       });
@@ -74,6 +81,7 @@ export async function POST(req: NextRequest) {
     console.log('[flow-score/lead] Lead captured:', {
       leadId,
       email: normalizedEmail,
+      source: leadSource,
       address: address || '(none)',
       county: county || '(none)',
       alertCounty: alertCounty === true,

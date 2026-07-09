@@ -13,7 +13,7 @@ import {
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
   Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User, Share2,
-  Trash2, Plus
+  Trash2, Plus, Mail, Bell
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ScoreCard from '@/components/ScoreCard';
@@ -29,7 +29,7 @@ import { buildStandInputs, windDirectionToDeg } from '@/lib/scoring/stand-inputs
 import { getStandExplainability, buildStandNarrative, renderChipsHTML, renderQualityBarsHTML, renderKeyIndicatorsHTML } from '@/lib/scoring/stand-explainability';
 import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
-import { trackTerritoryTeaserShown, trackTerritoryTeaserClicked } from '@/lib/gtag';
+import { trackTerritoryTeaserShown, trackTerritoryTeaserClicked, trackGenerateLead } from '@/lib/gtag';
 import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
@@ -3228,6 +3228,55 @@ const archetypeInitializedRef = useRef(false);
   // Ref to hold raw flow API response for terrain story re-generation
   const terrainFlowRawRef = useRef<any>(null);
 
+  // ========== AHA-MOMENT LEAD CAPTURE ("Save your Flow Score") ==========
+  // Surfaced once per session to free/logged-out users right after the deer-flow
+  // render completes. Soft & dismissible — does NOT interrupt the free render.
+  const [showAhaCapture, setShowAhaCapture] = useState(false);
+  const [ahaEmail, setAhaEmail] = useState('');
+  const [ahaAlertCounty, setAhaAlertCounty] = useState(true);
+  const [ahaSubmitting, setAhaSubmitting] = useState(false);
+  const [ahaError, setAhaError] = useState<string | null>(null);
+  const [ahaCaptured, setAhaCaptured] = useState(false);
+  const ahaFiredRef = useRef(false);
+
+  // Derive county/state the same way the report builder does (OPSEC: only the
+  // user's OWN parcel location — never any other party's data).
+  const ahaCounty = useMemo(() => {
+    return (parcelPolygon?.properties?.county ??
+      activeAddress?.split(',').find((p: string) =>
+        /\bcounty\b/i.test(p) &&
+        !/county\s+(road|rd|highway|hwy|route|rt|line|ln|street|st|drive|dr|lane)/i.test(p)
+      )?.replace(/county/i, '').trim() ?? '').replace(/\b\w/g, (c: string) => c.toUpperCase());
+  }, [parcelPolygon, activeAddress]);
+  const ahaState = useMemo(() => {
+    return (activeAddress?.match(/\b([A-Z]{2})\s+\d{5}\b/)?.[1] ?? 'MO').toUpperCase();
+  }, [activeAddress]);
+
+  // Trigger: fire once per session after the deer-flow render completes for a
+  // free/logged-out user. Soft delay so it lands AFTER the wow, not on load.
+  useEffect(() => {
+    if (isPro || territoryMode) return;
+    if (ahaFiredRef.current) return;
+    const hasFlow = (terrainFlowData?.flow_primary?.features?.length ?? 0) > 0;
+    if (!hasFlow) return;
+    // Respect prior session choices — don't re-nag if captured or dismissed.
+    try {
+      if (typeof window !== 'undefined') {
+        if (sessionStorage.getItem('tfp_aha_lead_captured') === '1') { ahaFiredRef.current = true; setAhaCaptured(true); return; }
+        if (sessionStorage.getItem('tfp_aha_lead_dismissed') === '1') { ahaFiredRef.current = true; return; }
+      }
+    } catch { /* sessionStorage unavailable */ }
+    ahaFiredRef.current = true;
+    const t = setTimeout(() => setShowAhaCapture(true), 1400);
+    return () => clearTimeout(t);
+  }, [terrainFlowData, isPro, territoryMode]);
+
+  const handleAhaDismiss = useCallback(() => {
+    setShowAhaCapture(false);
+    try { sessionStorage.setItem('tfp_aha_lead_dismissed', '1'); } catch { /* noop */ }
+  }, []);
+  // handleAhaSubmit is defined later (after parcelStrength is declared).
+
   // ========== CDL (USDA Cropland Data Layer) ==========
   const [cdlData, setCdlData] = useState<CDLAnalysisResult | null>(null);
 
@@ -3466,6 +3515,43 @@ const archetypeInitializedRef = useRef(false);
   const [highlightedStandRank, setHighlightedStandRank] = useState<number | null>(null);
   const [exceptionalIndex, setExceptionalIndex] = useState<number | null>(null);
   const [parcelStrength, setParcelStrength] = useState<number>(0);
+
+  // Aha-moment lead submit (defined here so parcelStrength is in scope).
+  const handleAhaSubmit = useCallback(async () => {
+    const email = ahaEmail.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAhaError('Please enter a valid email address.');
+      return;
+    }
+    setAhaSubmitting(true);
+    setAhaError(null);
+    try {
+      const res = await fetch('/api/flow-score/lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          address: activeAddress || undefined,
+          lat: activeLat,
+          lng: activeLng,
+          county: ahaCounty || undefined,
+          state: ahaState || undefined,
+          teaserScore: Math.round(parcelStrength || 0),
+          alertCounty: ahaAlertCounty,
+          source: 'terrain_brain_aha',
+        }),
+      });
+      if (!res.ok) throw new Error('Request failed');
+      try { trackGenerateLead({ county: ahaCounty, state: ahaState, source: 'terrain_brain_aha', address: activeAddress || '', alertCounty: ahaAlertCounty }); } catch { /* noop */ }
+      try { sessionStorage.setItem('tfp_aha_lead_captured', '1'); } catch { /* noop */ }
+      setAhaCaptured(true);
+      setTimeout(() => setShowAhaCapture(false), 2600);
+    } catch {
+      setAhaError('Something went wrong. Please try again.');
+    } finally {
+      setAhaSubmitting(false);
+    }
+  }, [ahaEmail, activeAddress, activeLat, activeLng, ahaCounty, ahaState, parcelStrength, ahaAlertCounty]);
   const [mostAlignedHint, setMostAlignedHint] = useState<{ standRank: number; name: string } | null>(null);
   const [alignmentPanelExpanded, setAlignmentPanelExpanded] = useState(false); // Collapsed by default
   /** Phase 2: true when terrain anchor gate rejects ALL candidates — parcel lacks defensible terrain. */
@@ -14628,6 +14714,121 @@ const archetypeInitializedRef = useRef(false);
               <Unlock className="w-4 h-4" />
               Unlock Territory
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ AHA-MOMENT LEAD CAPTURE — "Save your Flow Score" (free/logged-out only) ═══
+           Soft, dismissible card surfaced right after the deer-flow render completes.
+           Reuses the existing /api/flow-score/lead endpoint (source: terrain_brain_aha). */}
+      {showAhaCapture && !isPro && (
+        <div
+          className="absolute z-50 pointer-events-auto"
+          style={{ bottom: 24, left: 16, maxWidth: 360, width: 'calc(100vw - 32px)' }}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #0d1f17f2, #1a3a2af2)',
+              border: '1px solid #c9a84c88',
+              borderRadius: 12,
+              padding: '16px 18px',
+              backdropFilter: 'blur(12px)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+            }}
+          >
+            {/* Dismiss */}
+            <button
+              onClick={handleAhaDismiss}
+              aria-label="Dismiss"
+              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', cursor: 'pointer', color: '#e8e0d099', padding: 4 }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {ahaCaptured ? (
+              <div className="flex flex-col items-center text-center py-2">
+                <div style={{ background: '#c9a84c', borderRadius: 999, padding: 8, marginBottom: 10, display: 'flex' }}>
+                  <CheckCircle className="w-5 h-5 text-[#0d1f17]" />
+                </div>
+                <p style={{ color: '#e8e0d0', fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Flow Score saved.</p>
+                <p style={{ color: '#e8e0d0aa', fontSize: 12, lineHeight: 1.4 }}>
+                  Your full terrain report is on its way{ahaAlertCounty && ahaCounty ? `, and we'll alert you when new leases hit ${ahaCounty} County` : ''}.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-2">
+                  <div style={{ background: '#c9a84c', borderRadius: 6, padding: '4px 6px', display: 'flex', alignItems: 'center' }}>
+                    <Sparkles className="w-3.5 h-3.5 text-[#0d1f17]" />
+                  </div>
+                  <span style={{ color: '#c9a84c', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>
+                    Save your Flow Score
+                  </span>
+                </div>
+                <p style={{ color: '#e8e0d0', fontSize: 13.5, fontWeight: 500, lineHeight: 1.45, marginBottom: 12 }}>
+                  Get your full terrain report{ahaCounty ? ` + free alerts when new leases hit ${ahaCounty} County` : ' + free alerts when new leases hit your county'}.
+                </p>
+
+                <div style={{ position: 'relative', marginBottom: 10 }}>
+                  <Mail className="w-4 h-4" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#e8e0d077' }} />
+                  <input
+                    type="email"
+                    value={ahaEmail}
+                    onChange={(e) => { setAhaEmail(e.target.value); if (ahaError) setAhaError(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !ahaSubmitting) handleAhaSubmit(); }}
+                    placeholder="you@email.com"
+                    autoComplete="email"
+                    style={{
+                      width: '100%', background: '#0d1f17', border: `1px solid ${ahaError ? '#c0554c' : '#c9a84c55'}`,
+                      borderRadius: 8, padding: '10px 12px 10px 34px', color: '#e8e0d0', fontSize: 14, outline: 'none',
+                    }}
+                  />
+                </div>
+
+                {/* County lease-alert opt-in — prominent, default ON */}
+                <label
+                  htmlFor="aha-alert-county"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 12,
+                    background: ahaAlertCounty ? '#c9a84c1a' : 'transparent',
+                    border: `1px solid ${ahaAlertCounty ? '#c9a84c66' : '#e8e0d022'}`,
+                    borderRadius: 8, padding: '8px 10px',
+                  }}
+                >
+                  <input
+                    id="aha-alert-county"
+                    type="checkbox"
+                    checked={ahaAlertCounty}
+                    onChange={(e) => setAhaAlertCounty(e.target.checked)}
+                    style={{ accentColor: '#c9a84c', width: 16, height: 16, flexShrink: 0 }}
+                  />
+                  <Bell className="w-3.5 h-3.5" style={{ color: '#c9a84c', flexShrink: 0 }} />
+                  <span style={{ color: '#e8e0d0', fontSize: 12.5, lineHeight: 1.35 }}>
+                    Notify me about new leases in {ahaCounty ? `${ahaCounty} County` : 'my county'}
+                  </span>
+                </label>
+
+                {ahaError && (
+                  <p style={{ color: '#e8938c', fontSize: 12, marginBottom: 8 }}>{ahaError}</p>
+                )}
+
+                <button
+                  onClick={() => { if (!ahaSubmitting) handleAhaSubmit(); }}
+                  disabled={ahaSubmitting}
+                  className="w-full flex items-center justify-center gap-2 text-sm font-bold rounded-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  style={{
+                    background: 'linear-gradient(135deg, #c9a84c, #a88a30)', color: '#0d1f17',
+                    padding: '10px 16px', border: 'none', cursor: ahaSubmitting ? 'wait' : 'pointer', opacity: ahaSubmitting ? 0.7 : 1,
+                  }}
+                >
+                  {ahaSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {ahaSubmitting ? 'Saving…' : 'Save my Flow Score'}
+                </button>
+                <p style={{ color: '#e8e0d066', fontSize: 10.5, textAlign: 'center', marginTop: 8, lineHeight: 1.35 }}>
+                  Keep exploring your free flow render — this just saves your report.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

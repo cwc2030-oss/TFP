@@ -118,6 +118,29 @@ export function trackTerritoryTeaserShown(address: string, lat: number, lng: num
 }
 
 /**
+ * Lead captured at the Terrain Brain "aha" moment (email + county alerts opt-in).
+ * PII-safe: never send the raw email to GA4 — only county/state/source/value.
+ */
+export function trackGenerateLead(params: {
+  county?: string;
+  state?: string;
+  source?: string;
+  address?: string;
+  alertCounty?: boolean;
+}) {
+  const { county = '', state = '', source = 'terrain_brain_aha', address = '', alertCounty = false } = params;
+  trackEvent('generate_lead', {
+    county,
+    state,
+    source,
+    alert_county: alertCounty,
+    currency: 'USD',
+    value: 1,
+  });
+  logFunnelEvent('generate_lead', address, { county, state, source, alertCounty });
+}
+
+/**
  * Territory teaser CTA clicked — uses sendBeacon / keepalive:true
  * so the event fires reliably before the redirect to checkout.
  */

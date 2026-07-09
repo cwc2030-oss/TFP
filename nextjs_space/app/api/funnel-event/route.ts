@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       'purchase_completed',
       'territory_teaser_shown',
       'territory_teaser_clicked',
+      'generate_lead',
     ];
 
     if (!validEvents.includes(event)) {
