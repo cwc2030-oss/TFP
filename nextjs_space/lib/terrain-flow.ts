@@ -522,20 +522,43 @@ export function generateTerrainDrivenFlow(
     zoneScaling
   );
   
-  // ========== CRITICAL: CLIP TO PARCEL BOUNDARY ==========
-  // Uses parcelRings (all polygon rings) so territory-mode flow lines
-  // that cross between parcels are kept as long as ≥40% overlaps ANY parcel.
-  console.log('[TerrainFlow] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d (rings=%d)',
+  // ========== CLIP TO HUNT-CONTEXT AREA ==========
+  // Deer don't originate inside one parcel — they pour in from the surrounding
+  // terrain. Clipping single-parcel flow tight to the boundary discards the
+  // movement story (corridors entering, crossing, converging) and makes the
+  // Terrain Brain look lifeless. So for a SINGLE parcel we clip flow to a
+  // buffered hunt-context ring (~800m) around the parcel instead of the tight
+  // boundary. This keeps off-property flow that feeds the parcel visible.
+  //
+  // GUARDRAIL: this buffered ring ONLY governs the flow visualization. Stands,
+  // the report, and all parcel data stay scoped to the selected parcel — the
+  // neighbor's influence shows via flow, the neighbor's intel stays locked.
+  const FLOW_CONTEXT_BUFFER_M = 800;
+  let clipRings = parcelRings;
+  if (!isTerritory) {
+    try {
+      const bufferedParcel = createBufferedParcel(parcel, FLOW_CONTEXT_BUFFER_M);
+      const bufferedRing = bufferedParcel.geometry.coordinates?.[0];
+      if (bufferedRing && bufferedRing.length >= 4) {
+        clipRings = [bufferedRing];
+      }
+    } catch (bufErr) {
+      console.warn('[TerrainFlow] Buffered clip ring failed, falling back to parcel boundary:', bufErr);
+    }
+  }
+
+  console.log('[TerrainFlow] PRE-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d (rings=%d, buffered=%s)',
     rawFlowLines.primary.length, rawFlowLines.secondary.length, 
-    rawConvergenceZones.length, rawOpportunityZones.length, parcelRings.length);
+    rawConvergenceZones.length, rawOpportunityZones.length, clipRings.length, String(!isTerritory));
   
-  // For territory (multi-parcel), lower the overlap threshold so flow lines
-  // that bridge the gap between two parcels survive the clip.
-  const overlapThreshold = isTerritory ? 0.20 : 0.40;
-  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, parcelRings, overlapThreshold);
-  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, parcelRings, overlapThreshold);
-  const clippedConvergence = filterConvergenceZonesToParcel(rawConvergenceZones, parcelRings);
-  const clippedOpportunity = filterOpportunityZonesToParcel(rawOpportunityZones, parcelRings);
+  // Territory (multi-parcel): lower threshold so flow bridging parcels survives.
+  // Single parcel: clip against the wide 800m hunt-context ring, so a modest
+  // overlap keeps corridors that enter from off-property and cross the parcel.
+  const overlapThreshold = isTerritory ? 0.20 : 0.25;
+  const clippedPrimary = clipFlowLinesToParcel(rawFlowLines.primary, clipRings, overlapThreshold);
+  const clippedSecondary = clipFlowLinesToParcel(rawFlowLines.secondary, clipRings, overlapThreshold);
+  const clippedConvergence = filterConvergenceZonesToParcel(rawConvergenceZones, clipRings);
+  const clippedOpportunity = filterOpportunityZonesToParcel(rawOpportunityZones, clipRings);
   
   console.log('[TerrainFlow] POST-CLIP: primary=%d, secondary=%d, convergence=%d, opportunity=%d',
     clippedPrimary.length, clippedSecondary.length, 

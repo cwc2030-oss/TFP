@@ -145,6 +145,14 @@ export function computeParcelScale(widthM: number, heightM: number, isTerritory:
   // Apply non-linear scaling for very large parcels (diminishing returns)
   // Use square root scaling for zone counts to avoid excessive features
   const countScale = 1 + Math.sqrt(scaleFactor - 1) * 1.5;
+
+  // Flow is the hero of the single-parcel experience. Applying the full 2.5x
+  // scale to min-length pushed the primary threshold to ~375m on ~300-acre
+  // parcels, silently dropping strong-but-shorter corridors and leaving the
+  // map looking sparse. Halve the excess scale for length only so more real
+  // movement lines survive (primary ~263m / secondary ~140m at 2.5x). Small
+  // parcels (scaleFactor 1.0) are unaffected; territory still drops min to 0.
+  const lengthScale = 1 + (scaleFactor - 1) * 0.5;
   
   return {
     widthM,
@@ -156,8 +164,8 @@ export function computeParcelScale(widthM: number, heightM: number, isTerritory:
     // Flow line lengths scale directly with parcel size
     // Phase B: In territory mode, drop length thresholds entirely —
     // extract ALL candidates and classify at display via Green/Blue/Black tiers
-    minLengthPrimary: isTerritory ? 0 : Math.round(SPATIAL_SCALING_BASE.flow_min_length_primary * scaleFactor),
-    minLengthSecondary: isTerritory ? 0 : Math.round(SPATIAL_SCALING_BASE.flow_min_length_secondary * scaleFactor),
+    minLengthPrimary: isTerritory ? 0 : Math.round(SPATIAL_SCALING_BASE.flow_min_length_primary * lengthScale),
+    minLengthSecondary: isTerritory ? 0 : Math.round(SPATIAL_SCALING_BASE.flow_min_length_secondary * lengthScale),
     
     // Search and display radii scale with parcel size
     convergenceSearchRadius: Math.round(SPATIAL_SCALING_BASE.convergence_search_radius * scaleFactor),
