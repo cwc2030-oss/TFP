@@ -10575,12 +10575,14 @@ const archetypeInitializedRef = useRef(false);
             },
             paint: {
               'text-color': LAYER_COLORS.flowTierGreen,
+              // v5.0: slightly stronger so the "this way" direction cue reads on
+              // first parcel load, while staying subtle/stealthy (not gaudy).
               'text-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.5, 0.18, 0.66, 0.28, 0.85, 0.40,
+                0.5, 0.32, 0.66, 0.45, 0.85, 0.58,
               ],
-              'text-halo-color': 'rgba(255,255,255,0.15)',
-              'text-halo-width': 0.5,
+              'text-halo-color': 'rgba(255,255,255,0.18)',
+              'text-halo-width': 0.6,
             },
           });
         }
