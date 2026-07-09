@@ -1037,10 +1037,10 @@ export default function InteractiveMap({
       {/* Mapbox Map Container */}
       <div className="absolute inset-0 pt-10">
         {!mapLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-stone-100">
+          <div className="absolute inset-0 flex items-center justify-center bg-stone-950">
             <div className="text-center">
-              <Loader2 className="w-12 h-12 animate-spin text-emerald-600 mx-auto mb-4" />
-              <p className="text-stone-600">Loading Interactive 3D Map...</p>
+              <Loader2 className="w-12 h-12 animate-spin text-emerald-500 mx-auto mb-4" />
+              <p className="text-stone-300">Loading Interactive 3D Map...</p>
             </div>
           </div>
         )}
