@@ -504,7 +504,16 @@ export function generateTerrainDrivenFlow(
   }
   
   // Extract flow lines following terrain structure (on buffered extent) - SCALED THRESHOLDS
-  const rawFlowLines = extractFlowLines(components.flow_likelihood, corridorData, scaledThresholds);
+  // Territory mode: enable additive spatial binning so outer/southern parcels
+  // keep their strongest corridors even where the globally-normalized likelihood
+  // surface is depressed by a dominant central basin. Single parcels pass
+  // `undefined` and are unaffected (byte-identical extraction).
+  const rawFlowLines = extractFlowLines(
+    components.flow_likelihood,
+    corridorData,
+    scaledThresholds,
+    isTerritory ? { bbox: bufferedBbox } : undefined
+  );
   
   // Identify convergence zones from terrain/flow structure (on buffered extent) - SCALED PARAMS
   const rawConvergenceZones = identifyConvergenceZones(
@@ -630,10 +639,21 @@ export function generateTerrainDrivenFlow(
       if (demGrid) {
         const { ridgePoints } = detectRidges(demGrid);
         const { saddlePoints } = detectSaddles(demGrid);
-        
+
+        // Debug-layer point budgets. Single parcels keep the original 50/30
+        // caps; territories scale the cap with sqrt(area) (bounded) so the
+        // debug ridge/saddle overlays span the whole territory instead of
+        // clustering in one corner.
+        const ridgePtCap = isTerritory
+          ? Math.min(500, Math.round(50 * Math.sqrt(Math.max(1, parcelScale.areaAcres / 40))))
+          : 50;
+        const saddlePtCap = isTerritory
+          ? Math.min(300, Math.round(30 * Math.sqrt(Math.max(1, parcelScale.areaAcres / 40))))
+          : 30;
+
         enhancedLayers.ridge_points = {
           type: 'FeatureCollection' as const,
-          features: ridgePoints.slice(0, 50).map((rp, i) => ({
+          features: ridgePoints.slice(0, ridgePtCap).map((rp, i) => ({
             type: 'Feature' as const,
             properties: {
               id: `ridge_${i}`,
@@ -649,7 +669,7 @@ export function generateTerrainDrivenFlow(
         
         enhancedLayers.saddle_points = {
           type: 'FeatureCollection' as const,
-          features: saddlePoints.slice(0, 30).map((sp, i) => ({
+          features: saddlePoints.slice(0, saddlePtCap).map((sp, i) => ({
             type: 'Feature' as const,
             properties: {
               id: `saddle_${i}`,

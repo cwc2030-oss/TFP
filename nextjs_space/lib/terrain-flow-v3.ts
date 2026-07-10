@@ -362,8 +362,8 @@ function generateLinearFlow(
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
   // Scale flow counts with acreage
-  const numPrimary = Math.max(1, Math.min(4, Math.floor(scale.areaAcres / 400) + 1));
-  const numSecondary = scale.areaAcres < 80 ? 0 : Math.max(1, Math.min(5, Math.floor(scale.areaAcres / 300)));
+  const numPrimary = Math.max(1, Math.min(scale.isTerritory ? 24 : 4, Math.floor(scale.areaAcres / 400) + 1));
+  const numSecondary = scale.areaAcres < 80 ? 0 : Math.max(1, Math.min(scale.isTerritory ? 30 : 5, Math.floor(scale.areaAcres / 300)));
   const perpDir = (bearing + 90) % 360;
   const perpSpacing = Math.min(widthM, heightM) / (numPrimary + 1);
   
@@ -423,7 +423,7 @@ function generateFunnelFlow(
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
   // Number of convergence funnels scales with acreage
-  const numFunnels = Math.max(1, Math.min(3, Math.floor(scale.areaAcres / 500) + 1));
+  const numFunnels = Math.max(1, Math.min(scale.isTerritory ? 20 : 3, Math.floor(scale.areaAcres / 500) + 1));
   const flowsPerFunnel = Math.max(2, Math.min(3, Math.floor(scale.areaAcres / 300) + 1));
   const spreadAngle = 35;
   
@@ -503,8 +503,8 @@ function generateBenchFlow(
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
   // Scale flow counts with acreage
-  const numPrimary = Math.max(1, Math.min(4, Math.floor(scale.areaAcres / 400) + 1));
-  const numSecondary = scale.areaAcres < 70 ? 0 : Math.max(1, Math.min(5, Math.floor(scale.areaAcres / 250)));
+  const numPrimary = Math.max(1, Math.min(scale.isTerritory ? 24 : 4, Math.floor(scale.areaAcres / 400) + 1));
+  const numSecondary = scale.areaAcres < 70 ? 0 : Math.max(1, Math.min(scale.isTerritory ? 30 : 5, Math.floor(scale.areaAcres / 250)));
   const perpDir = (bearing + 90) % 360;
   const perpSpacing = Math.min(scale.widthM, scale.heightM) / (numPrimary + 1);
   
@@ -564,7 +564,7 @@ function generateCrossroadsFlow(
   const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
   
   // Scale crossroads count with acreage
-  const numCrossings = Math.max(1, Math.min(3, Math.floor(scale.areaAcres / 500) + 1));
+  const numCrossings = Math.max(1, Math.min(scale.isTerritory ? 20 : 3, Math.floor(scale.areaAcres / 500) + 1));
   const perpSpacing = Math.min(scale.widthM, scale.heightM) / (numCrossings + 1);
   
   for (let c = 0; c < numCrossings; c++) {
@@ -970,7 +970,7 @@ function generateOpportunityZones(
   funnels?: GeoJSON.FeatureCollection
 ): GeoJSON.Feature<GeoJSON.Point, OpportunityZoneProperties>[] {
   const MIN_SEPARATION_M = 80;
-  const MAX_ZONES = Math.min(3, scale.maxOpportunityZones);
+  const MAX_ZONES = scale.isTerritory ? scale.maxOpportunityZones : Math.min(3, scale.maxOpportunityZones);
 
   // v2.9 – Terrain-first candidate scoring.  Convergence is a tiny tie-breaker, NOT a primary signal.
   // v3.10 – saddle_prox removed from scoring; saddles no longer attract stand placement.

@@ -110,6 +110,7 @@ export interface ParcelScaleMetrics {
   diagonalM: number;
   areaAcres: number;
   scaleFactor: number;        // 1.0 for reference size, increases for larger parcels
+  isTerritory: boolean;       // true for multi-parcel territories
   
   // Scaled parameters
   minLengthPrimary: number;
@@ -146,6 +147,34 @@ export function computeParcelScale(widthM: number, heightM: number, isTerritory:
   // Use square root scaling for zone counts to avoid excessive features
   const countScale = 1 + Math.sqrt(scaleFactor - 1) * 1.5;
 
+  // ========== TERRITORY-SCALE FEATURE BUDGETS ==========
+  // v4.2 (large-territory coverage): The single-parcel budgets (min(10,...) /
+  // min(6,...)) are hard global ceilings. On a 100-parcel / ~10,000-acre
+  // territory this concentrates every convergence/opportunity zone in the
+  // central high-density basin, leaving outer/southern parcels with no
+  // features at all. In territory mode we grow the zone budget with AREA
+  // (per ~1,000 acres) so every region earns representation, while a hard
+  // performance ceiling keeps the 100-parcel worst case bounded. Small
+  // territories floor at the previous value (6) so their output is unchanged.
+  // Single parcels are untouched (isTerritory === false).
+  const TERRITORY_CONV_PER_1000_ACRES = 4;   // convergence zones per 1,000 acres
+  const TERRITORY_OPP_PER_1000_ACRES = 2.5;  // opportunity zones per 1,000 acres
+  const TERRITORY_CONV_FLOOR = 6;            // matches prior territory value
+  const TERRITORY_OPP_FLOOR = 6;             // matches prior territory value
+  const TERRITORY_CONV_CEILING = 48;         // perf ceiling (~100 parcels)
+  const TERRITORY_OPP_CEILING = 30;          // perf ceiling (~100 parcels)
+
+  const territoryConvZones = Math.max(
+    TERRITORY_CONV_FLOOR,
+    Math.min(TERRITORY_CONV_CEILING,
+      Math.round((areaAcres / 1000) * TERRITORY_CONV_PER_1000_ACRES))
+  );
+  const territoryOppZones = Math.max(
+    TERRITORY_OPP_FLOOR,
+    Math.min(TERRITORY_OPP_CEILING,
+      Math.round((areaAcres / 1000) * TERRITORY_OPP_PER_1000_ACRES))
+  );
+
   // Flow is the hero of the single-parcel experience. Applying the full 2.5x
   // scale to min-length pushed the primary threshold to ~375m on ~300-acre
   // parcels, silently dropping strong-but-shorter corridors and leaving the
@@ -160,6 +189,7 @@ export function computeParcelScale(widthM: number, heightM: number, isTerritory:
     diagonalM,
     areaAcres,
     scaleFactor,
+    isTerritory,
     
     // Flow line lengths scale directly with parcel size
     // Phase B: In territory mode, drop length thresholds entirely —
@@ -175,9 +205,15 @@ export function computeParcelScale(widthM: number, heightM: number, isTerritory:
     // Smoothing scales more gently (diminishing returns)
     gaussianSmoothCells: Math.min(6, Math.ceil(SPATIAL_SCALING_BASE.gaussian_smooth_cells * Math.sqrt(scaleFactor))),
     
-    // Zone counts scale with square root (fewer additional zones on very large parcels)
-    maxConvergenceZones: Math.min(10, Math.round(SPATIAL_SCALING_BASE.max_convergence_zones * countScale)),
-    maxOpportunityZones: Math.min(6, Math.round(SPATIAL_SCALING_BASE.max_opportunity_zones * countScale)),
+    // Zone counts scale with square root (fewer additional zones on very large parcels).
+    // Territory mode overrides with AREA-driven budgets so outer/southern parcels
+    // are represented (see TERRITORY-SCALE FEATURE BUDGETS above).
+    maxConvergenceZones: isTerritory
+      ? territoryConvZones
+      : Math.min(10, Math.round(SPATIAL_SCALING_BASE.max_convergence_zones * countScale)),
+    maxOpportunityZones: isTerritory
+      ? territoryOppZones
+      : Math.min(6, Math.round(SPATIAL_SCALING_BASE.max_opportunity_zones * countScale)),
   };
 }
 
@@ -865,10 +901,30 @@ export function computeFlowLikelihood(
  * Extract flow lines from likelihood surface
  * Follows terrain structure, not parcel shape
  */
+/**
+ * Options for additive spatial binning of flow lines.
+ * Territory-only. When enabled, after the normal (global-threshold) extraction,
+ * the territory bbox is divided into a coarse grid and each populated bin
+ * contributes its top-K strongest corridors even if they fall below the global
+ * likelihood threshold. This guarantees outer/southern parcels get flow-line
+ * coverage instead of being culled by a central high-density basin that
+ * dominates the globally-normalized likelihood surface. Purely ADDITIVE — it
+ * never removes a corridor the normal pass already kept, so single-parcel
+ * output (binning omitted) is byte-identical.
+ */
+export interface FlowBinningOptions {
+  bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
+  targetBinM?: number;   // approx bin edge length in meters (default 900)
+  perBinK?: number;      // max corridors kept per bin (default 3)
+  scoreFloor?: number;   // absolute min combinedScore to admit (default 0.30)
+  maxBinsPerAxis?: number; // perf clamp on grid dimension (default 12)
+}
+
 export function extractFlowLines(
   likelihoodGrid: TerrainGrid,
   corridorData: any,
-  thresholds: typeof FLOW_THRESHOLDS = FLOW_THRESHOLDS
+  thresholds: typeof FLOW_THRESHOLDS = FLOW_THRESHOLDS,
+  binning?: FlowBinningOptions
 ): {
   primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
@@ -945,6 +1001,96 @@ export function extractFlowLines(
     }
   });
   
+  // ========== ADDITIVE SPATIAL BINNING (territory coverage) ==========
+  // Ensure every region of a large territory keeps its strongest corridors,
+  // even where the globally-normalized likelihood surface is depressed by a
+  // dominant central basin. Purely additive: corridors already accepted above
+  // are skipped; each bin only ADDS its top-K remaining candidates.
+  if (binning) {
+    const [minLng, minLat, maxLng, maxLat] = binning.bbox;
+    const targetBinM = binning.targetBinM ?? 900;
+    const perBinK = binning.perBinK ?? 3;
+    const scoreFloor = binning.scoreFloor ?? 0.30;
+    const maxBinsPerAxis = binning.maxBinsPerAxis ?? 12;
+
+    const midLat = (minLat + maxLat) / 2;
+    const widthM = distanceMeters([minLng, midLat], [maxLng, midLat]);
+    const heightM = distanceMeters([minLng, minLat], [minLng, maxLat]);
+    const nCols = Math.max(1, Math.min(maxBinsPerAxis, Math.round(widthM / targetBinM)));
+    const nRows = Math.max(1, Math.min(maxBinsPerAxis, Math.round(heightM / targetBinM)));
+    const lngSpan = (maxLng - minLng) || 1e-9;
+    const latSpan = (maxLat - minLat) || 1e-9;
+
+    // Bucket candidate corridors (those NOT already accepted) by bin.
+    type Cand = { score: number; lengthM: number; coords: number[][]; idx: number };
+    const bins = new Map<number, Cand[]>();
+
+    corridors.forEach((corridor: any, idx: number) => {
+      if (!corridor.geometry?.coordinates) return;
+      const coords = corridor.geometry.coordinates;
+      const prob = (corridor.properties?.probability || 50) / 100;
+
+      let avgLikelihood = 0;
+      let sampleCount = 0;
+      coords.forEach((coord: number[]) => {
+        const cell = coordToCell([coord[0], coord[1]], likelihoodGrid);
+        if (cell) {
+          avgLikelihood += likelihoodGrid.data[cell.row]?.[cell.col] || 0;
+          sampleCount++;
+        }
+      });
+      if (sampleCount > 0) avgLikelihood /= sampleCount;
+
+      const combinedScore = prob * 0.4 + avgLikelihood * 0.6;
+
+      let lengthM = 0;
+      for (let i = 0; i < coords.length - 1; i++) {
+        lengthM += distanceMeters([coords[i][0], coords[i][1]], [coords[i + 1][0], coords[i + 1][1]]);
+      }
+
+      // Skip corridors the normal pass already accepted (identical conditions).
+      const tier: FlowTier = combinedScore >= thresholds.primary_percentile ? 'primary' : 'secondary';
+      const minLength = tier === 'primary' ? thresholds.min_length_m_primary : thresholds.min_length_m_secondary;
+      const acceptedByMain = lengthM >= minLength && combinedScore >= thresholds.secondary_percentile;
+      if (acceptedByMain) return;
+
+      // Candidate must clear the absolute noise floor and length gate.
+      if (combinedScore < scoreFloor) return;
+      if (lengthM < minLength) return;
+
+      // Assign to bin by corridor midpoint.
+      const mid = coords[Math.floor(coords.length / 2)];
+      const col = Math.max(0, Math.min(nCols - 1, Math.floor(((mid[0] - minLng) / lngSpan) * nCols)));
+      const row = Math.max(0, Math.min(nRows - 1, Math.floor(((mid[1] - minLat) / latSpan) * nRows)));
+      const key = row * nCols + col;
+      const arr = bins.get(key) || [];
+      arr.push({ score: combinedScore, lengthM, coords, idx });
+      bins.set(key, arr);
+    });
+
+    // From each populated bin, add its top-K strongest as secondary flow lines.
+    bins.forEach((cands) => {
+      cands.sort((a, b) => b.score - a.score);
+      cands.slice(0, perBinK).forEach((cand) => {
+        secondary.push({
+          type: 'Feature',
+          properties: {
+            id: `flow_secondary_bin_${cand.idx}`,
+            tier: 'secondary',
+            likelihood: cand.score,
+            lengthM: Math.round(cand.lengthM),
+            avgSlope: 10,
+            convergenceScore: cand.score,
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: cand.coords.map((c: number[]) => [c[0], c[1]]),
+          },
+        });
+      });
+    });
+  }
+
   // Sort by likelihood
   primary.sort((a, b) => b.properties.likelihood - a.properties.likelihood);
   secondary.sort((a, b) => b.properties.likelihood - a.properties.likelihood);
