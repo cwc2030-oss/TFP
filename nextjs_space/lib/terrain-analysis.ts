@@ -1111,9 +1111,15 @@ export interface ZoneScalingOptions {
   smoothingCells?: number;     // Gaussian smoothing kernel radius (default 3)
   opportunityRadius?: number;  // Opportunity zone radius (default 25m)
   maxOpportunityZones?: number; // Max opportunity zones (default 3)
+  // v4.3 (large-territory convergence fix): only set for territories >= 3,000 ac.
+  // When true, convergence radius is bounded (local pinch, not a multi-mile blob)
+  // and zone selection is spatially distributed across bins instead of taking the
+  // top-N global maxima (which all cluster in the dominant central/northern band).
+  isLargeTerritory?: boolean;
+  bbox?: [number, number, number, number]; // territory extent, for spatial binning
 }
 
-const DEFAULT_ZONE_SCALING: Required<ZoneScalingOptions> = {
+const DEFAULT_ZONE_SCALING: Required<Omit<ZoneScalingOptions, 'isLargeTerritory' | 'bbox'>> = {
   searchRadius: 100,
   baseRadius: 30,
   maxZones: 5,
@@ -1121,6 +1127,78 @@ const DEFAULT_ZONE_SCALING: Required<ZoneScalingOptions> = {
   opportunityRadius: 25,
   maxOpportunityZones: 3,
 };
+
+// v4.3: Hard ceiling on a single convergence zone's display radius. Convergence
+// is a PLACE where deer funnel — a local pinch point. It must never render as a
+// multi-mile band. Only enforced in large-territory mode; single parcels and
+// small territories keep their original (already-tight) radii untouched.
+const CONVERGENCE_MAX_RADIUS_M = 120;
+
+/**
+ * v4.3: Select convergence maxima spread ACROSS the territory instead of the
+ * top-N by raw density (which pile up in the dominant central/northern basin).
+ * Buckets maxima into a coarse spatial grid (<=12x12 bins) and picks each bin's
+ * strongest maxima in rounds until `maxZones` is filled. Fully deterministic
+ * (depends only on maxima values + positions). Used ONLY for large territories.
+ */
+function selectSpatiallyDistributedMaxima(
+  maxima: { row: number; col: number; value: number }[],
+  grid: TerrainGrid,
+  bbox: [number, number, number, number],
+  maxZones: number
+): { row: number; col: number; value: number }[] {
+  if (maxima.length <= maxZones) return maxima;
+
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  const spanLng = maxLng - minLng;
+  const spanLat = maxLat - minLat;
+  if (spanLng <= 0 || spanLat <= 0) {
+    return [...maxima].sort((a, b) => b.value - a.value).slice(0, maxZones);
+  }
+
+  const midLat = (minLat + maxLat) / 2;
+  const mPerDegLat = 111320;
+  const mPerDegLng = 111320 * Math.cos((midLat * Math.PI) / 180);
+  const widthM = spanLng * mPerDegLng;
+  const heightM = spanLat * mPerDegLat;
+
+  const TARGET_BIN_M = 900;
+  const MAX_BINS_PER_AXIS = 12;
+  const nx = Math.max(1, Math.min(MAX_BINS_PER_AXIS, Math.round(widthM / TARGET_BIN_M)));
+  const ny = Math.max(1, Math.min(MAX_BINS_PER_AXIS, Math.round(heightM / TARGET_BIN_M)));
+
+  const bins = new Map<string, { row: number; col: number; value: number }[]>();
+  for (const m of maxima) {
+    const coord = cellToCoord(m.row, m.col, grid);
+    const bx = Math.min(nx - 1, Math.max(0, Math.floor(((coord[0] - minLng) / spanLng) * nx)));
+    const by = Math.min(ny - 1, Math.max(0, Math.floor(((coord[1] - minLat) / spanLat) * ny)));
+    const key = `${bx},${by}`;
+    const arr = bins.get(key);
+    if (arr) arr.push(m);
+    else bins.set(key, [m]);
+  }
+
+  const binArrays = Array.from(bins.values());
+  for (const arr of binArrays) arr.sort((a, b) => b.value - a.value);
+  // Deterministic bin order: strongest-peak bin first.
+  binArrays.sort((a, b) => b[0].value - a[0].value);
+
+  const selected: { row: number; col: number; value: number }[] = [];
+  let round = 0;
+  while (selected.length < maxZones) {
+    let added = false;
+    for (const arr of binArrays) {
+      if (arr.length > round) {
+        selected.push(arr[round]);
+        added = true;
+        if (selected.length >= maxZones) break;
+      }
+    }
+    if (!added) break;
+    round++;
+  }
+  return selected;
+}
 
 /**
  * Identify convergence zones from terrain structure (not endpoint clustering)
@@ -1188,9 +1266,15 @@ export function identifyConvergenceZones(
     }
   }
   
-  // Sort by value and take top convergence zones (SCALED max count)
+  // Sort by value and take top convergence zones (SCALED max count).
+  // v4.3: On large territories, distribute zones across the extent so outer/
+  // southern regions earn convergence points instead of all maxima piling up
+  // in the dominant central/northern density band. Small territories & single
+  // parcels keep the original global top-N behavior (byte-identical).
   maxima.sort((a, b) => b.value - a.value);
-  const topZones = maxima.slice(0, opts.maxZones);
+  const topZones = (opts.isLargeTerritory && opts.bbox)
+    ? selectSpatiallyDistributedMaxima(maxima, smoothedDensity, opts.bbox, opts.maxZones)
+    : maxima.slice(0, opts.maxZones);
   
   topZones.forEach((max, idx) => {
     const coord = cellToCoord(max.row, max.col, smoothedDensity);
@@ -1207,8 +1291,18 @@ export function identifyConvergenceZones(
       }
     });
     
-    // SCALED radius: base + flow-count bonus
-    const scaledRadius = opts.baseRadius + flowCount * (opts.baseRadius / 3);
+    // SCALED radius: base + flow-count bonus.
+    // v4.3: On large territories the raw flowCount is unbounded (dozens of flows
+    // pass within searchRadius in a dense basin) which inflated the radius to
+    // km-scale blobs that merged into one broad band. Clamp the flow-count
+    // contribution (matches the v3/terrain-flow variants) and hard-cap the final
+    // radius so a high-flow node stays a LOCAL pinch point. Single parcels &
+    // small territories keep the original unbounded formula (byte-identical).
+    const radiusFlowCount = opts.isLargeTerritory ? Math.min(flowCount, 4) : flowCount;
+    let scaledRadius = opts.baseRadius + radiusFlowCount * (opts.baseRadius / 3);
+    if (opts.isLargeTerritory) {
+      scaledRadius = Math.min(scaledRadius, CONVERGENCE_MAX_RADIUS_M);
+    }
     
     zones.push({
       type: 'Feature',

@@ -942,7 +942,11 @@ function generateConvergenceFromFlows(
         id: `conv_${idx}`,
         intensity: fp.intensity,
         flowCount: Math.min(4, fp.flowCount),
-        radiusM: scale.convergenceBaseRadius + fp.flowCount * 10,
+        // v4.3: On large territories, clamp the flow-count contribution so a
+        // high-flow node stays a local pinch instead of a km-scale blob.
+        // Single parcels & small territories keep the original raw formula.
+        radiusM: scale.convergenceBaseRadius +
+          (scale.isTerritory && scale.areaAcres >= 3000 ? Math.min(4, fp.flowCount) : fp.flowCount) * 10,
         type: fp.flowCount >= 3 ? 'pinch' : 'overlap',
       },
       geometry: { type: 'Point', coordinates: fp.coord },

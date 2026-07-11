@@ -431,6 +431,11 @@ export function generateTerrainDrivenFlow(
     smoothingCells: parcelScale.gaussianSmoothCells,
     opportunityRadius: parcelScale.opportunityRadius,
     maxOpportunityZones: parcelScale.maxOpportunityZones,
+    // v4.3 (large-territory convergence fix): bound zone radius + distribute
+    // zones spatially only for territories >= 3,000 ac (the observed onset of
+    // the merged-band artifact). Smaller territories/single parcels unchanged.
+    isLargeTerritory: isTerritory && parcelScale.areaAcres >= 3000,
+    bbox: bufferedBbox,
   };
   
   console.log('[TerrainFlow] Parcel extent: %d x %d m (~%d acres)', 
