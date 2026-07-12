@@ -43,6 +43,8 @@ import {
 import type { TerrainFlowResponse } from '@/types/terrain-flow';
 import { buildFlowScope, toFlowLines } from '@/lib/flow-contract';
 import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
+import { syntheticFlowEnabled, MAX_ANALYSIS_ACRES } from '@/lib/flow-flags';
+import { clipFlowToAcreLimit } from '@/lib/flow-cap';
 import * as turf from '@turf/turf';
 
 /**
@@ -193,20 +195,29 @@ export async function POST(request: NextRequest) {
 
     // If requesting legacy synthetic mode for comparison
     if (options.mode === 'synthetic') {
-      console.log('[TerrainFlow] Generating LEGACY synthetic flow for comparison');
+      // Piece 1: synthetic flow is disabled by default. generateLegacySyntheticFlow
+      // already returns an empty response when the flag is OFF; here we also
+      // refuse to emit any flow_lines from the synthetic branch unless the flag
+      // is explicitly ON — the synthetic branch produces zero lines by default.
+      const synthEnabled = syntheticFlowEnabled();
+      console.log('[TerrainFlow] Synthetic comparison mode requested (flag %s)', synthEnabled ? 'ON' : 'OFF');
       const syntheticData = generateLegacySyntheticFlow(parcel);
       const processingTime = (Date.now() - startTime) / 1000;
       syntheticData.metadata.processing_time_seconds = processingTime;
       
       return NextResponse.json({
         ...syntheticData,
-        // Canonical flow contract (v5.0-scope) — additive, no behavior change
-        flow_lines: toFlowLines(syntheticData),
+        // Piece 1: no synthetic lines emitted when the flag is OFF (default).
+        flow_lines: synthEnabled ? toFlowLines(syntheticData) : [],
         scope: computeParcelScope(parcel, effectiveBuffer),
         engine_version: TERRAIN_ENGINE_VERSION,
+        empty_state: synthEnabled ? null : {
+          type: 'synthetic_disabled',
+          message: 'Synthetic comparison flow is disabled. Enable the synthetic flow flag to view it.',
+        },
         version: API_VERSION,
         request_id: `flow_synthetic_${Date.now().toString(36)}`,
-        terrain_debug: { ...terrainDebug, terrain_source: 'synthetic_comparison', fallback_used: true, fallback_reason: 'User requested synthetic comparison mode' },
+        terrain_debug: { ...terrainDebug, terrain_source: 'synthetic_comparison', fallback_used: true, fallback_reason: synthEnabled ? 'User requested synthetic comparison mode' : 'Synthetic flow disabled (flag off)' },
       });
     }
 
@@ -386,12 +397,65 @@ export async function POST(request: NextRequest) {
       time: processingTime.toFixed(2) + 's',
     });
 
+    // ─── Piece 1: 300-acre real-data cap ───────────────────────────────
+    // Cap any single analysis at MAX_ANALYSIS_ACRES of real terrain data.
+    // Beyond that, no whole-territory flow — the client shows a clean
+    // "spin up a Hunt Zone here" empty-state for the rest.
+    const scope = computeParcelScope(parcel, effectiveBuffer);
+    let outFlow: TerrainFlowResponse = flowData;
+    let emptyState: any = null;
+
+    if (scope.acres > MAX_ANALYSIS_ACRES) {
+      const clipped = clipFlowToAcreLimit(
+        {
+          flow_primary: flowData.flow_primary,
+          flow_secondary: flowData.flow_secondary,
+          convergence_zones: flowData.convergence_zones,
+          opportunity_zones: flowData.opportunity_zones,
+        },
+        scope.center,
+        MAX_ANALYSIS_ACRES,
+      );
+      outFlow = {
+        ...flowData,
+        flow_primary: clipped.flow_primary as any,
+        flow_secondary: clipped.flow_secondary as any,
+        convergence_zones: clipped.convergence_zones as any,
+        opportunity_zones: clipped.opportunity_zones as any,
+      };
+      emptyState = {
+        type: 'acre_cap',
+        max_acres: MAX_ANALYSIS_ACRES,
+        total_acres: Math.round(scope.acres),
+        message: `Analysis capped at ${MAX_ANALYSIS_ACRES} acres of real terrain. Spin up a Hunt Zone here to analyze the rest.`,
+      };
+      // Honesty: reflect the clipped counts in terrain_debug.
+      terrainDebug.flow_count_primary = outFlow.flow_primary.features.length;
+      terrainDebug.flow_count_secondary = outFlow.flow_secondary.features.length;
+      terrainDebug.convergence_count = outFlow.convergence_zones.features.length;
+      terrainDebug.opportunity_count = outFlow.opportunity_zones.features.length;
+      console.log('[TerrainFlow] Acre cap applied: %d ac > %d ac cap — kept %d, dropped %d flow features',
+        Math.round(scope.acres), MAX_ANALYSIS_ACRES, clipped.kept, clipped.dropped);
+    } else {
+      // Within the cap: if there is no real backbone flow at all, surface an
+      // honest no-backbone empty-state (never synthetic lines).
+      const totalLines =
+        outFlow.flow_primary.features.length + outFlow.flow_secondary.features.length;
+      if (totalLines === 0) {
+        emptyState = {
+          type: 'no_backbone',
+          message: 'No real terrain backbone available for this parcel yet.',
+        };
+      }
+    }
+
     return NextResponse.json({
-      ...flowData,
-      // Canonical flow contract (v5.0-scope) — additive, no behavior change
-      flow_lines: toFlowLines(flowData),
-      scope: computeParcelScope(parcel, effectiveBuffer),
+      ...outFlow,
+      // Canonical flow contract (v5.0-scope) — additive
+      flow_lines: toFlowLines(outFlow),
+      scope,
       engine_version: TERRAIN_ENGINE_VERSION,
+      empty_state: emptyState,
       flowMode,
       version: API_VERSION,
       request_id: `flow_terrain_${Date.now().toString(36)}`,
@@ -399,7 +463,7 @@ export async function POST(request: NextRequest) {
     }, {
       headers: {
         'X-Processing-Time-Ms': String(Date.now() - startTime),
-        'X-Flow-Mode': flowData.metadata.mode,
+        'X-Flow-Mode': outFlow.metadata.mode,
         'X-API-Version': API_VERSION,
       },
     });

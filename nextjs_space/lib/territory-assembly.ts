@@ -11,6 +11,9 @@ import type { TerrainLayers, TerrainSummary } from '@/types/terrain';
 import type { FlowLine } from '@/types/flow-contract';
 import { getFlowLines } from '@/lib/flow-contract';
 import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
+import { MAX_ANALYSIS_ACRES } from '@/lib/flow-flags';
+import { clipFlowToAcreLimit } from '@/lib/flow-cap';
+import * as turf from '@turf/turf';
 
 // ============ Types ============
 
@@ -67,6 +70,7 @@ export interface TerrainFlowBundle {
   // Canonical flow contract (v5.0-scope) — additive, no behavior change
   flow_lines?: FlowLine[];
   engine_version?: string;
+  empty_state?: any;
   metadata?: {
     flow_count_primary: number;
     flow_count_secondary: number;
@@ -226,20 +230,83 @@ export function assembleTerritory(
   const mergedOpportunity = mergeFeatureCollections(
     ...parcels.map(p => tagFeatures(p.terrainFlowData?.opportunity_zones, p.parcelId))
   );
+
+  // ---- Piece 1: 300-acre real-data cap on WHOLE-TERRITORY flow ----
+  // A territory is by definition a whole-territory analysis. Beyond
+  // MAX_ANALYSIS_ACRES we render flow only within a 300-ac core around the
+  // territory center; the rest is a clean empty-state (no synthetic lines).
+  let capFlowPrimary = mergedFlowPrimary;
+  let capFlowSecondary = mergedFlowSecondary;
+  let capConvergence = mergedConvergence;
+  let capOpportunity = mergedOpportunity;
+  let territoryEmptyState: any = null;
+  let territoryAcres = 0;
+  try {
+    for (const pp of parcelPolygons) {
+      if (pp?.polygon) territoryAcres += turf.area(pp.polygon as any) / 4046.8564224;
+    }
+  } catch {
+    /* leave territoryAcres as computed so far */
+  }
+  if (territoryAcres > MAX_ANALYSIS_ACRES) {
+    // Territory center = centroid of parcel polygons (fallback to lat/lng avg).
+    let center = { lat: 0, lng: 0 };
+    try {
+      const fc = {
+        type: 'FeatureCollection',
+        features: parcelPolygons.filter(p => p?.polygon).map(p => p.polygon),
+      } as GeoJSON.FeatureCollection;
+      const c = turf.centerOfMass(fc as any);
+      const coords = c?.geometry?.coordinates;
+      if (Array.isArray(coords) && coords.length >= 2) {
+        center = { lat: Number(coords[1]) || 0, lng: Number(coords[0]) || 0 };
+      }
+    } catch {
+      const n = parcelPolygons.length || 1;
+      center = {
+        lat: parcelPolygons.reduce((s, p) => s + (p?.lat || 0), 0) / n,
+        lng: parcelPolygons.reduce((s, p) => s + (p?.lng || 0), 0) / n,
+      };
+    }
+    const clipped = clipFlowToAcreLimit(
+      {
+        flow_primary: mergedFlowPrimary,
+        flow_secondary: mergedFlowSecondary,
+        convergence_zones: mergedConvergence,
+        opportunity_zones: mergedOpportunity,
+      },
+      center,
+      MAX_ANALYSIS_ACRES,
+    );
+    capFlowPrimary = clipped.flow_primary as any;
+    capFlowSecondary = clipped.flow_secondary as any;
+    capConvergence = clipped.convergence_zones as any;
+    capOpportunity = clipped.opportunity_zones as any;
+    territoryEmptyState = {
+      type: 'acre_cap',
+      max_acres: MAX_ANALYSIS_ACRES,
+      total_acres: Math.round(territoryAcres),
+      message: `Territory spans ~${Math.round(territoryAcres)} acres. Flow analysis is capped at ${MAX_ANALYSIS_ACRES} acres. Spin up a Hunt Zone here to analyze the rest.`,
+    };
+    console.log('[TerritoryAssembly] Acre cap applied: %d ac > %d ac cap — kept %d, dropped %d flow features',
+      Math.round(territoryAcres), MAX_ANALYSIS_ACRES, clipped.kept, clipped.dropped);
+  }
+
   const mergedFlow: TerrainFlowBundle = {
-    flow_primary: mergedFlowPrimary,
-    flow_secondary: mergedFlowSecondary,
-    convergence_zones: mergedConvergence,
-    opportunity_zones: mergedOpportunity,
+    flow_primary: capFlowPrimary,
+    flow_secondary: capFlowSecondary,
+    convergence_zones: capConvergence,
+    opportunity_zones: capOpportunity,
     isSynthetic: parcels.every(p => p.terrainFlowData?.isSynthetic !== false),
-    // Canonical flow contract (v5.0-scope) — additive, no behavior change
-    flow_lines: getFlowLines({ flow_primary: mergedFlowPrimary, flow_secondary: mergedFlowSecondary }),
+    // Canonical flow contract (v5.0-scope) — additive
+    flow_lines: getFlowLines({ flow_primary: capFlowPrimary, flow_secondary: capFlowSecondary }),
     engine_version: TERRAIN_ENGINE_VERSION,
+    empty_state: territoryEmptyState,
     metadata: {
-      flow_count_primary: mergedFlowPrimary.features.length,
-      flow_count_secondary: mergedFlowSecondary.features.length,
-      convergence_count: mergedConvergence.features.length,
-      opportunity_count: mergedOpportunity.features.length,
+      flow_count_primary: capFlowPrimary.features.length,
+      flow_count_secondary: capFlowSecondary.features.length,
+      convergence_count: capConvergence.features.length,
+      opportunity_count: capOpportunity.features.length,
       total_flow_length_m: parcels.reduce((sum, p) => sum + (p.terrainFlowData?.metadata?.total_flow_length_m || 0), 0),
       mode: parcels.find(p => p.terrainFlowData?.metadata?.mode)?.terrainFlowData?.metadata?.mode,
       dem_source: parcels.find(p => p.terrainFlowData?.metadata?.dem_source)?.terrainFlowData?.metadata?.dem_source,

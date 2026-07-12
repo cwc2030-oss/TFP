@@ -33,6 +33,7 @@ import type {
   RidgeTier,
 } from '@/types/terrain';
 import { pointInAnyWaterBody } from './terrain-raster';
+import { syntheticFlowEnabled } from './flow-flags';
 
 // ========== CONSERVATIVE THRESHOLDS FOR BACKBONE DETECTION ==========
 // Higher thresholds = fewer but more confident ridges
@@ -107,15 +108,17 @@ export async function fetchRidgeSpines(
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn('[Backbone] API error, falling back to empty state:', errorText);
+      console.warn('[Backbone] API error, returning honest empty state:', errorText);
       
-      // Fall back to synthetic generation (returns empty for now)
-      const syntheticData = generateSyntheticRidgeSpines(params.parcel);
+      // Piece 1: never emit synthetic lines on backbone-fetch failure.
+      // maybeGenerateSyntheticRidgeSpines returns an empty state when the
+      // synthetic flag is OFF (default).
+      const fallbackData = maybeGenerateSyntheticRidgeSpines(params.parcel);
       return {
-        success: true,
-        data: syntheticData,
+        success: fallbackData.success,
+        data: fallbackData,
         durationMs,
-        isSynthetic: true,
+        isSynthetic: syntheticFlowEnabled(),
       };
     }
     
@@ -177,15 +180,15 @@ export async function fetchRidgeSpines(
   } catch (err) {
     const durationMs = Date.now() - startTime;
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn('[Backbone] Fetch failed, returning empty state:', errMsg);
+    console.warn('[Backbone] Fetch failed, returning honest empty state:', errMsg);
     
-    // Fall back to synthetic generation (returns empty - "Not detected")
-    const syntheticData = generateSyntheticRidgeSpines(params.parcel);
+    // Piece 1: never emit synthetic lines on backbone-fetch failure.
+    const fallbackData = maybeGenerateSyntheticRidgeSpines(params.parcel);
     return {
-      success: true,
-      data: syntheticData,
+      success: fallbackData.success,
+      data: fallbackData,
       durationMs,
-      isSynthetic: true,
+      isSynthetic: syntheticFlowEnabled(),
     };
   }
 }
@@ -388,10 +391,31 @@ function computeBackboneConfidence(
  * ridge is infinitely better than three forced geometries. Additional spines
  * are ONLY added by the real DEM pipeline when the terrain justifies them.
  */
+/**
+ * Flag-gated wrapper around generateSyntheticRidgeSpines.
+ *
+ * Piece 1: this is the ONLY call site that should invoke the synthetic
+ * generator, and only when the synthetic flag is ON. When the flag is OFF
+ * (default) it returns an honest empty state — never synthetic lines.
+ */
+export function maybeGenerateSyntheticRidgeSpines(
+  parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+  waterBodies?: Array<{ coordinates: number[][][] }>
+): RidgeSpineResponse {
+  if (!syntheticFlowEnabled()) {
+    return emptyRidgeResponse('Synthetic ridge spines disabled (flag off)');
+  }
+  return generateSyntheticRidgeSpines(parcel, waterBodies);
+}
+
 export function generateSyntheticRidgeSpines(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   waterBodies?: Array<{ coordinates: number[][][] }>
 ): RidgeSpineResponse {
+  // Defense-in-depth: even if called directly, honor the flag.
+  if (!syntheticFlowEnabled()) {
+    return emptyRidgeResponse('Synthetic ridge spines disabled (flag off)');
+  }
   const startTime = Date.now();
 
   // Extract ALL outer rings for multi-parcel territory support

@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generateSyntheticRidgeSpines, filterSpinesByQuality, filterSaddlesByQuality } from '@/lib/ridge-extraction';
+import { maybeGenerateSyntheticRidgeSpines, filterSpinesByQuality, filterSaddlesByQuality } from '@/lib/ridge-extraction';
 import type { RidgeSpineResponse } from '@/types/terrain';
 
 const RIDGE_API_URL = process.env.RIDGE_API_URL || 
@@ -179,8 +179,8 @@ export async function POST(request: NextRequest) {
         terrainDebug.fallback_reason = 'Modal returned no usable data';
       }
       
-      console.log('[RidgeSpines] Generating SYNTHETIC fallback (reason:', terrainDebug.fallback_reason, ')');
-      ridgeData = generateSyntheticRidgeSpines(parcel);
+      console.log('[RidgeSpines] Synthetic fallback requested (reason:', terrainDebug.fallback_reason, ') — flag-gated');
+      ridgeData = maybeGenerateSyntheticRidgeSpines(parcel);
       terrainDebug.pipeline_steps.synthetic_generation = 'used';
       terrainDebug.post_filter_ridges_primary = ridgeData.ridges_primary.features.length;
       terrainDebug.post_filter_ridges_secondary = ridgeData.ridges_secondary.features.length;

@@ -52,7 +52,7 @@ import type {
 import { adaptV1Response } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors, enrichCorridorsWithRidgeAlignment } from '@/lib/corridor-tiering';
 import { clipLinesToParcel } from '@/lib/geo/clip-to-parcel';
-import { fetchRidgeSpines, generateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
+import { fetchRidgeSpines, maybeGenerateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow, tagSaddlesByCorridorProximity } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
@@ -7409,8 +7409,8 @@ const archetypeInitializedRef = useRef(false);
         } else {
           if (cancelled) return;
           console.warn('[Backbone] Ridge spine generation failed, using empty fallback');
-          // Generate synthetic as fallback
-          const synthetic = generateSyntheticRidgeSpines(parcelPolygon, nhdWaterBodiesRef.current?.length ? nhdWaterBodiesRef.current : undefined);
+          // Piece 1: flag-gated — returns empty state when synthetic flow is OFF (default)
+          const synthetic = maybeGenerateSyntheticRidgeSpines(parcelPolygon, nhdWaterBodiesRef.current?.length ? nhdWaterBodiesRef.current : undefined);
           setRidgeSpineData({
             ridges_primary: synthetic.ridges_primary,
             ridges_secondary: synthetic.ridges_secondary,

@@ -41,6 +41,8 @@ import type {
   DebugLayers,
 } from '@/types/terrain-flow';
 
+import { syntheticFlowEnabled } from './flow-flags';
+
 import {
   TERRAIN_FLOW_WEIGHTS,
   FLOW_THRESHOLDS,
@@ -455,7 +457,19 @@ export function generateTerrainDrivenFlow(
     (corridorData.corridors?.features?.length > 0 || corridorData.features?.length > 0);
   
   if (!hasCorridorData) {
-    console.log('[TerrainFlow] No corridor data available, generating from parcel terrain indicators');
+    // Piece 1: indicator flow is only legitimate when grounded in REAL ridge
+    // data. If there is no real ridge/saddle backbone AND synthetic flow is
+    // disabled (default), return an honest empty state instead of
+    // geometry-only synthetic flow.
+    const ridgeFeatureCount =
+      (ridgeData?.ridges_primary?.features?.length || 0) +
+      (ridgeData?.ridges_secondary?.features?.length || 0) +
+      (ridgeData?.saddle_nodes?.features?.length || 0);
+    if (ridgeFeatureCount === 0 && !syntheticFlowEnabled()) {
+      console.log('[TerrainFlow] No corridor data and no real terrain backbone; synthetic flow disabled — returning empty state');
+      return emptyFlowResponse('No real terrain backbone; synthetic flow disabled');
+    }
+    console.log('[TerrainFlow] No corridor data available, generating from parcel terrain indicators (real ridge features: %d)', ridgeFeatureCount);
     // Generate flow based on terrain indicators without corridor data
     // FIX 1+3: Pass ridgeData so saddle_nodes and bench-derived polygons reach V3
     return generateTerrainIndicatorFlow(parcel, coords, parcelBbox, bufferedBbox, parcelScale, ridgeData);
@@ -1159,6 +1173,12 @@ function generateTerrainConvergenceZones(
 export function generateLegacySyntheticFlow(
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
 ): TerrainFlowResponse {
+  // Piece 1: legacy synthetic flow is pure parcel-axis geometry with no real
+  // terrain grounding. Disabled by default; only runs when the synthetic flag
+  // is explicitly ON.
+  if (!syntheticFlowEnabled()) {
+    return emptyFlowResponse('Legacy synthetic flow disabled (flag off)');
+  }
   const startTime = Date.now();
   
   console.log('[TerrainFlow] === LEGACY SYNTHETIC (comparison only) ===');
