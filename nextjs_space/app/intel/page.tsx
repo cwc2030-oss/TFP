@@ -369,6 +369,36 @@ function clipPolygonsToRing(
 }
 
 /**
+ * Saddle-clip piece — clip POINT features to the Hunt Zone ring by strict
+ * containment. Mirrors clipLinesStrictToRing: a Point is kept only if it passes
+ * booleanPointInPolygon against the ring; everything else drops (fail-closed on
+ * a turf throw). Non-Point geometry passes through untouched so callers can hand
+ * mixed FeatureCollections safely. Guarantees zero markers past the ring edge —
+ * no interpolation, containment is exact by construction.
+ */
+function clipPointsToRing(
+  fc: GeoJSON.FeatureCollection,
+  ringPolygon: GeoJSON.Polygon,
+): GeoJSON.FeatureCollection {
+  if (!fc?.features?.length) return fc;
+  const ringFeature = turf.feature(ringPolygon);
+  const out: GeoJSON.Feature[] = [];
+  for (const f of fc.features) {
+    if (!f.geometry) continue;
+    if (f.geometry.type !== 'Point') { out.push(f); continue; }
+    const coord = (f.geometry as GeoJSON.Point).coordinates;
+    let inside = false;
+    try {
+      inside = turf.booleanPointInPolygon(turf.point(coord as [number, number]), ringFeature);
+    } catch {
+      inside = false; // fail-closed: drop on error rather than risk bleeding past the ring
+    }
+    if (inside) out.push(f);
+  }
+  return { type: 'FeatureCollection', features: out };
+}
+
+/**
  * DEMO TRUST FILTER — not final land-cover intelligence.
  *
  * Filters bedding polygons that fall within ~120 m of any building footprint
@@ -7913,15 +7943,53 @@ const archetypeInitializedRef = useRef(false);
       }
 
       // Update saddle nodes source
-      // ═══ PARCEL CLIP (belt-and-suspenders) — drop saddle nodes outside parcel ═══
+      // ═══ RING CLIP — saddle nodes must stay inside the 300-ac Hunt Zone ring ═══
+      // Saddle nodes are flow-shaped intel, so (like bedding/funnel-lines) they must
+      // not bleed past the ring on parcels larger than 300 ac. Build the SAME circle
+      // the ring draws (override-or-centroid center + acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+      // turf.circle steps:64/units:'meters') right here — building locally rather than
+      // reading huntZoneRingGeomRef avoids a ref-timing race with the main source effect
+      // and makes this re-clip correctly on ring drag (huntZoneCenterOverride is in deps).
+      // Clip happens BEFORE stability snapping so snapped anchors can never re-introduce
+      // an out-of-ring node. Falls back to the parcel-boundary clip if the ring can't be
+      // built (belt-and-suspenders — never render un-clipped).
       // ═══ SADDLE NODE STABILITY — snap new nodes to previous positions within tolerance ═══
       const saddleSource = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
       if (saddleSource) {
         let newNodes = ridgeSpineData.saddle_nodes;
-        // Clip saddle nodes to parcel boundary (catches stale un-clipped data from cache/stability)
-        if (parcelPolygon?.geometry) {
-          if (newNodes.features.length > 0) {
-            const before = newNodes.features.length;
+        // Build the Hunt Zone ring for this parcel (same primitives as the ring draw).
+        let saddleRingGeom: GeoJSON.Polygon | null = null;
+        if (parcelPolygon) {
+          try {
+            let coords: number[] | undefined;
+            if (huntZoneCenterOverride &&
+                Number.isFinite(huntZoneCenterOverride[0]) && Number.isFinite(huntZoneCenterOverride[1])) {
+              coords = [huntZoneCenterOverride[0], huntZoneCenterOverride[1]];
+            } else {
+              const c = turf.centerOfMass(parcelPolygon as any);
+              coords = c?.geometry?.coordinates;
+            }
+            if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+              saddleRingGeom = turf.circle(
+                [Number(coords[0]), Number(coords[1])],
+                acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+                { units: 'meters', steps: 64 }
+              ).geometry as GeoJSON.Polygon;
+            }
+          } catch (ringErr) {
+            console.warn('[MAP] Saddle-node ring clip build failed', ringErr);
+          }
+        }
+        if (newNodes.features.length > 0) {
+          const before = newNodes.features.length;
+          if (saddleRingGeom) {
+            // Primary path: strict ring containment (zero bleed past the ring edge).
+            newNodes = clipPointsToRing(newNodes, saddleRingGeom);
+            if (before !== newNodes.features.length) {
+              console.log('[MAP] Saddle nodes ring clip:', before, '→', newNodes.features.length);
+            }
+          } else if (parcelPolygon?.geometry) {
+            // Fallback: parcel-boundary clip if the ring could not be built.
             const clippedNodes = newNodes.features.filter(f => {
               if (f.geometry?.type !== 'Point') return true; // keep non-point features
               const [sLng, sLat] = (f.geometry as GeoJSON.Point).coordinates;
@@ -7929,7 +7997,7 @@ const archetypeInitializedRef = useRef(false);
             });
             newNodes = { type: 'FeatureCollection', features: clippedNodes };
             if (before !== clippedNodes.length) {
-              console.log('[MAP] Saddle nodes parcel clip:', before, '→', clippedNodes.length);
+              console.log('[MAP] Saddle nodes parcel clip (ring fallback):', before, '→', clippedNodes.length);
             }
           }
         }
@@ -7981,7 +8049,7 @@ const archetypeInitializedRef = useRef(false);
     } catch (err) {
       console.error('[Backbone] Error updating map sources (non-fatal):', err);
     }
-  }, [ridgeSpineData, mapReady, parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ridgeSpineData, mapReady, parcelPolygon, huntZoneCenterOverride]); // eslint-disable-line react-hooks/exhaustive-deps -- huntZoneCenterOverride re-clips saddle nodes to the dragged ring
 
   // ========== HUNTABILITY ENGINE — BIG BEAUTIFUL MAP v1 ==========
   useEffect(() => {
