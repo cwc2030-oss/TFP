@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Shield,
+  Database,
   Users,
   FileText,
   DollarSign,
@@ -129,9 +130,17 @@ export default function AdminPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <div className="flex items-center gap-3 mb-2">
-            <Shield className="w-8 h-8 text-amber-600" />
-            <h1 className="text-3xl font-bold text-stone-800">Admin Panel</h1>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <Shield className="w-8 h-8 text-amber-600" />
+              <h1 className="text-3xl font-bold text-stone-800">Admin Panel</h1>
+            </div>
+            <a
+              href="/admin/usage"
+              className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700 hover:text-emerald-800 border border-emerald-200 rounded-md px-3 py-1.5 bg-emerald-50"
+            >
+              <Database className="w-4 h-4" /> Regrid &amp; Cache Usage
+            </a>
           </div>
           <p className="text-stone-600">Terra Firma Partners LLC Dashboard</p>
         </motion.div>

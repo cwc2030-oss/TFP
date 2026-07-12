@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/db";
+import { recordCacheHitAsync } from "@/lib/cache-stats";
 
-const CACHE_DURATION_DAYS = 30;
+// Parcel geometry/ownership is effectively static, so we cache long-lived.
+// Overridable via PARCEL_CACHE_TTL_DAYS; defaults to 365 days. Manual purge is
+// available via the admin cache-purge endpoint.
+const CACHE_DURATION_DAYS = parseInt(
+  process.env.PARCEL_CACHE_TTL_DAYS || "365",
+  10
+);
 
 export interface CachedParcelData {
   parcelId: string;
@@ -52,6 +59,7 @@ export async function getCachedParcel(lat: number, lng: number): Promise<CachedP
     
     if (cached && cached.expiresAt > new Date()) {
       console.log(`[CACHE HIT] Parcel at ${roundedLat}, ${roundedLng}`);
+      recordCacheHitAsync('parcel');
       return JSON.parse(cached.data) as CachedParcelData;
     }
     

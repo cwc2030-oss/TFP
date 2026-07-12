@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { regridFetch } from "@/lib/regrid-client";
+import { prisma } from "@/lib/db";
+import { recordCacheHitAsync } from "@/lib/cache-stats";
 
 export const dynamic = "force-dynamic";
+
+// Round coordinates to ~11m grid for consistent cache keys.
+function roundCoord4(val: number): number {
+  return Math.round(val * 10000) / 10000;
+}
 
 interface AdjacentParcel {
   parcelId: string;
@@ -63,6 +70,32 @@ export async function GET(request: NextRequest) {
   }
 
   const radius = Math.min(Math.max(parseInt(radiusParam || '500', 10), 100), 2000);
+
+  // ── Check adjacent cache (parcel geometry is static) ──
+  const rLat = roundCoord4(parseFloat(lat));
+  const rLng = roundCoord4(parseFloat(lng));
+  try {
+    const cached = await prisma.adjacentCache.findUnique({
+      where: { lat_lng_radius: { lat: rLat, lng: rLng, radius } },
+    });
+    if (cached) {
+      console.log(`[ADJACENT-CACHE HIT] ${rLat}, ${rLng}, r=${radius}`);
+      recordCacheHitAsync('adjacent');
+      const parsed = JSON.parse(cached.data) as AdjacentResponse;
+      // Re-filter the subject parcel in case a different subjectId was passed
+      const filtered = subjectId
+        ? parsed.parcels.filter((p) => p.parcelId !== subjectId)
+        : parsed.parcels;
+      return NextResponse.json({
+        success: true,
+        parcels: filtered,
+        subjectParcelId: subjectId || undefined,
+        cached: true,
+      });
+    }
+  } catch (cacheErr) {
+    console.error('[ADJACENT-CACHE] Read error (non-fatal):', cacheErr);
+  }
 
   try {
     // Regrid v2 parcels/point with radius returns GeoJSON FeatureCollection
@@ -126,6 +159,18 @@ export async function GET(request: NextRequest) {
       parcels,
       subjectParcelId: subjectId || undefined,
     };
+
+    // ── Write to cache; re-filter subject on read for different subjectIds ──
+    // Only cache successful, non-empty responses to avoid caching transient failures.
+    if (parcels.length > 0) {
+      prisma.adjacentCache
+        .upsert({
+          where: { lat_lng_radius: { lat: rLat, lng: rLng, radius } },
+          update: { data: JSON.stringify({ success: true, parcels }) },
+          create: { lat: rLat, lng: rLng, radius, data: JSON.stringify({ success: true, parcels }) },
+        })
+        .catch((err) => console.error('[ADJACENT-CACHE] Write error:', err));
+    }
 
     return NextResponse.json(response);
   } catch (err: unknown) {

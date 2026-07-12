@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
 import { regridFetch } from "@/lib/regrid-client";
+import { recordCacheHitAsync } from "@/lib/cache-stats";
 import { geocodeAddress } from "@/lib/geocode-address";
 
 // Version 2.1 - Regrid Pro API with caching
@@ -421,6 +422,7 @@ export async function POST(request: NextRequest) {
       });
       if (cached) {
         console.log(`[NEIGHBOR-CACHE HIT] ${rLat}, ${rLng}, r=${radiusMeters}`);
+        recordCacheHitAsync('neighbors');
         const parcels = JSON.parse(cached.data);
         return NextResponse.json({ parcels, cached: true });
       }

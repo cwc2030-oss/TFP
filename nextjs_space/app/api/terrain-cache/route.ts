@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
+import { recordCacheHitAsync } from '@/lib/cache-stats';
 
 const CACHE_TTL_DAYS = 7;
 
@@ -21,11 +23,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No valid parcel IDs' }, { status: 400 });
     }
 
-    // Fetch all cached entries that are not expired
+    // Fetch all cached entries that are not expired AND match the current
+    // terrain engine version. Entries computed by an older engine version no
+    // longer match -> treated as misses -> recomputed & re-cached fresh.
     const cached = await prisma.terrainAnalysisCache.findMany({
       where: {
         parcelId: { in: ids },
         expiresAt: { gt: new Date() },
+        engineVersion: TERRAIN_ENGINE_VERSION,
       },
     });
 
@@ -55,7 +60,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ results, found, missing });
+    if (found.length > 0) {
+      recordCacheHitAsync('terrain', found.length);
+    }
+
+    return NextResponse.json({ results, found, missing, engineVersion: TERRAIN_ENGINE_VERSION });
   } catch (err) {
     console.error('[TerrainCache] GET error:', err);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
@@ -116,6 +125,7 @@ export async function POST(req: NextRequest) {
         lng,
         acreage: acreage || 0,
         data: JSON.stringify(data),
+        engineVersion: TERRAIN_ENGINE_VERSION,
         expiresAt,
       },
       update: {
@@ -123,6 +133,7 @@ export async function POST(req: NextRequest) {
         lng,
         acreage: acreage || 0,
         data: JSON.stringify(data),
+        engineVersion: TERRAIN_ENGINE_VERSION,
         expiresAt,
         version: { increment: 1 },
       },

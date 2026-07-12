@@ -128,6 +128,21 @@ model NeighborCache {
   @@index([lat, lng])
 }
 
+// Cache for the parcels-adjacent-v2 Regrid endpoint. Kept separate from
+// NeighborCache because it stores a different response shape (AdjacentParcel[])
+// and shares the same default radius (500), which would otherwise collide.
+model AdjacentCache {
+  id          String   @id @default(cuid())
+  lat         Float
+  lng         Float
+  radius      Int      @default(500)
+  data        String   // JSON stringified AdjacentResponse
+  createdAt   DateTime @default(now())
+
+  @@unique([lat, lng, radius])
+  @@index([lat, lng])
+}
+
 model RegridUsage {
   id          String   @id @default(cuid())
   date        DateTime @db.Date
@@ -137,6 +152,21 @@ model RegridUsage {
   updatedAt   DateTime @updatedAt
 
   @@unique([date, endpointTag])
+  @@index([date])
+}
+
+// Cache-hit instrumentation. Kept separate from RegridUsage so the Regrid
+// daily-alert total is never inflated by cache hits. Each hit on a
+// Regrid-backed tag represents one avoided Regrid API call.
+model CacheHit {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  cacheTag  String   // e.g. 'parcel', 'neighbors', 'adjacent', 'terrain'
+  hitCount  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, cacheTag])
   @@index([date])
 }
 
@@ -401,12 +431,14 @@ model TerrainAnalysisCache {
   lng       Float                     // Parcel centroid longitude
   acreage   Float    @default(0)
   data      String   @db.Text         // JSON: { layers, tieredCorridorData, ridgeSpineData, terrainFlowData, summary, provenance }
-  version   Int      @default(1)      // Cache version for invalidation
+  version   Int      @default(1)      // Legacy write counter (kept for history)
+  engineVersion String @default("legacy") // Terrain engine version this entry was computed with; read path filters on the current version
   createdAt DateTime @default(now())
   expiresAt DateTime                  // TTL (e.g., 7 days)
 
   @@index([lat, lng])
   @@index([expiresAt])
+  @@index([engineVersion])
 }
 
 // v4.1 — Post-hunt outcome recording
