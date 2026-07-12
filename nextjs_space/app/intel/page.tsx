@@ -53,6 +53,8 @@ import { adaptV1Response } from '@/types/terrain';
 import { tierCorridorData, generateSyntheticTieredCorridors, enrichCorridorsWithRidgeAlignment } from '@/lib/corridor-tiering';
 import { clipLinesToParcel } from '@/lib/geo/clip-to-parcel';
 import { fetchRidgeSpines, maybeGenerateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
+import * as turf from '@turf/turf';
+import { acresToRadiusMeters, MAX_ANALYSIS_ACRES } from '@/lib/flow-flags';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow, tagSaddlesByCorridorProximity } from '@/lib/terrain-flow';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
@@ -5898,7 +5900,7 @@ const archetypeInitializedRef = useRef(false);
     };
     for (const layer of style.layers) {
       if (!layer.id.startsWith('tfp-')) continue;
-      if (layer.id.startsWith('tfp-parcel-') || layer.id.startsWith('tfp-territory-')) continue;
+      if (layer.id.startsWith('tfp-parcel-') || layer.id.startsWith('tfp-territory-') || layer.id.startsWith('tfp-huntzone-')) continue;
       if (layer.layout?.visibility === 'none') continue;
       if (PERMANENTLY_HIDDEN_LAYERS.current.has(layer.id)) continue;
       const prop = propMap[(layer as any).type] || 'line-opacity';
@@ -5927,7 +5929,8 @@ const archetypeInitializedRef = useRef(false);
           if (
             layer.id.startsWith('tfp-') &&
             !layer.id.startsWith('tfp-parcel-') &&
-            !layer.id.startsWith('tfp-territory-')
+            !layer.id.startsWith('tfp-territory-') &&
+            !layer.id.startsWith('tfp-huntzone-')
           ) {
             try {
               map.setLayoutProperty(layer.id, 'visibility', 'none');
@@ -6459,6 +6462,36 @@ const archetypeInitializedRef = useRef(false);
         }
       }
 
+      // ═══ PIECE 2 — HUNT ZONE LENS (static 300-ac scope ring) ═══
+      // Center on the parcel centroid and size to the 300-ac analysis cap using the
+      // SAME primitives as the Piece 1 flow clip (turf.centerOfMass + acresToRadiusMeters
+      // + turf.circle steps:64/units:'meters'), so the ring edge coincides exactly with
+      // where clipped flow stops. Static — recomputed only when the parcel changes.
+      const huntzoneSource = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource;
+      if (huntzoneSource) {
+        if (parcelPolygon) {
+          try {
+            const c = turf.centerOfMass(parcelPolygon as any);
+            const coords = c?.geometry?.coordinates;
+            if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+              const ring = turf.circle(
+                [Number(coords[0]), Number(coords[1])],
+                acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+                { units: 'meters', steps: 64 }
+              );
+              huntzoneSource.setData({ type: 'FeatureCollection', features: [ring] } as any);
+            } else {
+              huntzoneSource.setData(EMPTY_FC);
+            }
+          } catch (err) {
+            console.warn('[MAP] Hunt Zone ring build failed', err);
+            huntzoneSource.setData(EMPTY_FC);
+          }
+        } else {
+          huntzoneSource.setData(EMPTY_FC);
+        }
+      }
+
       // v3.8.3 — Clear QA parcel source when main parcel updates to prevent boundary duplication
       // The authoritative boundary is tfp-parcel (gold); QA (cyan) must never overlap it
       const qaParcelSource = map.getSource('tfp-qa-parcel') as mapboxgl.GeoJSONSource;
@@ -6728,7 +6761,7 @@ const archetypeInitializedRef = useRef(false);
           circle: 'circle-opacity', heatmap: 'heatmap-opacity',
           symbol: 'icon-opacity',
         };
-        const fadePrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
+        const fadePrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-', 'tfp-huntzone-'];
         const currentStyle = map.getStyle();
         if (currentStyle?.layers) {
           for (const layer of currentStyle.layers) {
@@ -6770,7 +6803,7 @@ const archetypeInitializedRef = useRef(false);
           circle: 'circle-opacity', heatmap: 'heatmap-opacity',
           symbol: 'icon-opacity',
         };
-        const skipPrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-'];
+        const skipPrefixes = ['tfp-parcel-', 'tfp-territory-', 'tfp-adjacent-', 'tfp-huntzone-'];
         const curStyle = map.getStyle();
         if (curStyle?.layers) {
           for (const layer of curStyle.layers) {
@@ -9476,8 +9509,9 @@ const archetypeInitializedRef = useRef(false);
 
     // Boundary layers stay visible in Clean Map mode (satellite + parcel lines).
     const isBoundaryLayer = (id: string) =>
-      (id.includes('parcel') || id.includes('territory') || id.includes('adjacent')) &&
-      !id.includes('qa-parcel');
+      ((id.includes('parcel') || id.includes('territory') || id.includes('adjacent')) &&
+      !id.includes('qa-parcel')) ||
+      id.startsWith('tfp-huntzone-');
 
     try {
       if (cleanMap) {
@@ -9745,6 +9779,40 @@ const archetypeInitializedRef = useRef(false);
               'line-width': 4.5,          // ~4-5px for clear visibility
               'line-dasharray': [5, 3],   // Dashed pattern
               'line-opacity': 0.95,       // Strong presence
+            },
+          });
+        }
+
+        // ========== PIECE 2 — HUNT ZONE LENS (static 300-ac scope ring) ==========
+        // A clean gold circle marking the 300-acre analysis scope, centered on the
+        // parcel centroid. Built with the SAME center (turf.centerOfMass) and radius
+        // (acresToRadiusMeters) as the Piece 1 flow clip, so the ring edge lines up
+        // exactly with where clipped flow stops. Solid (not dashed) so it reads as a
+        // distinct element from the dashed parcel boundary while keeping gold family
+        // resemblance. Static only — no dragging yet.
+        if (!map.getSource('tfp-huntzone')) {
+          map.addSource('tfp-huntzone', { type: 'geojson', data: EMPTY_FC });
+          // Outer glow halo (wide, blurred, behind the ring)
+          map.addLayer({
+            id: 'tfp-huntzone-glow',
+            type: 'line',
+            source: 'tfp-huntzone',
+            paint: {
+              'line-color': LAYER_COLORS.parcelGlow,
+              'line-width': 8,
+              'line-opacity': 0.3,
+              'line-blur': 3,
+            },
+          });
+          // Main ring (solid gold, crisp)
+          map.addLayer({
+            id: 'tfp-huntzone-ring',
+            type: 'line',
+            source: 'tfp-huntzone',
+            paint: {
+              'line-color': LAYER_COLORS.parcelBoundary,
+              'line-width': 2.75,
+              'line-opacity': 0.9,
             },
           });
         }
@@ -11657,6 +11725,8 @@ const archetypeInitializedRef = useRef(false);
           'tfp-edge-boundary-highlight',   // Hover highlight for adjacent parcels
           'tfp-parcel-glow',               // Selected parcel glow (below main line)
           'tfp-parcel-outline',            // Selected parcel boundary
+          'tfp-huntzone-glow',             // Piece 2: Hunt Zone lens glow (with parcel boundary)
+          'tfp-huntzone-ring',             // Piece 2: Hunt Zone 300-ac scope ring
           // Terrain structure
           'tfp-bedding-fill',
           'tfp-bedding-outline',
@@ -13358,6 +13428,22 @@ const archetypeInitializedRef = useRef(false);
             try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.95)); } catch {}
             try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.35)); } catch {}
             console.log('[PICK] Imperative paint: gold boundary visible immediately');
+            // Piece 2: paint the Hunt Zone 300-ac scope ring immediately too, so it
+            // appears in lockstep with the gold boundary (same center/radius as the
+            // Piece 1 flow clip). React effect will keep it in sync afterward.
+            try {
+              const hzSrc = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
+              if (hzSrc) {
+                const c = turf.centerOfMass(parcelFeature as any);
+                const coords = c?.geometry?.coordinates;
+                if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+                  const ring = turf.circle([Number(coords[0]), Number(coords[1])], acresToRadiusMeters(MAX_ANALYSIS_ACRES), { units: 'meters', steps: 64 });
+                  hzSrc.setData({ type: 'FeatureCollection', features: [ring] } as any);
+                  try { map.setLayoutProperty('tfp-huntzone-ring', 'visibility', 'visible'); } catch {}
+                  try { map.setLayoutProperty('tfp-huntzone-glow', 'visibility', 'visible'); } catch {}
+                }
+              }
+            } catch (e) { console.warn('[PICK] Hunt Zone ring imperative paint failed', e); }
           }
         }
       }
