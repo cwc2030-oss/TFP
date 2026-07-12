@@ -269,6 +269,65 @@ function filterByGeometryType(
 }
 
 /**
+ * STRICT RING CLIP — guarantees zero vertices outside a ring polygon.
+ *
+ * Unlike clipLinesToParcel (which interpolates crossing points via binary
+ * search — those points can land a hair OUTSIDE an inscribed n-gon ring), this
+ * keeps ONLY vertices that pass booleanPointInPolygon against the ring, grouped
+ * into contiguous runs of >= 2 points. No interpolation, so containment is
+ * guaranteed by construction. Handles LineString and MultiLineString; feature
+ * properties are preserved on each surviving run.
+ */
+function clipLinesStrictToRing(
+  fc: GeoJSON.FeatureCollection,
+  ringPolygon: GeoJSON.Polygon,
+): GeoJSON.FeatureCollection {
+  const ringFeature = turf.feature(ringPolygon);
+  const out: GeoJSON.Feature[] = [];
+
+  const clipCoords = (coords: number[][], props: GeoJSON.GeoJsonProperties) => {
+    let run: number[][] = [];
+    const flush = () => {
+      if (run.length >= 2) {
+        out.push({
+          type: 'Feature',
+          properties: props ? { ...props } : {},
+          geometry: { type: 'LineString', coordinates: run },
+        });
+      }
+      run = [];
+    };
+    for (const coord of coords) {
+      let inside = false;
+      try {
+        inside = turf.booleanPointInPolygon(turf.point(coord as [number, number]), ringFeature);
+      } catch {
+        inside = false;
+      }
+      if (inside) {
+        run.push(coord);
+      } else {
+        flush();
+      }
+    }
+    flush();
+  };
+
+  for (const f of fc.features) {
+    if (!f.geometry) continue;
+    if (f.geometry.type === 'LineString') {
+      clipCoords((f.geometry as GeoJSON.LineString).coordinates, f.properties);
+    } else if (f.geometry.type === 'MultiLineString') {
+      for (const part of (f.geometry as GeoJSON.MultiLineString).coordinates) {
+        clipCoords(part, f.properties);
+      }
+    }
+  }
+
+  return { type: 'FeatureCollection', features: out };
+}
+
+/**
  * DEMO TRUST FILTER — not final land-cover intelligence.
  *
  * Filters bedding polygons that fall within ~120 m of any building footprint
@@ -2278,6 +2337,18 @@ function DeerIntelContent() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // vNext: markersRef removed — stands are GeoJSON layers, no HTML markers
   const popupRef = useRef<mapboxgl.Popup | null>(null);
+
+  // ═══ PIECE 3 — DRAGGABLE HUNT ZONE RING ═══
+  // huntZoneCenterOverride: committed ring center (snapped to grid). null = derive
+  // from parcel centerOfMass. Changing this state re-runs the main source effect,
+  // which is the SINGLE clip/compute that fires on drag release (never mid-drag).
+  const [huntZoneCenterOverride, setHuntZoneCenterOverride] = useState<[number, number] | null>(null);
+  // Mirror of the override for imperative (non-React) drag handlers.
+  const huntZoneCenterRef = useRef<[number, number] | null>(null);
+  // True only while a ring drag is in progress. Guards against any mid-drag recompute.
+  const huntZoneDraggingRef = useRef<boolean>(false);
+  // Live center tracked during a drag (before snap/commit).
+  const huntZoneDragCenterRef = useRef<[number, number] | null>(null);
   
   // v3.5.1 — Animation frame ref for corridor flow animation
   const flowAnimationRef = useRef<number | null>(null);
@@ -6467,18 +6538,35 @@ const archetypeInitializedRef = useRef(false);
       // SAME primitives as the Piece 1 flow clip (turf.centerOfMass + acresToRadiusMeters
       // + turf.circle steps:64/units:'meters'), so the ring edge coincides exactly with
       // where clipped flow stops. Static — recomputed only when the parcel changes.
+      // huntZoneRingGeomMain — the 300-ac ring polygon for THIS parcel, captured here
+      // so downstream flow-shaped sources in this same effect (e.g. funnels-lines) can
+      // clip to the identical circle the ring draws.
+      let huntZoneRingGeomMain: GeoJSON.Polygon | null = null;
       const huntzoneSource = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource;
       if (huntzoneSource) {
         if (parcelPolygon) {
           try {
-            const c = turf.centerOfMass(parcelPolygon as any);
-            const coords = c?.geometry?.coordinates;
+            // Piece 3: ring center = user-dragged override (snapped) when present,
+            // otherwise the parcel centroid. When the override is set this effect
+            // re-runs (override is in the dep array) — that is the SINGLE clip/compute
+            // that fires on drag release; nothing recomputes mid-drag.
+            let coords: number[] | undefined;
+            if (huntZoneCenterOverride &&
+                Number.isFinite(huntZoneCenterOverride[0]) && Number.isFinite(huntZoneCenterOverride[1])) {
+              coords = [huntZoneCenterOverride[0], huntZoneCenterOverride[1]];
+            } else {
+              const c = turf.centerOfMass(parcelPolygon as any);
+              coords = c?.geometry?.coordinates;
+            }
             if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
               const ring = turf.circle(
                 [Number(coords[0]), Number(coords[1])],
                 acresToRadiusMeters(MAX_ANALYSIS_ACRES),
                 { units: 'meters', steps: 64 }
               );
+              huntZoneRingGeomMain = ring.geometry as GeoJSON.Polygon;
+              // Keep the imperative drag handlers' baseline center in sync.
+              huntZoneCenterRef.current = [Number(coords[0]), Number(coords[1])];
               huntzoneSource.setData({ type: 'FeatureCollection', features: [ring] } as any);
             } else {
               huntzoneSource.setData(EMPTY_FC);
@@ -6584,7 +6672,18 @@ const archetypeInitializedRef = useRef(false);
       const funnelLinesSource = map.getSource('tfp-funnels-lines') as mapboxgl.GeoJSONSource;
       if (funnelLinesSource) {
         const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
-        const lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
+        let lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
+        // Piece 2 close-out (defensive): funnel/draw lines are flow-shaped, so clip them
+        // to the SAME 300-ac ring the Hunt Zone lens draws. Nothing renders these today
+        // (layer filter + sublayer visibility), but clipping here guarantees no future
+        // sublayer toggle can spill funnel/draw geometry past the ring.
+        // We use a STRICT vertex-containment clip (not clipLinesToParcel): it keeps
+        // only vertices actually inside the ring polygon (contiguous runs >= 2 pts,
+        // no interpolated crossing points), so 0 vertices can land outside the ring
+        // by construction. Handles both LineString and MultiLineString.
+        if (huntZoneRingGeomMain) {
+          lines = clipLinesStrictToRing(lines, huntZoneRingGeomMain) as typeof lines;
+        }
         // Debug: log funnel types
         const funnelTypes = lines.features.map(f => f.properties?.funnelType);
         const typeCounts = funnelTypes.reduce((acc, t) => { acc[t || 'unknown'] = (acc[t || 'unknown'] || 0) + 1; return acc; }, {} as Record<string, number>);
@@ -6845,7 +6944,99 @@ const archetypeInitializedRef = useRef(false);
     } catch (err) {
       console.error('[MAP] Error updating sources (non-fatal):', err);
     }
-  }, [layers, parcelPolygon, mapReady]);
+  }, [layers, parcelPolygon, mapReady, huntZoneCenterOverride]);
+
+  // ========== PIECE 3 — HUNT ZONE RING DRAG + SNAP ==========
+  // Make the gold Hunt Zone ring grabbable and draggable. Hard debounce: while
+  // dragging we ONLY reposition the ring circle visually (imperative setData on the
+  // tfp-huntzone source) — no React state changes, so NO flow clip/recompute fires.
+  // On release we snap the center to a ~100 m grid and commit it via state, which is
+  // the SINGLE clip/compute for the move. The ring is always rebuilt with the same
+  // turf.circle(radius, steps:64) primitive, so it stays perfectly round and scaled.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
+    const GRAB_LAYERS = ['tfp-huntzone-fill', 'tfp-huntzone-ring'];
+
+    const setRingAt = (center: [number, number]) => {
+      try {
+        const ring = turf.circle(center, RING_RADIUS_M, { units: 'meters', steps: 64 });
+        const src = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
+        if (src) src.setData({ type: 'FeatureCollection', features: [ring] } as any);
+      } catch { /* non-fatal */ }
+    };
+
+    // ~100 m grid snap: round lng/lat to 0.001° (lat ≈ 111 m, lng ≈ 88 m @ ~38°N).
+    // Deterministic and identical to the Piece 4 cache-key grid
+    // (key = `${lat.toFixed(3)}_${lng.toFixed(3)}`), so snapped drops become cache hits.
+    const snapToGrid = (lng: number, lat: number): [number, number] => {
+      return [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000];
+    };
+
+    const onMove = (e: mapboxgl.MapMouseEvent) => {
+      if (!huntZoneDraggingRef.current) return;
+      const c: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+      huntZoneDragCenterRef.current = c;
+      setRingAt(c); // visual only — no state, no clip/compute
+    };
+
+    const onUp = () => {
+      if (!huntZoneDraggingRef.current) return;
+      huntZoneDraggingRef.current = false;
+      map.off('mousemove', onMove);
+      try { (map as any).dragPan.enable(); } catch { /* noop */ }
+      map.getCanvas().style.cursor = '';
+      const live = huntZoneDragCenterRef.current;
+      huntZoneDragCenterRef.current = null;
+      if (live) {
+        const snapped = snapToGrid(live[0], live[1]);
+        setRingAt(snapped);                 // settle on grid immediately (round + scaled)
+        huntZoneCenterRef.current = snapped;
+        setHuntZoneCenterOverride(snapped); // SINGLE clip/compute fires here, on release
+        console.log('[MAP] Hunt Zone ring released — snapped center', snapped);
+      }
+    };
+
+    const onDown = (e: mapboxgl.MapMouseEvent) => {
+      if ((e.originalEvent as MouseEvent).button !== 0) return; // left button only
+      const src = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
+      if (!src) return;
+      (e as any).preventDefault(); // stop the map's default drag-pan for this gesture
+      huntZoneDraggingRef.current = true;
+      huntZoneDragCenterRef.current = [e.lngLat.lng, e.lngLat.lat];
+      try { (map as any).dragPan.disable(); } catch { /* noop */ }
+      map.getCanvas().style.cursor = 'grabbing';
+      map.on('mousemove', onMove);
+      map.once('mouseup', onUp);
+    };
+
+    const onEnter = () => { if (!huntZoneDraggingRef.current) map.getCanvas().style.cursor = 'grab'; };
+    const onLeave = () => { if (!huntZoneDraggingRef.current) map.getCanvas().style.cursor = ''; };
+
+    GRAB_LAYERS.forEach(id => {
+      map.on('mousedown', id, onDown);
+      map.on('mouseenter', id, onEnter);
+      map.on('mouseleave', id, onLeave);
+    });
+
+    return () => {
+      GRAB_LAYERS.forEach(id => {
+        map.off('mousedown', id, onDown);
+        map.off('mouseenter', id, onEnter);
+        map.off('mouseleave', id, onLeave);
+      });
+      map.off('mousemove', onMove);
+    };
+  }, [mapReady]);
+
+  // Piece 3: when the parcel changes, drop any dragged ring center so the new parcel's
+  // ring starts centered on its own centroid (not the previous drag position).
+  useEffect(() => {
+    setHuntZoneCenterOverride(null);
+    huntZoneCenterRef.current = null;
+  }, [parcelPolygon?.properties?.parcelId]);
 
   // ========== FIT TO PARCEL ON LOAD (IMMEDIATE ORIENTATION) ==========
   // v4-fix10: Parcel-only initial fit — sets clean first frame
@@ -9823,6 +10014,19 @@ const archetypeInitializedRef = useRef(false);
         // resemblance. Static only — no dragging yet.
         if (!map.getSource('tfp-huntzone')) {
           map.addSource('tfp-huntzone', { type: 'geojson', data: EMPTY_FC });
+          // Piece 3: near-invisible fill covering the ring interior. Serves as the
+          // drag grab-target (the whole lens is grabbable, not just the thin line)
+          // and doubles as a subtle lens tint. Added first so the glow/ring draw
+          // on top of it.
+          map.addLayer({
+            id: 'tfp-huntzone-fill',
+            type: 'fill',
+            source: 'tfp-huntzone',
+            paint: {
+              'fill-color': LAYER_COLORS.parcelBoundary,
+              'fill-opacity': 0.04,
+            },
+          });
           // Outer glow halo (wide, blurred, behind the ring)
           map.addLayer({
             id: 'tfp-huntzone-glow',
@@ -11756,6 +11960,7 @@ const archetypeInitializedRef = useRef(false);
           'tfp-edge-boundary-highlight',   // Hover highlight for adjacent parcels
           'tfp-parcel-glow',               // Selected parcel glow (below main line)
           'tfp-parcel-outline',            // Selected parcel boundary
+          'tfp-huntzone-fill',             // Piece 3: Hunt Zone lens fill (drag grab-target)
           'tfp-huntzone-glow',             // Piece 2: Hunt Zone lens glow (with parcel boundary)
           'tfp-huntzone-ring',             // Piece 2: Hunt Zone 300-ac scope ring
           // Terrain structure
@@ -13470,6 +13675,7 @@ const archetypeInitializedRef = useRef(false);
                 if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
                   const ring = turf.circle([Number(coords[0]), Number(coords[1])], acresToRadiusMeters(MAX_ANALYSIS_ACRES), { units: 'meters', steps: 64 });
                   hzSrc.setData({ type: 'FeatureCollection', features: [ring] } as any);
+                  try { map.setLayoutProperty('tfp-huntzone-fill', 'visibility', 'visible'); } catch {}
                   try { map.setLayoutProperty('tfp-huntzone-ring', 'visibility', 'visible'); } catch {}
                   try { map.setLayoutProperty('tfp-huntzone-glow', 'visibility', 'visible'); } catch {}
                 }
