@@ -3,6 +3,14 @@ import type { NextRequest } from 'next/server';
 
 const CANONICAL_HOST = 'terrafirma.partners';
 
+// QA/staging mirrors that are intentionally EXEMPT from the canonical 301.
+// These serve the latest checkpoint in isolation (no redirect to production)
+// so a deployed build can be verified independently. They are marked noindex
+// below so they never compete with the canonical domain for SEO.
+const QA_HOSTS = new Set<string>([
+  'terra-firma-mapping-nf30ep.abacusai.app',
+]);
+
 // Permanent (308) redirects for legacy URLs from discontinued products.
 const REDIRECTS: Record<string, string> = {
   '/api/sample-quick-look': '/api/free-look',
@@ -60,10 +68,11 @@ export function middleware(request: NextRequest) {
   //   - localhost / 127.0.0.1 (local dev)
   const isCanonical = host === CANONICAL_HOST;
   const isPreview = host.includes('.preview.');
+  const isQaMirror = QA_HOSTS.has(host);
   const isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.endsWith('.local');
-  const isProdMirror = host.endsWith('.abacusai.app') && !isPreview;
+  const isProdMirror = host.endsWith('.abacusai.app') && !isPreview && !isQaMirror;
 
-  if (host && !isCanonical && !isPreview && !isLocal && isProdMirror) {
+  if (host && !isCanonical && !isPreview && !isQaMirror && !isLocal && isProdMirror) {
     const url = request.nextUrl.clone();
     url.protocol = 'https:';
     url.host = CANONICAL_HOST;
