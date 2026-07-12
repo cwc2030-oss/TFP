@@ -147,14 +147,20 @@ export function fadeLayerIn(
   easeFn: (t: number) => number = easeOutQuart,
 ): void {
   if (!map.getLayer(layerId)) return;
-  map.setLayoutProperty(layerId, 'visibility', 'visible');
+  try { map.setLayoutProperty(layerId, 'visibility', 'visible'); } catch { /* ignore */ }
   try {
     const current = (map as MapWithGetPaint).getPaintProperty(layerId, opacityProp);
     if (typeof current !== 'number') {
       map.setPaintProperty(layerId, opacityProp, 0);
     }
   } catch {
-    map.setPaintProperty(layerId, opacityProp, 0);
+    // The readback (or the seed set) failed — Mapbox can throw a
+    // "Cannot read properties of undefined (reading 'value')" TypeError from
+    // deep inside setPaintProperty when a layer's transitionable paint state is
+    // momentarily undefined (e.g. property not applicable to this layer type or
+    // the layer was re-created mid-animation). Guard this fallback so it can
+    // never surface as an UNHANDLED runtime error.
+    try { map.setPaintProperty(layerId, opacityProp, 0); } catch { /* not applicable — skip */ }
   }
   animatePaint(map, layerId, opacityProp, targetOpacity, durationMs, easeFn);
 }

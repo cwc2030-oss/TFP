@@ -8135,18 +8135,14 @@ const archetypeInitializedRef = useRef(false);
         corridorZoneSource.setData(huntabilityData.corridorZones);
       }
 
-      // Update huntability corridor spine source (clipped to parcel + 50m)
-      // In territory mode with >1 parcels, use merged territory polygon as clip boundary
+      // Huntability corridor spine source — synthetic (hasDEM:false). Per containment
+      // policy, no fabricated lines may go live: feed EMPTY_FC so the source holds
+      // zero geometry. The tfp-huntability-corridors-{primary,secondary} layers are
+      // also visibility:'none' + in PERMANENTLY_HIDDEN_LAYERS, so this is belt-and-
+      // suspenders — even a devtools visibility flip would reveal nothing.
       const corridorSource = map.getSource('tfp-huntability-corridors') as mapboxgl.GeoJSONSource;
       if (corridorSource) {
-        let hClipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-        if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
-          const merged = mergeParcelPolygons(territoryParcelsRef.current);
-          hClipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-        } else {
-          hClipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-        }
-        corridorSource.setData(clipLinesToParcel(huntabilityData.corridorLines, hClipGeom, 50));
+        corridorSource.setData(EMPTY_FC);
       }
 
       // Update huntability convergence source
