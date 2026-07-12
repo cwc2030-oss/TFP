@@ -56,6 +56,8 @@ import { fetchRidgeSpines, maybeGenerateSyntheticRidgeSpines } from '@/lib/ridge
 import * as turf from '@turf/turf';
 import { acresToRadiusMeters, MAX_ANALYSIS_ACRES } from '@/lib/flow-flags';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow, tagSaddlesByCorridorProximity } from '@/lib/terrain-flow';
+import { huntZoneScopeKey, buildHuntZoneCircle } from '@/lib/huntzone-scope';
+import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
 import { buildTerrainHeatMap, rescoreStandSites } from '@/lib/terrain-heatmap';
 import { buildTerrainRaster, primeStandSitesToGeoJSON, pointInAnyWaterBody, type RasterGrid } from '@/lib/terrain-raster';
 import { buildStandSelectionDebug, type StandSelectionDebug } from '@/lib/stand-selection-debug';
@@ -2349,6 +2351,17 @@ function DeerIntelContent() {
   const huntZoneDraggingRef = useRef<boolean>(false);
   // Live center tracked during a drag (before snap/commit).
   const huntZoneDragCenterRef = useRef<[number, number] | null>(null);
+  // ═══ PIECE 4 — NATIVE PER-SCOPE FLOW COMPUTE + CACHE ═══
+  // huntZoneRingGeomRef: current 300-ac ring polygon (written by the main source
+  // effect). When a drag override is active, the flow-display clip uses THIS ring
+  // (not the whole parcel) so the rendered flow is scoped to the circle.
+  const huntZoneRingGeomRef = useRef<GeoJSON.Polygon | null>(null);
+  // Session-local memory cache of ring-scoped flow, keyed by huntZoneScopeKey.
+  // Backed by the persistent TerrainAnalysisCache (via /api/terrain-cache) so a
+  // revisit to a snapped spot returns instantly with no new terrain compute.
+  const huntZoneFlowCacheRef = useRef<Map<string, any>>(new Map());
+  // Guards against overlapping native computes when the ring is dragged rapidly.
+  const huntZoneComputeSeqRef = useRef<number>(0);
   
   // v3.5.1 — Animation frame ref for corridor flow animation
   const flowAnimationRef = useRef<number | null>(null);
@@ -6565,6 +6578,9 @@ const archetypeInitializedRef = useRef(false);
                 { units: 'meters', steps: 64 }
               );
               huntZoneRingGeomMain = ring.geometry as GeoJSON.Polygon;
+              // Piece 4: expose the current ring polygon so the flow-display clip can
+              // scope rendered flow to the circle when a drag override is active.
+              huntZoneRingGeomRef.current = huntZoneRingGeomMain;
               // Keep the imperative drag handlers' baseline center in sync.
               huntZoneCenterRef.current = [Number(coords[0]), Number(coords[1])];
               huntzoneSource.setData({ type: 'FeatureCollection', features: [ring] } as any);
@@ -7037,6 +7053,132 @@ const archetypeInitializedRef = useRef(false);
     setHuntZoneCenterOverride(null);
     huntZoneCenterRef.current = null;
   }, [parcelPolygon?.properties?.parcelId]);
+
+  // ========== PIECE 4 — NATIVE PER-SCOPE FLOW COMPUTE + CACHE ==========
+  // When the Hunt Zone ring SETTLES on a snapped grid center (huntZoneCenterOverride
+  // commits from the Piece 3 drag release), compute flow NATIVELY for that 300-ac
+  // circle: the circle itself is the AOI handed to the terrain engine, so ridges/
+  // saddles are grounded in that scope (NOT a clip of a whole-parcel computation,
+  // which reintroduces the large-territory distortions flagged in Piece 1).
+  //
+  // Cache-first: keyed by (center@0.001deg grid, radius, engine_version) — the same
+  // grid Piece 3 snaps to. A revisit to a previously-computed snapped spot returns
+  // from cache with NO new terrain compute (and records a 'terrain' cache hit that
+  // surfaces in /admin/usage). Wind/season/stands then recompute live on top of the
+  // cached static terrain via the existing terrainFlowData-driven effects.
+  useEffect(() => {
+    // Only fires on a committed drag override — never on initial parcel load
+    // (that path keeps the existing whole-parcel + Piece-1 acre-cap behavior).
+    if (!huntZoneCenterOverride || !parcelPolygon) return;
+    if (territoryAssemblyRef.current) return;
+
+    const [lng, lat] = huntZoneCenterOverride;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+
+    const radiusM = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
+    const key = huntZoneScopeKey({ lat, lng }, radiusM, TERRAIN_ENGINE_VERSION);
+    const seq = ++huntZoneComputeSeqRef.current;
+    let cancelled = false;
+
+    const applyFlow = (payload: any, srcLabel: string) => {
+      if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
+      setTerrainFlowData(payload);
+      terrainFlowRawRef.current = payload;
+      console.log(`[HuntZoneFlow] Applied ${srcLabel} flow for`, key, {
+        primary: payload?.flow_primary?.features?.length ?? 0,
+        secondary: payload?.flow_secondary?.features?.length ?? 0,
+        convergence: payload?.convergence_zones?.features?.length ?? 0,
+      });
+    };
+
+    const run = async () => {
+      setTerrainFlowLoading(true);
+      try {
+        // 1) Session memory cache — truly instant, no network.
+        const mem = huntZoneFlowCacheRef.current.get(key);
+        if (mem) {
+          // Fire-and-forget server GET so the cache hit still registers in
+          // /admin/usage, without blocking the instant memory return.
+          fetch(`/api/terrain-cache?parcelIds=${encodeURIComponent(key)}`, { cache: 'no-store' }).catch(() => {});
+          applyFlow(mem, 'memory-cache');
+          return;
+        }
+
+        // 2) Persistent cache (TerrainAnalysisCache, engine-version filtered).
+        try {
+          const resp = await fetch(`/api/terrain-cache?parcelIds=${encodeURIComponent(key)}`, { cache: 'no-store' });
+          if (!cancelled && resp.ok) {
+            const json = await resp.json();
+            const hit = json?.results?.[key]?.terrainFlowData;
+            if (hit) {
+              huntZoneFlowCacheRef.current.set(key, hit);
+              applyFlow(hit, 'persistent-cache');
+              return;
+            }
+          }
+        } catch { /* fall through to native compute */ }
+        if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
+
+        // 3) MISS — native compute for the 300-ac circle scope.
+        const circle = buildHuntZoneCircle({ lat, lng }, radiusM);
+        console.log('[HuntZoneFlow] Cache MISS — native compute for scope', key);
+        const result = await fetchTerrainFlow({
+          parcel: circle,
+          parcel_id: key,
+          // Tight buffer: enough landscape context for ridges feeding the circle,
+          // without pulling in distant terrain that would distort the scope.
+          bufferMeters: 500,
+        });
+        if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
+
+        if (result.success && result.data) {
+          const d = result.data;
+          const payload = {
+            flow_primary: d.flow_primary,
+            flow_secondary: d.flow_secondary,
+            convergence_zones: d.convergence_zones,
+            opportunity_zones: d.opportunity_zones,
+            isSynthetic: result.isSynthetic,
+            metadata: {
+              flow_count_primary: d.metadata.stats.flow_count_primary,
+              flow_count_secondary: d.metadata.stats.flow_count_secondary,
+              convergence_count: d.metadata.stats.convergence_count,
+              opportunity_count: d.metadata.stats.opportunity_count,
+              total_flow_length_m: d.metadata.stats.total_flow_length_m,
+              mode: d.metadata.mode,
+              dem_source: d.metadata.dem_source,
+              fallback_reason: d.metadata.fallback_reason,
+            },
+          };
+          huntZoneFlowCacheRef.current.set(key, payload);
+          applyFlow(payload, 'native-compute');
+          // Persist real DEM computes only — never cache a synthetic fallback
+          // (so a later real compute can still populate the cache).
+          if (!result.isSynthetic) {
+            fetch('/api/terrain-cache', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                parcelId: key,
+                lat,
+                lng,
+                acreage: MAX_ANALYSIS_ACRES,
+                data: { terrainFlowData: payload, scope: { lat, lng, radiusM } },
+              }),
+            }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        if (!cancelled) console.warn('[HuntZoneFlow] compute error', err);
+      } finally {
+        if (!cancelled && seq === huntZoneComputeSeqRef.current) setTerrainFlowLoading(false);
+      }
+    };
+
+    run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [huntZoneCenterOverride]);
 
   // ========== FIT TO PARCEL ON LOAD (IMMEDIATE ORIENTATION) ==========
   // v4-fix10: Parcel-only initial fit — sets clean first frame
@@ -9147,7 +9289,12 @@ const archetypeInitializedRef = useRef(false);
       // v3.9.3: Clip display lines to parcel + 50m buffer (terrain brain still uses full 800m context)
       // In territory mode with >1 parcels, use merged territory polygon as clip boundary
       let clipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-      if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
+      if (huntZoneCenterOverride && huntZoneRingGeomRef.current) {
+        // Piece 4: a dragged Hunt Zone scopes display flow to the 300-ac ring the
+        // native compute was run for — not the whole parcel — so what renders is
+        // exactly the circle's native flow.
+        clipGeom = huntZoneRingGeomRef.current as GeoJSON.Polygon;
+      } else if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
         const merged = mergeParcelPolygons(territoryParcelsRef.current);
         clipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
       } else {
@@ -9326,7 +9473,7 @@ const archetypeInitializedRef = useRef(false);
     return () => {
       if (terrainFlowDebounceRef.current) clearTimeout(terrainFlowDebounceRef.current);
     };
-  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, parcelPolygon, ridgeSpineData, season]);
+  }, [terrainFlowData, legacySyntheticData, flowComparisonMode, mapReady, layers, parcelPolygon, ridgeSpineData, season, huntZoneCenterOverride]);
 
   // ========== TERRAIN STORY OVERLAY LABELS (Niehues-style) ==========
   // Generate map labels at terrain feature centroids showing feature type + percentage.
