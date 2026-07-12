@@ -7190,14 +7190,45 @@ const archetypeInitializedRef = useRef(false);
       }
 
       // Update context corridors sources (clipped)
+      // Piece 2 close-out: context corridors are flow-shaped, so they must not
+      // extend past the 300-ac Hunt Zone ring. Build the SAME circle the ring uses
+      // (turf.centerOfMass of the parcel + acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+      // turf.circle steps:64/units:'meters') and clip context lines to it after the
+      // parcel+50m clip. The parcel boundary itself is geographic, not flow, so it is
+      // intentionally NOT clipped here.
+      let huntZoneRingGeom: GeoJSON.Polygon | undefined;
+      try {
+        const ringSourceParcel = parcelPolygonRef.current;
+        if (ringSourceParcel) {
+          const c = turf.centerOfMass(ringSourceParcel as any);
+          const coords = c?.geometry?.coordinates;
+          if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+            const ring = turf.circle(
+              [Number(coords[0]), Number(coords[1])],
+              acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+              { units: 'meters', steps: 64 }
+            );
+            huntZoneRingGeom = ring.geometry as GeoJSON.Polygon;
+          }
+        }
+      } catch (ringErr) {
+        console.warn('[MAP] Context-corridor ring clip build failed', ringErr);
+      }
+
+      const clipContextToRing = (fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection => {
+        const parcelClipped = clipLinesToParcel(fc, clipGeom, 50);
+        if (!huntZoneRingGeom) return parcelClipped;
+        return clipLinesToParcel(parcelClipped, huntZoneRingGeom, 0);
+      };
+
       const contextPrimarySource = map.getSource('tfp-corridors-context-primary') as mapboxgl.GeoJSONSource;
       if (contextPrimarySource) {
-        contextPrimarySource.setData(clipLinesToParcel(tieredCorridorData.corridors_context_primary, clipGeom, 50));
+        contextPrimarySource.setData(clipContextToRing(tieredCorridorData.corridors_context_primary));
       }
 
       const contextPossibleSource = map.getSource('tfp-corridors-context-possible') as mapboxgl.GeoJSONSource;
       if (contextPossibleSource) {
-        contextPossibleSource.setData(clipLinesToParcel(tieredCorridorData.corridors_context_possible, clipGeom, 50));
+        contextPossibleSource.setData(clipContextToRing(tieredCorridorData.corridors_context_possible));
       }
 
       // Update hard funnels source
