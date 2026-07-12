@@ -41,6 +41,38 @@ import {
   expandBbox,
 } from '@/lib/terrain-analysis';
 import type { TerrainFlowResponse } from '@/types/terrain-flow';
+import { buildFlowScope, toFlowLines } from '@/lib/flow-contract';
+import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
+import * as turf from '@turf/turf';
+
+/**
+ * Compute the canonical flow scope for a parcel analysis (Piece 0 plumbing).
+ * center = parcel centroid, radius_m = analysis buffer, acres from parcel area,
+ * mode = 'parcel'. Fully defensive: never throws.
+ */
+function computeParcelScope(
+  parcel: any,
+  radiusM: number,
+) {
+  let center = { lat: 0, lng: 0 };
+  let acres = 0;
+  try {
+    const c = turf.centerOfMass(parcel as any);
+    const coords = c?.geometry?.coordinates;
+    if (Array.isArray(coords) && coords.length >= 2) {
+      center = { lat: Number(coords[1]) || 0, lng: Number(coords[0]) || 0 };
+    }
+  } catch {
+    /* leave center at origin on failure */
+  }
+  try {
+    const areaM2 = turf.area(parcel as any);
+    if (Number.isFinite(areaM2)) acres = areaM2 / 4046.8564224;
+  } catch {
+    /* leave acres at 0 on failure */
+  }
+  return buildFlowScope({ center, radius_m: radiusM, acres, mode: 'parcel' });
+}
 
 // Modal endpoint for DEM-based corridor computation
 const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL || 
@@ -168,6 +200,10 @@ export async function POST(request: NextRequest) {
       
       return NextResponse.json({
         ...syntheticData,
+        // Canonical flow contract (v5.0-scope) — additive, no behavior change
+        flow_lines: toFlowLines(syntheticData),
+        scope: computeParcelScope(parcel, effectiveBuffer),
+        engine_version: TERRAIN_ENGINE_VERSION,
         version: API_VERSION,
         request_id: `flow_synthetic_${Date.now().toString(36)}`,
         terrain_debug: { ...terrainDebug, terrain_source: 'synthetic_comparison', fallback_used: true, fallback_reason: 'User requested synthetic comparison mode' },
@@ -352,6 +388,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ...flowData,
+      // Canonical flow contract (v5.0-scope) — additive, no behavior change
+      flow_lines: toFlowLines(flowData),
+      scope: computeParcelScope(parcel, effectiveBuffer),
+      engine_version: TERRAIN_ENGINE_VERSION,
       flowMode,
       version: API_VERSION,
       request_id: `flow_terrain_${Date.now().toString(36)}`,

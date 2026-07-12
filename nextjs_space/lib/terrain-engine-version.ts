@@ -11,6 +11,7 @@
  *   - Engine fixes propagate instantly (version bump busts the cache)
  *   - Expensive static terrain compute is still cached between bumps
  *
- * Current engine: v4.3 (large-territory convergence radius + distribution fix)
+ * Current engine: v5.0-scope (canonical scope-aware flow contract:
+ *   flow_lines[] + scope{} + engine_version emitted on flow responses)
  */
-export const TERRAIN_ENGINE_VERSION = 'v4.3';
+export const TERRAIN_ENGINE_VERSION = 'v5.0-scope';

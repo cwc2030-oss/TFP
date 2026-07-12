@@ -15,6 +15,8 @@
  */
 import type { SavedProperty } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { getFlowLines, buildFlowScope } from '@/lib/flow-contract';
+import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
 
 interface ParcelLite {
   geometry?: {
@@ -131,6 +133,15 @@ export async function buildFlowSnapshot(
     // Metadata for display
     flowMode: tfd.metadata?.mode ?? null,
     demSource: tfd.metadata?.dem_source ?? null,
+    // Canonical flow contract (v5.0-scope) — additive, no behavior change
+    flowLines: getFlowLines(tfd),
+    scope: buildFlowScope({
+      center: { lat: sp.centroidLat, lng: sp.centroidLng },
+      radius_m: Number(tfd.metadata?.buffer_m) || 0,
+      acres: 0,
+      mode: 'parcel',
+    }),
+    engineVersion: TERRAIN_ENGINE_VERSION,
   };
 
   return JSON.stringify(snapshot);

@@ -8,6 +8,9 @@
  */
 
 import type { TerrainLayers, TerrainSummary } from '@/types/terrain';
+import type { FlowLine } from '@/types/flow-contract';
+import { getFlowLines } from '@/lib/flow-contract';
+import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
 
 // ============ Types ============
 
@@ -61,6 +64,9 @@ export interface TerrainFlowBundle {
   convergence_zones: GeoJSON.FeatureCollection;
   opportunity_zones?: GeoJSON.FeatureCollection;
   isSynthetic: boolean;
+  // Canonical flow contract (v5.0-scope) — additive, no behavior change
+  flow_lines?: FlowLine[];
+  engine_version?: string;
   metadata?: {
     flow_count_primary: number;
     flow_count_secondary: number;
@@ -226,6 +232,9 @@ export function assembleTerritory(
     convergence_zones: mergedConvergence,
     opportunity_zones: mergedOpportunity,
     isSynthetic: parcels.every(p => p.terrainFlowData?.isSynthetic !== false),
+    // Canonical flow contract (v5.0-scope) — additive, no behavior change
+    flow_lines: getFlowLines({ flow_primary: mergedFlowPrimary, flow_secondary: mergedFlowSecondary }),
+    engine_version: TERRAIN_ENGINE_VERSION,
     metadata: {
       flow_count_primary: mergedFlowPrimary.features.length,
       flow_count_secondary: mergedFlowSecondary.features.length,
