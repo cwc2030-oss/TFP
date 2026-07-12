@@ -330,6 +330,45 @@ function clipLinesStrictToRing(
 }
 
 /**
+ * Piece R1 — clip polygon features to the Hunt Zone ring via TRUE geometric
+ * intersection (zero bleed). Reuses the same ring polygon the Piece-1/4 flow
+ * clip uses, so bedding stops exactly where flow stops. Each polygon is
+ * intersected with the ring; the clipped remnant keeps the original feature
+ * properties. Polygons fully inside pass through unchanged; polygons fully
+ * outside drop out; straddling polygons are trimmed to the ring boundary.
+ * Never fabricates geometry — on a rare turf.intersect throw the polygon is
+ * dropped (fail-closed) so nothing can spill past the ring.
+ */
+function clipPolygonsToRing(
+  fc: GeoJSON.FeatureCollection,
+  ringPolygon: GeoJSON.Polygon,
+): GeoJSON.FeatureCollection {
+  if (!fc?.features?.length) return fc;
+  const ringFeature = turf.feature(ringPolygon);
+  const out: GeoJSON.Feature[] = [];
+  for (const f of fc.features) {
+    if (!f.geometry) continue;
+    const t = f.geometry.type;
+    if (t !== 'Polygon' && t !== 'MultiPolygon') { out.push(f); continue; }
+    try {
+      const clipped = turf.intersect(
+        turf.featureCollection([
+          f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+          ringFeature as GeoJSON.Feature<GeoJSON.Polygon>,
+        ])
+      );
+      if (clipped?.geometry) {
+        out.push({ type: 'Feature', properties: { ...(f.properties || {}) }, geometry: clipped.geometry });
+      }
+      // no intersection → polygon entirely outside the ring → drop it
+    } catch {
+      // fail-closed: drop on intersect error rather than risk bleeding past the ring
+    }
+  }
+  return { type: 'FeatureCollection', features: out };
+}
+
+/**
  * DEMO TRUST FILTER — not final land-cover intelligence.
  *
  * Filters bedding polygons that fall within ~120 m of any building footprint
@@ -2638,7 +2677,9 @@ const archetypeInitializedRef = useRef(false);
   const [terrainReasonPosition, setTerrainReasonPosition] = useState<{ x: number; y: number } | null>(null);
   
   // v3.6.0 — Bedding Probability visibility toggle
-  const [showBeddingProbability, setShowBeddingProbability] = useState(false);
+  // Piece R1 — surface bedding zones inside the Hunt Zone ring by default. The
+  // "Bedding Zones" toggle still lets the user hide them; ON is the ring default.
+  const [showBeddingProbability, setShowBeddingProbability] = useState(true);
 
   // UI state
   const [panelCollapsed, setPanelCollapsed] = useState(false); // Left panel open by default
@@ -6675,11 +6716,16 @@ const archetypeInitializedRef = useRef(false);
 
           const stableFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: stabilizedFeatures };
           previousBeddingRef.current = stableFC;
-          beddingSource.setData(stableFC);
+          // Piece R1 — surface bedding INSIDE the Hunt Zone ring: clip the
+          // (whole-parcel) bedding to the 300-ac ring so nothing bleeds past it.
+          // previousBeddingRef keeps the UNCLIPPED geometry so stability tracking
+          // stays parcel-wide; clip is a display-time op re-run on every ring drag
+          // (this effect is keyed on huntZoneCenterOverride).
+          beddingSource.setData(huntZoneRingGeomMain ? clipPolygonsToRing(stableFC, huntZoneRingGeomMain) : stableFC);
         } else {
           // First analysis or no previous data — use new data as-is
           previousBeddingRef.current = polygonsOnly;
-          beddingSource.setData(polygonsOnly);
+          beddingSource.setData(huntZoneRingGeomMain ? clipPolygonsToRing(polygonsOnly, huntZoneRingGeomMain) : polygonsOnly);
         }
       }
       // ═══ END BEDDING STABILITY ═══
@@ -7350,7 +7396,14 @@ const archetypeInitializedRef = useRef(false);
       // Update ghost bedding source
       const ghostSource = map.getSource('tfp-edge-ghost') as mapboxgl.GeoJSONSource;
       if (ghostSource) {
-        ghostSource.setData(isMultiParcel ? EMPTY_FC : edgeIntelData.ghostBedding);
+        // Piece R1 — ghost bedding shares the Bedding Zones toggle, so clip it to
+        // the Hunt Zone ring as well; surfaced bedding (core + ghost) must never
+        // bleed past the ring. Uses the shared ring ref set by the ring-build effect.
+        {
+          const ghostRing = huntZoneRingGeomRef.current;
+          const ghostFC = isMultiParcel ? EMPTY_FC : edgeIntelData.ghostBedding;
+          ghostSource.setData(ghostRing ? clipPolygonsToRing(ghostFC, ghostRing) : ghostFC);
+        }
       }
 
       // Update ghost saddles source
@@ -10295,7 +10348,24 @@ const archetypeInitializedRef = useRef(false);
             source: 'tfp-bedding',
             layout: { visibility: 'visible' },
             paint: {
-              'fill-color': '#1a5c2a',
+              // Piece R1 — zone-type distinction: color soft fill by bedding type when
+              // the source carries one (backend `type`, or huntability `beddingType`).
+              // Muted earthy palette that reads UNDER the flow lines without competing.
+              // Falls back to the original dark green when no type is present.
+              'fill-color': [
+                'match',
+                ['coalesce', ['get', 'beddingType'], ['get', 'type'], 'default'],
+                'sanctuary', '#6d4c41',        // deep brown — core sanctuary bedding
+                'thermal', '#3f7d3a',          // warm green — solar/thermal bedding
+                'thermal_bedding', '#3f7d3a',
+                'staging', '#8d7355',          // taupe — staging near food/corridors
+                'staging_bedding', '#8d7355',
+                'escape', '#546b52',           // muted slate-green — escape bedding
+                'escape_cover', '#546b52',
+                'transition', '#2f7d6e',       // teal — transition bedding
+                'transition_bedding', '#2f7d6e',
+                '#1a5c2a',                     // default (original)
+              ],
               'fill-opacity': 0, // starts hidden; Bedding Zones button fades in
             },
           });
@@ -10305,7 +10375,20 @@ const archetypeInitializedRef = useRef(false);
             source: 'tfp-bedding',
             layout: { visibility: 'visible' },
             paint: {
-              'line-color': '#1a5c2a',
+              'line-color': [
+                'match',
+                ['coalesce', ['get', 'beddingType'], ['get', 'type'], 'default'],
+                'sanctuary', '#6d4c41',
+                'thermal', '#3f7d3a',
+                'thermal_bedding', '#3f7d3a',
+                'staging', '#8d7355',
+                'staging_bedding', '#8d7355',
+                'escape', '#546b52',
+                'escape_cover', '#546b52',
+                'transition', '#2f7d6e',
+                'transition_bedding', '#2f7d6e',
+                '#1a5c2a',
+              ],
               'line-opacity': 0, // starts hidden; Bedding Zones button fades in
               'line-dasharray': [4, 3],
             },
