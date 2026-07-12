@@ -54,7 +54,7 @@ import { tierCorridorData, generateSyntheticTieredCorridors, enrichCorridorsWith
 import { clipLinesToParcel } from '@/lib/geo/clip-to-parcel';
 import { fetchRidgeSpines, maybeGenerateSyntheticRidgeSpines } from '@/lib/ridge-extraction';
 import * as turf from '@turf/turf';
-import { acresToRadiusMeters, MAX_ANALYSIS_ACRES } from '@/lib/flow-flags';
+import { acresToRadiusMeters, MAX_ANALYSIS_ACRES, standsEnabled } from '@/lib/flow-flags';
 import { fetchTerrainFlow, generateSyntheticTerrainFlow, generateLegacySyntheticFlow, tagSaddlesByCorridorProximity } from '@/lib/terrain-flow';
 import { huntZoneScopeKey, buildHuntZoneCircle } from '@/lib/huntzone-scope';
 import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
@@ -2671,6 +2671,12 @@ const archetypeInitializedRef = useRef(false);
   //
   // Set to false once terrain structure is visually verified and ready for deer logic.
   const TERRAIN_WORK_MODE = false;
+
+  // Piece 5: Stand selection ("where to sit") is off-message and removed from
+  // the product. Every stand map layer/source and all stand UI is gated behind
+  // this flag, which defaults OFF. Set NEXT_PUBLIC_ENABLE_STANDS=1 to re-enable
+  // (dev/debug only). Flow / convergence / bedding / saddles are unaffected.
+  const STANDS_ENABLED = standsEnabled();
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Phase 1: Clean map = stands + terrain features that justify them
@@ -9774,6 +9780,16 @@ const archetypeInitializedRef = useRef(false);
 
     const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+    // STANDS FLAG GATE (Piece 5): the nearest-corridor highlight is stand-tied.
+    // With stands removed (flag OFF, default) never render it.
+    if (!STANDS_ENABLED) {
+      highlightSource.setData(emptyFC);
+      if (map.getLayer('tfp-flow-nearest-highlight')) {
+        map.setLayoutProperty('tfp-flow-nearest-highlight', 'visibility', 'none');
+      }
+      return;
+    }
+
     // No stand selected → clear highlight
     if (selectedStand === null) {
       highlightSource.setData(emptyFC);
@@ -9987,9 +10003,10 @@ const archetypeInitializedRef = useRef(false);
           fadeLayerOut(map, 'tfp-flow-tiers-glow', 'line-opacity', FADE_OUT);
         }
       }
-      // Nearest corridor highlight follows any flow tier + stand selection
+      // Nearest corridor highlight follows any flow tier + stand selection.
+      // Piece 5: stand-tied, so never show when stands are disabled (flag OFF).
       if (map.getLayer('tfp-flow-nearest-highlight')) {
-        const showHighlight = _anyOn && selectedStand !== null;
+        const showHighlight = STANDS_ENABLED && _anyOn && selectedStand !== null;
         if (showHighlight) {
           fadeLayerIn(map, 'tfp-flow-nearest-highlight', 0.70, 'line-opacity', FADE_IN);
         } else {
@@ -14669,18 +14686,20 @@ const archetypeInitializedRef = useRef(false);
       const map = mapRef.current;
       if (!map) return;
 
-      // ── PAYWALL GATE: hide all stand / pocket / direction layers for non-purchased users ──
-      const canShowStands = parcelUnlockedRef.current || isProRef.current;
-      if (!canShowStands) {
+      // ── STANDS FLAG GATE (Piece 5): stand selection is removed from the product.
+      // When STANDS_ENABLED is OFF (default), clear every stand-related source and
+      // hide every stand layer so nothing renders, then bail. The old paywall gate
+      // (parcelUnlocked / isPro) is gone — stand visibility is purely flag-driven. ──
+      if (!STANDS_ENABLED) {
         // Clear all stand-related GeoJSON sources so nothing renders on the map
-        const clearSources = ['tfp-stands', 'tfp-stand-emphasis', 'tfp-hunt-pockets', 'tfp-stand-direction', 'tfp-killzone', 'tfp-stand-tertiary'];
+        const clearSources = ['tfp-stands', 'tfp-stand-emphasis', 'tfp-hunt-pockets', 'tfp-stand-direction', 'tfp-killzone', 'tfp-stand-tertiary', 'tfp-flow-nearest-highlight'];
         clearSources.forEach(src => {
           if (map.getSource(src)) {
             try { (map.getSource(src) as mapboxgl.GeoJSONSource).setData(EMPTY_FC); } catch {}
           }
         });
-        // Hide all stand layers + support layers
-        const allStandLayers = [...STAND_LAYER_IDS, 'tfp-stand-emphasis-glow', 'tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke', 'tfp-stand-direction-main', 'tfp-stand-direction-flank', 'tfp-killzone-fill', 'tfp-killzone-stroke'];
+        // Hide all stand layers + support layers (incl. tertiary dot + stand-tied flow highlight)
+        const allStandLayers = [...STAND_LAYER_IDS, 'tfp-stand-emphasis-glow', 'tfp-hunt-pockets-fill', 'tfp-hunt-pockets-stroke', 'tfp-stand-direction-main', 'tfp-stand-direction-flank', 'tfp-killzone-fill', 'tfp-killzone-stroke', 'tfp-stand-tertiary-dot', 'tfp-flow-nearest-highlight'];
         allStandLayers.forEach(id => {
           if (map.getLayer(id)) {
             try { map.setLayoutProperty(id, 'visibility', 'none'); } catch {}
@@ -14888,10 +14907,11 @@ const archetypeInitializedRef = useRef(false);
     const map = mapRef.current;
     if (!map) return;
 
-    // PAYWALL GATE: force stands hidden when parcel not purchased
-    const canShowStands = parcelUnlockedRef.current || isProRef.current;
-    // Clean Map ON overrides everything: stands hidden until restored.
-    const globalShow = !cleanMapRef.current && canShowStands && visibility.stands;
+    // STANDS FLAG GATE (Piece 5): stands are removed from the product. When the
+    // flag is OFF (default) globalShow is always false, so every stand layer stays
+    // hidden. The old paywall gate (parcelUnlocked / isPro) has been removed.
+    // Clean Map ON also overrides everything: stands hidden until restored.
+    const globalShow = STANDS_ENABLED && !cleanMapRef.current && visibility.stands;
 
     const applyVisibility = () => {
       // Toggle stand GeoJSON layers — deterministic, immediate
@@ -14975,13 +14995,10 @@ const archetypeInitializedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    // Piece 5: stands removed — don't bind stand click/hover handlers when flag OFF.
+    if (!STANDS_ENABLED) return;
 
     const onClick = (e: mapboxgl.MapLayerMouseEvent) => {
-      // PAYWALL GATE: if parcel not purchased, show paywall modal instead
-      if (!parcelUnlockedRef.current && !isProRef.current) {
-        setShowParcelPaywall(true);
-        return;
-      }
       const feat = e.features?.[0];
       if (!feat?.properties) return;
       const idx = feat.properties.standIdx as number;
@@ -15370,7 +15387,7 @@ const archetypeInitializedRef = useRef(false);
           className="absolute z-40 flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm px-5 py-3 rounded-full shadow-xl shadow-amber-900/40 transition-all hover:scale-105"
           style={{ bottom: '24px', left: '50%', transform: 'translateX(-50%)' }}
         >
-          {filteredStands.length > 0
+          {STANDS_ENABLED && filteredStands.length > 0
             ? `🎯 ${filteredStands.length} Stands Found — Unlock $19`
             : '🎯 Get My Hunt Plan — $19'}
         </button>
@@ -16927,7 +16944,7 @@ const archetypeInitializedRef = useRef(false);
                     <div>
                       <p className="text-[11px] font-semibold text-amber-300">Welcome to Terrain Brain</p>
                       <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
-                        {"You're viewing a live terrain analysis of a real Missouri parcel. Switch between demo parcels above to see different terrain features — funnels, ridges, bedding areas, and stand placements."}
+                        {"You're viewing a live terrain analysis of a real Missouri parcel. Switch between demo parcels above to see different terrain features — funnels, ridges, and bedding areas."}
                       </p>
                     </div>
                   </div>
@@ -17171,12 +17188,17 @@ const archetypeInitializedRef = useRef(false);
 
                           // v3.8.2: Bedding removed from narrative — speculative, not decision-grade
                           const quality = score >= 80 ? 'excellent' : score >= 65 ? 'strong' : score >= 50 ? 'moderate' : 'limited';
-                          const standPhrase = stands > 0 
-                            ? `We identified ${stands} stand placement${stands > 1 ? 's' : ''} with ${quality} alignment to the terrain` 
-                            : 'No stand placements met our quality threshold on this parcel';
-                          const funnelPhrase = funnels > 2 ? `, and ${funnels} natural funnels that concentrate movement` : funnels > 0 ? ` with ${funnels} natural funnel${funnels > 1 ? 's' : ''}` : '';
-
-                          return `${standPhrase}${funnelPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
+                          // Piece 5: stand claims removed from narrative unless flag ON.
+                          if (STANDS_ENABLED) {
+                            const standPhrase = stands > 0 
+                              ? `We identified ${stands} stand placement${stands > 1 ? 's' : ''} with ${quality} alignment to the terrain` 
+                              : 'No stand placements met our quality threshold on this parcel';
+                            const funnelPhrase = funnels > 2 ? `, and ${funnels} natural funnels that concentrate movement` : funnels > 0 ? ` with ${funnels} natural funnel${funnels > 1 ? 's' : ''}` : '';
+                            return `${standPhrase}${funnelPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
+                          }
+                          // Terrain/flow-focused narrative (no stand claims)
+                          const terrainPhrase = funnels > 2 ? `${funnels} natural funnels that concentrate movement` : funnels > 0 ? `${funnels} natural funnel${funnels > 1 ? 's' : ''}` : 'terrain features worth scouting';
+                          return `We mapped ${quality} terrain structure with ${terrainPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
                         })()}
                       </p>
                     </div>
@@ -17209,7 +17231,9 @@ const archetypeInitializedRef = useRef(false);
                     {/* Character description derived from data */}
                     <p className="text-[10px] text-white/70 leading-relaxed">
                       {summary.funnelCount > 3 ? 'Heavy funnel density' : summary.funnelCount > 1 ? 'Natural funneling present' : 'Limited funneling'}
-                      {summary.topStandScore >= 80 ? ' — premium stand opportunities.' : summary.topStandScore >= 60 ? ' — solid stand potential.' : ' — marginal stand options.'}
+                      {STANDS_ENABLED
+                        ? (summary.topStandScore >= 80 ? ' — premium stand opportunities.' : summary.topStandScore >= 60 ? ' — solid stand potential.' : ' — marginal stand options.')
+                        : (summary.topStandScore >= 80 ? ' — premium terrain structure.' : summary.topStandScore >= 60 ? ' — solid terrain structure.' : ' — marginal terrain structure.')}
                     </p>
                   </div>
 
@@ -17301,8 +17325,9 @@ const archetypeInitializedRef = useRef(false);
               )}
 
               {/* ═══ STAND DECISION CARD (left panel, v3.9.3) ═══ */}
+              {/* Piece 5: entire stand-decision surface gated behind STANDS_ENABLED (default OFF) */}
               {/* Loading skeleton — shows while terrain analysis is running */}
-              {alignedStands.length === 0 && isLoading && (
+              {STANDS_ENABLED && alignedStands.length === 0 && isLoading && (
                 <div className="px-3 pt-2 pb-3 border-t border-white/[0.04]">
                   <div className="flex items-center gap-2 mb-2.5">
                     <Target className="h-3 w-3 text-amber-500/70" />
@@ -17334,7 +17359,7 @@ const archetypeInitializedRef = useRef(false);
                   <p className="text-[9px] text-stone-500/60 text-center mt-2">Analyzing terrain — locking stand positions…</p>
                 </div>
               )}
-              {filteredStands.length > 0 && (() => {
+              {STANDS_ENABLED && filteredStands.length > 0 && (() => {
                 const top3 = filteredStands; // filtered by hunter type
                 const STAND_TITLES = ["#1 Stand", '#2 Stand', '#3 Stand', '#4 Stand', '#5 Stand'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
@@ -17630,7 +17655,7 @@ const archetypeInitializedRef = useRef(false);
                     <div className="bg-gradient-to-br from-amber-500/[0.10] to-orange-500/[0.06] border border-amber-500/20 rounded-xl p-3">
                       <p className="text-[11px] text-white/90 font-semibold">🔒 Full hunt plan locked</p>
                       <p className="text-[10px] text-stone-400 leading-relaxed mt-1 mb-2">
-                        Unlock stand locations, approach routes, and your complete Hunt Report for just $19.
+                        Unlock full terrain, flow &amp; corridor intelligence and your complete Hunt Report for just $19.
                       </p>
                       <button
                         onClick={() => setShowParcelPaywall(true)}
@@ -18198,7 +18223,8 @@ const archetypeInitializedRef = useRef(false);
               {/* ========== TERRAIN WORK MODE NOTICE ========== */}
               {TERRAIN_WORK_MODE && <TerrainWorkModeNotice />}
 
-              {/* ─── STAND SELECTION ─── */}
+              {/* ─── STAND SELECTION ─── (gated behind STANDS_ENABLED flag) */}
+              {STANDS_ENABLED && (<>
               <div className="px-3 pt-3 pb-1">
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
@@ -18538,6 +18564,7 @@ const archetypeInitializedRef = useRef(false);
                   })()}
                 </div>
               </div>
+              </>)}
 
 
               {/* ─── CORRIDORS & ALIGNMENT ─── */}
@@ -18638,7 +18665,8 @@ const archetypeInitializedRef = useRef(false);
               })()}
               {/* ========== ALIGNMENT PANEL (V2 - DISABLED DURING TERRAIN REFINEMENT) ========== */}
               {/* Phase 2: No anchored stands message */}
-              {!TERRAIN_WORK_MODE && noAnchoredStands && alignedStands.length === 0 && (
+              {/* Piece 5: gated behind STANDS_ENABLED (default OFF) */}
+              {STANDS_ENABLED && !TERRAIN_WORK_MODE && noAnchoredStands && alignedStands.length === 0 && (
                 <div className="border-b border-white/10 px-3 py-3">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-amber-400 text-sm">⚠</span>
@@ -18651,7 +18679,8 @@ const archetypeInitializedRef = useRef(false);
                   </p>
                 </div>
               )}
-              {!TERRAIN_WORK_MODE && (
+              {/* Piece 5: ranked stand list / stand cards gated behind STANDS_ENABLED (default OFF) */}
+              {STANDS_ENABLED && !TERRAIN_WORK_MODE && (
                <div className="relative">
                 <StandAlignmentPanel
                   alignedStands={alignedStands}
@@ -19193,7 +19222,8 @@ const archetypeInitializedRef = useRef(false);
               })()}
 
               {/* ══ v3.9.2 — Stand Decision Card (cycles Today → Alternate → Backup) ══ */}
-              {(() => {
+              {/* Piece 5: stand decision card gated behind STANDS_ENABLED (default OFF) */}
+              {STANDS_ENABLED && (() => {
                 const STAND_TITLES = ["#1 Stand", '#2 Stand', '#3 Stand', '#4 Stand', '#5 Stand'];
                 const cardIdx = Math.min(decisionCardIdx, top3.length - 1);
                 const stand = top3[cardIdx];
@@ -19565,9 +19595,8 @@ const archetypeInitializedRef = useRef(false);
                 <strong>Full access includes:</strong>
               </p>
               <ul style={{ color: '#94a3b8', fontSize: '12px', lineHeight: 1.8, margin: '8px 0 0', paddingLeft: '16px', textAlign: 'left' as const }}>
-                <li>Top 3 stand locations with approach routes</li>
-                <li>#1 Stand recommendation</li>
-                <li>Full terrain & corridor intelligence</li>
+                <li>Full terrain, flow & corridor intelligence</li>
+                <li>Convergence, bedding & saddle analysis</li>
                 <li>Downloadable Hunt Report PDF</li>
                 <li>Permanent access — never re-locked</li>
               </ul>
@@ -19867,7 +19896,7 @@ const archetypeInitializedRef = useRef(false);
                   </div>
                   <div className="flex items-center gap-2 text-sm text-white/80">
                     <CheckCircle className="w-4 h-4 text-green-400" />
-                    <span>Optimal stand sites</span>
+                    <span>Convergence &amp; saddle zones</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-white/80">
                     <CheckCircle className="w-4 h-4 text-green-400" />
@@ -19988,7 +20017,8 @@ const archetypeInitializedRef = useRef(false);
           <span className="text-white/60">Low</span>
         </div>
         
-        {selectedStand !== null && (
+        {/* Piece 5: stand-tied approach chip gated behind STANDS_ENABLED (default OFF) */}
+        {STANDS_ENABLED && selectedStand !== null && (
           <>
             <div className="h-5 w-px bg-white/20" />
             <div className="flex items-center gap-2">
@@ -19998,17 +20028,21 @@ const archetypeInitializedRef = useRef(false);
           </>
         )}
         
-        <div className="h-5 w-px bg-white/20" />
-        
-        {/* Stands */}
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px]" style={{ background: `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)`, boxShadow: `0 0 8px ${LAYER_COLORS.standGold}60` }}>⭐</span>
-          <span className="text-amber-300 font-medium">#1 Sit</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
-          <span>#2</span>
-        </div>
+        {/* Piece 5: stand legend chips gated behind STANDS_ENABLED (default OFF) */}
+        {STANDS_ENABLED && (
+          <>
+            <div className="h-5 w-px bg-white/20" />
+            {/* Stands */}
+            <div className="flex items-center gap-2">
+              <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px]" style={{ background: `linear-gradient(135deg, ${LAYER_COLORS.standGold}, #f59e0b)`, boxShadow: `0 0 8px ${LAYER_COLORS.standGold}60` }}>⭐</span>
+              <span className="text-amber-300 font-medium">#1 Sit</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.standHigh }} />
+              <span>#2</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* ========== ADJACENT PARCEL POPUP ========== */}

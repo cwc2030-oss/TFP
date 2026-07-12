@@ -19,6 +19,20 @@ export function syntheticFlowEnabled(): boolean {
 }
 
 /**
+ * Whether stand selection (the "where to sit" product surface) is enabled.
+ * Defaults OFF. Stand selection is off-message and being removed from the
+ * product; every stand map layer/source and all stand UI is gated behind this
+ * flag. Only the exact string '1' turns it back on (dev/debug only).
+ *
+ * To temporarily re-enable stands, set:
+ *   NEXT_PUBLIC_ENABLE_STANDS=1
+ * Any other value (including unset) keeps stands OFF.
+ */
+export function standsEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ENABLE_STANDS === '1';
+}
+
+/**
  * Hard cap on the acreage of real ridge/saddle spine data any single
  * whole-territory analysis will render flow for. Beyond this, the analysis
  * shows a clean "spin up a Hunt Zone here" empty-state instead of
