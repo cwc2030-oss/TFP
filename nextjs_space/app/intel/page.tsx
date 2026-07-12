@@ -7647,22 +7647,28 @@ const archetypeInitializedRef = useRef(false);
         contextPossibleSource.setData(clipContextToRing(tieredCorridorData.corridors_context_possible));
       }
 
+      // Containment: funnels + intrusion are flow-shaped polygons — clip to the same
+      // 300-ac ring so nothing bleeds past the gold edge on >300-ac parcels (true
+      // geometric intersection, fail-closed). No-op when the parcel is <= the ring.
+      const clipPolysToRingOrRaw = (fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection =>
+        huntZoneRingGeom ? clipPolygonsToRing(fc, huntZoneRingGeom) : fc;
+
       // Update hard funnels source
       const hardFunnelSource = map.getSource('tfp-funnels-hard') as mapboxgl.GeoJSONSource;
       if (hardFunnelSource) {
-        hardFunnelSource.setData(tieredCorridorData.funnels_hard);
+        hardFunnelSource.setData(clipPolysToRingOrRaw(tieredCorridorData.funnels_hard));
       }
 
       // Update slight funnels source
       const slightFunnelSource = map.getSource('tfp-funnels-slight') as mapboxgl.GeoJSONSource;
       if (slightFunnelSource) {
-        slightFunnelSource.setData(tieredCorridorData.funnels_slight);
+        slightFunnelSource.setData(clipPolysToRingOrRaw(tieredCorridorData.funnels_slight));
       }
 
       // Update intrusion overlay source
       const intrusionSource = map.getSource('tfp-intrusion-overlay') as mapboxgl.GeoJSONSource;
       if (intrusionSource) {
-        intrusionSource.setData(tieredCorridorData.intrusion_overlay);
+        intrusionSource.setData(clipPolysToRingOrRaw(tieredCorridorData.intrusion_overlay));
       }
 
       console.log('[MAP] Updated tiered corridor sources');
@@ -9422,13 +9428,55 @@ const archetypeInitializedRef = useRef(false);
         clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
       }
 
+      // Containment: build the 300-ac Hunt Zone ring for THIS parcel (same primitives
+      // as the ring draw — override-or-centroid center + acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+      // turf.circle steps:64/units:'meters'). On a >300-ac parcel the undragged clipGeom is
+      // the whole parcel, so flow-shaped sources (flow tiers + convergence) would bleed past
+      // the ring. We clip them to the ring so the default (undragged) view is fully contained.
+      // On a <=300-ac parcel the ring is larger than the parcel, so this is a no-op there.
+      // Built locally (not read from huntZoneRingGeomRef) to avoid a ref-timing race with the
+      // main source effect.
+      let flowRingGeom: GeoJSON.Polygon | null = null;
+      {
+        const flowRingParcel = parcelPolygonRef.current;
+        if (flowRingParcel && !(territoryModeRef.current && territoryParcelsRef.current.length > 1)) {
+          try {
+            let coords: number[] | undefined;
+            if (huntZoneCenterOverride &&
+                Number.isFinite(huntZoneCenterOverride[0]) && Number.isFinite(huntZoneCenterOverride[1])) {
+              coords = [huntZoneCenterOverride[0], huntZoneCenterOverride[1]];
+            } else {
+              const c = turf.centerOfMass(flowRingParcel as any);
+              coords = c?.geometry?.coordinates;
+            }
+            if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+              flowRingGeom = turf.circle(
+                [Number(coords[0]), Number(coords[1])],
+                acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+                { units: 'meters', steps: 64 }
+              ).geometry as GeoJSON.Polygon;
+            }
+          } catch (ringErr) {
+            console.warn('[MAP] Flow ring clip build failed', ringErr);
+          }
+        }
+      }
+
       // Phase B: Merge primary+secondary into unified classified source
       // Merge → classify (green/blue/black by likelihood) → filter water → smooth → clip
       const filteredPrimary = filterFlowLines(flowData?.flow_primary || emptyFC);
       const filteredSecondary = filterFlowLines(flowData?.flow_secondary || emptyFC);
       const merged = mergeAndClassifyFlows(filteredPrimary, filteredSecondary);
       const smoothed = smoothFlowFeatureCollection(merged, 0.7);
-      const clipped = clipLinesToParcel(smoothed, clipGeom, 50, 'tfp-flow-tiers');
+      let clipped = clipLinesToParcel(smoothed, clipGeom, 50, 'tfp-flow-tiers');
+      // Strict ring containment (zero bleed past the ring edge — no interpolation).
+      if (flowRingGeom) {
+        const beforeTiers = clipped.features.length;
+        clipped = clipLinesStrictToRing(clipped, flowRingGeom);
+        if (beforeTiers !== clipped.features.length) {
+          console.log('[MAP] Flow tiers ring clip:', beforeTiers, '→', clipped.features.length);
+        }
+      }
       
       // Update tier counts for UI badges
       const counts = countByTier(clipped);
@@ -9444,7 +9492,7 @@ const archetypeInitializedRef = useRef(false);
       const convergenceSource = map.getSource('tfp-flow-convergence') as mapboxgl.GeoJSONSource;
       if (convergenceSource) {
         const rawConvergence = flowData?.convergence_zones || emptyFC;
-        const filteredConvergence = nhdWaterBodiesRef.current?.length
+        let filteredConvergence: GeoJSON.FeatureCollection = nhdWaterBodiesRef.current?.length
           ? {
               ...rawConvergence,
               features: rawConvergence.features.filter((f: any) => {
@@ -9453,6 +9501,15 @@ const archetypeInitializedRef = useRef(false);
               }),
             }
           : rawConvergence;
+        // Containment: convergence markers are the core flow signal — clip to the ring
+        // so none render past the gold edge on >300-ac parcels (strict point containment).
+        if (flowRingGeom) {
+          const beforeConv = filteredConvergence.features.length;
+          filteredConvergence = clipPointsToRing(filteredConvergence, flowRingGeom);
+          if (beforeConv !== filteredConvergence.features.length) {
+            console.log('[MAP] Convergence ring clip:', beforeConv, '→', filteredConvergence.features.length);
+          }
+        }
         convergenceSource.setData(filteredConvergence);
       }
 
