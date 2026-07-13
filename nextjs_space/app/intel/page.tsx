@@ -2822,6 +2822,12 @@ const archetypeInitializedRef = useRef(false);
   const [readGateSubmitted, setReadGateSubmitted] = useState(false);
   // Placeholder Season Pass unlock in flight.
   const [unlockingSeason, setUnlockingSeason] = useState(false);
+  // PIECE 6a polish — when the Terrain Brain is locked (anonymous / reads spent),
+  // the map must render identical to the paid experience MINUS the flow scope.
+  // The only scope overlay that paints from parcelPolygon alone (independent of the
+  // analysis fetch) is the 300-ac Hunt Zone scope ring; readLocked suppresses it so
+  // the locked view shows base map + boundary + ownership only — no ring/flow.
+  const [readLocked, setReadLocked] = useState(false);
 
   // Fetch read status on mount + whenever auth/subscription changes.
   const refreshReadStatus = useCallback(async () => {
@@ -6210,6 +6216,9 @@ const archetypeInitializedRef = useRef(false);
       return;
     }
 
+    // PIECE 6a polish — clear any prior locked state; a gate block below re-sets it.
+    setReadLocked(false);
+
     // TERRITORY FIREWALL: When territory mode is active, runAnalysis must ONLY
     // execute if explicitly invoked by "Analyze Territory" / "Re-Align Territory"
     // which always set prefetchedParcelRef first (or have >1 territory parcels).
@@ -6360,6 +6369,7 @@ const archetypeInitializedRef = useRef(false);
           if (!gate.allow) {
             setProgress(0);
             setProgressStep('');
+            setReadLocked(true); // suppress the scope ring — locked = paid minus scope
             if (gate.status === 'anonymous') setShowReadSignupGate(true);
             else setShowParcelPaywall(true); // season-pass wall
             return; // finally{} resets flags; flow analysis is NOT fetched
@@ -6496,6 +6506,7 @@ const archetypeInitializedRef = useRef(false);
         if (!gate.allow) {
           setProgress(0);
           setProgressStep('');
+          setReadLocked(true); // suppress the scope ring — locked = paid minus scope
           if (gate.status === 'anonymous') setShowReadSignupGate(true);
           else setShowParcelPaywall(true); // season-pass wall
           return; // finally{} resets flags; flow analysis is NOT fetched
@@ -6721,7 +6732,9 @@ const archetypeInitializedRef = useRef(false);
       let huntZoneRingGeomMain: GeoJSON.Polygon | null = null;
       const huntzoneSource = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource;
       if (huntzoneSource) {
-        if (parcelPolygon) {
+        // PIECE 6a polish — when locked, the scope ring is absent (locked = paid
+        // minus scope). Skip building/painting it; the else clears to EMPTY_FC.
+        if (parcelPolygon && !readLocked) {
           try {
             // Piece 3: ring center = user-dragged override (snapped) when present,
             // otherwise the parcel centroid. When the override is set this effect
@@ -7129,7 +7142,7 @@ const archetypeInitializedRef = useRef(false);
     } catch (err) {
       console.error('[MAP] Error updating sources (non-fatal):', err);
     }
-  }, [layers, parcelPolygon, mapReady, huntZoneCenterOverride]);
+  }, [layers, parcelPolygon, mapReady, huntZoneCenterOverride, readLocked]);
 
   // ========== PIECE 3 — HUNT ZONE RING DRAG + SNAP ==========
   // Make the gold Hunt Zone ring grabbable and draggable. Hard debounce: while
