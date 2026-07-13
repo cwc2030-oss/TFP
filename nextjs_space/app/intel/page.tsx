@@ -3508,6 +3508,12 @@ const archetypeInitializedRef = useRef(false);
   const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
   // Ref to hold raw flow API response for terrain story re-generation
   const terrainFlowRawRef = useRef<any>(null);
+  // Mirror of ridgeSpineData so the (slow) terrain-flow effect can read the
+  // LATEST ridge extraction at completion instead of a stale closure value.
+  // Ridge-spines (~7-30s) almost always resolves before terrain-flow (~40-55s),
+  // so without this the story was generated with ridgeSpineData=null → Bench/
+  // Ridge/Saddle stuck at 0% even on rugged parcels. See PHASE 2a wiring fix.
+  const ridgeSpineDataRef = useRef<any>(null);
 
   // ========== AHA-MOMENT LEAD CAPTURE ("Save your Flow Score") ==========
   // Surfaced once per session to free/logged-out users right after the deer-flow
@@ -8457,7 +8463,7 @@ const archetypeInitializedRef = useRef(false);
                               (parcelPolygon?.properties as any)?.acreage ||
                               undefined;
           const storyAddress = qaParcel?.address || address || undefined;
-          const story = generateTerrainStory(result.data, storyAcreage, storyAddress, ridgeSpineData);
+          const story = generateTerrainStory(result.data, storyAcreage, storyAddress, ridgeSpineDataRef.current || ridgeSpineData);
           setTerrainStory(story);
           console.log('[TerrainStory] Generated:', story.headline);
         } else {
@@ -8489,7 +8495,7 @@ const archetypeInitializedRef = useRef(false);
                               (parcelPolygon?.properties as any)?.acreage ||
                               undefined;
           const synthAddress = qaParcel?.address || address || undefined;
-          const syntheticStory = generateTerrainStory(synthetic, synthAcreage, synthAddress, ridgeSpineData);
+          const syntheticStory = generateTerrainStory(synthetic, synthAcreage, synthAddress, ridgeSpineDataRef.current || ridgeSpineData);
           setTerrainStory(syntheticStory);
           console.log('[TerrainStory] Generated (synthetic):', syntheticStory.headline);
         }
@@ -8508,6 +8514,9 @@ const archetypeInitializedRef = useRef(false);
       cancelled = true;
     };
   }, [parcelPolygon]);
+
+  // Keep the ridge-data ref in sync so the slow terrain-flow effect reads current data.
+  useEffect(() => { ridgeSpineDataRef.current = ridgeSpineData; }, [ridgeSpineData]);
 
   // ========== TERRAIN STORY RE-GENERATION when ridgeSpineData arrives late ==========
   // The main terrain flow effect captures ridgeSpineData as a closure value.

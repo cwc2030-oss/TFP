@@ -128,13 +128,24 @@ export function computeStructuralDrivers(
   // is blended in, so flat ground no longer inherits a false ~0.64 Bench /
   // ~0.42 Ridge floor. When relief is measured the scores are real and marked
   // estimated:false, so the UI surfaces both rows as measured structure.
-  const ridgeCount = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
-    (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0);
+  const ridgeCountPrimary = ridgeSpineData?.metadata?.ridge_count_primary ?? 0;
+  const ridgeCountSecondary = ridgeSpineData?.metadata?.ridge_count_secondary ?? 0;
+  const ridgeCount = ridgeCountPrimary + ridgeCountSecondary;
   const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
   const totalRidgeLengthM = ridgeSpineData?.metadata?.total_ridge_length_m ?? 0;
 
   // Real, per-parcel measured relief signal (ridge/saddle extraction from DEM).
-  const hasMeasuredRelief = ridgeCount >= 1 || saddleCount >= 1;
+  // IMPORTANT — honest flat-terrain guard: a genuine structural parcel is
+  // indicated by a PRIMARY (dominant) ridge spine or by measured saddles. On
+  // flat cropland (e.g. 0–1% slope prime farmland) the DEM extraction can still
+  // surface a couple of weak SECONDARY spines inside the 400m analysis buffer —
+  // these are minor micro-relief, not real ridge structure. Counting them as
+  // measured relief made flat ground read "Ridge ~58% / Bench ~25%", which is
+  // dishonest. We therefore require at least one primary ridge OR at least one
+  // saddle before treating the parcel as having measured structure. Secondary
+  // spines still add magnitude once real structure is confirmed, but never
+  // establish it on their own.
+  const hasMeasuredRelief = ridgeCountPrimary >= 1 || saddleCount >= 1;
 
   // Real per-ridge DEM attributes (prominence + average flank slope).
   const allRidgeFeatures = [
@@ -265,11 +276,16 @@ export function generateTerrainStory(
   
   const drivers = computeStructuralDrivers(flowData, ridgeSpineData);
 
-  // Phase 1 honesty guard: real, per-parcel measured relief signal.
-  const ridgeCount = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
-    (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0);
+  // Phase 1 + 2a honesty guard: real, per-parcel measured relief signal.
+  // Structure must be established by a PRIMARY (dominant) ridge spine or by
+  // measured saddles — weak secondary spines picked up in the analysis buffer
+  // around flat cropland must NOT flip the parcel to "structured" (see the
+  // matching guard in computeStructuralDrivers). We pass the primary-ridge
+  // count into the confidence model so flat farmland with only secondary
+  // micro-relief honestly reads Low / "Gentle, low-relief terrain".
+  const ridgeCountPrimary = ridgeSpineData?.metadata?.ridge_count_primary ?? 0;
   const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
-  const reliefMeasured = ridgeCount >= 1 || saddleCount >= 1;
+  const reliefMeasured = ridgeCountPrimary >= 1 || saddleCount >= 1;
   
   // Determine primary and secondary movement drivers
   const { primaryDriver, secondaryDriver } = determineMovementDrivers(drivers, flowData);
@@ -284,7 +300,7 @@ export function generateTerrainStory(
   const narrative = generateNarrative(drivers, primaryDriver, secondaryDriver, keyOpportunity, parcelAcreage);
   
   // Determine confidence (gated on real measured relief, NOT the constant Bench)
-  const confidence = determineConfidence(drivers, flowData, ridgeCount, saddleCount);
+  const confidence = determineConfidence(drivers, flowData, ridgeCountPrimary, saddleCount);
   
   return {
     primaryDriver,
