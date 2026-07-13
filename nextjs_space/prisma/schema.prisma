@@ -29,6 +29,12 @@ model User {
   huntingReports   HuntingReport[]
   standSelections  StandSelection[]
   huntSessions     HuntSession[]
+  parcelReads      ParcelRead[]
+
+  // Piece 6a: placeholder Season Pass unlock (real Stripe billing lands in 6b).
+  // When true, the user has unlimited Terrain Brain reads + save. Pro/Pro Max/admin
+  // are treated as unlocked in code regardless of this flag.
+  readsUnlocked        Boolean  @default(false)
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
@@ -36,6 +42,26 @@ model User {
   stripeSubscriptionId String?   @unique
   subscriptionStatus   String?   @default("free")
   subscriptionEnds     DateTime?
+}
+
+// Piece 6a — Terrain Brain free-read meter.
+// One row per DISTINCT parcel/scope a user has read (fully analyzed) in a season.
+// A "read" = the first full Terrain Brain flow analysis of a distinct parcel.
+// Revisiting an already-read parcel does NOT create a new row (unique key), so it
+// never consumes another read. Season string comes from lib/reads.ts getCurrentSeason().
+model ParcelRead {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parcelKey  String                    // Regrid parcelId when available, else "ll:lat,lng"
+  season     String                    // e.g. "2026" — hunting season bucket
+  address    String?
+  lat        Float?
+  lng        Float?
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, parcelKey, season])
+  @@index([userId, season])
 }
 
 model MapLayer {

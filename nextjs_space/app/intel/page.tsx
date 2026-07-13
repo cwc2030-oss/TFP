@@ -2807,6 +2807,69 @@ const archetypeInitializedRef = useRef(false);
   const [showParcelPaywall, setShowParcelPaywall] = useState(false);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
 
+  // ═══ PIECE 6a — Terrain Brain free-read meter ═══
+  // readState mirrors /api/reads/status. `used` of `limit` reads consumed this
+  // season; `unlocked` = placeholder Season Pass / Pro; `authenticated` = signed in.
+  const [readState, setReadState] = useState<{ authenticated: boolean; unlocked: boolean; used: number; limit: number }>(
+    { authenticated: false, unlocked: false, used: 0, limit: 3 }
+  );
+  const readStateRef = useRef(readState);
+  useEffect(() => { readStateRef.current = readState; }, [readState]);
+  // Anonymous signup gate ("Sign up free — get 3 reads") + its email capture.
+  const [showReadSignupGate, setShowReadSignupGate] = useState(false);
+  const [readGateEmail, setReadGateEmail] = useState('');
+  const [readGateSubmitting, setReadGateSubmitting] = useState(false);
+  const [readGateSubmitted, setReadGateSubmitted] = useState(false);
+  // Placeholder Season Pass unlock in flight.
+  const [unlockingSeason, setUnlockingSeason] = useState(false);
+
+  // Fetch read status on mount + whenever auth/subscription changes.
+  const refreshReadStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reads/status', { cache: 'no-store' });
+      const d = await res.json();
+      setReadState({
+        authenticated: !!d.authenticated,
+        unlocked: !!d.unlocked,
+        used: typeof d.used === 'number' ? d.used : 0,
+        limit: typeof d.limit === 'number' ? d.limit : 3,
+      });
+    } catch { /* fail-open: leave prior state */ }
+  }, []);
+
+  // Consume/check a read for a resolved parcel right before the flow analysis.
+  // Returns the server decision; also syncs the meter. Fail-open on error.
+  const consumeReadGate = useCallback(async (
+    parcelObj: any, gLat: number, gLng: number,
+  ): Promise<{ allow: boolean; status: string }> => {
+    const pid = (parcelObj?.properties as any)?.parcelId;
+    const key = (pid && String(pid).length > 0)
+      ? String(pid)
+      : `ll:${gLat.toFixed(6)},${gLng.toFixed(6)}`;
+    try {
+      const res = await fetch('/api/reads/consume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parcelKey: key, address: activeAddressRef.current, lat: gLat, lng: gLng }),
+      });
+      const d = await res.json();
+      setReadState({
+        authenticated: d.authenticated !== false,
+        unlocked: !!d.unlocked,
+        used: typeof d.used === 'number' ? d.used : readStateRef.current.used,
+        limit: typeof d.limit === 'number' ? d.limit : readStateRef.current.limit,
+      });
+      return { allow: d.allow !== false, status: d.status || 'ok' };
+    } catch {
+      return { allow: true, status: 'error' }; // never block the hero on a hiccup
+    }
+  }, []);
+
+  // Load read status on mount + whenever auth/subscription changes.
+  useEffect(() => {
+    refreshReadStatus();
+  }, [sessionStatus, session?.user?.email, (session?.user as any)?.subscriptionStatus, refreshReadStatus]);
+
   // Refs for parcel access in closures (map event handlers, etc.)
   const parcelUnlockedRef = useRef(false);
   useEffect(() => { parcelUnlockedRef.current = parcelUnlocked; }, [parcelUnlocked]);
@@ -6290,7 +6353,19 @@ const archetypeInitializedRef = useRef(false);
         setParcelPolygon(syntheticParcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
         setProgress(20);
         setProgressStep('Using estimated boundary...');
-        
+
+        // ── PIECE 6a: read-meter gate (baseline boundary is already painted) ──
+        if (!(demoMode || heroParcel)) {
+          const gate = await consumeReadGate(syntheticParcel, currentLat, currentLng);
+          if (!gate.allow) {
+            setProgress(0);
+            setProgressStep('');
+            if (gate.status === 'anonymous') setShowReadSignupGate(true);
+            else setShowParcelPaywall(true); // season-pass wall
+            return; // finally{} resets flags; flow analysis is NOT fetched
+          }
+        }
+
         // Run analysis with synthetic parcel
         const result = await fetchTerrainAnalysis(
           {
@@ -6414,6 +6489,18 @@ const archetypeInitializedRef = useRef(false);
       setProgress(20);
       setProgressStep('Running terrain analysis...');
       console.log('[INTEL-DIAG] Got real parcel:', parcel.properties?.parcelId);
+
+      // ── PIECE 6a: read-meter gate (baseline boundary is already painted) ──
+      if (!(demoMode || heroParcel)) {
+        const gate = await consumeReadGate(parcel, currentLat, currentLng);
+        if (!gate.allow) {
+          setProgress(0);
+          setProgressStep('');
+          if (gate.status === 'anonymous') setShowReadSignupGate(true);
+          else setShowParcelPaywall(true); // season-pass wall
+          return; // finally{} resets flags; flow analysis is NOT fetched
+        }
+      }
 
       // Territory runs need longer timeout (multi-parcel DEM fetch + stitching)
       const analysisTimeout = isTerritoryRun ? 90_000 : 45_000;
@@ -15371,25 +15458,48 @@ const archetypeInitializedRef = useRef(false);
       <PurchaseTracker />
       <Toaster position="top-center" richColors />
 
-      {/* ═══ HUNT PLAN BANNER — top of viewport ═══ */}
-      {!isPro && summary && !isLoading && (
-        <div className="absolute top-0 left-0 right-0 z-40 flex items-center justify-center py-1.5 bg-gradient-to-r from-amber-600/90 to-orange-600/90 backdrop-blur-sm pointer-events-auto" style={{ paddingLeft: '60px', paddingRight: '60px' }}>
+      {/* ═══ TERRAIN BRAIN READS METER — top of viewport (Piece 6a) ═══ */}
+      {/* Free signed-in accounts see how many reads remain this season. Unlocked
+          (Season Pass / Pro / admin) and anonymous users don't see the meter. */}
+      {readState.authenticated && !readState.unlocked && summary && !isLoading && (
+        <div
+          className="absolute top-0 left-0 right-0 z-40 flex items-center justify-center py-1.5 backdrop-blur-sm pointer-events-auto cursor-pointer"
+          style={{
+            paddingLeft: '60px',
+            paddingRight: '60px',
+            background: readState.used >= readState.limit
+              ? 'linear-gradient(90deg, rgba(180,40,40,0.92), rgba(120,30,30,0.92))'
+              : 'linear-gradient(90deg, rgba(13,31,23,0.92), rgba(26,58,42,0.92))',
+            borderBottom: '1px solid rgba(201,168,76,0.4)',
+          }}
+          onClick={() => setShowParcelPaywall(true)}
+        >
           <p className="text-white text-[11px] font-medium tracking-wide">
-            ⚡ Unlock Your Full Hunt Plan — <strong>$19</strong> per parcel · No subscription required
+            {readState.used >= readState.limit ? (
+              <>🔒 Season locked — you&apos;ve used all <strong>{readState.limit}</strong> Terrain Brain reads · <span style={{ color: '#f5d572', textDecoration: 'underline' }}>Unlock the season</span></>
+            ) : (
+              <>🧠 <strong>{Math.max(0, readState.limit - readState.used)}</strong> of {readState.limit} Terrain Brain reads left this season · <span style={{ color: '#f5d572', textDecoration: 'underline' }}>Unlock unlimited</span></>
+            )}
           </p>
         </div>
       )}
 
-      {/* ═══ FLOATING CTA — bottom-right over map ═══ */}
-      {!isPro && !parcelUnlocked && summary && !isLoading && !showParcelPaywall && !territoryMode && (
+      {/* ═══ FLOATING CTA — Season Pass unlock (Piece 6a) ═══ */}
+      {/* Shown to free signed-in accounts; hidden once unlocked. Opens the
+          Season Pass wall (same modal used by the read wall). */}
+      {readState.authenticated && !readState.unlocked && summary && !isLoading && !showParcelPaywall && !territoryMode && (
         <button
           onClick={() => setShowParcelPaywall(true)}
-          className="absolute z-40 flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm px-5 py-3 rounded-full shadow-xl shadow-amber-900/40 transition-all hover:scale-105"
-          style={{ bottom: '24px', left: '50%', transform: 'translateX(-50%)' }}
+          className="absolute z-40 flex items-center gap-2 text-white font-bold text-sm px-5 py-3 rounded-full shadow-xl transition-all hover:scale-105"
+          style={{
+            bottom: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'linear-gradient(135deg, #b8892b, #c9a84c)',
+            boxShadow: '0 8px 24px rgba(120,90,20,0.45)',
+          }}
         >
-          {STANDS_ENABLED && filteredStands.length > 0
-            ? `🎯 ${filteredStands.length} Stands Found — Unlock $19`
-            : '🎯 Get My Hunt Plan — $19'}
+          🔓 Unlock the Season — Unlimited Ground
         </button>
       )}
 
@@ -19587,70 +19697,198 @@ const archetypeInitializedRef = useRef(false);
             textAlign: 'center' as const,
             boxShadow: '0 24px 80px rgba(0,0,0,0.6), 0 0 40px rgba(245,158,11,0.08)',
           }}>
-            <div style={{ fontSize: '40px', marginBottom: '8px' }}>🎯</div>
-            <h2 style={{ color: '#f59e0b', fontSize: '22px', fontWeight: 700, margin: '0 0 8px' }}>
-              Unlock Your Hunt Plan
+            <div style={{ fontSize: '40px', marginBottom: '8px' }}>🔓</div>
+            <h2 style={{ color: '#c9a84c', fontSize: '22px', fontWeight: 700, margin: '0 0 8px' }}>
+              {readState.used >= readState.limit
+                ? `You've read ${readState.used}.`
+                : 'Unlock the Season'}
             </h2>
-            <p style={{ color: '#94a3b8', fontSize: '13px', lineHeight: 1.6, margin: '0 0 6px' }}>
-              {activeAddress || 'This parcel'} · {activeAcres?.toFixed(0) || '—'} acres
+            <p style={{ color: '#e2e8f0', fontSize: '15px', lineHeight: 1.5, margin: '0 0 6px', fontWeight: 600 }}>
+              Unlock the season — unlimited ground.
             </p>
-            <div style={{ background: 'rgba(245,158,11,0.08)', borderRadius: '10px', padding: '14px 16px', margin: '16px 0' }}>
-              <p style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: 1.6, margin: 0 }}>
-                <strong>Full access includes:</strong>
-              </p>
-              <ul style={{ color: '#94a3b8', fontSize: '12px', lineHeight: 1.8, margin: '8px 0 0', paddingLeft: '16px', textAlign: 'left' as const }}>
-                <li>Full terrain, flow & corridor intelligence</li>
-                <li>Convergence, bedding & saddle analysis</li>
-                <li>Downloadable Hunt Report PDF</li>
-                <li>Permanent access — never re-locked</li>
+            <p style={{ color: '#94a3b8', fontSize: '12px', lineHeight: 1.6, margin: '0 0 4px' }}>
+              The map, boundaries &amp; ownership stay free. The Season Pass unlocks
+              every Terrain Brain read.
+            </p>
+            <div style={{ background: 'rgba(201,168,76,0.08)', borderRadius: '10px', padding: '14px 16px', margin: '16px 0' }}>
+              <ul style={{ color: '#cbd5e1', fontSize: '12px', lineHeight: 1.9, margin: 0, paddingLeft: '16px', textAlign: 'left' as const }}>
+                <li><strong>Unlimited</strong> Terrain Brain reads — every parcel, all season</li>
+                <li>Full flow, corridor, convergence &amp; bedding intelligence</li>
+                <li>Save your ground &amp; revisit any read free</li>
               </ul>
             </div>
             <button
-              onClick={handlePurchaseParcel}
-              disabled={purchaseLoading}
+              onClick={async () => {
+                if (unlockingSeason) return;
+                setUnlockingSeason(true);
+                try {
+                  const res = await fetch('/api/reads/unlock', { method: 'POST' });
+                  if (res.ok) {
+                    setReadState((prev) => ({ ...prev, unlocked: true }));
+                    await refreshReadStatus();
+                    setShowParcelPaywall(false);
+                    toast.success('Season unlocked — unlimited ground.');
+                    // Re-run the read now that the wall is lifted so the flow renders.
+                    setTimeout(() => runAnalysis(), 150);
+                  } else {
+                    toast.error('Could not unlock right now — please try again.');
+                  }
+                } catch {
+                  toast.error('Could not unlock right now — please try again.');
+                } finally {
+                  setUnlockingSeason(false);
+                }
+              }}
+              disabled={unlockingSeason}
               style={{
-                background: 'linear-gradient(135deg, #d97706, #b45309)',
+                background: 'linear-gradient(135deg, #b8892b, #c9a84c)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '10px',
                 padding: '14px 28px',
                 fontSize: '16px',
                 fontWeight: 700,
-                cursor: purchaseLoading ? 'wait' : 'pointer',
+                cursor: unlockingSeason ? 'wait' : 'pointer',
                 width: '100%',
                 marginBottom: '10px',
-                opacity: purchaseLoading ? 0.7 : 1,
-                boxShadow: '0 4px 20px rgba(217,119,6,0.3)',
+                opacity: unlockingSeason ? 0.7 : 1,
+                boxShadow: '0 4px 20px rgba(120,90,20,0.35)',
               }}
             >
-              {purchaseLoading ? 'Opening checkout…' : 'Unlock This Parcel — $19'}
+              {unlockingSeason ? 'Unlocking…' : 'Unlock the Season'}
             </button>
-            <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 12px' }}>
-              One-time purchase · Instant access · No subscription
+            <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 4px' }}>
+              Season Pass · unlimited reads all season
             </p>
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px', marginTop: '4px' }}>
-              <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 8px' }}>
-                Want unlimited access to all parcels?
-              </p>
-              <button
-                onClick={() => { setShowParcelPaywall(false); handleUpgrade('annual', 'pro'); }}
-                style={{
-                  background: 'transparent',
-                  color: '#f59e0b',
-                  border: '1px solid rgba(245,158,11,0.3)',
-                  borderRadius: '8px',
-                  padding: '8px 20px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Go Pro — $99/yr (all parcels unlocked)
-              </button>
-            </div>
             <button
               onClick={() => setShowParcelPaywall(false)}
               style={{ background: 'transparent', color: '#475569', border: 'none', fontSize: '12px', cursor: 'pointer', marginTop: '12px' }}
+            >
+              Maybe Later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ ANONYMOUS SIGNUP GATE — Piece 6a (email capture → free account) ═══ */}
+      {showReadSignupGate && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowReadSignupGate(false); }}
+        >
+          <div style={{
+            background: 'linear-gradient(135deg, #0d1f17, #1a3a2a)',
+            border: '1px solid rgba(201,168,76,0.4)',
+            borderRadius: '16px',
+            padding: '30px 34px',
+            maxWidth: '430px',
+            width: '92%',
+            textAlign: 'center' as const,
+            boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ fontSize: '38px', marginBottom: '6px' }}>🧠</div>
+            <h2 style={{ color: '#c9a84c', fontSize: '21px', fontWeight: 700, margin: '0 0 8px' }}>
+              Sign up free — get 3 Terrain Brain reads this season.
+            </h2>
+            <p style={{ color: '#cbd5e1', fontSize: '13px', lineHeight: 1.6, margin: '0 0 4px' }}>
+              The map, boundaries &amp; ownership are always free. Create a free
+              account to unlock the Terrain Brain read for this ground.
+            </p>
+            {readGateSubmitted ? (
+              <div style={{ background: 'rgba(201,168,76,0.1)', borderRadius: '10px', padding: '18px 16px', margin: '18px 0 6px' }}>
+                <p style={{ color: '#f5d572', fontSize: '14px', fontWeight: 600, margin: '0 0 4px' }}>You're in — taking you to sign up…</p>
+                <p style={{ color: '#94a3b8', fontSize: '12px', margin: 0 }}>Finish creating your free account to start reading ground.</p>
+              </div>
+            ) : (
+              <>
+                <div style={{ margin: '18px 0 8px' }}>
+                  <input
+                    type="email"
+                    value={readGateEmail}
+                    onChange={(e) => setReadGateEmail(e.target.value)}
+                    placeholder="you@email.com"
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') { (document.getElementById('read-gate-submit') as HTMLButtonElement)?.click(); } }}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(201,168,76,0.35)',
+                      background: 'rgba(0,0,0,0.35)',
+                      color: '#fff',
+                      fontSize: '14px',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+                <button
+                  id="read-gate-submit"
+                  disabled={readGateSubmitting}
+                  onClick={async () => {
+                    const email = readGateEmail.trim();
+                    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                      toast.error('Please enter a valid email address.');
+                      return;
+                    }
+                    setReadGateSubmitting(true);
+                    try {
+                      await fetch('/api/flow-score/lead', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          email,
+                          address: activeAddress || undefined,
+                          lat: activeLat,
+                          lng: activeLng,
+                          county: ahaCounty || undefined,
+                          state: ahaState || undefined,
+                          source: 'read_gate',
+                        }),
+                      });
+                      try { trackGenerateLead({ county: ahaCounty, state: ahaState, source: 'read_gate', address: activeAddress || '' }); } catch { /* noop */ }
+                    } catch { /* fail-open: still send them to signup */ }
+                    setReadGateSubmitted(true);
+                    // Route to signup, preserving this parcel so the read resumes after auth.
+                    setTimeout(() => {
+                      try {
+                        const url = new URL(window.location.href);
+                        const callback = encodeURIComponent(url.pathname + url.search);
+                        window.location.href = `/signup?email=${encodeURIComponent(email)}&callbackUrl=${callback}`;
+                      } catch {
+                        window.location.href = '/signup';
+                      }
+                    }, 900);
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, #b8892b, #c9a84c)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    padding: '13px 28px',
+                    fontSize: '15px',
+                    fontWeight: 700,
+                    cursor: readGateSubmitting ? 'wait' : 'pointer',
+                    width: '100%',
+                    opacity: readGateSubmitting ? 0.7 : 1,
+                    boxShadow: '0 4px 20px rgba(120,90,20,0.35)',
+                  }}
+                >
+                  {readGateSubmitting ? 'Setting up…' : 'Get my 3 free reads'}
+                </button>
+                <p style={{ color: '#7c8a99', fontSize: '11px', margin: '12px 0 0' }}>
+                  Already have an account?{' '}
+                  <a
+                    href={(() => { try { const u = new URL(window.location.href); return `/login?callbackUrl=${encodeURIComponent(u.pathname + u.search)}`; } catch { return '/login'; } })()}
+                    style={{ color: '#f5d572', textDecoration: 'underline' }}
+                  >
+                    Sign in
+                  </a>
+                </p>
+              </>
+            )}
+            <button
+              onClick={() => setShowReadSignupGate(false)}
+              style={{ background: 'transparent', color: '#475569', border: 'none', fontSize: '12px', cursor: 'pointer', marginTop: '14px' }}
             >
               Maybe Later
             </button>

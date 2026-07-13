@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Only accept known sources; default to the original flow-score gate.
-    const allowedSources = ['flow_score', 'terrain_brain_aha'];
+    const allowedSources = ['flow_score', 'terrain_brain_aha', 'read_gate'];
     const leadSource = allowedSources.includes(source) ? source : 'flow_score';
 
     const normalizedEmail = email.trim().toLowerCase();
