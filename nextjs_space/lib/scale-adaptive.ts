@@ -65,8 +65,8 @@ const SMALL_SPEC: ModeSpec = {
   corridorPrimaryWidth: 1.5,
   corridorPossibleWidth: 1.2,
   drawWidth: 1.5,
-  flowPrimaryWidth: 1.0,
-  flowOpacity: 0.55,
+  flowPrimaryWidth: 1.9,   // paint: boosted from 1.0 for bolder, more believable flow lines
+  flowOpacity: 0.82,       // paint: boosted from 0.55 so green reads confident, not washed-out
   storyLabelFontSize: 14,
 };
 
@@ -76,8 +76,8 @@ const MEDIUM_SPEC: ModeSpec = {
   corridorPrimaryWidth: 2.5,
   corridorPossibleWidth: 2.0,
   drawWidth: 2.0,
-  flowPrimaryWidth: 1.5,
-  flowOpacity: 0.80,
+  flowPrimaryWidth: 2.6,   // paint: boosted from 1.5
+  flowOpacity: 0.92,       // paint: boosted from 0.80
   storyLabelFontSize: 12,
 };
 
@@ -87,8 +87,8 @@ const LARGE_SPEC: ModeSpec = {
   corridorPrimaryWidth: 3.5,
   corridorPossibleWidth: 3.0,
   drawWidth: 2.5,
-  flowPrimaryWidth: 2.5,
-  flowOpacity: 0.95,
+  flowPrimaryWidth: 3.4,   // paint: boosted from 2.5
+  flowOpacity: 0.98,       // paint: boosted from 0.95
   storyLabelFontSize: 10,
 };
 

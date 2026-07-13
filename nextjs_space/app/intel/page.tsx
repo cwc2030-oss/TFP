@@ -5078,25 +5078,28 @@ const archetypeInitializedRef = useRef(false);
       map.setPaintProperty('tfp-funnels-lines-draws', 'line-width', sp.drawWidth);
     }
 
-    // --- Phase B: Flow tier widths (green/blue/black) ---
-    const tierLayers: [string, number][] = [
-      ['tfp-flow-green', FLOW_TIER_WIDTH_MULT.green],
-      ['tfp-flow-blue', FLOW_TIER_WIDTH_MULT.blue],
-      ['tfp-flow-black', FLOW_TIER_WIDTH_MULT.black],
+    // --- Phase B: Flow tier widths + tier-honest opacity (green/blue/black) ---
+    // oMult keeps tier honesty: green fully opaque/bold, blue clearly present,
+    // black visibly lighter but never invisible. (paint-only)
+    const tierLayers: [string, number, number][] = [
+      ['tfp-flow-green', FLOW_TIER_WIDTH_MULT.green, 1.0],
+      ['tfp-flow-blue', FLOW_TIER_WIDTH_MULT.blue, 0.86],
+      ['tfp-flow-black', FLOW_TIER_WIDTH_MULT.black, 0.66],
     ];
-    for (const [layerId, wMult] of tierLayers) {
+    for (const [layerId, wMult, oMult] of tierLayers) {
       if (map.getLayer(layerId)) {
         const w = sp.flowPrimaryWidth * wMult;
         map.setPaintProperty(layerId, 'line-width',
           ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.3, w * 0.5, 0.5, w * 0.73, 0.75, w]);
+            0.3, w * 0.72, 0.5, w * 1.0, 0.75, w * 1.35]);
+        const o = sp.flowOpacity * oMult;
         map.setPaintProperty(layerId, 'line-opacity',
           ['interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.3, sp.flowOpacity * 0.6, 0.5, sp.flowOpacity * 0.8, 0.75, sp.flowOpacity]);
+            0.3, Math.min(1, o * 0.82), 0.5, Math.min(1, o * 0.92), 0.75, Math.min(1, o)]);
       }
     }
     if (map.getLayer('tfp-flow-tiers-glow')) {
-      map.setPaintProperty('tfp-flow-tiers-glow', 'line-opacity', sp.flowOpacity * 0.22);
+      map.setPaintProperty('tfp-flow-tiers-glow', 'line-opacity', Math.min(0.6, sp.flowOpacity * 0.42));
     }
 
     // --- Stand marker sizes (scale multiplier applied to rank-based radii) ---
@@ -10137,24 +10140,26 @@ const archetypeInitializedRef = useRef(false);
       // Phase B: Green/Blue/Black flow tier visibility
       // Each tier has independent visibility (decoupled from isPressureMode so runs show on startup)
       const spFlow = scaleParamsRef.current;
-      const tierVisMap: [string, boolean, number][] = [
-        ['tfp-flow-green', flowVisibility.flowGreen, FLOW_TIER_WIDTH_MULT.green],
-        ['tfp-flow-blue', flowVisibility.flowBlue, FLOW_TIER_WIDTH_MULT.blue],
-        ['tfp-flow-black', flowVisibility.flowBlack, FLOW_TIER_WIDTH_MULT.black],
+      // oMult keeps tier honesty: green boldest, blue clearly present,
+      // black visibly lighter but never invisible. (paint-only)
+      const tierVisMap: [string, boolean, number, number][] = [
+        ['tfp-flow-green', flowVisibility.flowGreen, FLOW_TIER_WIDTH_MULT.green, 1.0],
+        ['tfp-flow-blue', flowVisibility.flowBlue, FLOW_TIER_WIDTH_MULT.blue, 0.86],
+        ['tfp-flow-black', flowVisibility.flowBlack, FLOW_TIER_WIDTH_MULT.black, 0.66],
       ];
-      for (const [layerId, tierOn, wMult] of tierVisMap) {
+      for (const [layerId, tierOn, wMult, oMult] of tierVisMap) {
         if (!map.getLayer(layerId)) continue;
         if (tierOn) {
           map.setLayoutProperty(layerId, 'visibility', 'visible');
           const fw = spFlow.flowPrimaryWidth * wMult;
           map.setPaintProperty(layerId, 'line-width', [
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.3, fw * 0.7, 0.5, fw * 1.0, 0.75, fw * 1.4
+            0.3, fw * 0.72, 0.5, fw * 1.0, 0.75, fw * 1.35
           ]);
-          const fo = spFlow.flowOpacity;
+          const fo = spFlow.flowOpacity * oMult;
           map.setPaintProperty(layerId, 'line-opacity', clampOpacityExpr([
             'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-            0.3, fo * 0.7, 0.5, fo * 0.85, 0.75, fo
+            0.3, fo * 0.82, 0.5, fo * 0.92, 0.75, fo
           ]));
         } else {
           fadeLayerOut(map, layerId, 'line-opacity', FADE_OUT);
@@ -10164,7 +10169,7 @@ const archetypeInitializedRef = useRef(false);
       const _anyOn = flowVisibility.flowGreen || flowVisibility.flowBlue || flowVisibility.flowBlack;
       if (map.getLayer('tfp-flow-tiers-glow')) {
         if (_anyOn) {
-          fadeLayerIn(map, 'tfp-flow-tiers-glow', 0.22, 'line-opacity', FADE_IN);
+          fadeLayerIn(map, 'tfp-flow-tiers-glow', 0.42, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-tiers-glow', 'line-opacity', FADE_OUT);
         }
@@ -11416,10 +11421,10 @@ const archetypeInitializedRef = useRef(false);
               ],
               'line-width': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 5, 0.75, 8
+                0.3, 7, 0.75, 13
               ],
-              'line-opacity': 0.18,
-              'line-blur': 2.5,
+              'line-opacity': 0.32,
+              'line-blur': 3.2,
             },
           });
           
@@ -11437,7 +11442,7 @@ const archetypeInitializedRef = useRef(false);
               ],
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.1, 0.35, 0.3, 0.55
+                0.1, 0.42, 0.3, 0.60
               ],
               'line-dasharray': [8, 4],
             },
@@ -11457,7 +11462,7 @@ const archetypeInitializedRef = useRef(false);
               ],
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.3, 0.50, 0.5, 0.65, 0.66, 0.80
+                0.3, 0.62, 0.5, 0.78, 0.66, 0.90
               ],
             },
           });
@@ -11476,7 +11481,7 @@ const archetypeInitializedRef = useRef(false);
               ],
               'line-opacity': [
                 'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
-                0.5, 0.55, 0.66, 0.70, 0.85, 0.85
+                0.5, 0.75, 0.66, 0.88, 0.85, 0.98
               ],
             },
           });

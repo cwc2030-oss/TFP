@@ -22,8 +22,8 @@ export const FLOW_TIER_THRESHOLDS = {
 
 /** Tier colors — chosen for satellite imagery readability */
 export const FLOW_TIER_COLORS = {
-  green: '#2D6A4F',       // Deep forest green
-  greenGlow: '#40916C',   // Lighter green glow
+  green: '#2E9E5B',       // Brighter confident green (paint boost)
+  greenGlow: '#5BD68F',   // Bright green glow (paint boost)
   blue: '#3B6FA0',        // Steel blue
   blueGlow: '#5A8FC0',    // Lighter blue glow
   black: '#1A1A1A',       // Near-black (existing)
@@ -32,9 +32,9 @@ export const FLOW_TIER_COLORS = {
 
 /** Width multipliers relative to base flowPrimaryWidth from scale-adaptive */
 export const FLOW_TIER_WIDTH_MULT = {
-  green: 1.0,    // Full width
-  blue: 0.75,    // 75%
-  black: 0.55,   // 55%
+  green: 1.2,    // Boldest (paint boost)
+  blue: 0.85,    // Clearly present
+  black: 0.62,   // Visibly lighter but not invisible
 } as const;
 
 /**
