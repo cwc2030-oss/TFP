@@ -240,8 +240,8 @@ function NavLink({
       href={href}
       className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
         active
-          ? "text-emerald-700 bg-emerald-50"
-          : "text-stone-600 hover:text-emerald-700 hover:bg-stone-50"
+          ? "text-emerald-800 bg-emerald-50"
+          : "text-stone-700 hover:text-emerald-700 hover:bg-stone-50"
       }`}
     >
       {children}
@@ -262,7 +262,7 @@ function MobileNavLink({
     <Link
       href={href}
       onClick={onClick}
-      className="block px-4 py-2 text-stone-600 hover:bg-stone-100 rounded-lg"
+      className="block px-4 py-2 text-stone-700 hover:bg-stone-100 rounded-lg"
     >
       {children}
     </Link>

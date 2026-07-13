@@ -31,6 +31,7 @@ import { useFlowAnimation } from '@/hooks/intel/useFlowAnimation';
 import { animatePaint, fadeLayerIn, fadeLayerOut, fadeToggleLayers, staggeredFadeToggle, gracefulClear, cancelAllAnimations } from '@/lib/map-animation';
 import { trackTerritoryTeaserShown, trackTerritoryTeaserClicked, trackGenerateLead } from '@/lib/gtag';
 import { reconcileVisibility, type ReconcileState } from '@/lib/layer-visibility';
+import { BUILD_STAMP } from '@/lib/build-stamp';
 import { SeasonPanel, SEASONS } from '@/components/intel/SeasonPanel';
 import { WindCompass, WIND_DIRECTIONS } from '@/components/intel/WindCompass';
 import { TerrainWorkModeNotice } from '@/components/intel/TerrainWorkModeNotice';
@@ -2299,6 +2300,14 @@ export default function DeerIntelPage() {
       <Suspense fallback={<LoadingFallback />}>
         <DeerIntelContent />
       </Suspense>
+      {/* Always-visible build stamp (not debug-gated) so anyone can confirm
+          which build they're on at a glance. */}
+      <div
+        className="fixed bottom-1.5 right-2 z-[9999] pointer-events-none select-none rounded bg-black/55 px-1.5 py-0.5 font-mono text-[10px] leading-none tracking-tight text-white/70 backdrop-blur-sm"
+        aria-label={BUILD_STAMP}
+      >
+        {BUILD_STAMP}
+      </div>
     </IntelErrorBoundary>
   );
 }
