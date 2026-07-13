@@ -3,13 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 
 const STATUS_MESSAGES = [
-  { text: 'Terrain Brain · reading elevation data…', until: 8 },
-  { text: 'Terrain Brain · mapping ridges & corridors…', until: 16 },
-  { text: 'Terrain Brain · calculating deer flow…', until: 24 },
-  { text: 'Terrain Brain · placing stand locations…', until: 30 },
+  { text: 'Terrain Brain · reading terrain…', until: 8 },
+  { text: 'Terrain Brain · mapping ridges & funnels…', until: 16 },
+  { text: 'Terrain Brain · mapping deer flow…', until: 24 },
+  { text: 'Terrain Brain · marking convergence zones…', until: 30 },
 ];
 const ROLLOVER_MESSAGES = [
-  'Terrain Brain · assembling your territory…',
+  'Terrain Brain · refining deer flow…',
   'Terrain Brain · merging terrain features…',
   'Terrain Brain · crunching the big picture…',
 ];
@@ -78,7 +78,7 @@ export default function TerrainLoadingBar({ visible }: TerrainLoadingBarProps) {
           <p className="text-[9px] text-stone-500 leading-relaxed">
             {elapsed < 30
               ? 'A single parcel takes ~30 seconds'
-              : 'Large territory — this can take a minute or two'}
+              : 'Large area — this can take a minute or two'}
           </p>
         )}
       </div>
