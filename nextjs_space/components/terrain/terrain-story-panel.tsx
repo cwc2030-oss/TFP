@@ -111,12 +111,16 @@ export function StructuralDriversGrid({
   compact?: boolean;
   showLabels?: boolean;
 }) {
+  // PHASE 1 honesty guard: hide estimated (constant-blended) drivers entirely.
+  // Bench & Ridge are not yet per-parcel measured, so we never render them.
+  // Only real, measured/derived drivers (Saddle, Convergence) are shown until
+  // Phase 2a derives Bench & Ridge from the parcel DEM (then estimated=false).
   const driverList = [
     { key: 'benchSupport', driver: drivers.benchSupport },
     { key: 'saddleInfluence', driver: drivers.saddleInfluence },
     { key: 'ridgeSpineSupport', driver: drivers.ridgeSpineSupport },
     { key: 'convergenceDensity', driver: drivers.convergenceDensity },
-  ];
+  ].filter(({ driver }) => !driver.estimated);
   
   if (compact) {
     return (
@@ -358,12 +362,13 @@ export function TerrainStoryExportLegend({
 }) {
   if (!story) return null;
   
+  // PHASE 1 honesty guard: hide estimated (constant-blended) drivers entirely.
   const driverList = [
     { driver: story.drivers.benchSupport, label: 'Bench Support' },
     { driver: story.drivers.saddleInfluence, label: 'Saddle Influence' },
     { driver: story.drivers.ridgeSpineSupport, label: 'Ridge/Spine' },
     { driver: story.drivers.convergenceDensity, label: 'Convergence' },
-  ];
+  ].filter(({ driver }) => !driver.estimated);
   
   return (
     <div className="bg-stone-900/95 border border-stone-700/50 rounded-xl p-4 max-w-sm">

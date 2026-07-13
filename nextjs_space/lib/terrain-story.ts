@@ -100,6 +100,8 @@ const MOVEMENT_DRIVER_LABELS: Record<MovementDriver, string> = {
 export function computeStructuralDrivers(
   flowData: TerrainFlowResponse | null,
   ridgeSpineData?: {
+    ridges_primary?: GeoJSON.FeatureCollection;
+    ridges_secondary?: GeoJSON.FeatureCollection;
     saddle_nodes?: GeoJSON.FeatureCollection;
     metadata?: {
       saddle_count?: number;
@@ -118,31 +120,71 @@ export function computeStructuralDrivers(
   // Extract weights used in analysis
   const weights = metadata.weights || {};
   
-  // ========== PHASE 1 HONESTY GUARD ==========
-  // Bench & Ridge scores are currently blended from GLOBAL weight constants
-  // (TERRAIN_FLOW_WEIGHTS.bench_likelihood / spine_proximity), NOT from direct
-  // per-parcel DEM measurement. On flat/low-relief ground that constant floor
-  // otherwise pins Bench ~0.64 and Ridge ~0.42+, producing a false "confident"
-  // ridge story identical to genuine Ozark ridge parcels.
-  //
-  // Until Phase 2 (real per-parcel DEM grids) we:
-  //   1. Zero Bench & Ridge when there is NO measured relief (0 ridges, 0 saddles)
-  //      so flat ground honestly reads minimal structure.
-  //   2. Mark Bench & Ridge as `estimated` whenever they carry the constant blend,
-  //      so the UI never presents them as measured structure.
+  // ========== PHASE 2a: MEASURED Bench & Ridge from real per-parcel DEM ==========
+  // Bench & Ridge are now derived DIRECTLY from the real ridge/saddle features
+  // extracted from the per-parcel USGS 3DEP DEM (Modal ridge endpoint) — ridge
+  // count, total ridge length, per-ridge prominence (ft) and per-ridge average
+  // slope (deg). No global weight constant (bench_likelihood / spine_proximity)
+  // is blended in, so flat ground no longer inherits a false ~0.64 Bench /
+  // ~0.42 Ridge floor. When relief is measured the scores are real and marked
+  // estimated:false, so the UI surfaces both rows as measured structure.
   const ridgeCount = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
     (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0);
   const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
+  const totalRidgeLengthM = ridgeSpineData?.metadata?.total_ridge_length_m ?? 0;
 
   // Real, per-parcel measured relief signal (ridge/saddle extraction from DEM).
   const hasMeasuredRelief = ridgeCount >= 1 || saddleCount >= 1;
 
-  // --- Bench support (constant-blended → ESTIMATED until Phase 2) ---
-  const benchWeight = weights.bench_likelihood || 0;
-  const benchRidgeBucket = ridgeCount >= 4 ? 0.4 : ridgeCount >= 2 ? 0.25 : ridgeCount >= 1 ? 0.1 : 0;
+  // Real per-ridge DEM attributes (prominence + average flank slope).
+  const allRidgeFeatures = [
+    ...(ridgeSpineData?.ridges_primary?.features ?? []),
+    ...(ridgeSpineData?.ridges_secondary?.features ?? []),
+  ];
+  const ridgesWithSlope = allRidgeFeatures.filter(
+    f => (f.properties as any)?.avgSlopeDeg != null
+  );
+  const avgProminenceFt = allRidgeFeatures.length
+    ? allRidgeFeatures.reduce(
+        (s, f) => s + Math.max(0, (f.properties as any)?.prominenceFt ?? 0), 0
+      ) / allRidgeFeatures.length
+    : 0;
+  // Bench-forming flanks: ridge segments whose measured average slope sits in
+  // the shelf-favorable band (4–16°). Steep crests (>16°) rarely hold benches.
+  const benchFavorableRidges = ridgesWithSlope.filter(f => {
+    const s = (f.properties as any).avgSlopeDeg as number;
+    return s >= 4 && s <= 16;
+  }).length;
+
+  // --- Ridge / spine support (MEASURED from real ridge extraction) ---
+  //   count: how many distinct spines were extracted
+  //   length: how far the measured spine network extends (≥~1km → well-developed)
+  //   prominence: how much real vertical relief the spines carry (≥~60ft → strong)
+  const ridgeCountComponent =
+    ridgeCount >= 6 ? 0.55 :
+    ridgeCount >= 4 ? 0.45 :
+    ridgeCount >= 2 ? 0.32 :
+    ridgeCount >= 1 ? 0.20 : 0;
+  const ridgeLengthComponent = Math.min(0.25, (totalRidgeLengthM / 1000) * 0.25);
+  const ridgeProminenceComponent = Math.min(0.20, (avgProminenceFt / 60) * 0.20);
+  const ridgeSpineSupport = hasMeasuredRelief
+    ? Math.min(1, ridgeCountComponent + ridgeLengthComponent + ridgeProminenceComponent)
+    : 0; // no measured ridges → honest 0 (flat / low-relief ground)
+
+  // --- Bench support (MEASURED from real ridge-flank geometry) ---
+  // Benches are shelves on ridge flanks; prevalence scales with how many
+  // measured ridges present shelf-favorable slopes plus the extent of flank.
+  // When per-ridge slope data is unavailable, fall back to a ridge-count proxy
+  // so real ridge parcels still register measured bench structure.
+  const benchFlankComponent = ridgesWithSlope.length > 0
+    ? (benchFavorableRidges >= 4 ? 0.55 :
+       benchFavorableRidges >= 2 ? 0.38 :
+       benchFavorableRidges >= 1 ? 0.22 : 0)
+    : (ridgeCount >= 4 ? 0.4 : ridgeCount >= 2 ? 0.26 : ridgeCount >= 1 ? 0.15 : 0);
+  const benchLengthComponent = Math.min(0.25, (totalRidgeLengthM / 1200) * 0.25);
   const benchSupport = hasMeasuredRelief
-    ? Math.min(1, benchWeight * 2.0 + benchRidgeBucket)
-    : 0; // flat / low-relief ground → honest minimal, not the constant 0.64 floor
+    ? Math.min(1, benchFlankComponent + benchLengthComponent)
+    : 0; // no measured relief → honest 0 (flat / low-relief ground)
 
   // --- Saddle influence (REAL: driven by measured saddle count) ---
   const saddleWeight = weights.saddle_proximity || 0;
@@ -150,18 +192,6 @@ export function computeStructuralDrivers(
     (saddleCount >= 5 ? 0.6 : saddleCount >= 3 ? 0.45 : saddleCount >= 1 ? 0.3 : 0) +
     saddleWeight * 1.5
   ));
-
-  // --- Ridge / spine support (constant-blended → ESTIMATED until Phase 2) ---
-  const spineWeight = weights.spine_proximity || 0.25;
-  const primaryFlowCount = flow_primary.features.length;
-  const totalFlowLength = metadata.stats.total_flow_length_m || 0;
-  const ridgeSpineSupport = hasMeasuredRelief
-    ? Math.min(1, (
-        spineWeight * 1.5 +
-        (primaryFlowCount > 3 ? 0.3 : primaryFlowCount * 0.1) +
-        (totalFlowLength > 500 ? 0.2 : totalFlowLength / 2500)
-      ))
-    : 0; // no measured ridges → honest minimal, not the constant 0.42+ floor
 
   // --- Convergence density (geometry-derived) ---
   const convergenceCount = convergence_zones.features.length;
@@ -181,7 +211,7 @@ export function computeStructuralDrivers(
       shortLabel: 'Bench',
       description: getBenchDescription(benchSupport),
       icon: 'bench',
-      estimated: benchSupport > 0, // constant-blended whenever non-zero (Phase 2 makes real)
+      estimated: false, // PHASE 2a: measured from real per-parcel DEM ridge-flank geometry
     },
     saddleInfluence: {
       score: saddleInfluence,
@@ -197,7 +227,7 @@ export function computeStructuralDrivers(
       shortLabel: 'Ridge',
       description: getRidgeDescription(ridgeSpineSupport),
       icon: 'ridge',
-      estimated: ridgeSpineSupport > 0, // constant-blended whenever non-zero (Phase 2 makes real)
+      estimated: false, // PHASE 2a: measured from real per-parcel DEM ridge extraction (count/length/prominence)
     },
     convergenceDensity: {
       score: convergenceDensity,
@@ -218,6 +248,8 @@ export function generateTerrainStory(
   parcelAcreage?: number,
   parcelAddress?: string,
   ridgeSpineData?: {
+    ridges_primary?: GeoJSON.FeatureCollection;
+    ridges_secondary?: GeoJSON.FeatureCollection;
     saddle_nodes?: GeoJSON.FeatureCollection;
     metadata?: {
       saddle_count?: number;
@@ -549,14 +581,24 @@ function determineConfidence(
   ridgeCount: number = 0,
   saddleCount: number = 0
 ): 'high' | 'medium' | 'low' {
-  // ========== PHASE 1 HONESTY GUARD ==========
+  // ========== HONESTY GUARD (Phase 1 + 2a) ==========
   // Confidence must be gated on REAL, per-parcel measured relief (ridge/saddle
-  // extraction from the DEM) and a real_dem flow mode — NOT on the constant
-  // Bench value (0.64), which previously tripped `hasStrongFeature` on every
-  // parcel and forced "High confidence" onto flat ground.
+  // extraction from the DEM) — NOT on the constant Bench value (0.64), which
+  // previously tripped `hasStrongFeature` on every parcel and forced "High
+  // confidence" onto flat ground.
+  //
+  // Phase 2a fix: the real-DEM signal was previously read from
+  // `metadata.mode === 'real_dem'`, but the flow engine only ever labels real
+  // DEM flow `'terrain_driven'` — so that check was never true and pinned EVERY
+  // parcel (including genuine ridge parcels) to Low. We now detect real DEM from
+  // the flow's dem_source (excluding the synthetic/empty fallbacks) combined
+  // with measured ridge/saddle structure, so flat ground still reads Low while
+  // surveyed ridge parcels can honestly earn Medium/High.
   const flowCount = flowData.flow_primary.features.length + flowData.flow_secondary.features.length;
   const mode = flowData.metadata.mode;
-  const isRealDem = mode === 'real_dem';
+  const demSource = String((flowData.metadata as any).dem_source || 'NONE').toUpperCase();
+  const NON_REAL_DEM_SOURCES = ['NONE', 'PATTERN_INFERRED', 'SYNTHETIC_AXIS', 'GEOMETRY_BASED (LEGACY)'];
+  const isRealDem = mode !== 'error' && !NON_REAL_DEM_SOURCES.includes(demSource);
 
   // Real measured structure from the DEM ridge/saddle pipeline.
   const strongMeasuredStructure = ridgeCount >= 2 || saddleCount >= 1;

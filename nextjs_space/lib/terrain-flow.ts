@@ -406,7 +406,27 @@ export function generateTerrainDrivenFlow(
   if (coords.length < 4) {
     return emptyFlowResponse('Insufficient parcel coordinates');
   }
-  
+
+  // ─── PHASE 2b: honest no-data guard (Modal-failure path) ──────────────
+  // If there is NO real corridor data AND NO real ridge/saddle backbone, do
+  // NOT fabricate centroid/RNG-based flow lines. Return an honest empty
+  // response so the UI shows an "insufficient terrain data / not detected"
+  // low state with NO drawn fake lines. This guard runs BEFORE any centroid
+  // or seeded-RNG initialization, so the fabricated path is never touched.
+  // Geometry-only synthetic flow is only ever produced when the default-OFF
+  // synthetic flow flag is explicitly enabled (dev/debug).
+  const hasRealCorridor = !!corridorData &&
+    (((corridorData.corridors?.features?.length || 0) > 0) ||
+     ((corridorData.features?.length || 0) > 0));
+  const realRidgeFeatureCount =
+    (ridgeData?.ridges_primary?.features?.length || 0) +
+    (ridgeData?.ridges_secondary?.features?.length || 0) +
+    (ridgeData?.saddle_nodes?.features?.length || 0);
+  if (!hasRealCorridor && realRidgeFeatureCount === 0 && !syntheticFlowEnabled()) {
+    console.log('[TerrainFlow] Phase 2b no-data guard: no real corridor/ridge data & synthetic OFF — returning honest empty flow (no fabricated centroid-RNG lines)');
+    return emptyFlowResponse('No real terrain data (Modal unavailable/empty); synthetic flow disabled');
+  }
+
   const isTerritory = parcelRings.length > 1;
   const parcelBbox = getBbox(coords);
   const bufferedBbox = expandBbox(parcelBbox, ANALYSIS_BUFFER_M);
