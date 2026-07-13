@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
 }
 
 function resolveTier(priceId: string | null, purchaseType?: string): string {
+  if (purchaseType === "season_pass") return "season_pass";
   if (purchaseType === "hunt_plan") return "parcel_unlock";
   if (!priceId) return "unknown";
   const pro = [
@@ -80,6 +81,7 @@ function resolveTier(priceId: string | null, purchaseType?: string): string {
   ].filter(Boolean);
   if (promax.includes(priceId)) return "pro_max";
   if (pro.includes(priceId)) return "pro";
+  if (priceId === process.env.STRIPE_SEASON_PASS_PRICE_ID) return "season_pass";
   if (priceId === process.env.STRIPE_HUNT_PLAN_PRICE_ID) return "parcel_unlock";
   return "unknown";
 }

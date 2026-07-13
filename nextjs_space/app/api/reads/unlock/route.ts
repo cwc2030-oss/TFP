@@ -78,7 +78,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const priceId = process.env.STRIPE_HUNT_PLAN_PRICE_ID;
+    // Dedicated Season Pass price (separate product from the single-parcel
+    // unlock). Falls back to the legacy $19 hunt-plan price so checkout can
+    // never break if the dedicated var is ever missing.
+    const priceId =
+      process.env.STRIPE_SEASON_PASS_PRICE_ID || process.env.STRIPE_HUNT_PLAN_PRICE_ID;
     if (!priceId) {
       return NextResponse.json({ error: 'Season Pass price not configured' }, { status: 500 });
     }
