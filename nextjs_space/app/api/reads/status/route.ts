@@ -29,7 +29,7 @@ export async function GET() {
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { readsUnlocked: true, subscriptionStatus: true, role: true },
+      select: { readsUnlocked: true, subscriptionStatus: true, role: true, seasonPassSeason: true, seasonPassExpiry: true },
     });
 
     const unlocked = isReadsUnlocked(user);

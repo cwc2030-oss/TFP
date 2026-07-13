@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { prisma } from '@/lib/db';
+import { getCurrentSeason, getSeasonExpiry } from '@/lib/reads';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,6 +142,10 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       console.error('[webhook] purchase_completed funnel log failed:', funnelErr);
     }
 
+  } else if (session.metadata?.purchaseType === 'season_pass') {
+    // ── $19 one-time Season Pass purchase (Piece 6b) ──
+    await handleSeasonPassPurchase(session);
+
   } else if (session.metadata?.purchaseType === 'hunt_plan') {
     // ── $19 one-time parcel hunt plan purchase ──
     await handleHuntPlanPurchase(session);
@@ -158,6 +163,49 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   } else {
     console.warn('[webhook] checkout.session.completed with no subscription and no orderId, session:', session.id);
+  }
+}
+
+async function handleSeasonPassPurchase(session: Stripe.Checkout.Session) {
+  const userId = session.metadata?.userId;
+  const season = session.metadata?.season || getCurrentSeason();
+
+  if (!userId) {
+    console.error('[webhook] season_pass purchase missing userId metadata:', session.metadata);
+    return;
+  }
+
+  const expiry = getSeasonExpiry(season);
+
+  // Idempotent: Stripe can redeliver this event; writing the same season/expiry
+  // twice is a harmless no-op, so no extra guard is needed for the flip itself.
+  await prisma.user.update({
+    where: { id: userId },
+    data: { seasonPassSeason: season, seasonPassExpiry: expiry },
+  });
+
+  console.log('[webhook] Season Pass activated for user', userId, 'season:', season, 'expiry:', expiry.toISOString());
+
+  // Server-side funnel event — purchase_completed for the Season Pass (idempotent).
+  try {
+    if (await funnelEventExists('purchase_completed', session.id)) {
+      console.log('[webhook] purchase_completed already logged for session', session.id, '— skipping (idempotent)');
+    } else {
+      await prisma.funnelEvent.create({
+        data: {
+          event: 'purchase_completed',
+          address: session.customer_details?.email || session.customer_email || userId,
+          metadata: JSON.stringify({
+            productType: 'season_pass',
+            price: 19,
+            season,
+            stripeSessionId: session.id,
+          }),
+        },
+      });
+    }
+  } catch (funnelErr) {
+    console.error('[webhook] purchase_completed funnel log failed:', funnelErr);
   }
 }
 

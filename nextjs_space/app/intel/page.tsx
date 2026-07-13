@@ -5137,6 +5137,57 @@ const archetypeInitializedRef = useRef(false);
     }
   }, []);
 
+  // ── Handle season_pass return from Stripe Checkout (Piece 6b) ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sp = params.get('season_pass');
+    if (!sp) return;
+
+    // Strip our own param but KEEP lat/lng/address so the normal auto-run keeps
+    // the parcel context.
+    const cleanUrl = () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('season_pass');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', url.toString());
+    };
+
+    if (sp === 'cancelled') {
+      cleanUrl();
+      toast('Checkout cancelled — your Season Pass wasn’t purchased.', { icon: '↩️' });
+      return;
+    }
+
+    if (sp === 'success') {
+      cleanUrl();
+      setShowParcelPaywall(false);
+      toast.success('Season Pass active — unlimited ground.');
+      // The webhook flips the account to a pass holder; it may land a beat after
+      // this redirect, so poll status briefly, then re-run the read once unlocked.
+      let tries = 0;
+      const poll = async () => {
+        tries += 1;
+        try {
+          const res = await fetch('/api/reads/status', { cache: 'no-store' });
+          const d = await res.json();
+          if (d?.unlocked) {
+            setReadState((prev) => ({ ...prev, authenticated: true, unlocked: true }));
+            setTimeout(() => runAnalysis(), 150);
+            return;
+          }
+        } catch { /* ignore transient errors */ }
+        if (tries < 6) {
+          setTimeout(poll, 1500);
+        } else {
+          // Fall back to a re-run anyway — the server gate is authoritative.
+          setTimeout(() => runAnalysis(), 150);
+        }
+      };
+      poll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // v3.8.4 — Keep "X min ago" out of render body; update via interval only
   useEffect(() => {
     setWindLastUpdated(new Date()); // hydration-safe: set real time client-side
@@ -19735,20 +19786,31 @@ const archetypeInitializedRef = useRef(false);
                 if (unlockingSeason) return;
                 setUnlockingSeason(true);
                 try {
-                  const res = await fetch('/api/reads/unlock', { method: 'POST' });
-                  if (res.ok) {
+                  // Piece 6b — real $19 Season Pass checkout. Redirect the shopper
+                  // to Stripe; the webhook flips the account to a pass holder and
+                  // the season_pass=success return re-runs the read.
+                  const res = await fetch('/api/reads/unlock', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lat: activeLat, lng: activeLng, address: activeAddress }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (res.ok && data?.url) {
+                    window.location.href = data.url as string;
+                    return; // navigating away
+                  }
+                  if (res.ok && data?.alreadyUnlocked) {
                     setReadState((prev) => ({ ...prev, unlocked: true }));
                     await refreshReadStatus();
                     setShowParcelPaywall(false);
-                    toast.success('Season unlocked — unlimited ground.');
-                    // Re-run the read now that the wall is lifted so the flow renders.
+                    toast.success('Season Pass active — unlimited ground.');
                     setTimeout(() => runAnalysis(), 150);
                   } else {
-                    toast.error('Could not unlock right now — please try again.');
+                    toast.error('Could not start checkout — please try again.');
+                    setUnlockingSeason(false);
                   }
                 } catch {
-                  toast.error('Could not unlock right now — please try again.');
-                } finally {
+                  toast.error('Could not start checkout — please try again.');
                   setUnlockingSeason(false);
                 }
               }}
@@ -19768,7 +19830,7 @@ const archetypeInitializedRef = useRef(false);
                 boxShadow: '0 4px 20px rgba(120,90,20,0.35)',
               }}
             >
-              {unlockingSeason ? 'Unlocking…' : 'Unlock the Season'}
+              {unlockingSeason ? 'Redirecting to checkout…' : 'Unlock the Season — $19'}
             </button>
             <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 4px' }}>
               Season Pass · unlimited reads all season

@@ -6,9 +6,12 @@
  * that the flow locks (baseline map stays free). Revisiting an already-read
  * parcel never consumes a new read (enforced by the ParcelRead unique key).
  *
- * The Season Pass unlock is a PLACEHOLDER in 6a (User.readsUnlocked). Real
- * Stripe billing arrives in 6b. Pro / Pro Max / admin are always treated as
- * unlocked here so paying subscribers are never metered.
+ * The Season Pass is a real $19 one-time seasonal purchase (Piece 6b): the
+ * Stripe webhook stamps User.seasonPassSeason + seasonPassExpiry, and a pass
+ * grants unlimited reads + save while it is the current season and unexpired.
+ * Pro / Pro Max / admin are always treated as unlocked here so paying
+ * subscribers are never metered. User.readsUnlocked remains a legacy/admin
+ * override kept from 6a.
  */
 
 /** Free Terrain Brain reads allowed per season for a signed-in free account. */
@@ -31,18 +34,37 @@ export function getCurrentSeason(now: Date = new Date()): string {
 }
 
 /**
- * Whether a user is "unlocked" (unlimited reads + save). True for the
- * placeholder Season Pass flag OR any paying/admin tier.
+ * The moment a Season Pass bought for `season` lapses. Whitetail seasons run
+ * roughly July of the opening year through the following June, so a pass is
+ * valid until July 1 (UTC) of the year AFTER the season opens. 6c can use this
+ * to drive renewal prompts.
+ */
+export function getSeasonExpiry(season: string): Date {
+  const year = parseInt(season, 10);
+  const openYear = Number.isFinite(year) ? year : new Date().getUTCFullYear();
+  return new Date(Date.UTC(openYear + 1, 6, 1, 0, 0, 0)); // July 1 of openYear+1
+}
+
+/**
+ * Whether a user is "unlocked" (unlimited reads + save). True for any
+ * paying/admin tier, the legacy readsUnlocked override, OR an active Season
+ * Pass (bought for the current season and not yet expired).
  */
 export function isReadsUnlocked(user: {
   readsUnlocked?: boolean | null;
   subscriptionStatus?: string | null;
   role?: string | null;
-} | null | undefined): boolean {
+  seasonPassSeason?: string | null;
+  seasonPassExpiry?: Date | string | null;
+} | null | undefined, now: Date = new Date()): boolean {
   if (!user) return false;
-  if (user.readsUnlocked) return true;
   const sub = (user.subscriptionStatus || '').toLowerCase();
   if (sub === 'pro' || sub === 'promax') return true;
   if ((user.role || '').toLowerCase() === 'admin') return true;
+  if (user.readsUnlocked) return true; // legacy/admin override from 6a
+  // Season Pass — valid only for the CURRENT season and while unexpired.
+  if (user.seasonPassSeason && user.seasonPassSeason === getCurrentSeason(now)) {
+    if (!user.seasonPassExpiry || new Date(user.seasonPassExpiry) > now) return true;
+  }
   return false;
 }

@@ -31,10 +31,18 @@ model User {
   huntSessions     HuntSession[]
   parcelReads      ParcelRead[]
 
-  // Piece 6a: placeholder Season Pass unlock (real Stripe billing lands in 6b).
+  // Piece 6a: placeholder Season Pass unlock (kept as a legacy/admin override).
   // When true, the user has unlimited Terrain Brain reads + save. Pro/Pro Max/admin
   // are treated as unlocked in code regardless of this flag.
   readsUnlocked        Boolean  @default(false)
+
+  // Piece 6b: real Season Pass ($19 one-time, seasonal). Set by the Stripe webhook
+  // on a completed season_pass checkout. seasonPassSeason holds the season bucket
+  // the pass is valid for (e.g. "2026"); seasonPassExpiry is when it lapses. A pass
+  // grants unlimited reads + save ONLY while seasonPassSeason == current season and
+  // now < seasonPassExpiry (see lib/reads.isReadsUnlocked). 6c uses these fields.
+  seasonPassSeason     String?
+  seasonPassExpiry     DateTime?
 
   // Stripe subscription fields
   stripeCustomerId     String?   @unique
