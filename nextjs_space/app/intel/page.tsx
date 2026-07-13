@@ -17252,7 +17252,7 @@ const archetypeInitializedRef = useRef(false);
                   )}
 
                   {/* ── Key Metrics Row ── */}
-                  <div className="grid grid-cols-4 gap-1 mb-2">
+                  <div className={`grid ${STANDS_ENABLED ? 'grid-cols-4' : 'grid-cols-2'} gap-1 mb-2`}>
                     <div className="text-center">
                       <p className="text-sm text-white font-bold">{ridgeSpineData?.ridges_primary?.features?.length ?? 0}</p>
                       <p className="text-[8px] text-stone-500/70 uppercase">Ridges</p>
@@ -17261,21 +17261,25 @@ const archetypeInitializedRef = useRef(false);
                       <p className="text-sm text-white font-bold">{summary.funnelCount}</p>
                       <p className="text-[8px] text-stone-500/70 uppercase">Funnels</p>
                     </div>
-                    <div className="text-center">
-                      <p className={`text-sm font-bold ${summary.topStandScore >= 80 ? 'text-red-400' : summary.topStandScore >= 60 ? 'text-amber-400' : 'text-stone-400'}`}>
-                        {summary.topStandScore}
-                      </p>
-                      <p className="text-[8px] text-stone-500/70 uppercase">Top Score</p>
-                      <p className="text-[8px] text-stone-500/50 italic mt-0.5">Wind &amp; season adjusted</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-white font-bold">{filteredStands.length || '—'}</p>
-                      <p className="text-[8px] text-stone-500/70 uppercase">Stands</p>
-                    </div>
+                    {STANDS_ENABLED && (
+                      <div className="text-center">
+                        <p className={`text-sm font-bold ${summary.topStandScore >= 80 ? 'text-red-400' : summary.topStandScore >= 60 ? 'text-amber-400' : 'text-stone-400'}`}>
+                          {summary.topStandScore}
+                        </p>
+                        <p className="text-[8px] text-stone-500/70 uppercase">Top Score</p>
+                        <p className="text-[8px] text-stone-500/50 italic mt-0.5">Wind &amp; season adjusted</p>
+                      </div>
+                    )}
+                    {STANDS_ENABLED && (
+                      <div className="text-center">
+                        <p className="text-sm text-white font-bold">{filteredStands.length || '—'}</p>
+                        <p className="text-[8px] text-stone-500/70 uppercase">Stands</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* ── Share Score Card ── */}
-                  {!isLoading && summary.topStandScore > 0 && (
+                  {STANDS_ENABLED && !isLoading && summary.topStandScore > 0 && (
                     <button
                       onClick={() => setShowScoreCard(true)}
                       className="w-full flex items-center justify-center gap-1.5 py-1.5 mb-2
