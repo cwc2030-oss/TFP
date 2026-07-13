@@ -2464,6 +2464,10 @@ function DeerIntelContent() {
   const urlP5Lng = parseFloat(searchParams.get('p5lng') || '0');
   const urlTerritoryName = searchParams.get('name') || 'My Territory';
   const urlSavedPropertyId = searchParams.get('savedPropertyId') || '';
+  // Piece 6c — a single saved parcel opened from /properties carries its owning
+  // SavedProperty id so the read gate can recognise the user's own ground and
+  // let them review it read-only after a pass lapses.
+  const urlSavedParcelId = searchParams.get('savedParcelId') || '';
   // If hero parcel is specified, use its coords; if demo mode, use Pineville; else URL
   const resolvedInitial = heroParcel
     ? { lat: heroParcel.lat, lng: heroParcel.lng, address: heroParcel.address, acreage: heroParcel.acreage }
@@ -2846,7 +2850,7 @@ const archetypeInitializedRef = useRef(false);
   // Consume/check a read for a resolved parcel right before the flow analysis.
   // Returns the server decision; also syncs the meter. Fail-open on error.
   const consumeReadGate = useCallback(async (
-    parcelObj: any, gLat: number, gLng: number,
+    parcelObj: any, gLat: number, gLng: number, savedPropertyId?: string,
   ): Promise<{ allow: boolean; status: string }> => {
     const pid = (parcelObj?.properties as any)?.parcelId;
     const key = (pid && String(pid).length > 0)
@@ -2856,7 +2860,7 @@ const archetypeInitializedRef = useRef(false);
       const res = await fetch('/api/reads/consume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parcelKey: key, address: activeAddressRef.current, lat: gLat, lng: gLng }),
+        body: JSON.stringify({ parcelKey: key, address: activeAddressRef.current, lat: gLat, lng: gLng, savedPropertyId: savedPropertyId || undefined }),
       });
       const d = await res.json();
       setReadState({
@@ -6251,7 +6255,11 @@ const archetypeInitializedRef = useRef(false);
 
   // Fetch terrain analysis using shared client
   const analysisInFlightRef = useRef(false);
-  const runAnalysis = useCallback(async () => {
+  const runAnalysis = useCallback(async (opts?: { savedPropertyId?: string }) => {
+    // Piece 6c — when the flow is opened on the user's OWN saved ground we thread
+    // its SavedProperty id to the read gate so the server allows a read-only view
+    // without consuming a read or walling a lapsed/free user.
+    const savedPropertyIdForGate = opts?.savedPropertyId || undefined;
     // ── DIAGNOSTIC: Log every runAnalysis entry with full context ──
     console.log('[TRIGGER-DIAG] runAnalysis() ENTERED — territoryMode:', territoryModeRef.current,
       'parcels:', territoryParcelsRef.current.length,
@@ -6416,7 +6424,7 @@ const archetypeInitializedRef = useRef(false);
 
         // ── PIECE 6a: read-meter gate (baseline boundary is already painted) ──
         if (!(demoMode || heroParcel)) {
-          const gate = await consumeReadGate(syntheticParcel, currentLat, currentLng);
+          const gate = await consumeReadGate(syntheticParcel, currentLat, currentLng, savedPropertyIdForGate);
           if (!gate.allow) {
             setProgress(0);
             setProgressStep('');
@@ -6553,7 +6561,7 @@ const archetypeInitializedRef = useRef(false);
 
       // ── PIECE 6a: read-meter gate (baseline boundary is already painted) ──
       if (!(demoMode || heroParcel)) {
-        const gate = await consumeReadGate(parcel, currentLat, currentLng);
+        const gate = await consumeReadGate(parcel, currentLat, currentLng, savedPropertyIdForGate);
         if (!gate.allow) {
           setProgress(0);
           setProgressStep('');
@@ -9492,7 +9500,9 @@ const archetypeInitializedRef = useRef(false);
           prefetchedParcelRef.current = merged;
           territoryFadeInPending.current = true;
           console.error('[SAVED-TERRITORY] Auto-analyzing territory with', loaded.length, 'parcels');
-          setTimeout(() => runAnalysis(), 200);
+          // Piece 6c — this is the user's own saved territory; pass its id so the
+          // read gate lets them review it read-only even if their pass lapsed.
+          setTimeout(() => runAnalysis({ savedPropertyId: urlSavedPropertyId || undefined }), 200);
         }, 2000);
       } catch (e) {
         console.error('[SAVED-TERRITORY] Failed:', e);
@@ -13487,7 +13497,9 @@ const archetypeInitializedRef = useRef(false);
     // blank/null map and throws the 0,0 console error. Skip it — the empty
     // state (address entry) is rendered instead.
     if (hasValidParcel) {
-      runAnalysis();
+      // Piece 6c — a single saved parcel opened from /properties carries
+      // savedParcelId; thread it so the owner can review saved ground read-only.
+      runAnalysis({ savedPropertyId: urlSavedParcelId || undefined });
     } else {
       setIsLoading(false);
     }

@@ -8,15 +8,23 @@ import { READS_PER_SEASON, getCurrentSeason, isReadsUnlocked } from '@/lib/reads
 
 /**
  * POST /api/reads/consume
- * Body: { parcelKey: string, address?, lat?, lng? }
+ * Body: { parcelKey: string, address?, lat?, lng?, savedPropertyId? }
  *
  * Authoritative gate for a Terrain Brain read. Called by /intel right before
  * the full flow analysis fires. Possible statuses:
  *  - anonymous : no session         -> allow:false (client shows signup prompt)
  *  - unlocked  : Season Pass / Pro   -> allow:true  (never metered)
+ *  - saved     : own saved ground    -> allow:true  (read-only view, never walled)
  *  - revisit   : already read parcel -> allow:true  (no new read consumed)
  *  - ok        : new read within cap -> allow:true  (read recorded)
  *  - wall      : cap reached         -> allow:false (client shows the wall)
+ *
+ * Piece 6c: a lapsed/free user must always be able to REVIEW ground they saved.
+ * When the client passes a savedPropertyId, we verify server-side that the
+ * signed-in user actually owns it and, if so, allow the flow read-only without
+ * consuming a read or ever showing the wall — regardless of lock state. This
+ * keeps a single authoritative gate (ownership is checked here, not trusted
+ * from a client flag) so "never lock a user's own saved ground" holds.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -40,6 +48,31 @@ export async function POST(req: NextRequest) {
     const address: string | undefined = body?.address ? String(body.address).slice(0, 300) : undefined;
     const lat = typeof body?.lat === 'number' ? body.lat : undefined;
     const lng = typeof body?.lng === 'number' ? body.lng : undefined;
+    const savedPropertyId: string = (body?.savedPropertyId || '').toString().trim();
+
+    // Piece 6c — own saved ground stays viewable after a pass lapses. If the
+    // client is opening one of THIS user's saved properties, verify ownership
+    // server-side and let the flow run read-only: never consume a read, never
+    // wall, no matter the lock state.
+    if (savedPropertyId) {
+      const owned = await prisma.savedProperty.findFirst({
+        where: { id: savedPropertyId, userId },
+        select: { id: true },
+      });
+      if (owned) {
+        const used = await prisma.parcelRead.count({ where: { userId, season } });
+        return NextResponse.json({
+          allow: true, status: 'saved', authenticated: true,
+          unlocked: isReadsUnlocked(
+            await prisma.user.findUnique({
+              where: { id: userId },
+              select: { readsUnlocked: true, subscriptionStatus: true, role: true, seasonPassSeason: true, seasonPassExpiry: true },
+            }),
+          ),
+          used, limit: READS_PER_SEASON,
+        });
+      }
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },

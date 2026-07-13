@@ -104,7 +104,9 @@ export default function PropertiesPage() {
     if (p.type === 'territory') {
       router.push(`/intel?savedPropertyId=${p.id}`);
     } else {
-      router.push(`/intel?lat=${p.centroidLat}&lng=${p.centroidLng}`);
+      // Piece 6c — carry the SavedProperty id so the read gate recognises the
+      // owner's saved ground and lets them review it read-only after a lapse.
+      router.push(`/intel?lat=${p.centroidLat}&lng=${p.centroidLng}&savedParcelId=${p.id}`);
     }
   };
 
