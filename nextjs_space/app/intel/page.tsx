@@ -2681,6 +2681,11 @@ const archetypeInitializedRef = useRef(false);
   // this flag, which defaults OFF. Set NEXT_PUBLIC_ENABLE_STANDS=1 to re-enable
   // (dev/debug only). Flow / convergence / bedding / saddles are unaffected.
   const STANDS_ENABLED = standsEnabled();
+
+  // FLOW_ONLY_UI: hide non-flow controls (Territory builder, export/report/onX,
+  // extra layer toggles, archetype tuning) for the simplified 300-acre flow.
+  // Set false to restore the full toolbar. Nothing is deleted — only gated.
+  const FLOW_ONLY_UI = true;
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Phase 1: Clean map = stands + terrain features that justify them
@@ -15826,7 +15831,7 @@ const archetypeInitializedRef = useRef(false);
       )}
 
       {/* ========== TERRITORY BUILDER PANEL ========== */}
-      {territoryMode && (
+      {!FLOW_ONLY_UI && territoryMode && (
         <div style={{
           position: 'absolute',
           top: 60,
@@ -16568,7 +16573,7 @@ const archetypeInitializedRef = useRef(false);
               <span className="md:hidden lg:inline">{cleanMap ? 'Clean: ON' : 'Clean Map'}</span>
             </Button>
             {/* Adjacent Parcels Toggle */}
-            {adjacentParcels.length > 0 && (
+            {!FLOW_ONLY_UI && adjacentParcels.length > 0 && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -16590,7 +16595,7 @@ const archetypeInitializedRef = useRef(false);
               </Button>
             )}
             {/* Territory Boundary: Bold → Thin → Off cycle */}
-            {territoryParcels.length > 0 && (
+            {!FLOW_ONLY_UI && territoryParcels.length > 0 && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -16613,7 +16618,7 @@ const archetypeInitializedRef = useRef(false);
               </Button>
             )}
             {/* Show Internal Parcel Seams — only for multi-parcel territories */}
-            {territoryParcels.length > 1 && (
+            {!FLOW_ONLY_UI && territoryParcels.length > 1 && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -16667,6 +16672,7 @@ const archetypeInitializedRef = useRef(false);
               </Button>
             )}
             {/* Territory Builder toggle */}
+            {!FLOW_ONLY_UI && (
             <Button
               size="sm"
               variant="ghost"
@@ -16743,6 +16749,7 @@ const archetypeInitializedRef = useRef(false);
                 : 'Territory'}</span>
               {!isPro && !territoryMode && <span className="ml-1 text-[9px] bg-amber-500/30 text-amber-300 px-1 rounded md:hidden lg:inline">PRO</span>}
             </Button>
+            )}
             {/* Parcel Pick Mode — de-emphasized in demo, available for exploration. */}
             <Button
               size="sm"
@@ -16772,6 +16779,7 @@ const archetypeInitializedRef = useRef(false);
               <Crosshair className="h-4 w-4 lg:mr-1" />
               <span className="md:hidden lg:inline">Re-center</span>
             </Button>
+            {!FLOW_ONLY_UI && (
             <Button
               size="sm"
               variant="ghost"
@@ -16785,6 +16793,7 @@ const archetypeInitializedRef = useRef(false);
               <Download className="h-4 w-4 lg:mr-1" />
               <span className="md:hidden lg:inline">{exportMode ? 'Exit Screenshot' : 'Screenshot'}</span>
             </Button>
+            )}
           </div>
         </div>
       </div>
@@ -17195,6 +17204,7 @@ const archetypeInitializedRef = useRef(false);
               </div>
 
               {/* ═══ HUNTER TYPE SELECTOR ═══ */}
+              {!FLOW_ONLY_UI && (
               <div className="px-3 pt-3 pb-1">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Hunter Type</span>
@@ -17219,8 +17229,10 @@ const archetypeInitializedRef = useRef(false);
                   ))}
                 </div>
               </div>
+              )}
 
               {/* ═══ HUNT ARCHETYPE SELECTOR ═══ */}
+              {!FLOW_ONLY_UI && (
               <div className="px-3 pt-1 pb-2">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Hunt Goal</span>
@@ -17245,6 +17257,7 @@ const archetypeInitializedRef = useRef(false);
                   ))}
                 </div>
               </div>
+              )}
 
               {/* ═══ CHAPTER 2 — CONDITIONS ═══ */}
               <div className="px-3 pt-2 pb-2 border-t border-white/[0.04]">
@@ -17322,6 +17335,7 @@ const archetypeInitializedRef = useRef(false);
               />
 
               {/* Moon phase selector (part of Conditions chapter) */}
+              {!FLOW_ONLY_UI && (
               <div className="px-3 pb-2">
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <span className="text-[10px] text-stone-500/80 font-medium">Moon Phase</span>
@@ -17351,6 +17365,7 @@ const archetypeInitializedRef = useRef(false);
                   ))}
                 </div>
               </div>
+              )}
 
               {/* ═══ CHAPTER 3 — INTELLIGENCE READOUT ═══ */}
               {summary && (
@@ -17753,7 +17768,7 @@ const archetypeInitializedRef = useRef(false);
                   </p>
                 )}
                 {/* Clear Cache & Re-Analyze — subtle secondary action */}
-                {summary && !isLoading && (
+                {!FLOW_ONLY_UI && summary && !isLoading && (
                   <button
                     onClick={async () => {
                       const parcelId = (parcelPolygon?.properties as any)?.parcelId ||
@@ -18038,7 +18053,7 @@ const archetypeInitializedRef = useRef(false);
                   {/* CDL Field Edge toggle — only shown when CDL data has edge features */}
                   {(() => {
                     const fieldEdgeCount = (cdlData?.agEdgeLines?.features?.length ?? 0) + (cdlData?.insideCorners?.features?.length ?? 0);
-                    if (!cdlData || fieldEdgeCount === 0) return null;
+                    if (FLOW_ONLY_UI || !cdlData || fieldEdgeCount === 0) return null;
                     return (
                       <button
                         onClick={() => setShowTerrainReasons(v => !v)}
@@ -18059,6 +18074,7 @@ const archetypeInitializedRef = useRef(false);
                 </div>
               </div>
               {/* Legacy "Bedding" toggle removed — replaced by Bedding Zones (tfp-bedding-probability) */}
+              {!FLOW_ONLY_UI && (
               <div className="p-3 border-b border-white/[0.06]">
                 {/* v3.6.0: Terrain Reasons Toggle */}
                 <div className="mt-1">
@@ -18087,7 +18103,9 @@ const archetypeInitializedRef = useRef(false);
                   )}
                 </div>
               </div>
+              )}
 
+              {!FLOW_ONLY_UI && (
               <div className="p-3 border-b border-white/[0.06]">
                 <div className="space-y-1">
                   
@@ -18134,6 +18152,7 @@ const archetypeInitializedRef = useRef(false);
                   })()}
                 </div>
               </div>
+              )}
               {/* ─── DEER FLOW ─── */}
               <div className="px-3 pt-3 pb-1">
                 <div className="flex items-center gap-2">
@@ -18159,6 +18178,7 @@ const archetypeInitializedRef = useRef(false);
                     )}
                   </h3>
                   {/* Inspect Mode Toggle */}
+                  {!FLOW_ONLY_UI && (
                   <button
                     onClick={() => setInspectModeEnabled(!inspectModeEnabled)}
                     className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] transition-all ${
@@ -18171,6 +18191,7 @@ const archetypeInitializedRef = useRef(false);
                     <Crosshair className="h-3 w-3" />
                     <span>{inspectModeEnabled ? 'Inspecting' : 'Inspect'}</span>
                   </button>
+                  )}
                 </div>
                 
                 {/* Analysis Quality Badge - compact inline version */}
@@ -18219,6 +18240,8 @@ const archetypeInitializedRef = useRef(false);
                   </button>
 
                   {/* pressureFocus/pressureView UI removed — locked to balanced/pressure */}
+                  {/* FLOW_ONLY_UI: fold Green/Blue/Black + Convergence sub-toggles under Master */}
+                  {!FLOW_ONLY_UI && (<>
                   {/* Divider with "Supporting Evidence" label */}
                   <div className="flex items-center gap-2 py-1">
                     <div className="flex-1 h-px bg-stone-700/50" />
@@ -18294,6 +18317,7 @@ const archetypeInitializedRef = useRef(false);
                       </button>
                     );
                   })()}
+                  </>)}
                 </div>
 
                 
@@ -18925,6 +18949,7 @@ const archetypeInitializedRef = useRef(false);
                {/* End of TERRAIN_WORK_MODE conditional wrapper for Alignment Panel */}
 
               {/* ========== PARCEL-HUNT FILE DOWNLOAD / PREVIEW ========== */}
+              {!FLOW_ONLY_UI && (
               <div className="p-3 border-t border-white/[0.06]">
                 {isPro ? (
                   /* Pro/ProMax: download + share row */
@@ -19015,8 +19040,9 @@ const archetypeInitializedRef = useRef(false);
                   {isPro ? '5-page terrain & alignment report' : 'Free preview — upgrade to download PDF'}
                 </p>
               </div>
+              )}
 
-              {(parcelUnlocked || isPro) && summary && !isLoading && (
+              {!FLOW_ONLY_UI && (parcelUnlocked || isPro) && summary && !isLoading && (
                 <div className="mx-3 mb-3 rounded-xl border border-amber-500/25 bg-gradient-to-br from-amber-500/[0.10] to-emerald-500/[0.08] p-3">
                   <p className="text-[11px] text-amber-200 font-semibold">What&apos;s next?</p>
                   <p className="text-[10px] text-stone-400 leading-relaxed mt-1 mb-2">
@@ -19056,7 +19082,7 @@ const archetypeInitializedRef = useRef(false);
               )}
 
               {/* ========== OPEN IN onX HUNT ========== */}
-              {activeLat && activeLng && (
+              {!FLOW_ONLY_UI && activeLat && activeLng && (
                 <div className="px-3 pb-3">
                   <button
                     onClick={() => {
