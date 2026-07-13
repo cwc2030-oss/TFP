@@ -17,6 +17,12 @@ export interface StructuralDriverScore {
   shortLabel: string;      // 2-3 word label for badges
   description: string;     // One sentence explanation
   icon: 'bench' | 'saddle' | 'ridge' | 'convergence';
+  // Phase 1 honesty guard: true when this score is NOT derived from direct
+  // per-parcel DEM measurement (currently Bench & Ridge, which are blended
+  // from global weight constants). The UI must mark these as estimates and
+  // never present them as confident measured structure. Removed in Phase 2
+  // once Bench/Ridge are driven from real per-parcel DEM grids.
+  estimated?: boolean;
 }
 
 export interface StructuralDrivers {
@@ -65,6 +71,12 @@ export interface TerrainStorySummary {
   
   // Confidence in the overall story
   confidence: 'high' | 'medium' | 'low';
+
+  // Phase 1 honesty guard: true only when the parcel has real, per-parcel
+  // measured relief (real DEM ridge/saddle extraction found structure).
+  // When false, the ground is flat / low-relief and the UI must present the
+  // story honestly (gentle terrain, estimated Bench/Ridge, no "High confidence").
+  reliefMeasured: boolean;
 }
 
 // ========== DRIVER LABELS ==========
@@ -106,38 +118,52 @@ export function computeStructuralDrivers(
   // Extract weights used in analysis
   const weights = metadata.weights || {};
   
-  // Calculate bench support — use bench_likelihood weight from flow metadata
-  // (the API doesn't return per-zone benchBonus, so derive from analysis weights
-  //  and ridge structure: parcels with multiple ridges tend to have side-hill benches)
-  const benchWeight = weights.bench_likelihood || 0;
+  // ========== PHASE 1 HONESTY GUARD ==========
+  // Bench & Ridge scores are currently blended from GLOBAL weight constants
+  // (TERRAIN_FLOW_WEIGHTS.bench_likelihood / spine_proximity), NOT from direct
+  // per-parcel DEM measurement. On flat/low-relief ground that constant floor
+  // otherwise pins Bench ~0.64 and Ridge ~0.42+, producing a false "confident"
+  // ridge story identical to genuine Ozark ridge parcels.
+  //
+  // Until Phase 2 (real per-parcel DEM grids) we:
+  //   1. Zero Bench & Ridge when there is NO measured relief (0 ridges, 0 saddles)
+  //      so flat ground honestly reads minimal structure.
+  //   2. Mark Bench & Ridge as `estimated` whenever they carry the constant blend,
+  //      so the UI never presents them as measured structure.
   const ridgeCount = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
     (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0);
-  // More ridges → more bench terrain between them; weight contributes base signal
-  const benchSupport = Math.min(1, (
-    benchWeight * 2.0 +
-    (ridgeCount >= 4 ? 0.4 : ridgeCount >= 2 ? 0.25 : ridgeCount >= 1 ? 0.1 : 0)
-  ));
-  
-  // Calculate saddle influence — use actual saddle count from ridge-spine pipeline
   const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
+
+  // Real, per-parcel measured relief signal (ridge/saddle extraction from DEM).
+  const hasMeasuredRelief = ridgeCount >= 1 || saddleCount >= 1;
+
+  // --- Bench support (constant-blended → ESTIMATED until Phase 2) ---
+  const benchWeight = weights.bench_likelihood || 0;
+  const benchRidgeBucket = ridgeCount >= 4 ? 0.4 : ridgeCount >= 2 ? 0.25 : ridgeCount >= 1 ? 0.1 : 0;
+  const benchSupport = hasMeasuredRelief
+    ? Math.min(1, benchWeight * 2.0 + benchRidgeBucket)
+    : 0; // flat / low-relief ground → honest minimal, not the constant 0.64 floor
+
+  // --- Saddle influence (REAL: driven by measured saddle count) ---
   const saddleWeight = weights.saddle_proximity || 0;
   const saddleInfluence = Math.min(1, (
     (saddleCount >= 5 ? 0.6 : saddleCount >= 3 ? 0.45 : saddleCount >= 1 ? 0.3 : 0) +
     saddleWeight * 1.5
   ));
-  
-  // Calculate ridge/spine support from flow metadata
+
+  // --- Ridge / spine support (constant-blended → ESTIMATED until Phase 2) ---
   const spineWeight = weights.spine_proximity || 0.25;
   const primaryFlowCount = flow_primary.features.length;
-  const secondaryFlowCount = flow_secondary.features.length;
   const totalFlowLength = metadata.stats.total_flow_length_m || 0;
-  const ridgeSpineSupport = Math.min(1, (
-    spineWeight * 1.5 +
-    (primaryFlowCount > 3 ? 0.3 : primaryFlowCount * 0.1) +
-    (totalFlowLength > 500 ? 0.2 : totalFlowLength / 2500)
-  ));
-  
-  // Calculate convergence density
+  const ridgeSpineSupport = hasMeasuredRelief
+    ? Math.min(1, (
+        spineWeight * 1.5 +
+        (primaryFlowCount > 3 ? 0.3 : primaryFlowCount * 0.1) +
+        (totalFlowLength > 500 ? 0.2 : totalFlowLength / 2500)
+      ))
+    : 0; // no measured ridges → honest minimal, not the constant 0.42+ floor
+
+  // --- Convergence density (geometry-derived) ---
   const convergenceCount = convergence_zones.features.length;
   const convergenceIntensities = convergence_zones.features.map(f => f.properties.intensity || 0.5);
   const avgConvergence = convergenceIntensities.length > 0
@@ -147,7 +173,7 @@ export function computeStructuralDrivers(
     (convergenceCount / 5) * 0.5 +
     avgConvergence * 0.5
   ));
-  
+
   return {
     benchSupport: {
       score: benchSupport,
@@ -155,6 +181,7 @@ export function computeStructuralDrivers(
       shortLabel: 'Bench',
       description: getBenchDescription(benchSupport),
       icon: 'bench',
+      estimated: benchSupport > 0, // constant-blended whenever non-zero (Phase 2 makes real)
     },
     saddleInfluence: {
       score: saddleInfluence,
@@ -162,6 +189,7 @@ export function computeStructuralDrivers(
       shortLabel: 'Saddle',
       description: getSaddleDescription(saddleInfluence),
       icon: 'saddle',
+      estimated: false, // driven by real measured saddle count
     },
     ridgeSpineSupport: {
       score: ridgeSpineSupport,
@@ -169,6 +197,7 @@ export function computeStructuralDrivers(
       shortLabel: 'Ridge',
       description: getRidgeDescription(ridgeSpineSupport),
       icon: 'ridge',
+      estimated: ridgeSpineSupport > 0, // constant-blended whenever non-zero (Phase 2 makes real)
     },
     convergenceDensity: {
       score: convergenceDensity,
@@ -176,6 +205,7 @@ export function computeStructuralDrivers(
       shortLabel: 'Convergence',
       description: getConvergenceDescription(convergenceDensity),
       icon: 'convergence',
+      estimated: false,
     },
   };
 }
@@ -202,6 +232,12 @@ export function generateTerrainStory(
   }
   
   const drivers = computeStructuralDrivers(flowData, ridgeSpineData);
+
+  // Phase 1 honesty guard: real, per-parcel measured relief signal.
+  const ridgeCount = (ridgeSpineData?.metadata?.ridge_count_primary ?? 0) +
+    (ridgeSpineData?.metadata?.ridge_count_secondary ?? 0);
+  const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
+  const reliefMeasured = ridgeCount >= 1 || saddleCount >= 1;
   
   // Determine primary and secondary movement drivers
   const { primaryDriver, secondaryDriver } = determineMovementDrivers(drivers, flowData);
@@ -209,14 +245,14 @@ export function generateTerrainStory(
   // Find key opportunity zone
   const keyOpportunity = findKeyOpportunity(flowData);
   
-  // Generate headline
-  const headline = generateHeadline(primaryDriver, secondaryDriver, drivers);
+  // Generate headline (honest "gentle terrain" when no measured relief)
+  const headline = generateHeadline(primaryDriver, secondaryDriver, drivers, reliefMeasured);
   
   // Generate narrative
   const narrative = generateNarrative(drivers, primaryDriver, secondaryDriver, keyOpportunity, parcelAcreage);
   
-  // Determine confidence
-  const confidence = determineConfidence(drivers, flowData);
+  // Determine confidence (gated on real measured relief, NOT the constant Bench)
+  const confidence = determineConfidence(drivers, flowData, ridgeCount, saddleCount);
   
   return {
     primaryDriver,
@@ -226,6 +262,7 @@ export function generateTerrainStory(
     headline,
     narrative,
     confidence,
+    reliefMeasured,
   };
 }
 
@@ -233,10 +270,10 @@ export function generateTerrainStory(
 
 function getEmptyDrivers(): StructuralDrivers {
   return {
-    benchSupport: { score: 0, label: 'Not detected', shortLabel: 'Bench', description: 'No bench terrain identified', icon: 'bench' },
-    saddleInfluence: { score: 0, label: 'Not detected', shortLabel: 'Saddle', description: 'No saddle influence identified', icon: 'saddle' },
-    ridgeSpineSupport: { score: 0, label: 'Not detected', shortLabel: 'Ridge', description: 'No ridge structure identified', icon: 'ridge' },
-    convergenceDensity: { score: 0, label: 'Not detected', shortLabel: 'Convergence', description: 'No flow convergence detected', icon: 'convergence' },
+    benchSupport: { score: 0, label: 'Not detected', shortLabel: 'Bench', description: 'No bench terrain identified', icon: 'bench', estimated: false },
+    saddleInfluence: { score: 0, label: 'Not detected', shortLabel: 'Saddle', description: 'No saddle influence identified', icon: 'saddle', estimated: false },
+    ridgeSpineSupport: { score: 0, label: 'Not detected', shortLabel: 'Ridge', description: 'No ridge structure identified', icon: 'ridge', estimated: false },
+    convergenceDensity: { score: 0, label: 'Not detected', shortLabel: 'Convergence', description: 'No flow convergence detected', icon: 'convergence', estimated: false },
   };
 }
 
@@ -249,6 +286,7 @@ function getEmptyStory(): TerrainStorySummary {
     headline: 'Terrain analysis incomplete',
     narrative: 'Run terrain flow analysis to reveal movement patterns and opportunity zones.',
     confidence: 'low',
+    reliefMeasured: false,
   };
 }
 
@@ -428,8 +466,15 @@ function findKeyOpportunity(
 function generateHeadline(
   primary: TerrainStorySummary['primaryDriver'],
   secondary: TerrainStorySummary['secondaryDriver'],
-  drivers: StructuralDrivers
+  drivers: StructuralDrivers,
+  reliefMeasured: boolean = true
 ): string {
+  // Phase 1 honesty guard: flat / low-relief ground with NO measured ridges or
+  // saddles must NOT be given a ridge-driven headline. Report it honestly.
+  if (!reliefMeasured) {
+    return 'Gentle, low-relief terrain — limited structural funneling';
+  }
+
   // Get the dominant driver
   const driverScores = [
     { name: 'bench', score: drivers.benchSupport.score },
@@ -500,25 +545,32 @@ function generateNarrative(
 
 function determineConfidence(
   drivers: StructuralDrivers,
-  flowData: TerrainFlowResponse
+  flowData: TerrainFlowResponse,
+  ridgeCount: number = 0,
+  saddleCount: number = 0
 ): 'high' | 'medium' | 'low' {
-  const avgDriverScore = (
-    drivers.benchSupport.score +
-    drivers.saddleInfluence.score +
-    drivers.ridgeSpineSupport.score +
-    drivers.convergenceDensity.score
-  ) / 4;
-  
-  const hasStrongFeature = Object.values(drivers).some(d => d.score >= 0.6);
+  // ========== PHASE 1 HONESTY GUARD ==========
+  // Confidence must be gated on REAL, per-parcel measured relief (ridge/saddle
+  // extraction from the DEM) and a real_dem flow mode — NOT on the constant
+  // Bench value (0.64), which previously tripped `hasStrongFeature` on every
+  // parcel and forced "High confidence" onto flat ground.
   const flowCount = flowData.flow_primary.features.length + flowData.flow_secondary.features.length;
   const mode = flowData.metadata.mode;
-  
-  if (mode === 'real_dem' && hasStrongFeature && flowCount >= 3) {
+  const isRealDem = mode === 'real_dem';
+
+  // Real measured structure from the DEM ridge/saddle pipeline.
+  const strongMeasuredStructure = ridgeCount >= 2 || saddleCount >= 1;
+  const someMeasuredStructure = ridgeCount >= 1 || saddleCount >= 1;
+
+  // Only genuinely surveyed terrain with measured structure earns high confidence.
+  if (isRealDem && strongMeasuredStructure && flowCount >= 3) {
     return 'high';
-  } else if ((mode === 'terrain_driven' || mode === 'real_dem') && avgDriverScore >= 0.35) {
+  }
+  // Real DEM with some measured structure → medium.
+  if (isRealDem && someMeasuredStructure) {
     return 'medium';
   }
-  
+  // Flat/low-relief ground, no measured structure, or templated fallback → low.
   return 'low';
 }
 

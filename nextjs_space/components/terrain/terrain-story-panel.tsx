@@ -45,6 +45,10 @@ function DriverBar({
   const color = getDriverColor(driver.score);
   const percentage = Math.round(driver.score * 100);
   
+  // Phase 1 honesty guard: Bench/Ridge are still constant-blended (not measured).
+  // Mark them so we never present an estimate as measured structure.
+  const isEstimate = !!driver.estimated && driver.score > 0;
+
   if (compact) {
     return (
       <div className="flex items-center gap-2">
@@ -57,8 +61,8 @@ function DriverBar({
             />
           </div>
         </div>
-        <span className="text-[10px] font-medium w-8 text-right" style={{ color }}>
-          {percentage}%
+        <span className="text-[10px] font-medium text-right whitespace-nowrap" style={{ color }}>
+          {isEstimate ? `~${percentage}%` : `${percentage}%`}
         </span>
       </div>
     );
@@ -70,9 +74,14 @@ function DriverBar({
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4" style={{ color }} />
           <span className="text-xs font-medium text-white">{driver.shortLabel}</span>
+          {isEstimate && (
+            <span className="text-[8px] uppercase tracking-wider text-stone-500 border border-stone-600/60 rounded px-1 py-px leading-none">
+              est
+            </span>
+          )}
         </div>
         <span className="text-xs font-semibold" style={{ color }}>
-          {percentage}%
+          {isEstimate ? `~${percentage}%` : `${percentage}%`}
         </span>
       </div>
       <div className="h-2 bg-stone-800 rounded-full overflow-hidden mb-1">
@@ -374,12 +383,13 @@ export function TerrainStoryExportLegend({
         {driverList.map(({ driver, label }, i) => {
           const Icon = DRIVER_ICONS[driver.icon];
           const color = getDriverColor(driver.score);
+          const isEstimate = !!driver.estimated && driver.score > 0;
           return (
             <div key={i} className="flex items-center gap-2">
               <Icon className="h-4 w-4 flex-shrink-0" style={{ color }} />
               <span className="text-xs text-white flex-1">{label}</span>
               <span className="text-xs font-bold" style={{ color }}>
-                {Math.round(driver.score * 100)}%
+                {isEstimate ? '~' : ''}{Math.round(driver.score * 100)}%
               </span>
             </div>
           );
