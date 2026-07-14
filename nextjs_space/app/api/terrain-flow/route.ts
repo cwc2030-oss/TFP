@@ -197,6 +197,12 @@ export async function POST(request: NextRequest) {
     const weights = { ...FLOW_WEIGHTS, ...options.weights };
     const thresholds = { ...FLOW_THRESHOLDS, ...options.thresholds };
 
+    // Hunt Zone scope move: the corridor endpoint returns empty for the tight
+    // 300-ac circle every time, so skip it entirely; and use a single ridge
+    // attempt (no double-retry) so a typical scope compute settles well under
+    // the client cap instead of stacking two 45s corridor + two 45s ridge waits.
+    const scopeCompute = options.scopeCompute === true;
+
     // If requesting legacy synthetic mode for comparison
     if (options.mode === 'synthetic') {
       // Piece 1: synthetic flow is disabled by default. generateLegacySyntheticFlow
@@ -233,10 +239,9 @@ export async function POST(request: NextRequest) {
     let ridgeData: any = null;
     let usedRealDEM = false;
 
-    terrainDebug.pipeline_steps.corridor_call = 'attempted';
-    console.log('[TerrainFlow] Fetching corridor data from Modal');
-
-    const corridorResponse = await fetchWithRetry(
+    const corridorResponse = scopeCompute
+      ? null
+      : await fetchWithRetry(
       CORRIDOR_API_URL,
       {
         method: 'POST',
@@ -260,6 +265,14 @@ export async function POST(request: NextRequest) {
       },
       'Corridor',
     );
+
+    if (scopeCompute) {
+      terrainDebug.pipeline_steps.corridor_call = 'skipped_scope_compute';
+      console.log('[TerrainFlow] Scope compute — skipping corridor call (empty for 300-ac circle)');
+    } else {
+      terrainDebug.pipeline_steps.corridor_call = 'attempted';
+      console.log('[TerrainFlow] Fetching corridor data from Modal');
+    }
 
     if (corridorResponse?.ok) {
       terrainDebug.corridor_modal_status = corridorResponse.status;
@@ -289,10 +302,11 @@ export async function POST(request: NextRequest) {
       terrainDebug.corridor_modal_error = errorText.slice(0, 300);
       terrainDebug.pipeline_steps.corridor_call = `http_${corridorResponse.status}`;
       console.log('[TerrainFlow] Corridor API error:', corridorResponse.status);
-    } else {
+    } else if (!scopeCompute) {
       terrainDebug.pipeline_steps.corridor_call = 'unreachable';
       terrainDebug.corridor_modal_error = 'No response (timeout or network error)';
     }
+    // (scopeCompute leaves corridor_call = 'skipped_scope_compute')
 
     // Fetch ridge data
     terrainDebug.pipeline_steps.ridge_call = 'attempted';
@@ -319,6 +333,8 @@ export async function POST(request: NextRequest) {
         timeout: RIDGE_TIMEOUT_MS,
       },
       'Ridge',
+      // Scope move: single attempt (no double-retry) to stay under the client cap.
+      scopeCompute ? 1 : 2,
     );
 
     if (ridgeResponse?.ok) {

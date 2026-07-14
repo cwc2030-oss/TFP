@@ -2440,6 +2440,9 @@ function DeerIntelContent() {
   const huntZoneFlowCacheRef = useRef<Map<string, any>>(new Map());
   // Guards against overlapping native computes when the ring is dragged rapidly.
   const huntZoneComputeSeqRef = useRef<number>(0);
+  // AbortController for the in-flight scope-move flow fetch. Aborted in the
+  // effect cleanup so a superseded scope move stops starving the Modal backend.
+  const huntZoneFetchAbortRef = useRef<AbortController | null>(null);
   
   // v3.5.1 — Animation frame ref for corridor flow animation
   const flowAnimationRef = useRef<number | null>(null);
@@ -3515,6 +3518,12 @@ const archetypeInitializedRef = useRef(false);
     };
   } | null>(null);
   const [terrainFlowLoading, setTerrainFlowLoading] = useState(false);
+  // Scope-move failure state: set when a Hunt Zone scope compute fails/times out
+  // so the UI can surface an explicit "couldn't load — tap to retry" at the new
+  // scope instead of leaving it silently empty or showing the prior position's flow.
+  const [scopeFlowError, setScopeFlowError] = useState<null | { lng: number; lat: number }>(null);
+  // Bumped by the retry button to re-run the scope compute effect on demand.
+  const [scopeRetryNonce, setScopeRetryNonce] = useState(0);
   // Ref to hold raw flow API response for terrain story re-generation
   const terrainFlowRawRef = useRef<any>(null);
   // Mirror of ridgeSpineData so the (slow) terrain-flow effect can read the
@@ -7344,8 +7353,19 @@ const archetypeInitializedRef = useRef(false);
     const seq = ++huntZoneComputeSeqRef.current;
     let cancelled = false;
 
+    // Supersede any in-flight scope fetch so it stops occupying the Modal
+    // backend, then arm a fresh controller for THIS scope move.
+    if (huntZoneFetchAbortRef.current) huntZoneFetchAbortRef.current.abort();
+    const abortController = new AbortController();
+    huntZoneFetchAbortRef.current = abortController;
+
+    // A new scope move starts clean: clear any stale failure banner so we don't
+    // show a retry from a previous position over this fresh attempt.
+    setScopeFlowError(null);
+
     const applyFlow = (payload: any, srcLabel: string) => {
       if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
+      setScopeFlowError(null);
       setTerrainFlowData(payload);
       terrainFlowRawRef.current = payload;
       console.log(`[HuntZoneFlow] Applied ${srcLabel} flow for`, key, {
@@ -7353,6 +7373,16 @@ const archetypeInitializedRef = useRef(false);
         secondary: payload?.flow_secondary?.features?.length ?? 0,
         convergence: payload?.convergence_zones?.features?.length ?? 0,
       });
+    };
+
+    // Surface an explicit, retryable failure at the NEW scope. Never leaves the
+    // previous position's flow standing in as this scope's answer.
+    const failScope = (reason: string) => {
+      if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
+      console.warn('[HuntZoneFlow] scope compute failed —', reason, 'for', key);
+      setTerrainFlowData(null);
+      terrainFlowRawRef.current = null;
+      setScopeFlowError({ lng, lat });
     };
 
     const run = async () => {
@@ -7384,6 +7414,12 @@ const archetypeInitializedRef = useRef(false);
         if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
 
         // 3) MISS — native compute for the 300-ac circle scope.
+        // Clear the previous scope's flow now so it is never mistaken for this
+        // scope's answer while the compute runs (loading bar covers the gap).
+        if (!cancelled && seq === huntZoneComputeSeqRef.current) {
+          setTerrainFlowData(null);
+          terrainFlowRawRef.current = null;
+        }
         const circle = buildHuntZoneCircle({ lat, lng }, radiusM);
         console.log('[HuntZoneFlow] Cache MISS — native compute for scope', key);
         const result = await fetchTerrainFlow({
@@ -7392,8 +7428,19 @@ const archetypeInitializedRef = useRef(false);
           // Tight buffer: enough landscape context for ridges feeding the circle,
           // without pulling in distant terrain that would distort the scope.
           bufferMeters: 500,
+          // Cancel this fetch if a newer scope move supersedes it.
+          signal: abortController.signal,
+          // Skip corridor + drop ridge double-retry so the compute stays under cap,
+          // and surface real failures instead of silent synthetic substitution.
+          options: { scopeCompute: true },
         });
-        if (cancelled || seq !== huntZoneComputeSeqRef.current) return;
+        // Superseded while in flight — the newer move owns the UI now.
+        if (result.aborted || cancelled || seq !== huntZoneComputeSeqRef.current) return;
+
+        if (!result.success) {
+          failScope(result.error || `HTTP ${result.status ?? '?'}`);
+          return;
+        }
 
         if (result.success && result.data) {
           const d = result.data;
@@ -7431,18 +7478,30 @@ const archetypeInitializedRef = useRef(false);
               }),
             }).catch(() => {});
           }
+        } else {
+          // success but no data payload — treat as a failure, not empty silence.
+          failScope('empty response');
         }
       } catch (err) {
-        if (!cancelled) console.warn('[HuntZoneFlow] compute error', err);
+        // AbortError from a superseded move is expected — swallow it silently.
+        if ((err as any)?.name === 'AbortError' || abortController.signal.aborted) return;
+        if (!cancelled && seq === huntZoneComputeSeqRef.current) {
+          failScope(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         if (!cancelled && seq === huntZoneComputeSeqRef.current) setTerrainFlowLoading(false);
       }
     };
 
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // Abort the in-flight fetch for this superseded scope move so the Modal
+      // backend is freed for the newer request (prevents request pile-up).
+      abortController.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [huntZoneCenterOverride]);
+  }, [huntZoneCenterOverride, scopeRetryNonce]);
 
   // ========== FIT TO PARCEL ON LOAD (IMMEDIATE ORIENTATION) ==========
   // v4-fix10: Parcel-only initial fit — sets clean first frame
@@ -15849,6 +15908,24 @@ const archetypeInitializedRef = useRef(false);
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
             <span>{flowSegmentExplainLoading ? 'Analyzing flow segment…' : 'Analyzing parcel…'}</span>
+          </div>
+        </div>
+      )}
+      {/* Scope-move flow failure — explicit, retryable. Never leaves the new
+           scope silently blank or showing the previous position's flow. */}
+      {scopeFlowError && !terrainFlowLoading && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40">
+          <div className="flex items-center gap-3 bg-black/80 backdrop-blur-sm text-white/90 pl-4 pr-2 py-2 rounded-full shadow-lg text-xs font-medium border border-amber-400/40">
+            <svg className="h-4 w-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>Terrain flow couldn't load for this scope.</span>
+            <button
+              onClick={() => { setScopeFlowError(null); setScopeRetryNonce(n => n + 1); }}
+              className="bg-amber-400 hover:bg-amber-300 text-black font-semibold px-3 py-1 rounded-full transition-colors"
+            >
+              Tap to retry
+            </button>
           </div>
         </div>
       )}
