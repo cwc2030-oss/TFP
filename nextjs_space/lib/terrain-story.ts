@@ -215,16 +215,28 @@ export function computeStructuralDrivers(
     saddleWeight * 1.5
   ));
 
-  // --- Convergence density (geometry-derived) ---
-  const convergenceCount = convergence_zones.features.length;
-  const convergenceIntensities = convergence_zones.features.map(f => f.properties.intensity || 0.5);
-  const avgConvergence = convergenceIntensities.length > 0
-    ? convergenceIntensities.reduce((a, b) => a + b, 0) / convergenceIntensities.length
+  // --- Convergence density (Phase 3: real, continuous) ---
+  // Reads directly from the real network-derived convergence zones. The old
+  // (count/5)*0.5 + avg*0.5 formula snapped the number to 10% steps and clustered
+  // every parcel near 70-90%. We now score continuously from real signal:
+  //   - peakIntensity: the strongest real meeting point on the parcel
+  //   - avgIntensity : overall meeting quality across zones
+  //   - breadth      : how many real zones exist, smoothly (1 - e^(-n/2.5)),
+  //                    so it grows without hard 10% jumps and never over-weights
+  //                    a parcel that simply has many weak nodes.
+  // No real convergence -> 0 (honest). Varies parcel-to-parcel with terrain.
+  const convergenceIntensities = convergence_zones.features.map(f => f.properties.intensity || 0);
+  const convergenceCount = convergenceIntensities.length;
+  const peakConvergence = convergenceCount > 0 ? Math.max(...convergenceIntensities) : 0;
+  const avgConvergence = convergenceCount > 0
+    ? convergenceIntensities.reduce((a, b) => a + b, 0) / convergenceCount
     : 0;
-  const convergenceDensity = Math.min(1, (
-    (convergenceCount / 5) * 0.5 +
-    avgConvergence * 0.5
-  ));
+  const convergenceBreadth = convergenceCount > 0 ? 1 - Math.exp(-convergenceCount / 2.5) : 0;
+  const convergenceDensity = convergenceCount === 0 ? 0 : Math.min(1, Math.max(0, (
+    peakConvergence * 0.6 +
+    avgConvergence * 0.15 +
+    convergenceBreadth * 0.25
+  )));
 
   return {
     benchSupport: {

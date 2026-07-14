@@ -1215,8 +1215,9 @@ export function generateTerrainFlowV3(
     ({ primary, secondary } = generatePatternBasedFlow(coords, pattern, parcelScale));
   }
   
-  // Generate convergence zones (if flows exist) — pass all rings for multi-parcel containment
-  const convergenceZones = generateConvergenceFromFlows(primary, secondary, parcelRings, parcelScale);
+  // Generate convergence zones from the REAL traced network (Phase 3) — pass all
+  // rings for multi-parcel containment plus ridgeData for saddle-depth signal.
+  const convergenceZones = deriveConvergenceFromNetwork(primary, secondary, parcelRings, parcelScale, ridgeData);
   
   // Generate opportunity zones scored by 4-component terrain formula
   const opportunityZones = generateOpportunityZones(convergenceZones, parcelScale, ridgeData, beddingPolygons, funnels);
@@ -1275,86 +1276,218 @@ export function generateTerrainFlowV3(
 
 // ========== CONVERGENCE AND OPPORTUNITY ==========
 
-function generateConvergenceFromFlows(
+// ---- Phase 3 geometry helpers ----
+
+/** Planar segment/segment intersection (local lng/lat approx). Returns the
+ *  intersection point only when both segments genuinely cross (params in [0,1]). */
+function segmentIntersection(
+  p1: [number, number], p2: [number, number],
+  p3: [number, number], p4: [number, number]
+): [number, number] | null {
+  const x1 = p1[0], y1 = p1[1], x2 = p2[0], y2 = p2[1];
+  const x3 = p3[0], y3 = p3[1], x4 = p4[0], y4 = p4[1];
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-14) return null; // parallel / degenerate
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  const u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
+}
+
+/** Acute crossing angle (deg, 0-90) between two segments. 90 = perpendicular. */
+function segmentCrossAngle(
+  p1: [number, number], p2: [number, number],
+  p3: [number, number], p4: [number, number]
+): number {
+  const b1 = calculateBearing(p1, p2);
+  const b2 = calculateBearing(p3, p4);
+  let d = Math.abs(b1 - b2) % 180;
+  if (d > 90) d = 180 - d;
+  return d;
+}
+
+interface ConvergenceCandidate {
+  coord: [number, number];
+  intensity: number;              // continuous 0-1, NEVER pinned to 1.0
+  corridorCount: number;          // real corridors meeting here
+  type: ConvergenceZoneProperties['type'];
+}
+
+/**
+ * PHASE 3 — REAL CONVERGENCE.
+ *
+ * Retires the quantized fake (intensity pinned at ~0.7-1.0, additive 0.15 steps,
+ * count/5 clamp). A convergence zone is now a place where the REAL traced network
+ * genuinely meets or pinches, derived from three honest sources:
+ *
+ *   1. Saddle crossings — deer funnel through the real gap. Signal = saddle depth
+ *      (ridgeDropFt) + how many corridors meet there.
+ *   2. Ridge junctions — where two traced ridge spines converge (tip-to-body
+ *      approach). Signal = closeness + spine strength + corridors meeting.
+ *   3. True flow-line intersections — genuine segment crossings of the traced
+ *      lines. Signal = crossing angle (perpendicular pinches harder) + corridors.
+ *
+ * Intensity is scored CONTINUOUSLY from real signal so the number varies smoothly
+ * with terrain instead of snapping to 10% steps. Honest gate: no real meeting
+ * point → zero zones (never a planted parcel-center marker).
+ */
+function deriveConvergenceFromNetwork(
   primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
   parcelRings: number[][][],
-  scale: ParcelScaleMetrics
+  scale: ParcelScaleMetrics,
+  ridgeData: any
 ): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
   const allFlows = [...primary, ...secondary];
   if (allFlows.length < 1) return [];
-  
-  const zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] = [];
-  const proximityM = scale.convergenceSearchRadius;
-  const foundPoints: { coord: [number, number]; intensity: number; flowCount: number }[] = [];
-  
-  // Find intersection/proximity points between flows
+
+  const isSaddleFlow = (f: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>) =>
+    f.properties.id.startsWith('flow_saddle_');
+  const saddleFlows = allFlows.filter(isSaddleFlow);
+  const spineFlows = allFlows.filter((f) => !isSaddleFlow(f));
+
+  // How many DISTINCT corridors have a vertex within R of a coord.
+  const meetRadius = Math.max(55, Math.round((scale.convergenceSearchRadius || 90) * 0.6));
+  const corridorsNear = (coord: [number, number]): number => {
+    let n = 0;
+    for (const f of allFlows) {
+      const cs = f.geometry.coordinates as [number, number][];
+      let dmin = Infinity;
+      for (const c of cs) {
+        const d = distanceMeters(coord, c);
+        if (d < dmin) dmin = d;
+      }
+      if (dmin <= meetRadius) n++;
+    }
+    return n;
+  };
+  // Smoothly map "corridors meeting" (2+) into 0-1 without hard steps.
+  const meetNorm = (count: number) => Math.min(1, Math.max(0, count - 1) / 3);
+
+  const candidates: ConvergenceCandidate[] = [];
+
+  // ===== Source 1: Saddle crossings (deer funnel through the gap) =====
+  const saddleNodes = extractSaddleNodes(ridgeData?.saddle_nodes);
+  for (const sf of saddleFlows) {
+    const cs = sf.geometry.coordinates as [number, number][];
+    // The crossing is built as [flankA, saddlePoint, flankB]; the saddle sits mid.
+    const saddlePt = cs[Math.floor(cs.length / 2)] ?? cs[0];
+    if (!pointInAnyRing(saddlePt, parcelRings)) continue;
+    // Recover the real saddle depth from the nearest service saddle node.
+    let dropFt = 0;
+    let bestD = Infinity;
+    for (const s of saddleNodes) {
+      const d = distanceMeters(saddlePt, s.coord);
+      if (d < bestD) { bestD = d; dropFt = s.ridgeDropFt; }
+    }
+    const depthNorm = Math.min(1, dropFt / SADDLE_DROP_NORM_FT); // 80ft ceiling
+    const count = corridorsNear(saddlePt);
+    // A saddle crossing is inherently a funnel: modest baseline, then real signal.
+    const intensity = Math.max(0.05, Math.min(1,
+      0.22 + depthNorm * 0.48 + meetNorm(count) * 0.30
+    ));
+    candidates.push({ coord: saddlePt, intensity, corridorCount: Math.max(2, count), type: 'saddle' });
+  }
+
+  // ===== Source 2: Ridge junctions (traced spines converge) =====
+  // A junction is where one spine's TIP approaches another spine (Y/T meets).
+  const JUNCTION_DIST_M = Math.max(60, Math.round((scale.convergenceSearchRadius || 90) * 0.8));
+  const spineLikelihood = (f: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>) =>
+    Math.max(0, Math.min(1, f.properties.likelihood || 0.5));
+  for (let i = 0; i < spineFlows.length; i++) {
+    const a = spineFlows[i].geometry.coordinates as [number, number][];
+    if (a.length < 2) continue;
+    const tips: [number, number][] = [a[0], a[a.length - 1]];
+    for (let j = 0; j < spineFlows.length; j++) {
+      if (j === i) continue;
+      const b = spineFlows[j].geometry.coordinates as [number, number][];
+      if (b.length < 2) continue;
+      for (const tip of tips) {
+        // nearest point on spine b to this tip
+        let dMin = Infinity;
+        let near: [number, number] = b[0];
+        for (const c of b) {
+          const d = distanceMeters(tip, c);
+          if (d < dMin) { dMin = d; near = c; }
+        }
+        if (dMin > JUNCTION_DIST_M) continue;
+        const node: [number, number] = [(tip[0] + near[0]) / 2, (tip[1] + near[1]) / 2];
+        if (!pointInAnyRing(node, parcelRings)) continue;
+        const closeNorm = 1 - dMin / JUNCTION_DIST_M;
+        const promNorm = (spineLikelihood(spineFlows[i]) + spineLikelihood(spineFlows[j])) / 2;
+        const count = corridorsNear(node);
+        const intensity = Math.max(0.05, Math.min(1,
+          0.18 + closeNorm * 0.32 + promNorm * 0.28 + meetNorm(count) * 0.22
+        ));
+        candidates.push({ coord: node, intensity, corridorCount: Math.max(2, count), type: count >= 3 ? 'pinch' : 'overlap' });
+      }
+    }
+  }
+
+  // ===== Source 3: True flow-line intersections (genuine segment crossings) =====
   for (let i = 0; i < allFlows.length; i++) {
+    const a = allFlows[i].geometry.coordinates as [number, number][];
+    if (a.length < 2) continue;
+    const abox = getBbox(a);
     for (let j = i + 1; j < allFlows.length; j++) {
-      const coords1 = allFlows[i].geometry.coordinates;
-      const coords2 = allFlows[j].geometry.coordinates;
-      
-      for (const p1 of coords1) {
-        for (const p2 of coords2) {
-          const dist = distanceMeters([p1[0], p1[1]], [p2[0], p2[1]]);
-          if (dist < proximityM) {
-            const midpoint: [number, number] = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
-            
-            // Check if inside any parcel ring (territory multi-parcel support)
-            if (!pointInAnyRing(midpoint, parcelRings)) continue;
-            
-            // Merge with nearby found point or add new
-            const existing = foundPoints.find(fp => 
-              distanceMeters(fp.coord, midpoint) < proximityM * 0.5
-            );
-            
-            if (existing) {
-              existing.intensity = Math.min(1, existing.intensity + 0.15);
-              existing.flowCount++;
-            } else {
-              foundPoints.push({
-                coord: midpoint,
-                intensity: 0.7 + (1 - dist / proximityM) * 0.2,
-                flowCount: 2,
-              });
-            }
-          }
+      const b = allFlows[j].geometry.coordinates as [number, number][];
+      if (b.length < 2) continue;
+      const bbox = getBbox(b);
+      // cheap bbox overlap prefilter
+      if (abox[2] < bbox[0] || bbox[2] < abox[0] || abox[3] < bbox[1] || bbox[3] < abox[1]) continue;
+      for (let m = 0; m < a.length - 1; m++) {
+        for (let n = 0; n < b.length - 1; n++) {
+          const hit = segmentIntersection(a[m], a[m + 1], b[n], b[n + 1]);
+          if (!hit) continue;
+          if (!pointInAnyRing(hit, parcelRings)) continue;
+          const angle = segmentCrossAngle(a[m], a[m + 1], b[n], b[n + 1]);
+          const angleNorm = Math.sin((angle * Math.PI) / 180); // perpendicular -> 1
+          const count = corridorsNear(hit);
+          const intensity = Math.max(0.05, Math.min(1,
+            0.20 + angleNorm * 0.42 + meetNorm(count) * 0.30
+          ));
+          candidates.push({ coord: hit, intensity, corridorCount: Math.max(2, count), type: count >= 3 ? 'pinch' : 'overlap' });
         }
       }
     }
   }
-  
-  // v5: Honest convergence — no synthetic centered fallback.
-  // Previously, when flow lines never intersected (typical on flat/poor ground
-  // where lines run weak and roughly parallel), we planted ONE convergence zone
-  // at the midpoint of the primary flow line. Because primary flow lines are
-  // centroid-seeded, that midpoint sat near the scope center, producing the same
-  // centered "convergence ribbon" on every poor parcel regardless of terrain.
-  // Real convergence must come from actual flow-line intersections only. If none
-  // exist, we emit ZERO convergence zones — poor ground now honestly reads empty.
-  
-  // Sort and limit
-  foundPoints.sort((a, b) => b.intensity - a.intensity);
-  
-  foundPoints.slice(0, scale.maxConvergenceZones).forEach((fp, idx) => {
-    zones.push({
-      type: 'Feature',
+
+  if (candidates.length === 0) return [];
+
+  // Merge candidates that describe the same physical meeting point. Keep the
+  // strongest signal (max intensity / max corridor count) — NO additive
+  // accumulation, so intensity can never saturate to a fake 1.0.
+  const mergeR = Math.max(45, Math.round((scale.convergenceSearchRadius || 90) * 0.5));
+  candidates.sort((a, b) => b.intensity - a.intensity);
+  const merged: ConvergenceCandidate[] = [];
+  for (const c of candidates) {
+    const near = merged.find((m) => distanceMeters(m.coord, c.coord) < mergeR);
+    if (near) {
+      near.corridorCount = Math.max(near.corridorCount, c.corridorCount);
+      // 'saddle' type is the most descriptive; keep it if either says saddle.
+      if (c.type === 'saddle') near.type = 'saddle';
+      else if (near.type !== 'saddle' && c.type === 'pinch') near.type = 'pinch';
+    } else {
+      merged.push({ ...c });
+    }
+  }
+
+  merged.sort((a, b) => b.intensity - a.intensity);
+  return merged.slice(0, scale.maxConvergenceZones).map((c, idx) => {
+    const cappedCount = Math.min(4, c.corridorCount);
+    return {
+      type: 'Feature' as const,
       properties: {
         id: `conv_${idx}`,
-        intensity: fp.intensity,
-        flowCount: Math.min(4, fp.flowCount),
-        // v4.3: On large territories, clamp the flow-count contribution so a
-        // high-flow node stays a local pinch instead of a km-scale blob.
-        // Single parcels & small territories keep the original raw formula.
+        intensity: c.intensity,
+        flowCount: cappedCount,
         radiusM: scale.convergenceBaseRadius +
-          (scale.isTerritory && scale.areaAcres >= 3000 ? Math.min(4, fp.flowCount) : fp.flowCount) * 10,
-        type: fp.flowCount >= 3 ? 'pinch' : 'overlap',
+          (scale.isTerritory && scale.areaAcres >= 3000 ? cappedCount : c.corridorCount) * 10,
+        type: c.type,
       },
-      geometry: { type: 'Point', coordinates: fp.coord },
-    });
+      geometry: { type: 'Point' as const, coordinates: c.coord },
+    };
   });
-  
-  return zones;
 }
 
 /**
