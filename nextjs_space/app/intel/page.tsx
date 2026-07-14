@@ -7327,6 +7327,21 @@ const archetypeInitializedRef = useRef(false);
     huntZoneCenterRef.current = null;
   }, [parcelPolygon?.properties?.parcelId]);
 
+  // QA-only (admin, ?debug=true): expose a console hook to drive precise, rapid
+  // scope moves for the pile-up/abort acceptance test. Committing a snapped
+  // center is exactly what the Piece-3 drag release does, so this exercises the
+  // real Piece-4 compute + abort path. No effect unless ?debug=true.
+  useEffect(() => {
+    if (!debugMode) return;
+    (window as any).__TFP_SCOPE_MOVE__ = (lng: number, lat: number) => {
+      const snapped: [number, number] = [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000];
+      huntZoneCenterRef.current = snapped;
+      setHuntZoneCenterOverride(snapped);
+      return snapped;
+    };
+    return () => { try { delete (window as any).__TFP_SCOPE_MOVE__; } catch { /* noop */ } };
+  }, [debugMode]);
+
   // ========== PIECE 4 — NATIVE PER-SCOPE FLOW COMPUTE + CACHE ==========
   // When the Hunt Zone ring SETTLES on a snapped grid center (huntZoneCenterOverride
   // commits from the Piece 3 drag release), compute flow NATIVELY for that 300-ac

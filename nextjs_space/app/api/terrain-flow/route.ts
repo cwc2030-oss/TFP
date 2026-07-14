@@ -86,6 +86,10 @@ const RIDGE_API_URL = process.env.RIDGE_API_URL ||
 
 const CORRIDOR_TIMEOUT_MS = 45000; // 45s — allows Modal cold-start
 const RIDGE_TIMEOUT_MS = 45000;    // 45s — allows Modal cold-start + USGS 3DEP fallback
+// Scope compute skips corridor, so ridge is the only upstream call. Give it a bit
+// more room (still safely under the 60s client cap) so a Modal cold-start ridge
+// can finish instead of spuriously timing out at 45s and forcing a retry.
+const RIDGE_TIMEOUT_SCOPE_MS = 50000; // 50s
 const API_VERSION = 'v2.1-terrain-driven-2026-05-01';
 
 /**
@@ -97,25 +101,43 @@ async function fetchWithRetry(
   init: RequestInit & { timeout: number },
   label: string,
   maxAttempts: number = 2,
+  parentSignal?: AbortSignal,
 ): Promise<Response | null> {
   const { timeout, ...fetchInit } = init;
+  // If the client already gave up on this request (superseded by a newer scope
+  // move), don't even start the upstream call — free the Modal backend now.
+  if (parentSignal?.aborted) {
+    console.warn(`[TerrainFlow] ${label} skipped — client already aborted (superseded)`);
+    return null;
+  }
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    // Bridge the client abort into THIS upstream fetch so a superseded request
+    // actually cancels the Modal compute (not just abandons it client-side).
+    const onParentAbort = () => controller.abort();
+    if (parentSignal) parentSignal.addEventListener('abort', onParentAbort);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-
       const res = await fetch(url, { ...fetchInit, signal: controller.signal });
       clearTimeout(timeoutId);
       return res;
     } catch (err) {
+      clearTimeout(timeoutId);
       const errMsg = err instanceof Error ? err.message : String(err);
       const isTimeout = errMsg.includes('abort');
+      // Client aborted (superseded) — stop immediately, never retry, free backend.
+      if (parentSignal?.aborted) {
+        console.warn(`[TerrainFlow] ${label} attempt ${attempt} aborted — superseded by newer scope move (client cancelled)`);
+        return null;
+      }
       if (attempt < maxAttempts && isTimeout) {
         console.warn(`[TerrainFlow] ${label} attempt ${attempt} timed out after ${init.timeout}ms — retrying`);
         continue;
       }
       console.warn(`[TerrainFlow] ${label} attempt ${attempt} failed: ${errMsg}`);
       return null;
+    } finally {
+      if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
     }
   }
   return null;
@@ -202,6 +224,10 @@ export async function POST(request: NextRequest) {
     // attempt (no double-retry) so a typical scope compute settles well under
     // the client cap instead of stacking two 45s corridor + two 45s ridge waits.
     const scopeCompute = options.scopeCompute === true;
+    const flowReqId = `flowreq_${Date.now().toString(36)}`;
+    if (scopeCompute) {
+      console.log(`[TerrainFlow][scope ${flowReqId}] START scope compute for ${parcel_id} (corridor skipped, ridge single-attempt)`);
+    }
 
     // If requesting legacy synthetic mode for comparison
     if (options.mode === 'synthetic') {
@@ -264,6 +290,8 @@ export async function POST(request: NextRequest) {
         timeout: CORRIDOR_TIMEOUT_MS,
       },
       'Corridor',
+      2,
+      request.signal,
     );
 
     if (scopeCompute) {
@@ -330,11 +358,12 @@ export async function POST(request: NextRequest) {
             min_length_m: 60,
           },
         }),
-        timeout: RIDGE_TIMEOUT_MS,
+        timeout: scopeCompute ? RIDGE_TIMEOUT_SCOPE_MS : RIDGE_TIMEOUT_MS,
       },
       'Ridge',
       // Scope move: single attempt (no double-retry) to stay under the client cap.
       scopeCompute ? 1 : 2,
+      request.signal,
     );
 
     if (ridgeResponse?.ok) {
@@ -370,6 +399,35 @@ export async function POST(request: NextRequest) {
     } else {
       terrainDebug.pipeline_steps.ridge_call = 'unreachable';
       terrainDebug.ridge_modal_error = 'No response (timeout or network error)';
+    }
+
+    // Scope compute with NO usable ridge data: distinguish a transient upstream
+    // failure (timeout / unreachable / non-200 / parse error) from a genuine
+    // "flat terrain" empty. Corridor is skipped on scope computes, so ridge is
+    // the only data source — a transient ridge failure means we have NO answer
+    // for this scope. Surface it as an explicit failure (502) so the client shows
+    // the retry banner, rather than a 200 with empty flow that would read as a
+    // false "no flow detected here." A real ridge response with 0 features
+    // ('success_but_empty') is a legitimate empty result and falls through.
+    if (scopeCompute && !usedRealDEM) {
+      const rc = terrainDebug.pipeline_steps.ridge_call;
+      const transientFailure =
+        rc === 'unreachable' || rc === 'parse_error' ||
+        (typeof rc === 'string' && rc.startsWith('http_'));
+      if (transientFailure) {
+        const processingTime = (Date.now() - startTime) / 1000;
+        console.warn(`[TerrainFlow][scope ${flowReqId}] FAILED (${rc}) in ${processingTime.toFixed(2)}s (client_aborted=${request.signal.aborted}) — returning failure for retry (${parcel_id})`);
+        return NextResponse.json(
+          {
+            success: false,
+            error: `ridge_${rc}`,
+            scopeCompute: true,
+            version: API_VERSION,
+            terrain_debug: terrainDebug,
+          },
+          { status: 502 },
+        );
+      }
     }
 
     // Generate terrain-driven flow
@@ -416,6 +474,9 @@ export async function POST(request: NextRequest) {
       convergence: terrainDebug.convergence_count,
       time: processingTime.toFixed(2) + 's',
     });
+    if (scopeCompute) {
+      console.log(`[TerrainFlow][scope ${flowReqId}] DONE in ${processingTime.toFixed(2)}s (client_aborted=${request.signal.aborted}) for ${parcel_id}`);
+    }
 
     // ─── Piece 1: 300-acre real-data cap ───────────────────────────────
     // Cap any single analysis at MAX_ANALYSIS_ACRES of real terrain data.
