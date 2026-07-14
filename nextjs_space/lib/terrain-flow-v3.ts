@@ -1153,6 +1153,86 @@ function traceSaddleCrossings(
   return { primary, secondary };
 }
 
+// ========== PHASE 4: VISUAL POLISH (flank offset + smoothing) ==========
+//
+// PURELY COSMETIC. This pass changes how the flow lines LOOK, never which
+// ridges/saddles are traced, the honest gate, or the convergence scoring.
+// Critically it runs AFTER deriveConvergenceFromNetwork() in the main entry, so
+// the Phase 3 convergence network is computed on the RAW traced geometry and is
+// left byte-for-byte unchanged by everything here.
+//
+// Two transforms, both faithful to the real terrain:
+//   1. Flank offset — deer walk the sidehill bench just below the crest, not the
+//      razor's edge. We nudge each ridge-spine flow a modest, uniform distance to
+//      one side of the crest so the line sits BESIDE the ridge. Saddle crossings
+//      are NOT offset — they must keep passing through the real gap to meet the
+//      ridge lines. (Precise leeward/aspect-aware side selection is a later
+//      refinement; a clean modest offset is the Phase 4 bar.)
+//   2. Smoothing — the raw ridge polylines are jagged (DEM vertices). Chaikin
+//      corner-cutting rounds the jitter into natural travel curves. Chaikin stays
+//      strictly INSIDE the polyline's own envelope (each new point is a convex
+//      blend of two real vertices), so it can NEVER bow the line off the ridge —
+//      it only interpolates between real points. Endpoints are preserved so the
+//      line still begins/ends on the real ridge. Applied to the saddle crossings
+//      too, it rounds the [flank → saddle → flank] elbow so ridge → cross → ridge
+//      reads as one continuous, natural path instead of a sharp V.
+
+// Modest sidehill offset (m): deer walk the bench just below the crest. Tunable.
+const FLANK_OFFSET_M = Number(process.env.FLOW_FLANK_OFFSET_M || 14);
+// Chaikin smoothing iterations (2 = smooth curves with controlled vertex growth).
+const SMOOTH_ITERATIONS = Number(process.env.FLOW_SMOOTH_ITERATIONS || 2);
+
+/**
+ * Chaikin corner-cutting smoothing for an open polyline. Each iteration replaces
+ * every interior corner with two points at the classic 1/4 and 3/4 positions of
+ * each segment — a convex blend of two REAL vertices, so the smoothed curve can
+ * never leave the polyline's own envelope (it interpolates between real points,
+ * it does not invent an overshooting curve). First and last vertices are kept so
+ * the line still starts and ends exactly on the real ridge geometry.
+ */
+function chaikinSmooth(coords: [number, number][], iterations: number): [number, number][] {
+  if (coords.length < 3 || iterations <= 0) return coords;
+  let pts = coords;
+  for (let it = 0; it < iterations; it++) {
+    const next: [number, number][] = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p = pts[i];
+      const q = pts[i + 1];
+      next.push([p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25]);
+      next.push([p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75]);
+    }
+    next.push(pts[pts.length - 1]);
+    pts = next;
+  }
+  return pts;
+}
+
+/**
+ * Apply the Phase 4 visual polish to a set of flow features. Ridge-spine flows
+ * are offset to the flank then smoothed; saddle crossings are smoothed only (so
+ * they keep passing through the real gap to meet the ridge lines). lengthM is
+ * refreshed for display; every other property (id, tier, likelihood, …) is
+ * preserved exactly. Geometry is only reshaped between/around real vertices — no
+ * feature is added, removed, or relocated off its ridge.
+ */
+function polishFlowGeometry(
+  feats: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[]
+): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] {
+  return feats.map((f) => {
+    const isSaddleCrossing = f.properties.id.startsWith('flow_saddle_');
+    let coords = f.geometry.coordinates as [number, number][];
+    if (!isSaddleCrossing && FLANK_OFFSET_M > 0) {
+      coords = offsetRidgeToFlank(coords, FLANK_OFFSET_M);
+    }
+    coords = chaikinSmooth(coords, SMOOTH_ITERATIONS);
+    return {
+      ...f,
+      properties: { ...f.properties, lengthM: Math.round(computeLineLength(coords)) },
+      geometry: { type: 'LineString' as const, coordinates: coords },
+    };
+  });
+}
+
 // ========== MAIN ENTRY POINT ==========
 
 /**
@@ -1218,6 +1298,14 @@ export function generateTerrainFlowV3(
   // Generate convergence zones from the REAL traced network (Phase 3) — pass all
   // rings for multi-parcel containment plus ridgeData for saddle-depth signal.
   const convergenceZones = deriveConvergenceFromNetwork(primary, secondary, parcelRings, parcelScale, ridgeData);
+
+  // Phase 4: PURELY-VISUAL polish. Runs AFTER convergence derivation above, so
+  // the Phase 3 network is scored on the raw traced geometry and stays unchanged.
+  // Nudges ridge-spine flows onto the sidehill flank and smooths every line
+  // (ridge + saddle crossing) into natural travel curves. No line is relocated
+  // off its real ridge; smoothing only interpolates between real DEM vertices.
+  primary = polishFlowGeometry(primary);
+  secondary = polishFlowGeometry(secondary);
   
   // Generate opportunity zones scored by 4-component terrain formula
   const opportunityZones = generateOpportunityZones(convergenceZones, parcelScale, ridgeData, beddingPolygons, funnels);
