@@ -996,6 +996,163 @@ function traceFlowFromRidges(
   return { primary, secondary };
 }
 
+// ========== PHASE 2: SADDLE CROSSINGS ==========
+// Phase 1 traces each ridge as its own flow line. A saddle is the low col where
+// the ridge crest dips — the real gap deer use to cross from one drainage to the
+// next. Phase 2 lifts the old "saddles must not influence routing" ban and makes
+// real saddle nodes a first-class routing input: for each quality saddle sitting
+// on a traced ridge, we add a short crossing corridor perpendicular to the ridge
+// axis, passing through the real saddle point, so the network reads
+// ridge-travel → cross at the saddle → ridge-travel. Honest or nothing: only real
+// saddles from the service, and only where they sit on a traced ridge.
+const SADDLE_CROSSINGS_ENABLED = (process.env.FLOW_SADDLE_CROSSINGS ?? '1') !== '0';
+// A saddle must sit within this distance of a traced ridge flow line to count as
+// a real crossing on that ridge (else it would be a floating stub).
+const SADDLE_MAX_RIDGE_DIST_M = Number(process.env.FLOW_SADDLE_MAX_RIDGE_DIST_M || 130);
+// Half-length of each crossing arm (per flank side). Clamped to parcel scale.
+const SADDLE_CROSSING_REACH_M = Number(process.env.FLOW_SADDLE_CROSSING_REACH_M || 90);
+// Deep saddles (bigger ridgeDropFt) read as stronger crossings; normalization ceiling.
+const SADDLE_DROP_NORM_FT = 80;
+// A saddle at/above this drop is treated as a strong (primary-tier) crossing.
+const SADDLE_STRONG_DROP_FT = 40;
+const SADDLE_MAX_CROSSINGS = 40;
+
+interface SaddleNodeLite {
+  coord: [number, number];
+  ridgeDropFt: number;
+}
+
+function extractSaddleNodes(fc: any): SaddleNodeLite[] {
+  const feats: any[] = fc?.features || [];
+  const out: SaddleNodeLite[] = [];
+  for (const f of feats) {
+    const g = f?.geometry;
+    if (!g || g.type !== 'Point') continue;
+    const c = g.coordinates;
+    if (!Array.isArray(c) || c.length < 2 || !isFinite(c[0]) || !isFinite(c[1])) continue;
+    const p = f.properties || {};
+    out.push({ coord: [c[0], c[1]], ridgeDropFt: Number(p.ridgeDropFt) || 0 });
+  }
+  return out;
+}
+
+/**
+ * Nearest traced ridge flow line to a point. Returns the min distance (m) and
+ * the local ridge bearing there (from the vertices bracketing the nearest one),
+ * so the crossing can be drawn perpendicular to the real ridge axis.
+ */
+function nearestRidgeBearing(
+  point: [number, number],
+  flows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[]
+): { distM: number; bearing: number } | null {
+  let best: { distM: number; bearing: number } | null = null;
+  for (const f of flows) {
+    const cs = f.geometry.coordinates as [number, number][];
+    for (let i = 0; i < cs.length; i++) {
+      const d = distanceMeters(point, cs[i]);
+      if (best === null || d < best.distM) {
+        const prev = cs[Math.max(0, i - 1)];
+        const next = cs[Math.min(cs.length - 1, i + 1)];
+        best = { distM: d, bearing: calculateBearing(prev, next) };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Build saddle-crossing flow lines that connect the Phase-1 ridge flows through
+ * real saddle gaps. Honest gate: no ridge flow → nothing to cross; no saddle on
+ * a traced ridge → zero crossings (ridge lines only). Never fabricates a gap.
+ */
+function traceSaddleCrossings(
+  ridgeData: any,
+  ridgeFlows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
+  parcelRings: number[][][],
+  scale: ParcelScaleMetrics
+): {
+  primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+  secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+} {
+  const primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
+  const secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
+
+  // Phase 2 builds ON Phase 1 — no ridge flow means there is nothing to cross.
+  if (ridgeFlows.length === 0) return { primary, secondary };
+
+  const saddlesAll = extractSaddleNodes(ridgeData?.saddle_nodes);
+  if (saddlesAll.length === 0) {
+    console.log('[SaddleCross] No saddle nodes — ridge lines only (honest).');
+    return { primary, secondary };
+  }
+
+  const parcelBbox = getBbox(parcelRings.flat());
+  // Cheap pre-filter window. Traced ridges already live within parcel+300m; a
+  // valid saddle only needs to be within SADDLE_MAX_RIDGE_DIST_M of one of them,
+  // so widen the pre-filter by that reach to avoid clipping edge saddles. The
+  // real relevance gate is the distance-to-traced-ridge test below.
+  const relevanceBbox = expandBbox(parcelBbox, RIDGE_RELEVANCE_MARGIN_M + SADDLE_MAX_RIDGE_DIST_M);
+  const [minLng, minLat, maxLng, maxLat] = relevanceBbox;
+  const inBbox = (c: [number, number]) =>
+    c[0] >= minLng && c[0] <= maxLng && c[1] >= minLat && c[1] <= maxLat;
+
+  // Crossing arm length, kept proportional to the parcel (clamped).
+  const reachM = Math.max(
+    45,
+    Math.min(SADDLE_CROSSING_REACH_M, Math.round(scale.convergenceSearchRadius || SADDLE_CROSSING_REACH_M))
+  );
+
+  // Strongest (deepest) saddles first, scoped to the parcel-relevant window.
+  const relevant = saddlesAll
+    .filter((s) => inBbox(s.coord))
+    .sort((a, b) => b.ridgeDropFt - a.ridgeDropFt)
+    .slice(0, SADDLE_MAX_CROSSINGS);
+
+  let idx = 0;
+  let skippedFar = 0;
+  for (const s of relevant) {
+    const nr = nearestRidgeBearing(s.coord, ridgeFlows);
+    if (!nr || nr.distM > SADDLE_MAX_RIDGE_DIST_M) {
+      skippedFar++;
+      continue;
+    }
+    const perp = (nr.bearing + 90) % 360;
+    const endA = movePoint(s.coord, perp, reachM);
+    const endB = movePoint(s.coord, (perp + 180) % 360, reachM);
+    // The crossing passes THROUGH the real saddle point, perpendicular to the
+    // ridge axis — so it meets the ridge flow at the saddle and reaches into the
+    // flank on each side (ridge → cross → ridge), not a floating stub.
+    const coords: [number, number][] = [endA, s.coord, endB];
+    const lengthM = Math.round(computeLineLength(coords));
+    const dropNorm = Math.min(1, s.ridgeDropFt / SADDLE_DROP_NORM_FT);
+    const likelihood = Math.max(0.4, Math.min(0.9, 0.45 + dropNorm * 0.4));
+    const tier: FlowTier = s.ridgeDropFt >= SADDLE_STRONG_DROP_FT ? 'primary' : 'secondary';
+    const feat: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties> = {
+      type: 'Feature',
+      properties: {
+        id: `flow_saddle_${idx}`,
+        tier,
+        likelihood,
+        lengthM,
+        avgSlope: 6,
+        convergenceScore: 0.5,
+      },
+      geometry: { type: 'LineString', coordinates: coords },
+    };
+    (tier === 'primary' ? primary : secondary).push(feat);
+    idx++;
+  }
+
+  console.log(
+    '[SaddleCross] Built %d saddle crossings (%d saddles total, %d in-window, %d skipped far from ridge).',
+    idx,
+    saddlesAll.length,
+    relevant.length,
+    skippedFar
+  );
+  return { primary, secondary };
+}
+
 // ========== MAIN ENTRY POINT ==========
 
 /**
@@ -1046,6 +1203,13 @@ export function generateTerrainFlowV3(
   let secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   if (RIDGE_TRACE_ENABLED) {
     ({ primary, secondary } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+    // Phase 2: route flow through real saddle gaps. Only when ridge spines were
+    // actually traced (crossings connect traced ridges — never float on their own).
+    if (SADDLE_CROSSINGS_ENABLED && (primary.length + secondary.length) > 0) {
+      const cross = traceSaddleCrossings(ridgeData, [...primary, ...secondary], parcelRings, parcelScale);
+      primary.push(...cross.primary);
+      secondary.push(...cross.secondary);
+    }
   } else {
     // Retired legacy template (escape hatch only).
     ({ primary, secondary } = generatePatternBasedFlow(coords, pattern, parcelScale));
