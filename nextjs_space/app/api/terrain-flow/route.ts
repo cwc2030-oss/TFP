@@ -86,10 +86,12 @@ const RIDGE_API_URL = process.env.RIDGE_API_URL ||
 
 const CORRIDOR_TIMEOUT_MS = 45000; // 45s — allows Modal cold-start
 const RIDGE_TIMEOUT_MS = 45000;    // 45s — allows Modal cold-start + USGS 3DEP fallback
-// Scope compute skips corridor, so ridge is the only upstream call. Give it a bit
-// more room (still safely under the 60s client cap) so a Modal cold-start ridge
-// can finish instead of spuriously timing out at 45s and forcing a retry.
-const RIDGE_TIMEOUT_SCOPE_MS = 50000; // 50s
+// Scope compute skips corridor, so ridge is the only upstream call. Run TWO
+// attempts at ~27s each (54s worst case, safely under the 60s client cap):
+// a single cold/slow Modal timeout auto-recovers on the retry instead of
+// surfacing a hard 502 + "couldn't load — tap to retry" banner. The retry loop
+// has no inter-attempt backoff, so 2×27s stays under the cap.
+const RIDGE_TIMEOUT_SCOPE_MS = 27000; // 27s per attempt × 2 attempts ≈ 54s
 const API_VERSION = 'v2.1-terrain-driven-2026-05-01';
 
 /**
@@ -220,13 +222,14 @@ export async function POST(request: NextRequest) {
     const thresholds = { ...FLOW_THRESHOLDS, ...options.thresholds };
 
     // Hunt Zone scope move: the corridor endpoint returns empty for the tight
-    // 300-ac circle every time, so skip it entirely; and use a single ridge
-    // attempt (no double-retry) so a typical scope compute settles well under
-    // the client cap instead of stacking two 45s corridor + two 45s ridge waits.
+    // 300-ac circle every time, so skip it entirely. The ridge call runs 2
+    // attempts at ~27s each (54s worst case, under the 60s client cap) so a
+    // single cold/slow Modal ridge auto-recovers instead of surfacing a hard
+    // 502 + retry banner.
     const scopeCompute = options.scopeCompute === true;
     const flowReqId = `flowreq_${Date.now().toString(36)}`;
     if (scopeCompute) {
-      console.log(`[TerrainFlow][scope ${flowReqId}] START scope compute for ${parcel_id} (corridor skipped, ridge single-attempt)`);
+      console.log(`[TerrainFlow][scope ${flowReqId}] START scope compute for ${parcel_id} (corridor skipped, ridge 2 attempts x ~27s)`);
     }
 
     // If requesting legacy synthetic mode for comparison
@@ -361,8 +364,12 @@ export async function POST(request: NextRequest) {
         timeout: scopeCompute ? RIDGE_TIMEOUT_SCOPE_MS : RIDGE_TIMEOUT_MS,
       },
       'Ridge',
-      // Scope move: single attempt (no double-retry) to stay under the client cap.
-      scopeCompute ? 1 : 2,
+      // Two attempts for both scope and full path. For scope the per-attempt
+      // timeout is trimmed to ~27s so 2×27s stays under the 60s client cap while
+      // still auto-recovering from a single cold/slow Modal ridge call. The
+      // AbortController still cancels immediately when a newer scope move
+      // supersedes this request (parentSignal bridge in fetchWithRetry).
+      2,
       request.signal,
     );
 
@@ -374,7 +381,6 @@ export async function POST(request: NextRequest) {
         const rs = ridgeData.ridges_secondary?.features?.length || 0;
         terrainDebug.ridge_count_primary = rp;
         terrainDebug.ridge_count_secondary = rs;
-        
         if (rp + rs > 0) {
           terrainDebug.pipeline_steps.ridge_call = 'success';
           usedRealDEM = true;

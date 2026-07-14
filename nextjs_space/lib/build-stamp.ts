@@ -21,7 +21,10 @@ export const BUILD_DATE = 'Jul 14';
 // r2 — scope-move stability: abort pile-up, fast scope compute, retry-on-fail.
 // r3 — remove ridge-influence spine-count guard: influence now reflects real
 //      measured relief (prominence/relief), independent of primary-spine count.
-export const BUILD_REV = 'r3';
+// r1 (v5.2) — relief gate now max(primary,secondary) prominence @ 32 ft floor
+//      (restores flow on moderate ground) + scope ridge call back to 2 attempts
+//      × ~27s (kills the "tap to retry" banner under cold Modal).
+export const BUILD_REV = 'r1';
 
 // e.g. "build v5.0-scope r2 · Jul 13"
 export const BUILD_STAMP = `build ${TERRAIN_ENGINE_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

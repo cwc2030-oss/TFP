@@ -11,12 +11,15 @@
  *   - Engine fixes propagate instantly (version bump busts the cache)
  *   - Expensive static terrain compute is still cached between bumps
  *
- * Current engine: v5.1-prominence-gate (canonical scope-aware flow contract:
- *   flow_lines[] + scope{} + engine_version emitted on flow responses).
- *   v5.1 adds the prominence-magnitude relief gate + relief-gated bench
- *   fallback + removal of the centered-convergence fallback in
- *   lib/terrain-flow-v3.ts. Bumped so already-cached parcels miss and
- *   recompute lazily under the new gate (flat ground now reads honestly empty
- *   instead of serving the old centered "convergence ribbon").
+ * Current engine: v5.2-relief-gate. v5.2 fixes the v5.1 prominence gate, which
+ *   only looked at PRIMARY ridge prominence and required 50 ft — erasing flow
+ *   on real moderate/rolling hunting ground that carries its relief in
+ *   SECONDARY ridges (calibration 2026-07: 5 of 8 known-good moderate parcels
+ *   got no flow). v5.2 gates on max(primary, secondary) prominence with a
+ *   32 ft floor (calibrated clean gap: flat-ag ≤~30 ft, moderate ≥~33 ft) and
+ *   falls back to secondary ridge geometry for pattern classification when no
+ *   primary ridge is present. Bumped so already-cached parcels (including the
+ *   stale empty-flow entries produced by v5.1 on moderate ground) miss and
+ *   recompute lazily under the corrected gate.
  */
-export const TERRAIN_ENGINE_VERSION = 'v5.1-prominence-gate';
+export const TERRAIN_ENGINE_VERSION = 'v5.2-relief-gate';

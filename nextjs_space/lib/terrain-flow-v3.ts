@@ -161,7 +161,13 @@ export function classifyFlowPattern(
   
   // Check for real corridor data
   const corridors = corridorData?.corridors?.features || corridorData?.features || [];
-  const ridges = ridgeData?.ridges_primary?.features || [];
+  const primaryRidgeFeats: any[] = ridgeData?.ridges_primary?.features || [];
+  const secondaryRidgeFeats: any[] = ridgeData?.ridges_secondary?.features || [];
+  // Moderate/rolling ground frequently expresses ALL its relief as SECONDARY
+  // ridges (primary count = 0). Fall back to secondary geometry so pattern
+  // classification (funnel/linear) still fires on real relief. Primary is
+  // preferred when present to preserve behavior on steeper ground.
+  const ridges = primaryRidgeFeats.length > 0 ? primaryRidgeFeats : secondaryRidgeFeats;
   
   const hasCorridors = corridors.length > 0;
   // PROMINENCE-MAGNITUDE GATE (honest flat-terrain gate).
@@ -169,18 +175,34 @@ export function classifyFlowPattern(
   // but counting could NOT discriminate flat ag from real terrain:
   // the ridge service returns a primary ridge + 10-20 saddles on essentially
   // every parcel, all scored ~0.5. Only prominence MAGNITUDE separates genuine
-  // relief from micro-noise. We take the tallest primary-ridge prominence (ft)
-  // and require it to clear a floor before we treat the parcel as having
-  // "measured relief." Sub-floor parcels fall through to 'sparse'/'none' and
-  // read honestly empty. Floor is env-tunable (FLOW_PROMINENCE_FLOOR_FT) so it
-  // can be calibrated without a code change.
-  const primaryFeats: any[] = ridgeData?.ridges_primary?.features || [];
-  const maxPrimaryProminenceFt = primaryFeats.reduce(
+  // relief from micro-noise. We take the tallest ridge prominence (ft) of
+  // EITHER tier (primary OR secondary) and require it to clear a floor before
+  // we treat the parcel as having "measured relief." Sub-floor parcels fall
+  // through to 'sparse'/'none' and read honestly empty.
+  //
+  // Why BOTH tiers: moderate/rolling hunting ground routinely has zero primary
+  // ridges, with all its relief carried by secondary ridges (e.g. calibration
+  // 2026-07: Buffalo 0 primary / 39.6 ft secondary, Callaway 0 / 88.5 ft,
+  // Crawford 0 / 68.8 ft). A primary-only gate wrongly read those as flat and
+  // erased flow. Calibrated against the LIVE ridge engine on known moderate vs
+  // flat-ag parcels (coarse ~26 m DEM, the worst case): flat-ag tops out at
+  // ~30 ft on max(primary,secondary); real moderate ground starts at ~33 ft.
+  // Floor 32 ft sits in that clean gap. Saddle 'ridgeDropFt' was evaluated as a
+  // fallback and REJECTED: it both admits flat-ag false positives (Stoddard
+  // delta 39 ft) and misses real ground (Buffalo/Boone have 0 saddles).
+  // Floor is env-tunable (FLOW_PROMINENCE_FLOOR_FT) so it can be recalibrated
+  // without a code change.
+  const maxPrimaryProminenceFt = primaryRidgeFeats.reduce(
     (m: number, f: any) => Math.max(m, Number(f?.properties?.prominenceFt) || 0),
     0
   );
-  const PROMINENCE_FLOOR_FT = Number(process.env.FLOW_PROMINENCE_FLOOR_FT || 50);
-  const hasMeasuredRelief = maxPrimaryProminenceFt >= PROMINENCE_FLOOR_FT;
+  const maxSecondaryProminenceFt = secondaryRidgeFeats.reduce(
+    (m: number, f: any) => Math.max(m, Number(f?.properties?.prominenceFt) || 0),
+    0
+  );
+  const maxProminenceFt = Math.max(maxPrimaryProminenceFt, maxSecondaryProminenceFt);
+  const PROMINENCE_FLOOR_FT = Number(process.env.FLOW_PROMINENCE_FLOOR_FT || 32);
+  const hasMeasuredRelief = maxProminenceFt >= PROMINENCE_FLOOR_FT;
   const hasRidges = ridges.length > 0 && hasMeasuredRelief;
   
   // Structure score: how much terrain evidence we have
