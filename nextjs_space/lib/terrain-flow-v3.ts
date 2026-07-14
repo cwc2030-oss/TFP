@@ -164,7 +164,19 @@ export function classifyFlowPattern(
   const ridges = ridgeData?.ridges_primary?.features || [];
   
   const hasCorridors = corridors.length > 0;
-  const hasRidges = ridges.length > 0;
+  // Honest flat-terrain gate (mirrors hasMeasuredRelief in lib/terrain-story.ts):
+  // require a real PRIMARY ridge spine or a measured saddle before treating the
+  // parcel as having ridge structure. On flat/poor ag ground the DEM extraction
+  // can still surface a couple of weak SECONDARY spines inside the analysis
+  // buffer — minor micro-relief, not real structure. Counting those as ridges
+  // pushed structureScore to ~0.4 and forced a linear/funnel pattern, which is
+  // what generated flow lines (and, via the removed midpoint fallback, a centered
+  // convergence ribbon) on genuinely poor ground. Requiring measured relief lets
+  // weak ag fall through to 'sparse'/'none' and read honestly empty.
+  const ridgeCountPrimary = ridgeData?.metadata?.ridge_count_primary ?? 0;
+  const saddleCount = ridgeData?.metadata?.saddle_count ?? 0;
+  const hasMeasuredRelief = ridgeCountPrimary >= 1 || saddleCount >= 1;
+  const hasRidges = ridges.length > 0 && hasMeasuredRelief;
   
   // Structure score: how much terrain evidence we have
   // NOTE: saddles intentionally excluded — they must not influence routing or pattern classification.
@@ -917,20 +929,14 @@ function generateConvergenceFromFlows(
     }
   }
   
-  // If no intersections, use flow midpoints as weak convergence
-  if (foundPoints.length === 0 && primary.length > 0) {
-    const primaryCoords = primary[0].geometry.coordinates;
-    const midIdx = Math.floor(primaryCoords.length / 2);
-    const midpoint: [number, number] = [primaryCoords[midIdx][0], primaryCoords[midIdx][1]];
-    
-    if (pointInAnyRing(midpoint, parcelRings)) {
-      foundPoints.push({
-        coord: midpoint,
-        intensity: 0.55,
-        flowCount: 1,
-      });
-    }
-  }
+  // v5: Honest convergence — no synthetic centered fallback.
+  // Previously, when flow lines never intersected (typical on flat/poor ground
+  // where lines run weak and roughly parallel), we planted ONE convergence zone
+  // at the midpoint of the primary flow line. Because primary flow lines are
+  // centroid-seeded, that midpoint sat near the scope center, producing the same
+  // centered "convergence ribbon" on every poor parcel regardless of terrain.
+  // Real convergence must come from actual flow-line intersections only. If none
+  // exist, we emit ZERO convergence zones — poor ground now honestly reads empty.
   
   // Sort and limit
   foundPoints.sort((a, b) => b.intensity - a.intensity);
