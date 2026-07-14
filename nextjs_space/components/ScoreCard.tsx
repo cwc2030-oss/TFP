@@ -198,7 +198,7 @@ export default function ScoreCard({
           {[
             { label: 'FUNNELS', value: funnelCount },
             { label: 'STANDS', value: standCount },
-            { label: 'RIDGES', value: ridgeCount ?? 0 },
+            { label: 'RIDGE SPINES', value: ridgeCount ?? 0 },
             { label: 'SCORE', value: score }
           ].map(stat => (
             <div key={stat.label} style={{

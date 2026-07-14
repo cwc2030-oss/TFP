@@ -11,7 +11,12 @@
  *   - Engine fixes propagate instantly (version bump busts the cache)
  *   - Expensive static terrain compute is still cached between bumps
  *
- * Current engine: v5.0-scope (canonical scope-aware flow contract:
- *   flow_lines[] + scope{} + engine_version emitted on flow responses)
+ * Current engine: v5.1-prominence-gate (canonical scope-aware flow contract:
+ *   flow_lines[] + scope{} + engine_version emitted on flow responses).
+ *   v5.1 adds the prominence-magnitude relief gate + relief-gated bench
+ *   fallback + removal of the centered-convergence fallback in
+ *   lib/terrain-flow-v3.ts. Bumped so already-cached parcels miss and
+ *   recompute lazily under the new gate (flat ground now reads honestly empty
+ *   instead of serving the old centered "convergence ribbon").
  */
-export const TERRAIN_ENGINE_VERSION = 'v5.0-scope';
+export const TERRAIN_ENGINE_VERSION = 'v5.1-prominence-gate';

@@ -128,7 +128,7 @@ export function StructuralDriversGrid({
         {driverList.map(({ key, driver }) => (
           <div key={key} className="flex items-center gap-2">
             {showLabels && (
-              <span className="text-[10px] text-stone-400 w-20 truncate">
+              <span className="text-[10px] text-stone-400 w-24 truncate">
                 {driver.shortLabel}
               </span>
             )}

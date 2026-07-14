@@ -134,6 +134,18 @@ export function computeStructuralDrivers(
   const saddleCount = ridgeSpineData?.metadata?.saddle_count ?? 0;
   const totalRidgeLengthM = ridgeSpineData?.metadata?.total_ridge_length_m ?? 0;
 
+  // OPTION C GUARD ("0 spines + Ridge 61%" fix): the left panel, Score Card and
+  // PDF all display a PRIMARY-spine COUNT taken from the *filtered*
+  // ridges_primary.features array. The ridge-influence score below is built from
+  // metadata counts (primary+secondary) + length + prominence, which live on a
+  // separate field that is never recomputed after the water-body feature filter.
+  // So the array could be 0 while metadata still read >=1, producing a live
+  // "Ridge 61%" next to a displayed "0" spine count — reads as broken. We tie the
+  // ridge-influence score to the SAME displayed basis: if no primary spine is
+  // actually displayed, ridge influence is honestly 0 / Not detected.
+  const displayedPrimarySpineCount = ridgeSpineData?.ridges_primary?.features?.length ?? 0;
+  const hasDisplayedPrimarySpine = displayedPrimarySpineCount >= 1;
+
   // Real, per-parcel measured relief signal (ridge/saddle extraction from DEM).
   // IMPORTANT — honest flat-terrain guard: a genuine structural parcel is
   // indicated by a PRIMARY (dominant) ridge spine or by measured saddles. On
@@ -178,9 +190,9 @@ export function computeStructuralDrivers(
     ridgeCount >= 1 ? 0.20 : 0;
   const ridgeLengthComponent = Math.min(0.25, (totalRidgeLengthM / 1000) * 0.25);
   const ridgeProminenceComponent = Math.min(0.20, (avgProminenceFt / 60) * 0.20);
-  const ridgeSpineSupport = hasMeasuredRelief
+  const ridgeSpineSupport = (hasMeasuredRelief && hasDisplayedPrimarySpine)
     ? Math.min(1, ridgeCountComponent + ridgeLengthComponent + ridgeProminenceComponent)
-    : 0; // no measured ridges → honest 0 (flat / low-relief ground)
+    : 0; // no measured ridges OR no displayed primary spine → honest 0 (guard)
 
   // --- Bench support (MEASURED from real ridge-flank geometry) ---
   // Benches are shelves on ridge flanks; prevalence scales with how many
@@ -234,9 +246,11 @@ export function computeStructuralDrivers(
     },
     ridgeSpineSupport: {
       score: ridgeSpineSupport,
-      label: getRidgeLabel(ridgeSpineSupport),
-      shortLabel: 'Ridge',
-      description: getRidgeDescription(ridgeSpineSupport),
+      label: hasDisplayedPrimarySpine ? getRidgeLabel(ridgeSpineSupport) : 'Not detected',
+      // Relabeled 'Ridge' → 'Ridge influence' (Option C): this is a blended
+      // influence SCORE, not the primary-spine count shown in the panel.
+      shortLabel: 'Ridge influence',
+      description: hasDisplayedPrimarySpine ? getRidgeDescription(ridgeSpineSupport) : 'No ridge structure identified',
       icon: 'ridge',
       estimated: false, // PHASE 2a: measured from real per-parcel DEM ridge extraction (count/length/prominence)
     },
@@ -320,7 +334,7 @@ function getEmptyDrivers(): StructuralDrivers {
   return {
     benchSupport: { score: 0, label: 'Not detected', shortLabel: 'Bench', description: 'No bench terrain identified', icon: 'bench', estimated: false },
     saddleInfluence: { score: 0, label: 'Not detected', shortLabel: 'Saddle', description: 'No saddle influence identified', icon: 'saddle', estimated: false },
-    ridgeSpineSupport: { score: 0, label: 'Not detected', shortLabel: 'Ridge', description: 'No ridge structure identified', icon: 'ridge', estimated: false },
+    ridgeSpineSupport: { score: 0, label: 'Not detected', shortLabel: 'Ridge influence', description: 'No ridge structure identified', icon: 'ridge', estimated: false },
     convergenceDensity: { score: 0, label: 'Not detected', shortLabel: 'Convergence', description: 'No flow convergence detected', icon: 'convergence', estimated: false },
   };
 }

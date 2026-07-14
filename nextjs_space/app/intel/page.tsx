@@ -17571,7 +17571,7 @@ const archetypeInitializedRef = useRef(false);
                   <div className={`grid ${STANDS_ENABLED ? 'grid-cols-4' : 'grid-cols-2'} gap-1 mb-2`}>
                     <div className="text-center">
                       <p className="text-sm text-white font-bold">{ridgeSpineData?.ridges_primary?.features?.length ?? 0}</p>
-                      <p className="text-[8px] text-stone-500/70 uppercase">Ridges</p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Ridge spines</p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-white font-bold">{summary.funnelCount}</p>
