@@ -808,6 +808,194 @@ function computeLineLength(coords: [number, number][]): number {
   return length;
 }
 
+// ========== PHASE 1: REAL RIDGE-SPINE TRACER ==========
+//
+// Deer travel along ridge flanks, so flow lines should TRACE the real ridge
+// spine polylines delivered by the ridge service — not be synthesized from the
+// parcel centroid + edge-bearing + sinusoid (generateCurvedLine + the six
+// generate*Flow archetypes). This tracer replaces the geometry SOURCE:
+//   - One flow line per real ridge (strongest prominence first).
+//   - Tier rides the ridge service's own prominence-based split: primary ridges
+//     -> primary (green) flow, secondary ridges -> secondary (blue) flow.
+//   - Honest gate preserved (v5.2 prominence floor): if no ridge clears the
+//     floor, we emit ZERO flow. True-or-empty. Never a centroid fallback.
+//   - Flow-line count reflects real ridge count, so a 6-ridge parcel honestly
+//     shows more linework than a 1-ridge parcel.
+//
+// Flank offset (deer walk the flank, not the exact crest) is intentionally
+// modest and tunable; it defaults to 0 (trace the true spine) because per-vertex
+// downslope aspect is a Phase 4 refinement. Set FLOW_RIDGE_FLANK_OFFSET_M > 0 to
+// nudge every traced vertex a fixed distance to one side of the crest.
+
+// Flag: ridge tracing is the geometry source (default ON). Set FLOW_RIDGE_TRACE=0
+// to revert to the retired centroid/sinusoid template (generatePatternBasedFlow),
+// which is left in place purely as an escape hatch and no longer renders by default.
+const RIDGE_TRACE_ENABLED = (process.env.FLOW_RIDGE_TRACE ?? '1') !== '0';
+// Phase 4 tuning knob; 0 = trace the true crest.
+const RIDGE_FLANK_OFFSET_M = Number(process.env.FLOW_RIDGE_FLANK_OFFSET_M || 0);
+// Generous per-tier caps so density reflects real terrain complexity without
+// becoming absurd on dense multi-ridge parcels. Strongest ridges are kept first.
+const RIDGE_TRACE_MAX_PER_TIER = 30;
+// Ridges are relevant if they fall within the parcel bbox expanded by this margin
+// (roughly the buffered analysis window / visible map extent).
+const RIDGE_RELEVANCE_MARGIN_M = 300;
+
+interface RidgeFeatureLite {
+  coords: [number, number][];
+  prominenceFt: number;
+  ridgeScore: number;
+  lengthMeters: number;
+}
+
+function extractRidgeFeatures(fc: any): RidgeFeatureLite[] {
+  const feats: any[] = fc?.features || [];
+  const out: RidgeFeatureLite[] = [];
+  for (const f of feats) {
+    const g = f?.geometry;
+    if (!g || g.type !== 'LineString') continue;
+    const raw: any[] = g.coordinates || [];
+    const coords: [number, number][] = raw
+      .filter((c) => Array.isArray(c) && c.length >= 2 && isFinite(c[0]) && isFinite(c[1]))
+      .map((c) => [c[0], c[1]] as [number, number]);
+    if (coords.length < 2) continue;
+    const p = f.properties || {};
+    out.push({
+      coords,
+      prominenceFt: Number(p.prominenceFt) || 0,
+      ridgeScore: Number(p.avgRidgeScore) || 0,
+      lengthMeters: Number(p.lengthMeters) || computeLineLength(coords),
+    });
+  }
+  return out;
+}
+
+/** Offset a ridge polyline a fixed distance to one side of the crest (flank). */
+function offsetRidgeToFlank(coords: [number, number][], offsetM: number): [number, number][] {
+  if (offsetM === 0 || coords.length < 2) return coords;
+  const out: [number, number][] = [];
+  for (let i = 0; i < coords.length; i++) {
+    const prev = coords[Math.max(0, i - 1)];
+    const next = coords[Math.min(coords.length - 1, i + 1)];
+    const localBearing = calculateBearing(prev, next);
+    // Offset perpendicular to local travel direction (consistent side).
+    out.push(movePoint(coords[i], (localBearing + 90) % 360, offsetM));
+  }
+  return out;
+}
+
+/** True if any vertex of the polyline falls inside a bbox. */
+function polylineInBbox(coords: [number, number][], bbox: [number, number, number, number]): boolean {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  return coords.some((c) => c[0] >= minLng && c[0] <= maxLng && c[1] >= minLat && c[1] <= maxLat);
+}
+
+/**
+ * Trace flow lines directly from real ridge-spine geometry.
+ * Returns empty (honest gate) when no ridge clears the v5.2 prominence floor.
+ */
+function traceFlowFromRidges(
+  ridgeData: any,
+  parcelRings: number[][][],
+  scale: ParcelScaleMetrics
+): {
+  primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+  secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+} {
+  const primaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_primary);
+  const secondaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_secondary);
+
+  if (primaryRidgesAll.length === 0 && secondaryRidgesAll.length === 0) {
+    console.log('[RidgeTrace] No ridge geometry — empty flow (honest gate).');
+    return { primary: [], secondary: [] };
+  }
+
+  // The ridge service returns spines for a large buffered window (up to ~1 km
+  // around the parcel). Only ridges near the parcel are relevant to on-parcel
+  // deer flow, so scope to the parcel bbox expanded by a margin BEFORE both the
+  // honest gate and tracing. This keeps the gate reason and the rendered output
+  // consistent: gate-pass ⟺ at least one traceable ridge near the parcel.
+  const parcelBbox = getBbox(parcelRings.flat());
+  const relevanceBbox = expandBbox(parcelBbox, RIDGE_RELEVANCE_MARGIN_M);
+  const primaryRidges = primaryRidgesAll.filter((r) => polylineInBbox(r.coords, relevanceBbox));
+  const secondaryRidges = secondaryRidgesAll.filter((r) => polylineInBbox(r.coords, relevanceBbox));
+
+  if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
+    console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
+    return { primary: [], secondary: [] };
+  }
+
+  // Honest gate (v5.2): require measured relief above the prominence floor on
+  // EITHER tier, evaluated over the parcel-relevant ridges. Sub-floor parcels
+  // (flat ag / gate fails) read empty — never a centroid template fallback.
+  const PROMINENCE_FLOOR_FT = Number(process.env.FLOW_PROMINENCE_FLOOR_FT || 32);
+  const maxProminenceFt = [...primaryRidges, ...secondaryRidges].reduce(
+    (m, r) => Math.max(m, r.prominenceFt),
+    0
+  );
+  if (maxProminenceFt < PROMINENCE_FLOOR_FT) {
+    console.log(
+      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate).',
+      Math.round(maxProminenceFt),
+      PROMINENCE_FLOOR_FT
+    );
+    return { primary: [], secondary: [] };
+  }
+
+  const buildTier = (
+    ridges: RidgeFeatureLite[],
+    tier: FlowTier
+  ): GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] => {
+    // Strongest prominence first, capped per tier.
+    const relevant = ridges
+      .slice()
+      .sort((a, b) => b.prominenceFt - a.prominenceFt)
+      .slice(0, RIDGE_TRACE_MAX_PER_TIER);
+
+    const feats: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[] = [];
+    relevant.forEach((r, idx) => {
+      const coords = offsetRidgeToFlank(r.coords, RIDGE_FLANK_OFFSET_M);
+      const lengthM = Math.round(computeLineLength(coords));
+      // Likelihood rides the ridge's real measured prominence/score — not a template.
+      const promNorm = Math.min(1, r.prominenceFt / 150); // ~150 ft = strong spine
+      const base = tier === 'primary' ? 0.6 : 0.45;
+      const likelihood = Math.max(
+        tier === 'primary' ? 0.55 : 0.4,
+        Math.min(0.95, base + promNorm * 0.3 + r.ridgeScore * 0.1)
+      );
+      // Rough slope from prominence over run (display metadata only).
+      const promM = r.prominenceFt * 0.3048;
+      const avgSlope = r.lengthMeters > 0
+        ? Math.max(2, Math.min(35, (Math.atan(promM / r.lengthMeters) * 180) / Math.PI * 4))
+        : 7;
+      feats.push({
+        type: 'Feature',
+        properties: {
+          id: `flow_${tier}_${idx}`,
+          tier,
+          likelihood,
+          lengthM,
+          avgSlope,
+          convergenceScore: 0.5,
+        },
+        geometry: { type: 'LineString', coordinates: coords },
+      });
+    });
+    return feats;
+  };
+
+  const primary = buildTier(primaryRidges, 'primary');
+  const secondary = buildTier(secondaryRidges, 'secondary');
+
+  console.log(
+    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft).',
+    primary.length,
+    secondary.length,
+    Math.round(maxProminenceFt)
+  );
+
+  return { primary, secondary };
+}
+
 // ========== MAIN ENTRY POINT ==========
 
 /**
@@ -849,8 +1037,19 @@ export function generateTerrainFlowV3(
     pattern.type, pattern.confidence, pattern.structureScore);
   console.log('[TerrainFlowV3] %s', pattern.explanation);
   
-  // Generate pattern-based flows
-  const { primary, secondary } = generatePatternBasedFlow(coords, pattern, parcelScale);
+  // Phase 1 geometry source: TRACE real ridge spines (deer walk the ridge flanks)
+  // instead of synthesizing lines from the parcel centroid + edge-bearing +
+  // sinusoid. The centroid/sinusoid template (generatePatternBasedFlow) is
+  // retired as the geometry source and kept only behind FLOW_RIDGE_TRACE=0 as a
+  // revert escape hatch — it no longer renders by default.
+  let primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+  let secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+  if (RIDGE_TRACE_ENABLED) {
+    ({ primary, secondary } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+  } else {
+    // Retired legacy template (escape hatch only).
+    ({ primary, secondary } = generatePatternBasedFlow(coords, pattern, parcelScale));
+  }
   
   // Generate convergence zones (if flows exist) — pass all rings for multi-parcel containment
   const convergenceZones = generateConvergenceFromFlows(primary, secondary, parcelRings, parcelScale);
