@@ -256,11 +256,19 @@ export interface TerrainFlowRequestParams {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
   parcel_id: string;
   bufferMeters?: number;
+  // External abort signal — when aborted (e.g. a superseded Hunt Zone scope
+  // move) the in-flight fetch is cancelled so the Modal backend is not starved
+  // by piled-up stale requests.
+  signal?: AbortSignal;
   options?: {
     weights?: Partial<typeof TERRAIN_FLOW_WEIGHTS>;
     thresholds?: Partial<typeof FLOW_THRESHOLDS>;
     includeDebugLayers?: boolean;
     mode?: 'terrain_driven' | 'synthetic'; // For comparison
+    // Hunt Zone scope move: server skips the (always-empty) corridor call and
+    // uses a single ridge attempt to stay well under the client cap; client
+    // never substitutes synthetic flow for a real scope answer.
+    scopeCompute?: boolean;
   };
 }
 
@@ -271,6 +279,9 @@ export interface TerrainFlowFetchResult {
   status?: number;
   durationMs: number;
   isSynthetic: boolean;
+  // True when the request was cancelled by an external abort (superseded).
+  // Callers should neither apply the (absent) result nor show a retry.
+  aborted?: boolean;
   terrainDebug?: Record<string, unknown>;
 }
 
@@ -288,29 +299,55 @@ export async function fetchTerrainFlow(
   console.log('[TerrainFlow] Buffer:', params.bufferMeters ?? ANALYSIS_BUFFER_M, 'm');
   console.log('[TerrainFlow] Mode:', params.options?.mode || 'terrain_driven');
   
+  const scopeCompute = params.options?.scopeCompute === true;
+  const externalSignal = params.signal;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    
-    const response = await fetch(TERRAIN_FLOW_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parcel: params.parcel,
-        parcel_id: params.parcel_id,
-        bufferMeters: params.bufferMeters ?? ANALYSIS_BUFFER_M,
-        options: params.options || {},
-      }),
-      signal: controller.signal,
-    });
-    
-    clearTimeout(timeoutId);
+    // Bridge an external abort (e.g. a superseded Hunt Zone scope move) into
+    // this request's controller so the in-flight fetch is cancelled promptly.
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', onExternalAbort);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(TERRAIN_FLOW_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcel: params.parcel,
+          parcel_id: params.parcel_id,
+          bufferMeters: params.bufferMeters ?? ANALYSIS_BUFFER_M,
+          options: params.options || {},
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+      if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+    }
+
     const durationMs = Date.now() - startTime;
     
     if (!response.ok) {
       const errorText = await response.text();
       console.warn('[TerrainFlow] API error:', errorText);
-      
+
+      // Scope compute: never silently substitute synthetic flow for a real
+      // scope answer — surface the failure so the caller can show retry.
+      if (scopeCompute) {
+        return {
+          success: false,
+          status: response.status,
+          durationMs,
+          isSynthetic: false,
+          error: `API HTTP ${response.status}: ${errorText.substring(0, 200)}`,
+        };
+      }
+
       // Client-side fallback is ALWAYS synthetic
       const fallbackData = params.options?.mode === 'synthetic'
         ? generateLegacySyntheticFlow(params.parcel)
@@ -361,8 +398,22 @@ export async function fetchTerrainFlow(
   } catch (err) {
     const durationMs = Date.now() - startTime;
     const errMsg = err instanceof Error ? err.message : String(err);
+
+    // An external abort means this request was superseded by a newer scope move.
+    // Report it as aborted so the caller neither applies nor retries.
+    if (externalSignal?.aborted) {
+      console.log('[TerrainFlow] Fetch aborted (superseded scope move)');
+      return { success: false, aborted: true, durationMs, isSynthetic: false };
+    }
+
     console.warn('[TerrainFlow] Fetch failed:', errMsg);
-    
+
+    // Scope compute: a timeout/network failure is NOT answered with synthetic
+    // flow — surface the failure so the caller can show an explicit retry.
+    if (scopeCompute) {
+      return { success: false, durationMs, isSynthetic: false, error: errMsg };
+    }
+
     // Client-side fallback is ALWAYS synthetic
     const fallbackData = params.options?.mode === 'synthetic'
       ? generateLegacySyntheticFlow(params.parcel)

@@ -96,9 +96,10 @@ async function fetchWithRetry(
   url: string,
   init: RequestInit & { timeout: number },
   label: string,
+  maxAttempts: number = 2,
 ): Promise<Response | null> {
   const { timeout, ...fetchInit } = init;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -109,8 +110,8 @@ async function fetchWithRetry(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const isTimeout = errMsg.includes('abort');
-      if (attempt === 1 && isTimeout) {
-        console.warn(`[TerrainFlow] ${label} attempt 1 timed out after ${init.timeout}ms — retrying`);
+      if (attempt < maxAttempts && isTimeout) {
+        console.warn(`[TerrainFlow] ${label} attempt ${attempt} timed out after ${init.timeout}ms — retrying`);
         continue;
       }
       console.warn(`[TerrainFlow] ${label} attempt ${attempt} failed: ${errMsg}`);
@@ -129,6 +130,9 @@ interface TerrainFlowRequest {
     thresholds?: Partial<typeof FLOW_THRESHOLDS>;
     includeDebugLayers?: boolean;
     mode?: 'terrain_driven' | 'synthetic'; // For comparison
+    // Hunt Zone scope move: skip the (always-empty) corridor call and use a
+    // single ridge attempt so the compute settles well under the client cap.
+    scopeCompute?: boolean;
   };
 }
 
