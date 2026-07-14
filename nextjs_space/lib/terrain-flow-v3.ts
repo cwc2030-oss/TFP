@@ -164,18 +164,23 @@ export function classifyFlowPattern(
   const ridges = ridgeData?.ridges_primary?.features || [];
   
   const hasCorridors = corridors.length > 0;
-  // Honest flat-terrain gate (mirrors hasMeasuredRelief in lib/terrain-story.ts):
-  // require a real PRIMARY ridge spine or a measured saddle before treating the
-  // parcel as having ridge structure. On flat/poor ag ground the DEM extraction
-  // can still surface a couple of weak SECONDARY spines inside the analysis
-  // buffer — minor micro-relief, not real structure. Counting those as ridges
-  // pushed structureScore to ~0.4 and forced a linear/funnel pattern, which is
-  // what generated flow lines (and, via the removed midpoint fallback, a centered
-  // convergence ribbon) on genuinely poor ground. Requiring measured relief lets
-  // weak ag fall through to 'sparse'/'none' and read honestly empty.
-  const ridgeCountPrimary = ridgeData?.metadata?.ridge_count_primary ?? 0;
-  const saddleCount = ridgeData?.metadata?.saddle_count ?? 0;
-  const hasMeasuredRelief = ridgeCountPrimary >= 1 || saddleCount >= 1;
+  // PROMINENCE-MAGNITUDE GATE (honest flat-terrain gate).
+  // Earlier we tried a count-based gate (require >=1 primary ridge or >=1 saddle),
+  // but counting could NOT discriminate flat ag from real terrain:
+  // the ridge service returns a primary ridge + 10-20 saddles on essentially
+  // every parcel, all scored ~0.5. Only prominence MAGNITUDE separates genuine
+  // relief from micro-noise. We take the tallest primary-ridge prominence (ft)
+  // and require it to clear a floor before we treat the parcel as having
+  // "measured relief." Sub-floor parcels fall through to 'sparse'/'none' and
+  // read honestly empty. Floor is env-tunable (FLOW_PROMINENCE_FLOOR_FT) so it
+  // can be calibrated without a code change.
+  const primaryFeats: any[] = ridgeData?.ridges_primary?.features || [];
+  const maxPrimaryProminenceFt = primaryFeats.reduce(
+    (m: number, f: any) => Math.max(m, Number(f?.properties?.prominenceFt) || 0),
+    0
+  );
+  const PROMINENCE_FLOOR_FT = Number(process.env.FLOW_PROMINENCE_FLOOR_FT || 50);
+  const hasMeasuredRelief = maxPrimaryProminenceFt >= PROMINENCE_FLOOR_FT;
   const hasRidges = ridges.length > 0 && hasMeasuredRelief;
   
   // Structure score: how much terrain evidence we have
@@ -266,8 +271,13 @@ export function classifyFlowPattern(
     }
   }
   
-  // Fallback: use parcel edge orientation for BENCH pattern
-  if (dominantDirs.length >= 1 && dominantDirs[0].weight > 200) {
+  // Fallback: use parcel edge orientation for BENCH pattern.
+  // GATED on measured relief: a "bench" is a contour-following sidehill, which
+  // only exists where there is real vertical relief. Parcel edge weight fires on
+  // ANY sizeable rectangular parcel (edges >200 m), so without this gate flat ag
+  // fields would classify as 'bench' and draw contour lines on dead-flat ground.
+  // Requiring measured relief lets sub-floor parcels fall through to 'sparse'.
+  if (hasMeasuredRelief && dominantDirs.length >= 1 && dominantDirs[0].weight > 200) {
     // Strong dominant edge direction suggests contour-following bench pattern
     return {
       type: 'bench',
