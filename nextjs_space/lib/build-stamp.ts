@@ -12,14 +12,16 @@
 import { TERRAIN_ENGINE_VERSION } from './terrain-engine-version';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 13';
+export const BUILD_DATE = 'Jul 14';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
 // cache is preserved across deploys). Bump TERRAIN_ENGINE_VERSION instead
 // only when the analysis output itself changes.
 // r2 — scope-move stability: abort pile-up, fast scope compute, retry-on-fail.
-export const BUILD_REV = 'r2';
+// r3 — remove ridge-influence spine-count guard: influence now reflects real
+//      measured relief (prominence/relief), independent of primary-spine count.
+export const BUILD_REV = 'r3';
 
 // e.g. "build v5.0-scope r2 · Jul 13"
 export const BUILD_STAMP = `build ${TERRAIN_ENGINE_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
