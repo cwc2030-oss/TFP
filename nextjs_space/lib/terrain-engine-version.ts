@@ -11,7 +11,17 @@
  *   - Engine fixes propagate instantly (version bump busts the cache)
  *   - Expensive static terrain compute is still cached between bumps
  *
- * Current engine: v5.2-relief-gate. v5.2 fixes the v5.1 prominence gate, which
+ * Current engine: v6.0-tier1-flow. Tier 1 "glorious flow" (Phases 1-4) ships
+ *   the honest, natural-looking deer-flow network: real ridge-traced flow lines
+ *   (Phase 1-2), network-derived convergence scoring (Phase 3), and visual
+ *   polish — modest downslope flank offset + Chaikin smoothing + curved saddle
+ *   crossings (Phase 4). The honest v5.2 relief gate is preserved unchanged
+ *   underneath: flat ground still yields no flow. Bumped from v5.2-relief-gate
+ *   so already-cached parcels miss and lazily recompute under the polished
+ *   Tier 1 engine (raw traced geometry drives convergence; polish is visual
+ *   only and never moves flow off the real terrain).
+ *
+ * Prior engine: v5.2-relief-gate. v5.2 fixes the v5.1 prominence gate, which
  *   only looked at PRIMARY ridge prominence and required 50 ft — erasing flow
  *   on real moderate/rolling hunting ground that carries its relief in
  *   SECONDARY ridges (calibration 2026-07: 5 of 8 known-good moderate parcels
@@ -22,4 +32,4 @@
  *   stale empty-flow entries produced by v5.1 on moderate ground) miss and
  *   recompute lazily under the corrected gate.
  */
-export const TERRAIN_ENGINE_VERSION = 'v5.2-relief-gate';
+export const TERRAIN_ENGINE_VERSION = 'v6.0-tier1-flow';
