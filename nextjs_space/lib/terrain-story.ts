@@ -257,17 +257,26 @@ export function computeStructuralDrivers(
   // (2) Saddle-pinch-derived convergence (the real pinch signal shown on the map
   // and used by the narrative). Each measured saddle node is a pinch point; its
   // strength is the real DEM drop (`ridgeDropFt`). Normalize per-saddle depth to a
-  // 0-1 pinch intensity (a ~40ft pass reads as a strong pinch), then score with
-  // the SAME peak/avg/breadth shape as the flow signal so the two are directly
-  // comparable. When node features are absent but the measured saddle_count is
-  // real, fall back to a modest count-driven signal (15ft default depth -> 0.375)
-  // so the driver still reflects the measured saddle total.
+  // 0-1 pinch intensity, then score with the SAME peak/avg/breadth shape as the
+  // flow signal so the two are directly comparable. When node features are absent
+  // but the measured saddle_count is real, fall back to a modest count-driven
+  // signal so the driver still reflects the measured saddle total.
+  //
+  // v6.3 de-saturation: the depth normalizer is 60ft (was 40ft). At 40ft a single
+  // ordinary 44ft pass already capped the peak term at 1.0, bunching genuinely
+  // deep saddles up at 80-90% and erasing the difference between a good pinch and
+  // a great one. A 60ft normalizer means only a truly major pass (>=60ft drop)
+  // reads as a full-strength pinch, so the deep end now SPREADS: a ~44ft saddle
+  // reads ~0.73, a ~29ft saddle ~0.48, and the score differentiates good from
+  // great instead of saturating. Shallow saddles still read low-moderate and a
+  // flat parcel (no saddles) is still an honest 0.
+  const SADDLE_PINCH_NORMALIZER_FT = 60;
   const saddleNodeFeatures = ridgeSpineData?.saddle_nodes?.features ?? [];
   const saddlePinchIntensities = saddleNodeFeatures.map(f => {
     const dropFt = (f.properties as any)?.ridgeDropFt ?? 15;
-    return Math.min(1, Math.max(0, dropFt / 40));
+    return Math.min(1, Math.max(0, dropFt / SADDLE_PINCH_NORMALIZER_FT));
   });
-  const DEFAULT_SADDLE_PINCH = 0.375; // 15ft default depth / 40ft normalizer
+  const DEFAULT_SADDLE_PINCH = 15 / SADDLE_PINCH_NORMALIZER_FT; // 15ft default depth / 60ft normalizer = 0.25
   const saddlePinchCount = saddlePinchIntensities.length > 0
     ? saddlePinchIntensities.length
     : saddleCount;
@@ -374,7 +383,22 @@ export function generateTerrainStory(
   
   // Generate narrative
   const narrative = generateNarrative(drivers, primaryDriver, secondaryDriver, keyOpportunity, parcelAcreage);
-  
+
+  // TEMP-DIAG-V63B: capture exact driver scores + headline for de-saturation verification. REMOVE before deploy.
+  if (typeof window !== 'undefined') {
+    (window as any).__TFP_CONV_DEBUG__ = {
+      bench: drivers.benchSupport.score,
+      saddle: drivers.saddleInfluence.score,
+      ridgeInfluence: drivers.ridgeSpineSupport.score,
+      convergence: drivers.convergenceDensity.score,
+      convergenceLabel: drivers.convergenceDensity.label,
+      primaryDriver,
+      secondaryDriver,
+      headline,
+      narrative,
+    };
+  }
+
   // Determine confidence (gated on real measured relief, NOT the constant Bench)
   const confidence = determineConfidence(drivers, flowData, ridgeCountPrimary, saddleCount);
   
