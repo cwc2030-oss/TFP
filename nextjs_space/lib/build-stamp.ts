@@ -11,11 +11,20 @@
  */
 // NOTE: The corner stamp's DISPLAY version is intentionally decoupled from
 // TERRAIN_ENGINE_VERSION. TERRAIN_ENGINE_VERSION is a terrain-cache key — bumping
-// it invalidates all cached compute and forces expensive recompute. This release
-// is a ship-only reliability fix (no change to terrain output), so the cache key
-// stays at v6.1 while the visible stamp advances to v6.2 for at-a-glance deploy
-// confirmation.
-export const BUILD_VERSION = 'v6.2-flowing-form';
+// it invalidates all cached compute and forces expensive recompute.
+//
+// v6.3 — Convergence-driver honesty reconciliation. The Convergence structural
+// driver now derives from the real measured saddle pinch nodes (via
+// computeStructuralDrivers) whenever the flow-derived convergence_zones are
+// empty/sparse, taking the MAX of the two real signals. This runs FRESH on every
+// render from the already-cached ridge/saddle data (saddle_nodes), so it surfaces
+// on existing cached parcels WITHOUT invalidating the terrain cache. Option B
+// (near-boundary convergence-zone tolerance in terrain-flow) is a no-op for
+// single parcels (already clipped to the 800m hunt-context buffer) and only
+// widens the territory-mode tight-clip path slightly. Net: no terrain-output
+// change that warrants an expensive full recompute, so the cache key stays at
+// v6.1 while the visible stamp advances to v6.3 for at-a-glance deploy confirmation.
+export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
 export const BUILD_DATE = 'Jul 15';
@@ -30,7 +39,11 @@ export const BUILD_DATE = 'Jul 15';
 // r1 (v5.2) — relief gate now max(primary,secondary) prominence @ 32 ft floor
 //      (restores flow on moderate ground) + scope ridge call back to 2 attempts
 //      × ~27s (kills the "tap to retry" banner under cold Modal).
+// r1 (v6.3) — Convergence driver reconciled to real pinch points: saddle-pinch
+//      fallback (Option A) + near-boundary convergence tolerance (Option B) so
+//      the number, the narrative, and the map agree. Honest 0 only when there
+//      are genuinely no convergence zones AND no saddles.
 export const BUILD_REV = 'r1';
 
-// e.g. "build v6.2-flowing-form r1 · Jul 15"
+// e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

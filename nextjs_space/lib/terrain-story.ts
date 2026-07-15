@@ -216,7 +216,7 @@ export function computeStructuralDrivers(
   ));
 
   // --- Convergence density (Phase 3: real, continuous) ---
-  // Reads directly from the real network-derived convergence zones. The old
+  // Reads from the real network-derived convergence zones. The old
   // (count/5)*0.5 + avg*0.5 formula snapped the number to 10% steps and clustered
   // every parcel near 70-90%. We now score continuously from real signal:
   //   - peakIntensity: the strongest real meeting point on the parcel
@@ -224,7 +224,23 @@ export function computeStructuralDrivers(
   //   - breadth      : how many real zones exist, smoothly (1 - e^(-n/2.5)),
   //                    so it grows without hard 10% jumps and never over-weights
   //                    a parcel that simply has many weak nodes.
-  // No real convergence -> 0 (honest). Varies parcel-to-parcel with terrain.
+  //
+  // v6.3 (Option A) — honesty reconciliation. The flow-derived convergence_zones
+  // are frequently EMPTY on real parcels: the flow-line density surface clears
+  // the convergence_threshold only occasionally, and near-boundary maxima used to
+  // be clipped out entirely (see filterConvergenceZonesToParcel). Yet the SAME
+  // parcel visibly shows real saddle pinch points on the map (the ghost-saddle
+  // silhouettes) and the narrative reads "Ridge-to-Saddle Compression" from the
+  // measured saddles. A saddle IS a terrain pinch. So when the flow convergence
+  // signal is empty or sparse we ALSO derive a convergence score from the real
+  // measured saddle pinch nodes (ridge_extraction `saddle_nodes`, each carrying
+  // its true DEM depth `ridgeDropFt`) — the identical upstream source the
+  // ghost-saddle layer and `saddleInfluence` already use. The final score is the
+  // MAX of the two real signals: strong flow convergence still wins, but a parcel
+  // that visibly pinches at saddles can never read a false 0. Honest 0 is
+  // preserved only when there are genuinely NO convergence zones AND NO saddles.
+
+  // (1) Flow-line-derived convergence (original signal).
   const convergenceIntensities = convergence_zones.features.map(f => f.properties.intensity || 0);
   const convergenceCount = convergenceIntensities.length;
   const peakConvergence = convergenceCount > 0 ? Math.max(...convergenceIntensities) : 0;
@@ -232,11 +248,46 @@ export function computeStructuralDrivers(
     ? convergenceIntensities.reduce((a, b) => a + b, 0) / convergenceCount
     : 0;
   const convergenceBreadth = convergenceCount > 0 ? 1 - Math.exp(-convergenceCount / 2.5) : 0;
-  const convergenceDensity = convergenceCount === 0 ? 0 : Math.min(1, Math.max(0, (
+  const flowConvergenceDensity = convergenceCount === 0 ? 0 : Math.min(1, Math.max(0, (
     peakConvergence * 0.6 +
     avgConvergence * 0.15 +
     convergenceBreadth * 0.25
   )));
+
+  // (2) Saddle-pinch-derived convergence (the real pinch signal shown on the map
+  // and used by the narrative). Each measured saddle node is a pinch point; its
+  // strength is the real DEM drop (`ridgeDropFt`). Normalize per-saddle depth to a
+  // 0-1 pinch intensity (a ~40ft pass reads as a strong pinch), then score with
+  // the SAME peak/avg/breadth shape as the flow signal so the two are directly
+  // comparable. When node features are absent but the measured saddle_count is
+  // real, fall back to a modest count-driven signal (15ft default depth -> 0.375)
+  // so the driver still reflects the measured saddle total.
+  const saddleNodeFeatures = ridgeSpineData?.saddle_nodes?.features ?? [];
+  const saddlePinchIntensities = saddleNodeFeatures.map(f => {
+    const dropFt = (f.properties as any)?.ridgeDropFt ?? 15;
+    return Math.min(1, Math.max(0, dropFt / 40));
+  });
+  const DEFAULT_SADDLE_PINCH = 0.375; // 15ft default depth / 40ft normalizer
+  const saddlePinchCount = saddlePinchIntensities.length > 0
+    ? saddlePinchIntensities.length
+    : saddleCount;
+  const peakSaddlePinch = saddlePinchIntensities.length > 0
+    ? Math.max(...saddlePinchIntensities)
+    : (saddleCount > 0 ? DEFAULT_SADDLE_PINCH : 0);
+  const avgSaddlePinch = saddlePinchIntensities.length > 0
+    ? saddlePinchIntensities.reduce((a, b) => a + b, 0) / saddlePinchIntensities.length
+    : (saddleCount > 0 ? DEFAULT_SADDLE_PINCH : 0);
+  const saddlePinchBreadth = saddlePinchCount > 0 ? 1 - Math.exp(-saddlePinchCount / 2.5) : 0;
+  const saddlePinchDensity = saddlePinchCount === 0 ? 0 : Math.min(1, Math.max(0, (
+    peakSaddlePinch * 0.6 +
+    avgSaddlePinch * 0.15 +
+    saddlePinchBreadth * 0.25
+  )));
+
+  // (3) Reconciled convergence: the stronger of the two real signals. Never a
+  // false 0 while the map is showing real saddle pinches; honest 0 only when
+  // neither flow convergence nor saddles exist on the parcel.
+  const convergenceDensity = Math.max(flowConvergenceDensity, saddlePinchDensity);
 
   return {
     benchSupport: {

@@ -223,13 +223,31 @@ function clipFlowLinesToParcel(
  * Filter convergence zones to only include those inside the parcel.
  * Supports multiple polygon rings (territory mode).
  */
+// v6.3 (Option B) — near-boundary tolerance for convergence zones.
+// Convergence maxima frequently sit ON the ridge/saddle that STRADDLES the
+// parcel boundary. The old strict inside-parcel test discarded exactly those
+// pinch points — the very same ones the ghost-saddle layer renders ~50m OUTSIDE
+// the boundary (GHOST_OFFSET). Keeping a small margin lets the Convergence
+// driver see the straddling pinches the map already shows, while still rejecting
+// far-field maxima that have nothing to do with this parcel.
+export const CONVERGENCE_BOUNDARY_MARGIN_M = 75;
+
 function filterConvergenceZonesToParcel(
   zones: GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[],
   parcelRings: number[][][]
 ): GeoJSON.Feature<GeoJSON.Point, ConvergenceZoneProperties>[] {
   return zones.filter(zone => {
     const point = zone.geometry.coordinates as [number, number];
-    return pointInAnyRing(point, parcelRings);
+    // Inside the parcel — always keep (original behavior).
+    if (pointInAnyRing(point, parcelRings)) return true;
+    // Just outside the boundary — keep straddling saddle/ridge pinches within
+    // CONVERGENCE_BOUNDARY_MARGIN_M meters of the nearest boundary edge.
+    let minEdgeDist = Infinity;
+    for (const ring of parcelRings) {
+      const d = pointToLineDistanceM(point, ring);
+      if (d < minEdgeDist) minEdgeDist = d;
+    }
+    return minEdgeDist <= CONVERGENCE_BOUNDARY_MARGIN_M;
   });
 }
 
