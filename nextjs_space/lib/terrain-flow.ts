@@ -348,7 +348,23 @@ export async function fetchTerrainFlow(
         };
       }
 
-      // Client-side fallback is ALWAYS synthetic
+      // MAIN PATH (v6.1 blank-fix): synthetic flow is OFF by default, so the old
+      // "fallback to synthetic" here produced an EMPTY render (Phase 2b no-data
+      // guard) that was indistinguishable from a genuinely flat parcel — a
+      // hunter would read "choked" as "no deer." Surface the failure instead so
+      // the caller shows the retry banner. Only emit synthetic when the dev flag
+      // is explicitly ON.
+      if (!syntheticFlowEnabled()) {
+        return {
+          success: false,
+          status: response.status,
+          durationMs,
+          isSynthetic: false,
+          error: `API HTTP ${response.status}: ${errorText.substring(0, 200)}`,
+        };
+      }
+
+      // Dev/debug only (NEXT_PUBLIC_ENABLE_SYNTHETIC_FLOW=1): synthetic fallback.
       const fallbackData = params.options?.mode === 'synthetic'
         ? generateLegacySyntheticFlow(params.parcel)
         : generateTerrainDrivenFlow(params.parcel, null, null);
@@ -414,7 +430,16 @@ export async function fetchTerrainFlow(
       return { success: false, durationMs, isSynthetic: false, error: errMsg };
     }
 
-    // Client-side fallback is ALWAYS synthetic
+    // MAIN PATH (v6.1 blank-fix): a timeout/abort/network failure must NOT render
+    // as an empty scope (synthetic is OFF by default → empty via Phase 2b guard),
+    // which a hunter reads as "no deer here" when the truth is "the compute
+    // choked." Surface the failure so the caller shows the retry banner. Only
+    // emit synthetic when the dev flag is explicitly ON.
+    if (!syntheticFlowEnabled()) {
+      return { success: false, durationMs, isSynthetic: false, error: errMsg };
+    }
+
+    // Dev/debug only (NEXT_PUBLIC_ENABLE_SYNTHETIC_FLOW=1): synthetic fallback.
     const fallbackData = params.options?.mode === 'synthetic'
       ? generateLegacySyntheticFlow(params.parcel)
       : generateTerrainDrivenFlow(params.parcel, null, null);

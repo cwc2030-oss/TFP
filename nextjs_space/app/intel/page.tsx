@@ -3535,6 +3535,14 @@ const archetypeInitializedRef = useRef(false);
   const [scopeFlowError, setScopeFlowError] = useState<null | { lng: number; lat: number }>(null);
   // Bumped by the retry button to re-run the scope compute effect on demand.
   const [scopeRetryNonce, setScopeRetryNonce] = useState(0);
+  // Main initial-render flow failure state (v6.1 blank-fix). Set when the main
+  // parcel flow compute fails/times out AFTER one auto-retry, so the UI shows an
+  // explicit "tap to retry" banner instead of a silent empty render. A
+  // genuinely-flat parcel returns success with empty flow and does NOT set this
+  // — that stays an honest empty, visibly distinct from a choked compute.
+  const [mainFlowError, setMainFlowError] = useState(false);
+  // Bumped by the retry button to re-run the main flow effect on demand.
+  const [mainRetryNonce, setMainRetryNonce] = useState(0);
   // Ref to hold raw flow API response for terrain story re-generation
   const terrainFlowRawRef = useRef<any>(null);
   // Mirror of ridgeSpineData so the (slow) terrain-flow effect can read the
@@ -8468,6 +8476,7 @@ const archetypeInitializedRef = useRef(false);
       setLegacySyntheticData(null);
       setTerrainStory(null);
       terrainFlowRawRef.current = null;
+      setMainFlowError(false);
       return;
     }
 
@@ -8482,6 +8491,7 @@ const archetypeInitializedRef = useRef(false);
 
     const generateFlowData = async () => {
       setTerrainFlowLoading(true);
+      setMainFlowError(false);
       try {
         const parcelId = (parcelPolygon.properties as any)?.parcelId || 
                          (parcelPolygon.properties as any)?.ll_uuid || 
@@ -8506,12 +8516,23 @@ const archetypeInitializedRef = useRef(false);
           },
         });
 
-        // Generate TERRAIN-DRIVEN flow (the new V2 approach)
-        const result = await fetchTerrainFlow({
+        // Generate TERRAIN-DRIVEN flow (the new V2 approach).
+        // v6.1 blank-fix: client cap 75s is the OUTER bound — it must never be
+        // shorter than the server main-path budget (corridor+ridge run in
+        // parallel, worst case 2×27s=54s). On a failed/timed-out compute we do
+        // ONE auto-retry before surfacing the retry banner, so a transient cold
+        // Modal choke self-heals without the hunter ever seeing a silent blank.
+        const runMainFetch = () => fetchTerrainFlow({
           parcel: parcelPolygon,
           parcel_id: parcelId,
           bufferMeters: 1000, // 1km buffer for landscape context
-        });
+        }, 75000);
+
+        let result = await runMainFetch();
+        if (!cancelled && !result.success) {
+          console.warn('[TerrainFlow] Main flow compute failed on first attempt — auto-retrying once', { error: result.error });
+          result = await runMainFetch();
+        }
 
         // Bail out if this effect was superseded by a newer parcelPolygon
         if (cancelled) {
@@ -8565,42 +8586,53 @@ const archetypeInitializedRef = useRef(false);
           const story = generateTerrainStory(result.data, storyAcreage, storyAddress, ridgeSpineDataRef.current || ridgeSpineData);
           setTerrainStory(story);
           console.log('[TerrainStory] Generated:', story.headline);
+
+          // v6.1 blank-fix: this is a genuine success — clear any prior failure
+          // banner. NOTE a success with ZERO flow features is a genuinely-FLAT
+          // parcel (honest empty), NOT a failure: we must NOT set mainFlowError
+          // here, so the UI renders the honest empty state, visibly distinct
+          // from the "tap to retry" choke banner.
+          setMainFlowError(false);
+          const totalFlow = primaryCount + secondaryCount;
+          console.log('[FlowDiag]', JSON.stringify({
+            path: 'main',
+            outcome: totalFlow > 0 ? 'real' : 'flat_empty',
+            isSynthetic: !!result.isSynthetic,
+            primary: primaryCount,
+            secondary: secondaryCount,
+            convergence: convergenceCount,
+            mode: result.data.metadata?.mode || 'unknown',
+            parcel: parcelId,
+          }));
         } else {
           if (cancelled) return;
-          console.warn('[TerrainFlow] Flow generation failed, using terrain-driven fallback');
-          const synthetic = generateSyntheticTerrainFlow(parcelPolygon);
-          setTerrainFlowData({
-            flow_primary: synthetic.flow_primary,
-            flow_secondary: synthetic.flow_secondary,
-            convergence_zones: synthetic.convergence_zones,
-            opportunity_zones: synthetic.opportunity_zones,
-            isSynthetic: true,
-            metadata: {
-              flow_count_primary: synthetic.metadata.stats.flow_count_primary,
-              flow_count_secondary: synthetic.metadata.stats.flow_count_secondary,
-              convergence_count: synthetic.metadata.stats.convergence_count,
-              opportunity_count: synthetic.metadata.stats.opportunity_count,
-              total_flow_length_m: synthetic.metadata.stats.total_flow_length_m,
-              mode: synthetic.metadata.mode,
-              dem_source: synthetic.metadata.dem_source,
-              fallback_reason: synthetic.metadata.fallback_reason,
-            },
-          });
-          // Store raw synthetic data for potential re-generation
-          terrainFlowRawRef.current = synthetic;
-          // Generate terrain story from synthetic data
-          const synthAcreage = qaParcel?.acreage || 
-                              (parcelPolygon?.properties as any)?.ll_gisacre ||
-                              (parcelPolygon?.properties as any)?.acreage ||
-                              undefined;
-          const synthAddress = qaParcel?.address || address || undefined;
-          const syntheticStory = generateTerrainStory(synthetic, synthAcreage, synthAddress, ridgeSpineDataRef.current || ridgeSpineData);
-          setTerrainStory(syntheticStory);
-          console.log('[TerrainStory] Generated (synthetic):', syntheticStory.headline);
+          // v6.1 blank-fix CRITICAL HONESTY: a failed/timed-out compute must NOT
+          // render as an empty scope. After the one auto-retry above still
+          // failed, route to the explicit "tap to retry" banner instead of
+          // silently synthesizing an empty/misleading flow. A hunter must never
+          // see "empty = no deer" when the truth is "the compute choked."
+          console.warn('[TerrainFlow] Main flow compute failed after auto-retry — surfacing retry banner (no silent blank)', { error: result.error });
+          setTerrainFlowData(null);
+          terrainFlowRawRef.current = null;
+          setTerrainStory(null);
+          setMainFlowError(true);
+          console.log('[FlowDiag]', JSON.stringify({
+            path: 'main',
+            outcome: 'failure',
+            error: result.error || 'unknown',
+            parcel: parcelId,
+          }));
         }
       } catch (err) {
         if (cancelled) return; // Suppress errors from superseded fetches
-        console.error('[TerrainFlow] Error during flow generation:', err);
+        // v6.1 blank-fix: an unexpected throw is still a failure, not a flat
+        // parcel — surface the retry banner rather than leaving stale/empty flow.
+        console.error('[TerrainFlow] Error during flow generation — surfacing retry banner:', err);
+        setTerrainFlowData(null);
+        terrainFlowRawRef.current = null;
+        setTerrainStory(null);
+        setMainFlowError(true);
+        console.log('[FlowDiag]', JSON.stringify({ path: 'main', outcome: 'failure', error: String(err) }));
       } finally {
         if (!cancelled) setTerrainFlowLoading(false);
       }
@@ -8612,7 +8644,9 @@ const archetypeInitializedRef = useRef(false);
     return () => {
       cancelled = true;
     };
-  }, [parcelPolygon]);
+    // mainRetryNonce is bumped by the retry banner to re-run this compute on demand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parcelPolygon, mainRetryNonce]);
 
   // Keep the ridge-data ref in sync so the slow terrain-flow effect reads current data.
   useEffect(() => { ridgeSpineDataRef.current = ridgeSpineData; }, [ridgeSpineData]);
@@ -16009,15 +16043,18 @@ const archetypeInitializedRef = useRef(false);
       )}
       {/* Scope-move flow failure — explicit, retryable. Never leaves the new
            scope silently blank or showing the previous position's flow. */}
-      {scopeFlowError && !terrainFlowLoading && (
+      {(scopeFlowError || mainFlowError) && !terrainFlowLoading && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40">
           <div className="flex items-center gap-3 bg-black/80 backdrop-blur-sm text-white/90 pl-4 pr-2 py-2 rounded-full shadow-lg text-xs font-medium border border-amber-400/40">
             <svg className="h-4 w-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
-            <span>Terrain flow couldn't load for this scope.</span>
+            <span>Terrain flow couldn't load{scopeFlowError ? ' for this scope' : ''}.</span>
             <button
-              onClick={() => { setScopeFlowError(null); setScopeRetryNonce(n => n + 1); }}
+              onClick={() => {
+                if (scopeFlowError) { setScopeFlowError(null); setScopeRetryNonce(n => n + 1); }
+                if (mainFlowError) { setMainFlowError(false); setMainRetryNonce(n => n + 1); }
+              }}
               className="bg-amber-400 hover:bg-amber-300 text-black font-semibold px-3 py-1 rounded-full transition-colors"
             >
               Tap to retry
@@ -18535,6 +18572,29 @@ const archetypeInitializedRef = useRef(false);
                           <div className="text-stone-500 bg-stone-800/30 rounded p-2 flex items-center gap-2">
                             <Loader2 className="h-3 w-3 animate-spin" />
                             <span className="text-[10px]">Analyzing terrain flow...</span>
+                          </div>
+                        );
+                      }
+
+                      // v6.1 blank-fix HONESTY: a CHOKED compute must never render
+                      // as "too flat / not detected." When the main compute failed
+                      // (after its auto-retry), show an explicit, retryable state
+                      // that is visibly distinct from the genuine no-flow empty.
+                      if (mainFlowError) {
+                        return (
+                          <div className="bg-amber-900/20 border border-amber-700/40 rounded p-2">
+                            <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Couldn't load terrain flow
+                            </p>
+                            <p className="text-stone-400 mt-1 text-[9px]">
+                              The analysis didn't finish — this isn't a "no flow" result. Tap to try again.
+                            </p>
+                            <button
+                              onClick={() => { setMainFlowError(false); setMainRetryNonce(n => n + 1); }}
+                              className="mt-1.5 w-full bg-amber-400 hover:bg-amber-300 text-black font-semibold text-[10px] px-2 py-1 rounded transition-colors"
+                            >
+                              Tap to retry
+                            </button>
                           </div>
                         );
                       }

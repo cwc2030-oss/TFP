@@ -84,8 +84,14 @@ const CORRIDOR_API_URL = process.env.CORRIDOR_API_URL ||
 const RIDGE_API_URL = process.env.RIDGE_API_URL || 
   'https://cwc2030--terrain-brain-v3-ridges-ridges-web.modal.run/v1/ridges';
 
-const CORRIDOR_TIMEOUT_MS = 45000; // 45s — allows Modal cold-start
-const RIDGE_TIMEOUT_MS = 45000;    // 45s — allows Modal cold-start + USGS 3DEP fallback
+// MAIN-PATH BUDGET (v6.1 blank-fix): corridor + ridge now run IN PARALLEL (see
+// Promise.all below), each with 2 attempts at 27s. Parallel worst case is 2×27s
+// = 54s (not the old 4×45s = 180s sequential blowup that overran the client's
+// abort and produced silent empty flow). The client cap is the OUTER bound at
+// 75s (REQUEST_TIMEOUT_MS in lib/terrain-flow.ts) — comfortably above this 54s
+// server budget + flow-gen compute, so the client never aborts mid-retry.
+const CORRIDOR_TIMEOUT_MS = 27000; // 27s per attempt × 2 attempts ≈ 54s (parallel with ridge)
+const RIDGE_TIMEOUT_MS = 27000;    // 27s per attempt × 2 attempts ≈ 54s (parallel with corridor)
 // Scope compute skips corridor, so ridge is the only upstream call. Run TWO
 // attempts at ~27s each (54s worst case, safely under the 60s client cap):
 // a single cold/slow Modal timeout auto-recovers on the retry instead of
@@ -268,9 +274,13 @@ export async function POST(request: NextRequest) {
     let ridgeData: any = null;
     let usedRealDEM = false;
 
-    const corridorResponse = scopeCompute
-      ? null
-      : await fetchWithRetry(
+    // Kick off corridor + ridge IN PARALLEL (v6.1 blank-fix). Both promises are
+    // started here and awaited together via Promise.all below, so worst case is
+    // 54s (2×27s), not the old 108s+ sequential path that overran the client
+    // abort and produced a silent empty render.
+    const corridorPromise = scopeCompute
+      ? Promise.resolve<Response | null>(null)
+      : fetchWithRetry(
       CORRIDOR_API_URL,
       {
         method: 'POST',
@@ -296,6 +306,39 @@ export async function POST(request: NextRequest) {
       2,
       request.signal,
     );
+
+    // Ridge promise — started NOW (before awaiting corridor) so the two Modal
+    // calls overlap on the wire. Both are awaited together via Promise.all.
+    terrainDebug.pipeline_steps.ridge_call = 'attempted';
+    const ridgePromise = fetchWithRetry(
+      RIDGE_API_URL,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
+        },
+        body: JSON.stringify({
+          parcel: bufferedParcel,
+          parcel_id: parcel_id + '_buffered',
+          bufferMeters: effectiveBuffer,
+          options: {
+            dem_source: 'USGS3DEP1m',
+            min_prominence_ft: 8,
+            min_length_m: 60,
+          },
+        }),
+        timeout: scopeCompute ? RIDGE_TIMEOUT_SCOPE_MS : RIDGE_TIMEOUT_MS,
+      },
+      'Ridge',
+      // Two attempts for both scope and full path at ~27s each. Running corridor
+      // and ridge in parallel keeps worst case at 54s — under the 75s client cap.
+      2,
+      request.signal,
+    );
+
+    // Await BOTH in parallel — the core of the budget fix.
+    const [corridorResponse, ridgeResponse] = await Promise.all([corridorPromise, ridgePromise]);
 
     if (scopeCompute) {
       terrainDebug.pipeline_steps.corridor_call = 'skipped_scope_compute';
@@ -339,39 +382,8 @@ export async function POST(request: NextRequest) {
     }
     // (scopeCompute leaves corridor_call = 'skipped_scope_compute')
 
-    // Fetch ridge data
-    terrainDebug.pipeline_steps.ridge_call = 'attempted';
-    console.log('[TerrainFlow] Fetching ridge data from Modal');
-
-    const ridgeResponse = await fetchWithRetry(
-      RIDGE_API_URL,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-OpenTopo-Key': process.env.OPENTOPOGRAPHY_API_KEY || '',
-        },
-        body: JSON.stringify({
-          parcel: bufferedParcel,
-          parcel_id: parcel_id + '_buffered',
-          bufferMeters: effectiveBuffer,
-          options: {
-            dem_source: 'USGS3DEP1m',
-            min_prominence_ft: 8,
-            min_length_m: 60,
-          },
-        }),
-        timeout: scopeCompute ? RIDGE_TIMEOUT_SCOPE_MS : RIDGE_TIMEOUT_MS,
-      },
-      'Ridge',
-      // Two attempts for both scope and full path. For scope the per-attempt
-      // timeout is trimmed to ~27s so 2×27s stays under the 60s client cap while
-      // still auto-recovering from a single cold/slow Modal ridge call. The
-      // AbortController still cancels immediately when a newer scope move
-      // supersedes this request (parentSignal bridge in fetchWithRetry).
-      2,
-      request.signal,
-    );
+    // Ridge response already awaited above (in parallel with corridor).
+    console.log('[TerrainFlow] Ridge data fetched (parallel with corridor)');
 
     if (ridgeResponse?.ok) {
       terrainDebug.ridge_modal_status = ridgeResponse.status;
@@ -428,6 +440,40 @@ export async function POST(request: NextRequest) {
             success: false,
             error: `ridge_${rc}`,
             scopeCompute: true,
+            version: API_VERSION,
+            terrain_debug: terrainDebug,
+          },
+          { status: 502 },
+        );
+      }
+    }
+
+    // MAIN PATH (v6.1 blank-fix) — distinguish a CHOKED compute from a genuinely
+    // FLAT parcel, exactly as the scope path does above. Without this, a
+    // transient Modal failure (timeout / unreachable / non-200 / parse error) on
+    // the initial render falls through to generateTerrainDrivenFlow(null,null),
+    // yields 0 lines, and returns a 200 'no_backbone' empty — which the client
+    // renders as an honest "flat" parcel. That is the precise dishonesty we must
+    // prevent: a hunter reading "empty = no deer" when the truth is "it choked."
+    // If we have NO real DEM data AND either endpoint failed transiently, surface
+    // an explicit failure (502) so the client shows the retry banner + auto-retry
+    // instead of a false-flat. Both endpoints returning real 200s with zero
+    // features ('success_but_empty') is a legitimate flat result and falls
+    // through to the honest no_backbone empty below.
+    if (!scopeCompute && !usedRealDEM) {
+      const isTransient = (rc: any) =>
+        rc === 'unreachable' || rc === 'parse_error' ||
+        (typeof rc === 'string' && rc.startsWith('http_'));
+      const corridorRc = terrainDebug.pipeline_steps.corridor_call;
+      const ridgeRc = terrainDebug.pipeline_steps.ridge_call;
+      if (isTransient(corridorRc) || isTransient(ridgeRc)) {
+        const processingTime = (Date.now() - startTime) / 1000;
+        console.warn(`[TerrainFlow][main ${flowReqId}] FAILED (corridor=${corridorRc} ridge=${ridgeRc}) in ${processingTime.toFixed(2)}s — returning failure for retry (${parcel_id})`);
+        console.log(`[FlowDiag] path=main outcome=failure corridor=${corridorRc} ridge=${ridgeRc} time=${processingTime.toFixed(1)}s parcel=${parcel_id}`);
+        return NextResponse.json(
+          {
+            success: false,
+            error: `compute_transient_failure (corridor=${corridorRc}, ridge=${ridgeRc})`,
             version: API_VERSION,
             terrain_debug: terrainDebug,
           },
@@ -534,6 +580,17 @@ export async function POST(request: NextRequest) {
           message: 'No real terrain backbone available for this parcel yet.',
         };
       }
+    }
+
+    // [FlowDiag] main-path classification — lets us grep the blank rate and watch
+    // it fall as Modal warms under the v6.1 cold-cache wave. Distinguishes a
+    // real render from an honest-flat empty (server 200 + no_backbone) so a flat
+    // parcel is never miscounted as a failure. Genuine failures never reach here
+    // (full path returns synthetic-or-fail via client; scope path 502s above).
+    {
+      const totalLines = outFlow.flow_primary.features.length + outFlow.flow_secondary.features.length;
+      const diagOutcome = totalLines > 0 ? 'real' : (emptyState?.type === 'no_backbone' ? 'flat_empty' : (emptyState?.type || 'empty'));
+      console.log(`[FlowDiag] path=${scopeCompute ? 'scope' : 'main'} outcome=${diagOutcome} flowMode=${flowMode} usedRealDEM=${usedRealDEM} primary=${outFlow.flow_primary.features.length} secondary=${outFlow.flow_secondary.features.length} conv=${outFlow.convergence_zones.features.length} time=${((Date.now() - startTime) / 1000).toFixed(1)}s parcel=${parcel_id}`);
     }
 
     return NextResponse.json({
