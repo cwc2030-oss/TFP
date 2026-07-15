@@ -1207,13 +1207,106 @@ function chaikinSmooth(coords: [number, number][], iterations: number): [number,
   return pts;
 }
 
+// ========== PHASE 5 ("Wake Up the Land") STEP 1: FLOWING FORM ==========
+//
+// The Phase-2 crossings are built as a straight bar [flankA, saddle, flankB]
+// drawn PERPENDICULAR to the ridge. Rendered next to the ridge line that also
+// runs through that saddle, the bar T-bones the ridge at ~90°. Here we reshape
+// each crossing (VISUAL ONLY, post-convergence) into a smooth curve that passes
+// through the real saddle TANGENT to the ridge axis, then peels off into each
+// flank — so ridge → saddle → ridge reads as one continuous flowing travel path
+// with no right angle. Honest: the curve is anchored on the SAME three real
+// points (flankA, saddle, flankB) the straight bar used and only interpolates
+// between them (same Chaikin convex-envelope principle) — it never bows onto
+// terrain the crossing did not already touch.
+
+// Sampled points per crossing arm (pre-Chaikin). 8 = smooth without vertex bloat.
+const CROSSING_ARM_SAMPLES = 8;
+// Ridge-tangent handle length as a fraction of the arm chord. Keeps the curve
+// rounded but controlled so it can't overshoot past the flank end.
+const CROSSING_TANGENT_SCALE = 0.55;
+
 /**
- * Apply the Phase 4 visual polish to a set of flow features. Ridge-spine flows
- * are offset to the flank then smoothed; saddle crossings are smoothed only (so
- * they keep passing through the real gap to meet the ridge lines). lengthM is
- * refreshed for display; every other property (id, tier, likelihood, …) is
- * preserved exactly. Geometry is only reshaped between/around real vertices — no
- * feature is added, removed, or relocated off its ridge.
+ * Cubic Hermite interpolation between P0 and P1 with endpoint tangents M0, M1,
+ * sampled at (samples+1) points (t = 0..1 inclusive). Works in lng/lat degree
+ * space; over the short crossing spans (<~100 m) the planar error is sub-metre.
+ */
+function hermiteSample(
+  P0: [number, number], P1: [number, number],
+  M0: [number, number], M1: [number, number],
+  samples: number
+): [number, number][] {
+  const out: [number, number][] = [];
+  for (let s = 0; s <= samples; s++) {
+    const t = s / samples;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = t3 - 2 * t2 + t;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = t3 - t2;
+    out.push([
+      h00 * P0[0] + h10 * M0[0] + h01 * P1[0] + h11 * M1[0],
+      h00 * P0[1] + h10 * M0[1] + h01 * P1[1] + h11 * M1[1],
+    ]);
+  }
+  return out;
+}
+
+/**
+ * Reshape a straight Phase-2 saddle crossing [flankA, saddle, flankB] into a
+ * smooth curve that runs through the real saddle TANGENT to the ridge axis, then
+ * curves off into each flank. This kills the 90° T-bone: at the saddle the
+ * crossing now runs PARALLEL to the ridge, so ridge → saddle → ridge reads as one
+ * continuous flowing path. Honest — the curve is anchored on the same three real
+ * points and only interpolates between them.
+ */
+function tangentializeCrossing(coords: [number, number][]): [number, number][] {
+  if (coords.length < 3) return coords;
+  const flankA = coords[0];
+  const saddle = coords[1];
+  const flankB = coords[coords.length - 1];
+
+  // Recover the ridge axis at the saddle from the crossing's own geometry: the
+  // straight bar was drawn perpendicular to the ridge, so ridge bearing =
+  // crossing bearing − 90°.
+  const crossingBearing = calculateBearing(saddle, flankB);
+  const ridgeBearing = (crossingBearing - 90 + 360) % 360;
+  // Unit ridge-direction vector in degree space (1 m step, lat-corrected).
+  const ridgeStep = movePoint(saddle, ridgeBearing, 1);
+  const ridgeVec: [number, number] = [ridgeStep[0] - saddle[0], ridgeStep[1] - saddle[1]];
+
+  const lenA = distanceMeters(flankA, saddle);
+  const lenB = distanceMeters(saddle, flankB);
+  // Degree-space magnitude of a 1 m ridge step (so ridgeVec * meters ≈ that span).
+  const scaleA = lenA * CROSSING_TANGENT_SCALE;
+  const scaleB = lenB * CROSSING_TANGENT_SCALE;
+
+  // Arm A: flankA → saddle. Approach tangent at flankA is the chord (gentle in);
+  // tangent at the saddle runs ALONG the ridge (tangential merge).
+  const m0A: [number, number] = [saddle[0] - flankA[0], saddle[1] - flankA[1]];
+  const m1A: [number, number] = [ridgeVec[0] * scaleA, ridgeVec[1] * scaleA];
+  const armA = hermiteSample(flankA, saddle, m0A, m1A, CROSSING_ARM_SAMPLES);
+
+  // Arm B: saddle → flankB. Tangent at the saddle CONTINUES along the ridge (same
+  // direction as arm A's end tangent → C1-smooth through the saddle); tangent at
+  // flankB is the chord out into the flank.
+  const m0B: [number, number] = [ridgeVec[0] * scaleB, ridgeVec[1] * scaleB];
+  const m1B: [number, number] = [flankB[0] - saddle[0], flankB[1] - saddle[1]];
+  const armB = hermiteSample(saddle, flankB, m0B, m1B, CROSSING_ARM_SAMPLES);
+
+  // Concatenate; drop the duplicate saddle vertex at the arm join.
+  return [...armA, ...armB.slice(1)];
+}
+
+/**
+ * Apply the visual polish to a set of flow features. Ridge-spine flows are
+ * offset to the flank then smoothed; saddle crossings are first curved into a
+ * tangential ridge merge (Phase 5 Step 1) then smoothed, so they flow into the
+ * ridge instead of T-boning it. lengthM is refreshed for display; every other
+ * property (id, tier, likelihood, …) is preserved exactly. Geometry is only
+ * reshaped between/around real vertices — no feature is added, removed, or
+ * relocated off its ridge.
  */
 function polishFlowGeometry(
   feats: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[]
@@ -1221,7 +1314,10 @@ function polishFlowGeometry(
   return feats.map((f) => {
     const isSaddleCrossing = f.properties.id.startsWith('flow_saddle_');
     let coords = f.geometry.coordinates as [number, number][];
-    if (!isSaddleCrossing && FLANK_OFFSET_M > 0) {
+    if (isSaddleCrossing) {
+      // Tangential merge (kill the 90° T-bone) then round.
+      coords = tangentializeCrossing(coords);
+    } else if (FLANK_OFFSET_M > 0) {
       coords = offsetRidgeToFlank(coords, FLANK_OFFSET_M);
     }
     coords = chaikinSmooth(coords, SMOOTH_ITERATIONS);

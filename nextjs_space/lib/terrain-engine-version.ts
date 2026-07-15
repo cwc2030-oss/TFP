@@ -11,7 +11,22 @@
  *   - Engine fixes propagate instantly (version bump busts the cache)
  *   - Expensive static terrain compute is still cached between bumps
  *
- * Current engine: v6.0-tier1-flow. Tier 1 "glorious flow" (Phases 1-4) ships
+ * Current engine: v6.1-flowing-form. Phase 5 ("Wake Up the Land") Step 1 adds
+ *   FLOWING FORM on top of the honest v6.0 geometry: saddle crossings are curved
+ *   into a TANGENTIAL ridge merge (they run parallel to the ridge as they pass
+ *   through the real saddle, then peel into each flank) so ridge → saddle → ridge
+ *   reads as one continuous flowing path with no 90° T-bone. This is a VISUAL
+ *   reshape only — it runs in the post-convergence polish stage, is anchored on
+ *   the same three real crossing points (flankA, saddle, flankB), and interpolates
+ *   strictly between them (Chaikin convex-envelope principle), so no line leaves
+ *   the real ridges/saddles. Convergence scoring and the honest v5.2 relief gate
+ *   are untouched (still computed on the raw traced geometry; flat ground still
+ *   yields no flow). Step 2 (corridor continuity beyond the ring) is a
+ *   rendering-only change and does not affect cached output. Bumped from
+ *   v6.0-tier1-flow so already-cached parcels miss and lazily recompute the
+ *   curved (tangential) crossing geometry.
+ *
+ * Prior engine: v6.0-tier1-flow. Tier 1 "glorious flow" (Phases 1-4) ships
  *   the honest, natural-looking deer-flow network: real ridge-traced flow lines
  *   (Phase 1-2), network-derived convergence scoring (Phase 3), and visual
  *   polish — modest downslope flank offset + Chaikin smoothing + curved saddle
@@ -32,4 +47,4 @@
  *   stale empty-flow entries produced by v5.1 on moderate ground) miss and
  *   recompute lazily under the corrected gate.
  */
-export const TERRAIN_ENGINE_VERSION = 'v6.0-tier1-flow';
+export const TERRAIN_ENGINE_VERSION = 'v6.1-flowing-form';

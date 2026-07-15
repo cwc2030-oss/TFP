@@ -653,6 +653,17 @@ const LAYER_COLORS = {
   flowTierBlackGlow: FLOW_TIER_COLORS.blackGlow,  // dark gray glow
 };
 
+// ========== PHASE 5 STEP 2 ("Wake Up the Land"): CORRIDOR CONTINUITY ==========
+// The traced flow geometry already runs well past the analysis ring (real ridge
+// spines extend out to the ~1 km fetch window). Instead of HARD-clipping it at
+// the ring edge (which dead-ends every corridor at the circle), we render the
+// beyond-ring portion as a faded, calm tail so a placed flow keeps flowing into
+// the surrounding real terrain. The tail is still the SAME real traced geometry
+// — nothing is fabricated; we simply stop discarding what we already fetched.
+// Both knobs are tunable via env.
+const FLOW_EXTENSION_FACTOR = Number(process.env.NEXT_PUBLIC_FLOW_EXTENSION_FACTOR || 2.0); // extension ring radius = inner ring × this
+const FLOW_EXTENSION_OPACITY = Number(process.env.NEXT_PUBLIC_FLOW_EXTENSION_OPACITY || 0.3); // faded-tail base opacity
+
 // ========== EDGE INTELLIGENCE UTILITIES ==========
 
 // Calculate bearing from point A to point B (in degrees)
@@ -5125,6 +5136,11 @@ const archetypeInitializedRef = useRef(false);
     if (map.getLayer('tfp-flow-tiers-glow')) {
       map.setPaintProperty('tfp-flow-tiers-glow', 'line-opacity', Math.min(0.6, sp.flowOpacity * 0.42));
     }
+    // Phase 5 Step 2: faded corridor-continuity tail tracks the same flow-opacity
+    // control, kept calm/soft relative to the crisp in-ring corridors.
+    if (map.getLayer('tfp-flow-extension')) {
+      map.setPaintProperty('tfp-flow-extension', 'line-opacity', Math.min(FLOW_EXTENSION_OPACITY, sp.flowOpacity * FLOW_EXTENSION_OPACITY));
+    }
 
     // --- Stand marker sizes (scale multiplier applied to rank-based radii) ---
     const sm = sp.markerSize; // multiplier: 1.4 (SMALL) → 1.0 (MEDIUM) → 0.72 (LARGE)
@@ -5889,7 +5905,7 @@ const archetypeInitializedRef = useRef(false);
     'tfp-movement-delta',
     'tfp-movement-post',
     'tfp-refuge-zones',
-    'tfp-flow-green', 'tfp-flow-blue', 'tfp-flow-black', 'tfp-flow-tiers-glow', 'tfp-flow-nearest-highlight', 'tfp-flow-convergence',
+    'tfp-flow-green', 'tfp-flow-blue', 'tfp-flow-black', 'tfp-flow-extension', 'tfp-flow-tiers-glow', 'tfp-flow-nearest-highlight', 'tfp-flow-convergence',
     'tfp-huntability-favorability', 'tfp-huntability-corridor-zones',
     'tfp-huntability-corridors', 'tfp-huntability-convergence',
     'tfp-bedding-probability',
@@ -7113,7 +7129,7 @@ const archetypeInitializedRef = useRef(false);
           if (id === 'tfp-flow-green') return !(_fv.flowGreen);
           if (id === 'tfp-flow-blue') return !(_fv.flowBlue);
           if (id === 'tfp-flow-black') return !(_fv.flowBlack);
-          if (id === 'tfp-flow-tiers-glow' || id === 'tfp-flow-direction-chevrons') {
+          if (id === 'tfp-flow-tiers-glow' || id === 'tfp-flow-direction-chevrons' || id === 'tfp-flow-extension') {
             return !(_fv.flowGreen || _fv.flowBlue || _fv.flowBlack);
           }
           if (id === 'tfp-flow-nearest-highlight') {
@@ -9700,6 +9716,10 @@ const archetypeInitializedRef = useRef(false);
       // Built locally (not read from huntZoneRingGeomRef) to avoid a ref-timing race with the
       // main source effect.
       let flowRingGeom: GeoJSON.Polygon | null = null;
+      // Phase 5 Step 2: a larger "reach" ring the faded corridor tail is bounded
+      // to, so the flow keeps flowing into the surrounding real terrain beyond
+      // the analysis ring instead of dead-ending at its edge.
+      let flowExtensionRingGeom: GeoJSON.Polygon | null = null;
       {
         const flowRingParcel = parcelPolygonRef.current;
         if (flowRingParcel && !(territoryModeRef.current && territoryParcelsRef.current.length > 1)) {
@@ -9713,9 +9733,15 @@ const archetypeInitializedRef = useRef(false);
               coords = c?.geometry?.coordinates;
             }
             if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+              const innerRadiusM = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
               flowRingGeom = turf.circle(
                 [Number(coords[0]), Number(coords[1])],
-                acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+                innerRadiusM,
+                { units: 'meters', steps: 64 }
+              ).geometry as GeoJSON.Polygon;
+              flowExtensionRingGeom = turf.circle(
+                [Number(coords[0]), Number(coords[1])],
+                innerRadiusM * FLOW_EXTENSION_FACTOR,
                 { units: 'meters', steps: 64 }
               ).geometry as GeoJSON.Polygon;
             }
@@ -9749,6 +9775,20 @@ const archetypeInitializedRef = useRef(false);
       const tiersSource = map.getSource('tfp-flow-tiers') as mapboxgl.GeoJSONSource;
       if (tiersSource) {
         tiersSource.setData(clipped);
+      }
+
+      // Phase 5 Step 2: faded corridor-continuity tail. The SAME real traced flow
+      // (pre-parcel-clip `smoothed`) bounded only to the larger extension ring, so
+      // the beyond-ring portion renders as a calm faded tail underneath the crisp
+      // corridors. Honest — this is the geometry the ridge tracer already produced
+      // out to the ~1 km fetch window; we simply stop discarding it at the ring.
+      const extensionSource = map.getSource('tfp-flow-extension') as mapboxgl.GeoJSONSource;
+      if (extensionSource) {
+        let extensionFC: GeoJSON.FeatureCollection = emptyFC;
+        if (flowExtensionRingGeom) {
+          extensionFC = clipLinesStrictToRing(smoothed, flowExtensionRingGeom);
+        }
+        extensionSource.setData(extensionFC);
       }
 
       // Update convergence zones source (filter points inside water bodies)
@@ -10264,6 +10304,14 @@ const archetypeInitializedRef = useRef(false);
           fadeLayerIn(map, 'tfp-flow-tiers-glow', 0.42, 'line-opacity', FADE_IN);
         } else {
           fadeLayerOut(map, 'tfp-flow-tiers-glow', 'line-opacity', FADE_OUT);
+        }
+      }
+      // Phase 5 Step 2: faded corridor-continuity tail follows any-tier-on.
+      if (map.getLayer('tfp-flow-extension')) {
+        if (_anyOn) {
+          fadeLayerIn(map, 'tfp-flow-extension', FLOW_EXTENSION_OPACITY, 'line-opacity', FADE_IN);
+        } else {
+          fadeLayerOut(map, 'tfp-flow-extension', 'line-opacity', FADE_OUT);
         }
       }
       // Nearest corridor highlight follows any flow tier + stand selection.
@@ -11495,6 +11543,38 @@ const archetypeInitializedRef = useRef(false);
         // ========== PHASE B: UNIFIED FLOW TIERS (Green/Blue/Black) ==========
         // Single source with per-tier filtered layers. Tier classification
         // happens at data-push time in the flow useEffect via mergeAndClassifyFlows().
+        // Phase 5 Step 2: faded corridor-continuity tail. Added BEFORE the crisp
+        // tier layers so it renders underneath them — inside the ring the crisp
+        // corridors cover it; beyond the ring only this calm faded tail shows, so
+        // the flow reads as continuing into the surrounding real terrain instead
+        // of dead-ending at the circle. Same real traced geometry, just softened.
+        if (!map.getSource('tfp-flow-extension')) {
+          map.addSource('tfp-flow-extension', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-flow-extension',
+            type: 'line',
+            source: 'tfp-flow-extension',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+              'line-color': [
+                'match', ['get', 'flowTier'],
+                'green', LAYER_COLORS.flowTierGreen,
+                'blue', LAYER_COLORS.flowTierBlue,
+                'black', LAYER_COLORS.flowTierBlack,
+                LAYER_COLORS.flowTierBlack
+              ],
+              'line-width': [
+                'interpolate', ['linear'], ['coalesce', ['get', 'likelihood'], 0.5],
+                0.3, 1.0, 0.66, 1.8, 0.85, 2.4
+              ],
+              // Calm faded tail; softened further with blur so it reads as a
+              // gentle continuation rather than a hard-edged corridor.
+              'line-opacity': FLOW_EXTENSION_OPACITY,
+              'line-blur': 1.4,
+            },
+          });
+        }
+
         if (!map.getSource('tfp-flow-tiers')) {
           map.addSource('tfp-flow-tiers', { type: 'geojson', data: EMPTY_FC });
           
@@ -12629,6 +12709,7 @@ const archetypeInitializedRef = useRef(false);
           'tfp-stand-tertiary-dot',      // v1.1 — faint tertiary stand dots
           // Flow lines (animated) — v3.5.1
           'tfp-stand-emphasis-glow',     // v3.8.1 — soft glow bias for top stand (below flow)
+          'tfp-flow-extension',          // Phase 5 Step 2: faded beyond-ring corridor tail (below crisp tiers)
           'tfp-flow-tiers-glow',         // Phase B: glow behind all flow tiers
           'tfp-flow-black',              // Phase B: low-confidence dashed
           'tfp-flow-blue',               // Phase B: moderate-confidence solid
