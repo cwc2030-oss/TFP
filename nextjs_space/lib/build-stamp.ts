@@ -9,10 +9,16 @@
  * The version is anchored to the terrain engine version so the stamp always
  * reflects the shipped analysis engine.
  */
-import { TERRAIN_ENGINE_VERSION } from './terrain-engine-version';
+// NOTE: The corner stamp's DISPLAY version is intentionally decoupled from
+// TERRAIN_ENGINE_VERSION. TERRAIN_ENGINE_VERSION is a terrain-cache key — bumping
+// it invalidates all cached compute and forces expensive recompute. This release
+// is a ship-only reliability fix (no change to terrain output), so the cache key
+// stays at v6.1 while the visible stamp advances to v6.2 for at-a-glance deploy
+// confirmation.
+export const BUILD_VERSION = 'v6.2-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 14';
+export const BUILD_DATE = 'Jul 15';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -26,5 +32,5 @@ export const BUILD_DATE = 'Jul 14';
 //      × ~27s (kills the "tap to retry" banner under cold Modal).
 export const BUILD_REV = 'r1';
 
-// e.g. "build v5.0-scope r2 · Jul 13"
-export const BUILD_STAMP = `build ${TERRAIN_ENGINE_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
+// e.g. "build v6.2-flowing-form r1 · Jul 15"
+export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
