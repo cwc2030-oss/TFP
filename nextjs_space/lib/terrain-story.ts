@@ -384,21 +384,6 @@ export function generateTerrainStory(
   // Generate narrative
   const narrative = generateNarrative(drivers, primaryDriver, secondaryDriver, keyOpportunity, parcelAcreage);
 
-  // TEMP-DIAG-V63B: capture exact driver scores + headline for de-saturation verification. REMOVE before deploy.
-  if (typeof window !== 'undefined') {
-    (window as any).__TFP_CONV_DEBUG__ = {
-      bench: drivers.benchSupport.score,
-      saddle: drivers.saddleInfluence.score,
-      ridgeInfluence: drivers.ridgeSpineSupport.score,
-      convergence: drivers.convergenceDensity.score,
-      convergenceLabel: drivers.convergenceDensity.label,
-      primaryDriver,
-      secondaryDriver,
-      headline,
-      narrative,
-    };
-  }
-
   // Determine confidence (gated on real measured relief, NOT the constant Bench)
   const confidence = determineConfidence(drivers, flowData, ridgeCountPrimary, saddleCount);
   
