@@ -840,6 +840,27 @@ const RIDGE_TRACE_MAX_PER_TIER = 30;
 // (roughly the buffered analysis window / visible map extent).
 const RIDGE_RELEVANCE_MARGIN_M = 300;
 
+// ── Honest-flow gates (v6.4): stop the saddle-crossing lattice from standing in
+// for a real ridge network on starved parcels — the "wiggly rectangles following
+// roads" failure. CALIBRATED BY EVIDENCE (Jul 16 probe spread), not feel:
+//   Putnam artifact  → 1 traced line @ 49-53 ft feeding 4-6 saddle crossings.
+//   warren/osage/fr. → 1 traced line @ 66-113 ft (genuine strong lone spine).
+//   callaway/gascon. → 2-3 traced lines @ 45-48 ft (real moderate network).
+//   Dietzfelbinger   → 7 traced lines @ 85 ft, 10 crossings (healthy, ~1.4:1).
+// Rule A (crossing discipline): saddle crossings SUPPLEMENT a ridge network,
+//   never constitute it. Require a real multi-line network (>= MIN_NETWORK) before
+//   drawing any crossing, and cap crossings at RATIO x traced-line count so they
+//   can never dominate (the artifact ran 4-6 crossings on a single line). The
+//   RATIO=2 ceiling leaves healthy parcels (Dietz 10<=14) byte-for-byte unchanged.
+// Rule B (starved -> honest-empty): a lone traced line below the lone-spine
+//   prominence bar is the Putnam artifact, not a flow story -> read empty. A
+//   genuine strong lone spine (>= bar) still draws. Bar sits between the artifact
+//   ceiling (53 ft) and the lowest genuine lone spine kept (66 ft), biased low to
+//   avoid the over-correction the old 50 ft floor caused on moderate ground.
+const FLOW_CROSS_MIN_NETWORK = Number(process.env.FLOW_CROSS_MIN_NETWORK || 2);
+const FLOW_CROSS_RATIO = Number(process.env.FLOW_CROSS_RATIO || 2);
+const FLOW_LONE_SPINE_MIN_FT = Number(process.env.FLOW_LONE_SPINE_MIN_FT || 60);
+
 interface RidgeFeatureLite {
   coords: [number, number][];
   prominenceFt: number;
@@ -900,13 +921,14 @@ function traceFlowFromRidges(
 ): {
   primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+  maxProminenceFt: number;
 } {
   const primaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_primary);
   const secondaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_secondary);
 
   if (primaryRidgesAll.length === 0 && secondaryRidgesAll.length === 0) {
     console.log('[RidgeTrace] No ridge geometry — empty flow (honest gate).');
-    return { primary: [], secondary: [] };
+    return { primary: [], secondary: [], maxProminenceFt: 0 };
   }
 
   // The ridge service returns spines for a large buffered window (up to ~1 km
@@ -921,7 +943,7 @@ function traceFlowFromRidges(
 
   if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
     console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
-    return { primary: [], secondary: [] };
+    return { primary: [], secondary: [], maxProminenceFt: 0 };
   }
 
   // Honest gate (v5.2): require measured relief above the prominence floor on
@@ -938,7 +960,7 @@ function traceFlowFromRidges(
       Math.round(maxProminenceFt),
       PROMINENCE_FLOOR_FT
     );
-    return { primary: [], secondary: [] };
+    return { primary: [], secondary: [], maxProminenceFt };
   }
 
   const buildTier = (
@@ -993,7 +1015,7 @@ function traceFlowFromRidges(
     Math.round(maxProminenceFt)
   );
 
-  return { primary, secondary };
+  return { primary, secondary, maxProminenceFt };
 }
 
 // ========== PHASE 2: SADDLE CROSSINGS ==========
@@ -1069,7 +1091,8 @@ function traceSaddleCrossings(
   ridgeData: any,
   ridgeFlows: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[],
   parcelRings: number[][][],
-  scale: ParcelScaleMetrics
+  scale: ParcelScaleMetrics,
+  maxCrossings?: number
 ): {
   primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
@@ -1106,7 +1129,7 @@ function traceSaddleCrossings(
   const relevant = saddlesAll
     .filter((s) => inBbox(s.coord))
     .sort((a, b) => b.ridgeDropFt - a.ridgeDropFt)
-    .slice(0, SADDLE_MAX_CROSSINGS);
+    .slice(0, Math.min(SADDLE_MAX_CROSSINGS, maxCrossings ?? SADDLE_MAX_CROSSINGS));
 
   let idx = 0;
   let skippedFar = 0;
@@ -1378,11 +1401,28 @@ export function generateTerrainFlowV3(
   let primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   let secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   if (RIDGE_TRACE_ENABLED) {
-    ({ primary, secondary } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
-    // Phase 2: route flow through real saddle gaps. Only when ridge spines were
-    // actually traced (crossings connect traced ridges — never float on their own).
-    if (SADDLE_CROSSINGS_ENABLED && (primary.length + secondary.length) > 0) {
-      const cross = traceSaddleCrossings(ridgeData, [...primary, ...secondary], parcelRings, parcelScale);
+    let maxProminenceFt: number;
+    ({ primary, secondary, maxProminenceFt } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+    const realLines = primary.length + secondary.length;
+    // Rule B (starved -> honest-empty): a thin network (<=1 traced line) whose
+    // single spine is below the lone-spine prominence bar is an artifact, not
+    // terrain. Return empty rather than hanging a saddle lattice on it.
+    if (realLines <= 1 && maxProminenceFt < FLOW_LONE_SPINE_MIN_FT) {
+      console.log(
+        '[RidgeTrace] Starved network (%d line, maxProm=%d ft < lone-spine bar %d ft) — honest-empty flow.',
+        realLines,
+        Math.round(maxProminenceFt),
+        FLOW_LONE_SPINE_MIN_FT
+      );
+      primary = [];
+      secondary = [];
+    } else if (SADDLE_CROSSINGS_ENABLED && realLines >= FLOW_CROSS_MIN_NETWORK) {
+      // Rule A (crossing discipline): saddle crossings SUPPLEMENT a real network
+      // (>= FLOW_CROSS_MIN_NETWORK traced lines) and are capped at
+      // FLOW_CROSS_RATIO x realLines so they can never outnumber the spines that
+      // justify them. A lone real spine draws clean (no lattice).
+      const maxCrossings = Math.round(FLOW_CROSS_RATIO * realLines);
+      const cross = traceSaddleCrossings(ridgeData, [...primary, ...secondary], parcelRings, parcelScale, maxCrossings);
       primary.push(...cross.primary);
       secondary.push(...cross.secondary);
     }
