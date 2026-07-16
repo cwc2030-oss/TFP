@@ -7473,6 +7473,16 @@ const archetypeInitializedRef = useRef(false);
           // and surface real failures instead of silent synthetic substitution.
           options: { scopeCompute: true },
         });
+        // ── Per-scope-move diagnostic probe ──────────────────────────────
+        // One greppable client line per move (incl. superseded/aborted ones)
+        // carrying the ridge-service HTTP status + feature counts (from the
+        // server terrain_debug) + end-to-end timing, so a rapid-roam burst can
+        // be read full→empty and an upstream throttle (429/503/timeout) can be
+        // separated from a client-side flow-render decay.
+        try {
+          const td: any = result.terrainDebug || {};
+          console.log(`[ScopeProbe] seq=${seq} outcome=${result.aborted ? 'ABORTED' : result.success ? (((result.data?.flow_primary?.features?.length ?? 0) + (result.data?.flow_secondary?.features?.length ?? 0)) > 0 ? 'OK' : 'EMPTY') : 'FAIL'} flow_http=${result.status ?? 'n/a'} ridge_call=${td.pipeline_steps?.ridge_call ?? 'n/a'} ridge_http=${td.ridge_modal_status ?? 'null'} rp=${td.ridge_count_primary ?? '?'} rs=${td.ridge_count_secondary ?? '?'} saddles=${td.ridge_saddle_count ?? '?'} flow_p=${result.data?.flow_primary?.features?.length ?? 0} flow_s=${result.data?.flow_secondary?.features?.length ?? 0} synthetic=${result.isSynthetic} dur=${result.durationMs}ms err=${result.error ?? ''} key=${key}`);
+        } catch { /* probe must never break the compute */ }
         // Superseded while in flight — the newer move owns the UI now.
         if (result.aborted || cancelled || seq !== huntZoneComputeSeqRef.current) return;
 

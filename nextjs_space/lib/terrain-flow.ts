@@ -357,12 +357,20 @@ export async function fetchTerrainFlow(
       // Scope compute: never silently substitute synthetic flow for a real
       // scope answer — surface the failure so the caller can show retry.
       if (scopeCompute) {
+        // Surface the server's terrain_debug (ridge-service HTTP status + feature
+        // counts) even on a FAILURE envelope, so the per-scope-move [ScopeProbe]
+        // can report the ridge status + counts on empty/failed moves too — this
+        // is what distinguishes an upstream throttle (429/503/timeout) from a
+        // client-side flow-render decay during a rapid roam burst.
+        let failDebug: Record<string, unknown> | undefined;
+        try { failDebug = JSON.parse(errorText)?.terrain_debug; } catch { /* body not JSON */ }
         return {
           success: false,
           status: response.status,
           durationMs,
           isSynthetic: false,
           error: `API HTTP ${response.status}: ${errorText.substring(0, 200)}`,
+          terrainDebug: failDebug,
         };
       }
 

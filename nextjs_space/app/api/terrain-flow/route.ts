@@ -435,6 +435,10 @@ export async function POST(request: NextRequest) {
       if (transientFailure) {
         const processingTime = (Date.now() - startTime) / 1000;
         console.warn(`[TerrainFlow][scope ${flowReqId}] FAILED (${rc}) in ${processingTime.toFixed(2)}s (client_aborted=${request.signal.aborted}) — returning failure for retry (${parcel_id})`);
+        // Per-scope-move diagnostic: one greppable line carrying ridge-service
+        // HTTP status + feature counts + timing so a rapid-roam burst can be read
+        // full→empty and throttle (429/503/timeout) vs render-decay separated.
+        console.log(`[ScopeProbe] req=${flowReqId} outcome=FAIL ridge_call=${rc} ridge_http=${terrainDebug.ridge_modal_status ?? 'null'} rp=${terrainDebug.ridge_count_primary} rs=${terrainDebug.ridge_count_secondary} saddles=${terrainDebug.ridge_saddle_count ?? 0} flow_p=0 flow_s=0 dur=${(processingTime * 1000).toFixed(0)}ms client_aborted=${request.signal.aborted} err=${terrainDebug.ridge_modal_error ?? ''} parcel=${parcel_id}`);
         return NextResponse.json(
           {
             success: false,
@@ -591,6 +595,11 @@ export async function POST(request: NextRequest) {
       const totalLines = outFlow.flow_primary.features.length + outFlow.flow_secondary.features.length;
       const diagOutcome = totalLines > 0 ? 'real' : (emptyState?.type === 'no_backbone' ? 'flat_empty' : (emptyState?.type || 'empty'));
       console.log(`[FlowDiag] path=${scopeCompute ? 'scope' : 'main'} outcome=${diagOutcome} flowMode=${flowMode} usedRealDEM=${usedRealDEM} primary=${outFlow.flow_primary.features.length} secondary=${outFlow.flow_secondary.features.length} conv=${outFlow.convergence_zones.features.length} time=${((Date.now() - startTime) / 1000).toFixed(1)}s parcel=${parcel_id}`);
+      // Per-scope-move diagnostic (success path): same greppable schema as the
+      // FAIL line above so a rapid-roam burst reads full→empty in one grep.
+      if (scopeCompute) {
+        console.log(`[ScopeProbe] req=${flowReqId} outcome=${totalLines > 0 ? 'OK' : 'EMPTY'} ridge_call=${terrainDebug.pipeline_steps?.ridge_call ?? 'unknown'} ridge_http=${terrainDebug.ridge_modal_status ?? 'null'} rp=${terrainDebug.ridge_count_primary} rs=${terrainDebug.ridge_count_secondary} saddles=${terrainDebug.ridge_saddle_count ?? 0} flow_p=${outFlow.flow_primary.features.length} flow_s=${outFlow.flow_secondary.features.length} dur=${(Date.now() - startTime)}ms client_aborted=${request.signal.aborted} flowMode=${flowMode} parcel=${parcel_id}`);
+      }
     }
 
     return NextResponse.json({
