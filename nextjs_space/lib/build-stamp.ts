@@ -48,7 +48,12 @@ export const BUILD_DATE = 'Jul 16';
 //      flow_primary/secondary / bbox reads); a throw now logs full message+stack and
 //      degrades to an honest empty story instead of blanking the intel view. The late
 //      ridge-data re-generation effect is wrapped so a throw can't crash unhandled.
-export const BUILD_REV = 'r2';
+// r3 (v6.3) — shared-backbone verdict + network-side per-line prominence floor:
+//      flow AND story consult ONE assessBackbone determination (stamped in
+//      metadata.backbone), and the network-count side now counts only lines that
+//      each clear NETWORK_LINE_MIN_FT (40ft) rather than a raw traced-line count,
+//      so flat-ag artifact spurs go honest-empty instead of drawing a lattice.
+export const BUILD_REV = 'r3';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
