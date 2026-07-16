@@ -144,7 +144,10 @@ export interface TerrainFlowMetadata {
 // Shared backbone determination shape (see lib/terrain-backbone.ts).
 export interface BackboneVerdict {
   hasRealBackbone: boolean;
-  realLines: number;
+  // Count of PROMINENCE-QUALIFIED traced ridge lines (each >= NETWORK_LINE_MIN_FT),
+  // NOT the raw traced-line count. Weak sub-floor artifact spines are excluded so
+  // a flat parcel can't clear the multi-line side of the gate on count alone.
+  networkLines: number;
   maxProminenceFt: number;
   reason: string;
 }

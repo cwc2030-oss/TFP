@@ -29,7 +29,7 @@ import type {
   FlowTier,
 } from '@/types/terrain-flow';
 import { sRand } from './seeded-rng';
-import { assessBackbone, type BackboneVerdict } from './terrain-backbone';
+import { assessBackbone, NETWORK_LINE_MIN_FT, type BackboneVerdict } from './terrain-backbone';
 
 import {
   TERRAIN_FLOW_WEIGHTS,
@@ -923,13 +923,16 @@ function traceFlowFromRidges(
   primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   maxProminenceFt: number;
+  // Count of prominence-qualified network lines (each ridge >= NETWORK_LINE_MIN_FT).
+  // Feeds the shared backbone verdict's multi-line side (NOT the raw line count).
+  strongLineCount: number;
 } {
   const primaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_primary);
   const secondaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_secondary);
 
   if (primaryRidgesAll.length === 0 && secondaryRidgesAll.length === 0) {
     console.log('[RidgeTrace] No ridge geometry — empty flow (honest gate).');
-    return { primary: [], secondary: [], maxProminenceFt: 0 };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0 };
   }
 
   // The ridge service returns spines for a large buffered window (up to ~1 km
@@ -944,7 +947,7 @@ function traceFlowFromRidges(
 
   if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
     console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
-    return { primary: [], secondary: [], maxProminenceFt: 0 };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0 };
   }
 
   // Honest gate (v5.2): require measured relief above the prominence floor on
@@ -961,7 +964,7 @@ function traceFlowFromRidges(
       Math.round(maxProminenceFt),
       PROMINENCE_FLOOR_FT
     );
-    return { primary: [], secondary: [], maxProminenceFt };
+    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0 };
   }
 
   const buildTier = (
@@ -1009,14 +1012,30 @@ function traceFlowFromRidges(
   const primary = buildTier(primaryRidges, 'primary');
   const secondary = buildTier(secondaryRidges, 'secondary');
 
+  // Count PROMINENCE-QUALIFIED network lines: mirror the exact set buildTier
+  // renders (same relevance filter + per-tier prominence sort + cap) and keep
+  // only ridges whose individual prominence clears the per-line network floor.
+  // This is what feeds the shared backbone verdict's multi-line side, so a flat
+  // parcel emitting several weak sub-floor artifact spines can't clear the gate
+  // on raw count alone.
+  const strongInTier = (ridges: RidgeFeatureLite[]) =>
+    ridges
+      .slice()
+      .sort((a, b) => b.prominenceFt - a.prominenceFt)
+      .slice(0, RIDGE_TRACE_MAX_PER_TIER)
+      .filter((r) => r.prominenceFt >= NETWORK_LINE_MIN_FT).length;
+  const strongLineCount = strongInTier(primaryRidges) + strongInTier(secondaryRidges);
+
   console.log(
-    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft).',
+    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft).',
     primary.length,
     secondary.length,
-    Math.round(maxProminenceFt)
+    Math.round(maxProminenceFt),
+    strongLineCount,
+    NETWORK_LINE_MIN_FT
   );
 
-  return { primary, secondary, maxProminenceFt };
+  return { primary, secondary, maxProminenceFt, strongLineCount };
 }
 
 // ========== PHASE 2: SADDLE CROSSINGS ==========
@@ -1407,20 +1426,25 @@ export function generateTerrainFlowV3(
   // permissive verdict for the retired legacy template path.
   let backboneVerdict: BackboneVerdict = {
     hasRealBackbone: true,
-    realLines: 0,
+    networkLines: 0,
     maxProminenceFt: 0,
     reason: 'not assessed (legacy template path)',
   };
   if (RIDGE_TRACE_ENABLED) {
     let maxProminenceFt: number;
-    ({ primary, secondary, maxProminenceFt } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+    let strongLineCount: number;
+    ({ primary, secondary, maxProminenceFt, strongLineCount } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
     const realLines = primary.length + secondary.length;
-    // Shared no-backbone verdict (Rule B, starved -> honest-empty): a thin
-    // network (<=1 traced line) whose single spine is below the lone-spine
-    // prominence bar is an artifact, not terrain. This SAME verdict is stamped
-    // into metadata.backbone so the story reads low-relief rather than
-    // re-deriving structure from raw saddle counts.
-    backboneVerdict = assessBackbone(realLines, maxProminenceFt, FLOW_LONE_SPINE_MIN_FT);
+    // Shared no-backbone verdict (Rule B, starved -> honest-empty). The network
+    // side now counts only lines that clear a real PER-LINE prominence floor
+    // (NETWORK_LINE_MIN_FT via strongLineCount) rather than a raw traced-line
+    // count: flat-ag artifacts can produce 2-3 low spurs that used to clear the
+    // network side on raw count and draw a lattice. A thin qualified network
+    // (<=1 line clearing the per-line floor) whose single spine is below the
+    // lone-spine prominence bar is an artifact, not terrain. This SAME verdict
+    // is stamped into metadata.backbone so the story reads low-relief rather
+    // than re-deriving structure from raw saddle counts.
+    backboneVerdict = assessBackbone(strongLineCount, maxProminenceFt, FLOW_LONE_SPINE_MIN_FT);
     if (!backboneVerdict.hasRealBackbone) {
       console.log('[RidgeTrace] Starved network — honest-empty flow. %s', backboneVerdict.reason);
       primary = [];
