@@ -164,6 +164,8 @@ export interface BackboneVerdict {
   // on the retired legacy template path and the pre-relevance early returns.
   lineLensM?: number[];
   lineCoherence?: number[];
+  /** Read-only flank-relief diagnostic (ft): median bilateral DEM drop sampled perpendicular to each ridge spine at ~125m on both flanks over up to 9 stations. A genuine ridge drops on BOTH sides; a bench/road-berm/flat-ag artifact stays flat. Per relevant line, same order as lineLensM/lineCoherence. */
+  lineFlankFt?: number[];
 }
 
 // ========== UI State Types ==========

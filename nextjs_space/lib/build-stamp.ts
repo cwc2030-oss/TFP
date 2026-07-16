@@ -59,7 +59,14 @@ export const BUILD_DATE = 'Jul 16';
 //      list, and the backbone verdict on every move, so per-line prominences are
 //      visible from server logs without the browser console. Purely additive —
 //      no gate/threshold/terrain-output change, terrain cache untouched.
-export const BUILD_REV = 'r4';
+// r5 (v6.3) — read-only length + coherence + flank-relief calibration instrumentation:
+//      terrain_debug and the ScopeProbe log now also expose per-line lengthMeters,
+//      coherence (avgRidgeScore), and flank-relief (median bilateral DEM drop sampled
+//      perpendicular to each spine at +/-125m over up to 9 stations, from ridge
+//      service v1.3.0). Investigates whether length/coherence/flank can separate
+//      genuine single spines from flat-ag artifacts where prominence alone could not.
+//      Purely additive diagnostics — no gate/threshold/terrain-output change, cache untouched.
+export const BUILD_REV = 'r5';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

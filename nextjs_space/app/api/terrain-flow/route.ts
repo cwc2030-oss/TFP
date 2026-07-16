@@ -534,6 +534,7 @@ export async function POST(request: NextRequest) {
       // could not. NOTE: length can include spine portions outside the parcel.
       terrainDebug.line_lengths_m = bb.lineLensM ?? [];
       terrainDebug.line_coherence = bb.lineCoherence ?? [];
+      terrainDebug.line_flank_ft = bb.lineFlankFt ?? [];
       terrainDebug.backbone_has_real = bb.hasRealBackbone;
       terrainDebug.backbone_reason = bb.reason;
     }
@@ -619,7 +620,7 @@ export async function POST(request: NextRequest) {
       // Per-scope-move diagnostic (success path): same greppable schema as the
       // FAIL line above so a rapid-roam burst reads full→empty in one grep.
       if (scopeCompute) {
-        console.log(`[ScopeProbe] req=${flowReqId} outcome=${totalLines > 0 ? 'OK' : 'EMPTY'} ridge_call=${terrainDebug.pipeline_steps?.ridge_call ?? 'unknown'} ridge_http=${terrainDebug.ridge_modal_status ?? 'null'} rp=${terrainDebug.ridge_count_primary} rs=${terrainDebug.ridge_count_secondary} saddles=${terrainDebug.ridge_saddle_count ?? 0} maxProm=${terrainDebug.max_prominence_ft ?? 'n/a'} strongLines=${terrainDebug.strong_line_count ?? 'n/a'} proms=[${(terrainDebug.line_prominences_ft ?? []).join(',')}] lensM=[${(terrainDebug.line_lengths_m ?? []).join(',')}] coh=[${(terrainDebug.line_coherence ?? []).join(',')}] backbone=${terrainDebug.backbone_has_real === undefined ? 'n/a' : (terrainDebug.backbone_has_real ? 'real' : 'none')} flow_p=${outFlow.flow_primary.features.length} flow_s=${outFlow.flow_secondary.features.length} dur=${(Date.now() - startTime)}ms client_aborted=${request.signal.aborted} flowMode=${flowMode} parcel=${parcel_id}`);
+        console.log(`[ScopeProbe] req=${flowReqId} outcome=${totalLines > 0 ? 'OK' : 'EMPTY'} ridge_call=${terrainDebug.pipeline_steps?.ridge_call ?? 'unknown'} ridge_http=${terrainDebug.ridge_modal_status ?? 'null'} rp=${terrainDebug.ridge_count_primary} rs=${terrainDebug.ridge_count_secondary} saddles=${terrainDebug.ridge_saddle_count ?? 0} maxProm=${terrainDebug.max_prominence_ft ?? 'n/a'} strongLines=${terrainDebug.strong_line_count ?? 'n/a'} proms=[${(terrainDebug.line_prominences_ft ?? []).join(',')}] lensM=[${(terrainDebug.line_lengths_m ?? []).join(',')}] coh=[${(terrainDebug.line_coherence ?? []).join(',')}] flankFt=[${(terrainDebug.line_flank_ft ?? []).join(',')}] backbone=${terrainDebug.backbone_has_real === undefined ? 'n/a' : (terrainDebug.backbone_has_real ? 'real' : 'none')} flow_p=${outFlow.flow_primary.features.length} flow_s=${outFlow.flow_secondary.features.length} dur=${(Date.now() - startTime)}ms client_aborted=${request.signal.aborted} flowMode=${flowMode} parcel=${parcel_id}`);
       }
     }
 

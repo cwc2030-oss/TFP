@@ -867,6 +867,10 @@ interface RidgeFeatureLite {
   prominenceFt: number;
   ridgeScore: number;
   lengthMeters: number;
+  // READ-ONLY flank-relief diagnostic from the ridge service (v3.1): bilateral,
+  // at-distance (125m), sustained (median over stations) cross-sectional drop.
+  flankReliefFt: number;
+  flankStations: number;
 }
 
 function extractRidgeFeatures(fc: any): RidgeFeatureLite[] {
@@ -886,6 +890,8 @@ function extractRidgeFeatures(fc: any): RidgeFeatureLite[] {
       prominenceFt: Number(p.prominenceFt) || 0,
       ridgeScore: Number(p.avgRidgeScore) || 0,
       lengthMeters: Number(p.lengthMeters) || computeLineLength(coords),
+      flankReliefFt: Number(p.flankReliefFt) || 0,
+      flankStations: Number(p.flankStations) || 0,
     });
   }
   return out;
@@ -936,13 +942,17 @@ function traceFlowFromRidges(
   // pre-relevance early returns.
   lineLensM: number[];
   lineCoherence: number[];
+  // READ-ONLY DIAGNOSTIC (flank-relief calibration): per-line bilateral flank
+  // relief (ft) aligned index-for-index with linePromsFt. Empty on pre-relevance
+  // early returns.
+  lineFlankFt: number[];
 } {
   const primaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_primary);
   const secondaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_secondary);
 
   if (primaryRidgesAll.length === 0 && secondaryRidgesAll.length === 0) {
     console.log('[RidgeTrace] No ridge geometry — empty flow (honest gate).');
-    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [] };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [], lineFlankFt: [] };
   }
 
   // The ridge service returns spines for a large buffered window (up to ~1 km
@@ -957,7 +967,7 @@ function traceFlowFromRidges(
 
   if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
     console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
-    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [] };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [], lineFlankFt: [] };
   }
 
   // Honest gate (v5.2): require measured relief above the prominence floor on
@@ -979,16 +989,18 @@ function traceFlowFromRidges(
   const linePromsFt = relevantLinesSorted.map((r) => Math.round(r.prominenceFt));
   const lineLensM = relevantLinesSorted.map((r) => Math.round(r.lengthMeters));
   const lineCoherence = relevantLinesSorted.map((r) => Math.round(r.ridgeScore * 1000) / 1000);
+  const lineFlankFt = relevantLinesSorted.map((r) => Math.round(r.flankReliefFt));
   if (maxProminenceFt < PROMINENCE_FLOOR_FT) {
     console.log(
-      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate). perLineProms=[%s] lensM=[%s] coh=[%s]',
+      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate). perLineProms=[%s] lensM=[%s] coh=[%s] flankFt=[%s]',
       Math.round(maxProminenceFt),
       PROMINENCE_FLOOR_FT,
       linePromsFt.join(','),
       lineLensM.join(','),
-      lineCoherence.join(',')
+      lineCoherence.join(','),
+      lineFlankFt.join(',')
     );
-    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0, linePromsFt, lineLensM, lineCoherence };
+    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0, linePromsFt, lineLensM, lineCoherence, lineFlankFt };
   }
 
   const buildTier = (
@@ -1051,7 +1063,7 @@ function traceFlowFromRidges(
   const strongLineCount = strongInTier(primaryRidges) + strongInTier(secondaryRidges);
 
   console.log(
-    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft). perLineProms=[%s] lensM=[%s] coh=[%s]',
+    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft). perLineProms=[%s] lensM=[%s] coh=[%s] flankFt=[%s]',
     primary.length,
     secondary.length,
     Math.round(maxProminenceFt),
@@ -1059,10 +1071,11 @@ function traceFlowFromRidges(
     NETWORK_LINE_MIN_FT,
     linePromsFt.join(','),
     lineLensM.join(','),
-    lineCoherence.join(',')
+    lineCoherence.join(','),
+    lineFlankFt.join(',')
   );
 
-  return { primary, secondary, maxProminenceFt, strongLineCount, linePromsFt, lineLensM, lineCoherence };
+  return { primary, secondary, maxProminenceFt, strongLineCount, linePromsFt, lineLensM, lineCoherence, lineFlankFt };
 }
 
 // ========== PHASE 2: SADDLE CROSSINGS ==========
@@ -1463,7 +1476,8 @@ export function generateTerrainFlowV3(
     let linePromsFt: number[];
     let lineLensM: number[];
     let lineCoherence: number[];
-    ({ primary, secondary, maxProminenceFt, strongLineCount, linePromsFt, lineLensM, lineCoherence } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+    let lineFlankFt: number[];
+    ({ primary, secondary, maxProminenceFt, strongLineCount, linePromsFt, lineLensM, lineCoherence, lineFlankFt } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
     const realLines = primary.length + secondary.length;
     // Shared no-backbone verdict (Rule B, starved -> honest-empty). The network
     // side now counts only lines that clear a real PER-LINE prominence floor
@@ -1481,6 +1495,7 @@ export function generateTerrainFlowV3(
     backboneVerdict.linePromsFt = linePromsFt;
     backboneVerdict.lineLensM = lineLensM;
     backboneVerdict.lineCoherence = lineCoherence;
+    backboneVerdict.lineFlankFt = lineFlankFt;
     if (!backboneVerdict.hasRealBackbone) {
       console.log('[RidgeTrace] Starved network — honest-empty flow. %s', backboneVerdict.reason);
       primary = [];
