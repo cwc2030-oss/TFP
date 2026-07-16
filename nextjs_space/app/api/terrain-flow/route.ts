@@ -517,6 +517,20 @@ export async function POST(request: NextRequest) {
     terrainDebug.convergence_count = flowData.convergence_zones.features.length;
     terrainDebug.opportunity_count = flowData.opportunity_zones.features.length;
 
+    // READ-ONLY DIAGNOSTIC (v6.4.2): surface the shared backbone verdict's gate
+    // inputs so an emptied move's REAL spine prominences are visible from server
+    // logs / batch scans without Clark's browser console. This is exactly the
+    // data the NETWORK_LINE_MIN_FT recalibration needs: max prominence, the
+    // per-line prominence list, the >=40ft qualified count, and the verdict.
+    const bb = flowData.metadata?.backbone;
+    if (bb) {
+      terrainDebug.max_prominence_ft = Math.round(bb.maxProminenceFt ?? 0);
+      terrainDebug.strong_line_count = bb.networkLines ?? 0;
+      terrainDebug.line_prominences_ft = bb.linePromsFt ?? [];
+      terrainDebug.backbone_has_real = bb.hasRealBackbone;
+      terrainDebug.backbone_reason = bb.reason;
+    }
+
     if (usedRealDEM) {
       flowData.metadata.mode = 'terrain_driven';
       flowData.metadata.dem_source = corridorData?.metadata?.dem_source || 'USGS_3DEP_1m';
@@ -598,7 +612,7 @@ export async function POST(request: NextRequest) {
       // Per-scope-move diagnostic (success path): same greppable schema as the
       // FAIL line above so a rapid-roam burst reads full→empty in one grep.
       if (scopeCompute) {
-        console.log(`[ScopeProbe] req=${flowReqId} outcome=${totalLines > 0 ? 'OK' : 'EMPTY'} ridge_call=${terrainDebug.pipeline_steps?.ridge_call ?? 'unknown'} ridge_http=${terrainDebug.ridge_modal_status ?? 'null'} rp=${terrainDebug.ridge_count_primary} rs=${terrainDebug.ridge_count_secondary} saddles=${terrainDebug.ridge_saddle_count ?? 0} flow_p=${outFlow.flow_primary.features.length} flow_s=${outFlow.flow_secondary.features.length} dur=${(Date.now() - startTime)}ms client_aborted=${request.signal.aborted} flowMode=${flowMode} parcel=${parcel_id}`);
+        console.log(`[ScopeProbe] req=${flowReqId} outcome=${totalLines > 0 ? 'OK' : 'EMPTY'} ridge_call=${terrainDebug.pipeline_steps?.ridge_call ?? 'unknown'} ridge_http=${terrainDebug.ridge_modal_status ?? 'null'} rp=${terrainDebug.ridge_count_primary} rs=${terrainDebug.ridge_count_secondary} saddles=${terrainDebug.ridge_saddle_count ?? 0} maxProm=${terrainDebug.max_prominence_ft ?? 'n/a'} strongLines=${terrainDebug.strong_line_count ?? 'n/a'} proms=[${(terrainDebug.line_prominences_ft ?? []).join(',')}] backbone=${terrainDebug.backbone_has_real === undefined ? 'n/a' : (terrainDebug.backbone_has_real ? 'real' : 'none')} flow_p=${outFlow.flow_primary.features.length} flow_s=${outFlow.flow_secondary.features.length} dur=${(Date.now() - startTime)}ms client_aborted=${request.signal.aborted} flowMode=${flowMode} parcel=${parcel_id}`);
       }
     }
 

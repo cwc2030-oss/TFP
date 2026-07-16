@@ -150,6 +150,14 @@ export interface BackboneVerdict {
   networkLines: number;
   maxProminenceFt: number;
   reason: string;
+  // READ-ONLY DIAGNOSTIC (v6.4.2). Prominences (ft, rounded, desc) of every
+  // parcel-relevant traced ridge line considered by the gate — primary+secondary,
+  // AFTER the relevance filter, BEFORE the per-line 40ft qualification. This is
+  // the exact set whose max is maxProminenceFt and whose >=NETWORK_LINE_MIN_FT
+  // count is networkLines. Surfaced so an emptied move's real spine prominences
+  // are visible from server logs / batch scans without Clark's browser console.
+  // Optional: absent on the retired legacy template path.
+  linePromsFt?: number[];
 }
 
 // ========== UI State Types ==========

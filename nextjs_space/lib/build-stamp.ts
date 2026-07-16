@@ -53,7 +53,13 @@ export const BUILD_DATE = 'Jul 16';
 //      metadata.backbone), and the network-count side now counts only lines that
 //      each clear NETWORK_LINE_MIN_FT (40ft) rather than a raw traced-line count,
 //      so flat-ag artifact spurs go honest-empty instead of drawing a lattice.
-export const BUILD_REV = 'r3';
+// r4 (v6.3) — read-only ScopeProbe/RidgeTrace calibration instrumentation: the
+//      server-side ScopeProbe log line and terrain_debug now expose maxProm,
+//      strongLineCount (prominence-qualified >=40ft), the per-line prominence
+//      list, and the backbone verdict on every move, so per-line prominences are
+//      visible from server logs without the browser console. Purely additive —
+//      no gate/threshold/terrain-output change, terrain cache untouched.
+export const BUILD_REV = 'r4';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

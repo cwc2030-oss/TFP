@@ -926,13 +926,17 @@ function traceFlowFromRidges(
   // Count of prominence-qualified network lines (each ridge >= NETWORK_LINE_MIN_FT).
   // Feeds the shared backbone verdict's multi-line side (NOT the raw line count).
   strongLineCount: number;
+  // READ-ONLY DIAGNOSTIC: prominences (ft, rounded, desc) of every parcel-relevant
+  // traced ridge line (primary+secondary) AFTER the relevance filter, BEFORE the
+  // per-line 40ft qualification. Empty on the pre-relevance early returns.
+  linePromsFt: number[];
 } {
   const primaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_primary);
   const secondaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_secondary);
 
   if (primaryRidgesAll.length === 0 && secondaryRidgesAll.length === 0) {
     console.log('[RidgeTrace] No ridge geometry — empty flow (honest gate).');
-    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0 };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [] };
   }
 
   // The ridge service returns spines for a large buffered window (up to ~1 km
@@ -947,7 +951,7 @@ function traceFlowFromRidges(
 
   if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
     console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
-    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0 };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [] };
   }
 
   // Honest gate (v5.2): require measured relief above the prominence floor on
@@ -958,13 +962,20 @@ function traceFlowFromRidges(
     (m, r) => Math.max(m, r.prominenceFt),
     0
   );
+  // READ-ONLY DIAGNOSTIC: per-line prominences over the exact relevance-filtered
+  // set maxProminenceFt/strongLineCount are derived from (desc, rounded). Computed
+  // here so even a stage-1 sub-floor early return can report the real spine ft.
+  const linePromsFt = [...primaryRidges, ...secondaryRidges]
+    .map((r) => Math.round(r.prominenceFt))
+    .sort((a, b) => b - a);
   if (maxProminenceFt < PROMINENCE_FLOOR_FT) {
     console.log(
-      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate).',
+      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate). perLineProms=[%s]',
       Math.round(maxProminenceFt),
-      PROMINENCE_FLOOR_FT
+      PROMINENCE_FLOOR_FT,
+      linePromsFt.join(',')
     );
-    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0 };
+    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0, linePromsFt };
   }
 
   const buildTier = (
@@ -1027,15 +1038,16 @@ function traceFlowFromRidges(
   const strongLineCount = strongInTier(primaryRidges) + strongInTier(secondaryRidges);
 
   console.log(
-    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft).',
+    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft). perLineProms=[%s]',
     primary.length,
     secondary.length,
     Math.round(maxProminenceFt),
     strongLineCount,
-    NETWORK_LINE_MIN_FT
+    NETWORK_LINE_MIN_FT,
+    linePromsFt.join(',')
   );
 
-  return { primary, secondary, maxProminenceFt, strongLineCount };
+  return { primary, secondary, maxProminenceFt, strongLineCount, linePromsFt };
 }
 
 // ========== PHASE 2: SADDLE CROSSINGS ==========
@@ -1433,7 +1445,8 @@ export function generateTerrainFlowV3(
   if (RIDGE_TRACE_ENABLED) {
     let maxProminenceFt: number;
     let strongLineCount: number;
-    ({ primary, secondary, maxProminenceFt, strongLineCount } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+    let linePromsFt: number[];
+    ({ primary, secondary, maxProminenceFt, strongLineCount, linePromsFt } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
     const realLines = primary.length + secondary.length;
     // Shared no-backbone verdict (Rule B, starved -> honest-empty). The network
     // side now counts only lines that clear a real PER-LINE prominence floor
@@ -1445,6 +1458,9 @@ export function generateTerrainFlowV3(
     // is stamped into metadata.backbone so the story reads low-relief rather
     // than re-deriving structure from raw saddle counts.
     backboneVerdict = assessBackbone(strongLineCount, maxProminenceFt, FLOW_LONE_SPINE_MIN_FT);
+    // READ-ONLY DIAGNOSTIC: attach the parcel-relevant per-line prominences so the
+    // route can surface them in terrain_debug + the ScopeProbe log line.
+    backboneVerdict.linePromsFt = linePromsFt;
     if (!backboneVerdict.hasRealBackbone) {
       console.log('[RidgeTrace] Starved network — honest-empty flow. %s', backboneVerdict.reason);
       primary = [];
