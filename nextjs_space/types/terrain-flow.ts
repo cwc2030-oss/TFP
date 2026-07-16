@@ -158,6 +158,12 @@ export interface BackboneVerdict {
   // are visible from server logs / batch scans without Clark's browser console.
   // Optional: absent on the retired legacy template path.
   linePromsFt?: number[];
+  // READ-ONLY DIAGNOSTIC (length/continuity calibration). Per-line spine length (m)
+  // and ridge-service coherence score (avgRidgeScore), aligned index-for-index with
+  // linePromsFt so a spine's prominence/length/coherence line up. Optional: absent
+  // on the retired legacy template path and the pre-relevance early returns.
+  lineLensM?: number[];
+  lineCoherence?: number[];
 }
 
 // ========== UI State Types ==========

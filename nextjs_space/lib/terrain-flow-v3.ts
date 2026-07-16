@@ -930,13 +930,19 @@ function traceFlowFromRidges(
   // traced ridge line (primary+secondary) AFTER the relevance filter, BEFORE the
   // per-line 40ft qualification. Empty on the pre-relevance early returns.
   linePromsFt: number[];
+  // READ-ONLY DIAGNOSTIC (length/continuity calibration): per-line spine length (m)
+  // and ridge-service coherence score (avgRidgeScore), aligned index-for-index with
+  // linePromsFt so a given spine's prominence/length/coherence line up. Empty on the
+  // pre-relevance early returns.
+  lineLensM: number[];
+  lineCoherence: number[];
 } {
   const primaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_primary);
   const secondaryRidgesAll = extractRidgeFeatures(ridgeData?.ridges_secondary);
 
   if (primaryRidgesAll.length === 0 && secondaryRidgesAll.length === 0) {
     console.log('[RidgeTrace] No ridge geometry — empty flow (honest gate).');
-    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [] };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [] };
   }
 
   // The ridge service returns spines for a large buffered window (up to ~1 km
@@ -951,7 +957,7 @@ function traceFlowFromRidges(
 
   if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
     console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
-    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [] };
+    return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [] };
   }
 
   // Honest gate (v5.2): require measured relief above the prominence floor on
@@ -965,17 +971,24 @@ function traceFlowFromRidges(
   // READ-ONLY DIAGNOSTIC: per-line prominences over the exact relevance-filtered
   // set maxProminenceFt/strongLineCount are derived from (desc, rounded). Computed
   // here so even a stage-1 sub-floor early return can report the real spine ft.
-  const linePromsFt = [...primaryRidges, ...secondaryRidges]
-    .map((r) => Math.round(r.prominenceFt))
-    .sort((a, b) => b - a);
+  // Sort ONCE by prominence desc, then derive proms/lengths/coherence in the SAME
+  // order so a spine's prominence, length (m), and coherence align index-for-index.
+  const relevantLinesSorted = [...primaryRidges, ...secondaryRidges]
+    .slice()
+    .sort((a, b) => b.prominenceFt - a.prominenceFt);
+  const linePromsFt = relevantLinesSorted.map((r) => Math.round(r.prominenceFt));
+  const lineLensM = relevantLinesSorted.map((r) => Math.round(r.lengthMeters));
+  const lineCoherence = relevantLinesSorted.map((r) => Math.round(r.ridgeScore * 1000) / 1000);
   if (maxProminenceFt < PROMINENCE_FLOOR_FT) {
     console.log(
-      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate). perLineProms=[%s]',
+      '[RidgeTrace] Max relevant ridge prominence %d ft < floor %d ft — empty flow (honest gate). perLineProms=[%s] lensM=[%s] coh=[%s]',
       Math.round(maxProminenceFt),
       PROMINENCE_FLOOR_FT,
-      linePromsFt.join(',')
+      linePromsFt.join(','),
+      lineLensM.join(','),
+      lineCoherence.join(',')
     );
-    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0, linePromsFt };
+    return { primary: [], secondary: [], maxProminenceFt, strongLineCount: 0, linePromsFt, lineLensM, lineCoherence };
   }
 
   const buildTier = (
@@ -1038,16 +1051,18 @@ function traceFlowFromRidges(
   const strongLineCount = strongInTier(primaryRidges) + strongInTier(secondaryRidges);
 
   console.log(
-    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft). perLineProms=[%s]',
+    '[RidgeTrace] Traced %d primary + %d secondary flow lines from real ridges (maxProm=%d ft, %d prominence-qualified >=%dft). perLineProms=[%s] lensM=[%s] coh=[%s]',
     primary.length,
     secondary.length,
     Math.round(maxProminenceFt),
     strongLineCount,
     NETWORK_LINE_MIN_FT,
-    linePromsFt.join(',')
+    linePromsFt.join(','),
+    lineLensM.join(','),
+    lineCoherence.join(',')
   );
 
-  return { primary, secondary, maxProminenceFt, strongLineCount, linePromsFt };
+  return { primary, secondary, maxProminenceFt, strongLineCount, linePromsFt, lineLensM, lineCoherence };
 }
 
 // ========== PHASE 2: SADDLE CROSSINGS ==========
@@ -1446,7 +1461,9 @@ export function generateTerrainFlowV3(
     let maxProminenceFt: number;
     let strongLineCount: number;
     let linePromsFt: number[];
-    ({ primary, secondary, maxProminenceFt, strongLineCount, linePromsFt } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
+    let lineLensM: number[];
+    let lineCoherence: number[];
+    ({ primary, secondary, maxProminenceFt, strongLineCount, linePromsFt, lineLensM, lineCoherence } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
     const realLines = primary.length + secondary.length;
     // Shared no-backbone verdict (Rule B, starved -> honest-empty). The network
     // side now counts only lines that clear a real PER-LINE prominence floor
@@ -1458,9 +1475,12 @@ export function generateTerrainFlowV3(
     // is stamped into metadata.backbone so the story reads low-relief rather
     // than re-deriving structure from raw saddle counts.
     backboneVerdict = assessBackbone(strongLineCount, maxProminenceFt, FLOW_LONE_SPINE_MIN_FT);
-    // READ-ONLY DIAGNOSTIC: attach the parcel-relevant per-line prominences so the
-    // route can surface them in terrain_debug + the ScopeProbe log line.
+    // READ-ONLY DIAGNOSTIC: attach the parcel-relevant per-line prominences, lengths
+    // (m), and coherence so the route can surface them in terrain_debug + the
+    // ScopeProbe log line (all aligned index-for-index with linePromsFt).
     backboneVerdict.linePromsFt = linePromsFt;
+    backboneVerdict.lineLensM = lineLensM;
+    backboneVerdict.lineCoherence = lineCoherence;
     if (!backboneVerdict.hasRealBackbone) {
       console.log('[RidgeTrace] Starved network — honest-empty flow. %s', backboneVerdict.reason);
       primary = [];
