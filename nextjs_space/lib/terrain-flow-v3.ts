@@ -29,6 +29,7 @@ import type {
   FlowTier,
 } from '@/types/terrain-flow';
 import { sRand } from './seeded-rng';
+import { assessBackbone, type BackboneVerdict } from './terrain-backbone';
 
 import {
   TERRAIN_FLOW_WEIGHTS,
@@ -1400,20 +1401,28 @@ export function generateTerrainFlowV3(
   // revert escape hatch — it no longer renders by default.
   let primary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
   let secondary: GeoJSON.Feature<GeoJSON.LineString, FlowLineProperties>[];
+  // Shared backbone verdict — computed ONCE here from the traced ridge network
+  // and stamped into the response metadata below so the terrain STORY consults
+  // the exact same determination (see lib/terrain-backbone.ts). Defaults to a
+  // permissive verdict for the retired legacy template path.
+  let backboneVerdict: BackboneVerdict = {
+    hasRealBackbone: true,
+    realLines: 0,
+    maxProminenceFt: 0,
+    reason: 'not assessed (legacy template path)',
+  };
   if (RIDGE_TRACE_ENABLED) {
     let maxProminenceFt: number;
     ({ primary, secondary, maxProminenceFt } = traceFlowFromRidges(ridgeData, parcelRings, parcelScale));
     const realLines = primary.length + secondary.length;
-    // Rule B (starved -> honest-empty): a thin network (<=1 traced line) whose
-    // single spine is below the lone-spine prominence bar is an artifact, not
-    // terrain. Return empty rather than hanging a saddle lattice on it.
-    if (realLines <= 1 && maxProminenceFt < FLOW_LONE_SPINE_MIN_FT) {
-      console.log(
-        '[RidgeTrace] Starved network (%d line, maxProm=%d ft < lone-spine bar %d ft) — honest-empty flow.',
-        realLines,
-        Math.round(maxProminenceFt),
-        FLOW_LONE_SPINE_MIN_FT
-      );
+    // Shared no-backbone verdict (Rule B, starved -> honest-empty): a thin
+    // network (<=1 traced line) whose single spine is below the lone-spine
+    // prominence bar is an artifact, not terrain. This SAME verdict is stamped
+    // into metadata.backbone so the story reads low-relief rather than
+    // re-deriving structure from raw saddle counts.
+    backboneVerdict = assessBackbone(realLines, maxProminenceFt, FLOW_LONE_SPINE_MIN_FT);
+    if (!backboneVerdict.hasRealBackbone) {
+      console.log('[RidgeTrace] Starved network — honest-empty flow. %s', backboneVerdict.reason);
       primary = [];
       secondary = [];
     } else if (SADDLE_CROSSINGS_ENABLED && realLines >= FLOW_CROSS_MIN_NETWORK) {
@@ -1494,6 +1503,10 @@ export function generateTerrainFlowV3(
         dominant_bearing: pattern.dominantBearing,
         explanation: pattern.explanation,
       },
+      // Shared "is there a real backbone?" verdict — consulted by the terrain
+      // story so flow (honest-empty vs. draw) and story (low-relief vs.
+      // structured) can never contradict each other.
+      backbone: backboneVerdict,
     },
   };
 }

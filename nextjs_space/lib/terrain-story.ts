@@ -359,6 +359,21 @@ export function generateTerrainStory(
     return getEmptyStory();
   }
 
+  // Shared no-backbone verdict (see lib/terrain-backbone.ts): the flow engine
+  // has ALREADY decided this parcel has no real terrain backbone (single spine
+  // below the lone-spine prominence bar). Honor that SAME determination here so
+  // the story reads honest low-relief instead of re-deriving "structure" from
+  // raw saddle counts. This is the shared verdict both readings consult — the
+  // story is NOT reading the flow line count; it reads the one stamped verdict.
+  const backbone = (flowData.metadata as any)?.backbone;
+  if (backbone && backbone.hasRealBackbone === false) {
+    console.log(
+      '[TerrainStory] Honoring shared no-backbone verdict — low-relief story. reason=%s',
+      backbone.reason,
+    );
+    return getLowReliefStory();
+  }
+
   try {
   const drivers = computeStructuralDrivers(flowData, ridgeSpineData);
 
@@ -431,6 +446,26 @@ function getEmptyStory(): TerrainStorySummary {
     drivers: getEmptyDrivers(),
     headline: 'Terrain analysis incomplete',
     narrative: 'Run terrain flow analysis to reveal movement patterns and opportunity zones.',
+    confidence: 'low',
+    reliefMeasured: false,
+  };
+}
+
+// Honest low-relief reading. Returned when the shared backbone verdict says this
+// parcel has no real terrain backbone (see lib/terrain-backbone.ts). Distinct
+// from getEmptyStory ("analysis incomplete"): here analysis SUCCEEDED and the
+// honest finding is that terrain does not funnel movement on this ground.
+function getLowReliefStory(): TerrainStorySummary {
+  return {
+    primaryDriver: { type: 'mixed-terrain', label: 'Gentle Terrain', confidence: 0.3 },
+    secondaryDriver: null,
+    keyOpportunity: null,
+    drivers: getEmptyDrivers(),
+    headline: 'Gentle, low-relief terrain — limited structural funneling',
+    narrative:
+      'This parcel shows gentle, low-relief ground with no dominant ridge backbone driving movement. ' +
+      'Deer travel here is dispersed rather than funneled by terrain — focus on food sources, cover ' +
+      'edges, and sign rather than terrain pinch points.',
     confidence: 'low',
     reliefMeasured: false,
   };

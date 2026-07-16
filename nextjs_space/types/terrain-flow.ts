@@ -134,6 +134,19 @@ export interface TerrainFlowMetadata {
     dominant_bearing: number;   // Primary flow direction in degrees
     explanation: string;        // Human-readable explanation
   };
+  // Shared "is there a real terrain backbone?" verdict. Computed ONCE by the
+  // flow engine from the traced ridge network (lib/terrain-backbone.ts) and
+  // consulted by BOTH the flow rendering and the terrain story so the two can
+  // never contradict (honest-empty flow <-> low-relief story).
+  backbone?: BackboneVerdict;
+}
+
+// Shared backbone determination shape (see lib/terrain-backbone.ts).
+export interface BackboneVerdict {
+  hasRealBackbone: boolean;
+  realLines: number;
+  maxProminenceFt: number;
+  reason: string;
 }
 
 // ========== UI State Types ==========
