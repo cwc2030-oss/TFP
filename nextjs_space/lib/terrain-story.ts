@@ -118,7 +118,7 @@ export function computeStructuralDrivers(
   const { metadata, opportunity_zones, convergence_zones, flow_primary, flow_secondary } = flowData;
   
   // Extract weights used in analysis
-  const weights = metadata.weights || {};
+  const weights = metadata?.weights || {};
   
   // ========== PHASE 2a: MEASURED Bench & Ridge from real per-parcel DEM ==========
   // Bench & Ridge are now derived DIRECTLY from the real ridge/saddle features
@@ -241,7 +241,7 @@ export function computeStructuralDrivers(
   // preserved only when there are genuinely NO convergence zones AND NO saddles.
 
   // (1) Flow-line-derived convergence (original signal).
-  const convergenceIntensities = convergence_zones.features.map(f => f.properties.intensity || 0);
+  const convergenceIntensities = (convergence_zones?.features ?? []).map(f => f?.properties?.intensity || 0);
   const convergenceCount = convergenceIntensities.length;
   const peakConvergence = convergenceCount > 0 ? Math.max(...convergenceIntensities) : 0;
   const avgConvergence = convergenceCount > 0
@@ -358,7 +358,8 @@ export function generateTerrainStory(
   if (!flowData) {
     return getEmptyStory();
   }
-  
+
+  try {
   const drivers = computeStructuralDrivers(flowData, ridgeSpineData);
 
   // Phase 1 + 2a honesty guard: real, per-parcel measured relief signal.
@@ -397,6 +398,18 @@ export function generateTerrainStory(
     confidence,
     reliefMeasured,
   };
+  } catch (err) {
+    // Analysis compute must never throw and blank the intel view. Surface the
+    // real cause (full message + stack) to the console for diagnosis, then
+    // degrade to an honest "analysis incomplete" story rather than crashing.
+    const e = err as Error;
+    console.error(
+      '[TerrainStory] generateTerrainStory threw — returning empty story. ' +
+      `message="${e?.message ?? String(err)}"`,
+      '\nstack:', e?.stack ?? '(no stack)',
+    );
+    return getEmptyStory();
+  }
 }
 
 // ========== HELPER FUNCTIONS ==========
@@ -541,7 +554,7 @@ function determineMovementDrivers(
 function findKeyOpportunity(
   flowData: TerrainFlowResponse
 ): TerrainStorySummary['keyOpportunity'] {
-  const opportunities = flowData.opportunity_zones.features;
+  const opportunities = flowData.opportunity_zones?.features ?? [];
   
   if (opportunities.length === 0) {
     return null;
@@ -556,7 +569,7 @@ function findKeyOpportunity(
   const coords = best.geometry.coordinates as [number, number];
   
   // Determine location description
-  const bbox = flowData.bbox;
+  const bbox = flowData.bbox ?? [0, 0, 0, 0];
   const centerLng = (bbox[0] + bbox[2]) / 2;
   const centerLat = (bbox[1] + bbox[3]) / 2;
   
@@ -695,9 +708,9 @@ function determineConfidence(
   // the flow's dem_source (excluding the synthetic/empty fallbacks) combined
   // with measured ridge/saddle structure, so flat ground still reads Low while
   // surveyed ridge parcels can honestly earn Medium/High.
-  const flowCount = flowData.flow_primary.features.length + flowData.flow_secondary.features.length;
-  const mode = flowData.metadata.mode;
-  const demSource = String((flowData.metadata as any).dem_source || 'NONE').toUpperCase();
+  const flowCount = (flowData.flow_primary?.features?.length ?? 0) + (flowData.flow_secondary?.features?.length ?? 0);
+  const mode = flowData.metadata?.mode;
+  const demSource = String((flowData.metadata as any)?.dem_source || 'NONE').toUpperCase();
   const NON_REAL_DEM_SOURCES = ['NONE', 'PATTERN_INFERRED', 'SYNTHETIC_AXIS', 'GEOMETRY_BASED (LEGACY)'];
   const isRealDem = mode !== 'error' && !NON_REAL_DEM_SOURCES.includes(demSource);
 

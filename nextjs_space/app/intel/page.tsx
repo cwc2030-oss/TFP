@@ -8668,9 +8668,15 @@ const archetypeInitializedRef = useRef(false);
                         (parcelPolygon?.properties as any)?.acreage ||
                         undefined;
     const storyAddress = qaParcel?.address || address || undefined;
-    const updatedStory = generateTerrainStory(terrainFlowRawRef.current, storyAcreage, storyAddress, ridgeSpineData);
-    setTerrainStory(updatedStory);
-    console.log('[TerrainStory] Re-generated with ridge data — bench:', updatedStory.drivers.benchSupport.score.toFixed(2), 'saddle:', updatedStory.drivers.saddleInfluence.score.toFixed(2));
+    try {
+      const updatedStory = generateTerrainStory(terrainFlowRawRef.current, storyAcreage, storyAddress, ridgeSpineData);
+      setTerrainStory(updatedStory);
+      console.log('[TerrainStory] Re-generated with ridge data — bench:', updatedStory.drivers.benchSupport.score.toFixed(2), 'saddle:', updatedStory.drivers.saddleInfluence.score.toFixed(2));
+    } catch (err) {
+      // Never let a late re-generation throw crash the intel view unhandled.
+      const e = err as Error;
+      console.error('[TerrainStory] Late re-generation threw (non-blocking):', e?.message ?? String(err), '\nstack:', e?.stack ?? '(no stack)');
+    }
   }, [ridgeSpineData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== v4.0 TERRAIN CACHE WRITE (single-parcel only) ==========

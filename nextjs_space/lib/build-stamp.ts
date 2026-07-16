@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 15';
+export const BUILD_DATE = 'Jul 16';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -43,7 +43,12 @@ export const BUILD_DATE = 'Jul 15';
 //      fallback (Option A) + near-boundary convergence tolerance (Option B) so
 //      the number, the narrative, and the map agree. Honest 0 only when there
 //      are genuinely no convergence zones AND no saddles.
-export const BUILD_REV = 'r1';
+// r2 (v6.3) — reliability hardening: generateTerrainStory / computeStructuralDrivers
+//      can no longer throw (guarded convergence_zones / metadata / opportunity_zones /
+//      flow_primary/secondary / bbox reads); a throw now logs full message+stack and
+//      degrades to an honest empty story instead of blanking the intel view. The late
+//      ridge-data re-generation effect is wrapped so a throw can't crash unhandled.
+export const BUILD_REV = 'r2';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
