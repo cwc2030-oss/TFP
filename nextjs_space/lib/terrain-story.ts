@@ -554,7 +554,11 @@ function determineMovementDrivers(
 function findKeyOpportunity(
   flowData: TerrainFlowResponse
 ): TerrainStorySummary['keyOpportunity'] {
-  const opportunities = flowData.opportunity_zones?.features ?? [];
+  // Guard: drop malformed features (null/undefined properties or geometry)
+  // so a single bad opportunity zone can't throw and blank the whole story.
+  const opportunities = (flowData.opportunity_zones?.features ?? []).filter(
+    (f) => f && f.properties && f.geometry && (f.geometry as any).coordinates,
+  );
   
   if (opportunities.length === 0) {
     return null;
@@ -562,10 +566,10 @@ function findKeyOpportunity(
   
   // Find highest-scoring opportunity
   const best = opportunities.reduce((prev, curr) => 
-    (curr.properties.score > prev.properties.score) ? curr : prev
+    ((curr.properties?.score ?? 0) > (prev.properties?.score ?? 0)) ? curr : prev
   );
   
-  const props = best.properties;
+  const props = (best.properties ?? {}) as Partial<OpportunityZoneProperties>;
   const coords = best.geometry.coordinates as [number, number];
   
   // Determine location description
@@ -590,22 +594,22 @@ function findKeyOpportunity(
   
   // Determine reason
   let reason = 'Multiple terrain factors combine here';
-  if (props.convergenceBonus > 0.3 && props.saddleBonus > 0.2) {
+  if ((props.convergenceBonus ?? 0) > 0.3 && (props.saddleBonus ?? 0) > 0.2) {
     reason = 'Multiple flows meet at saddle crossing';
-  } else if (props.benchBonus > 0.3) {
+  } else if ((props.benchBonus ?? 0) > 0.3) {
     reason = 'Bench terrain concentrates travel';
-  } else if (props.convergenceBonus > 0.3) {
+  } else if ((props.convergenceBonus ?? 0) > 0.3) {
     reason = 'Flow paths converge at pinch point';
-  } else if (props.saddleBonus > 0.2) {
+  } else if ((props.saddleBonus ?? 0) > 0.2) {
     reason = 'Saddle creates natural crossing';
-  } else if (props.flowIntensity > 0.6) {
+  } else if ((props.flowIntensity ?? 0) > 0.6) {
     reason = 'High-intensity flow corridor';
   }
   
   return {
     location,
     reason,
-    score: props.score,
+    score: props.score ?? 0,
   };
 }
 
