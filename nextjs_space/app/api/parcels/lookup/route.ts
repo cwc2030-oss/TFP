@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { getCachedParcel, setCachedParcel, getCachedParcelByPoint, CachedParcelData } from "@/lib/regrid-cache";
 import { normalizeToOuterRing, validateParcelGeometry, logGeometryDebug } from "@/lib/geometry-validation";
 import { regridFetch } from "@/lib/regrid-client";
 
@@ -220,6 +220,46 @@ export async function GET(request: NextRequest) {
               geometryType: geoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
               legalDescription: cached.legalDescription || undefined,
               plss: [cached.plssTownship, cached.plssRange, cached.plssSection]
+                .filter(Boolean).join(', ') || undefined,
+            }
+          };
+          return NextResponse.json(response);
+        }
+      }
+    }
+
+    // Point-in-polygon cache fallback (same rationale as /api/parcels): the
+    // direct-key lookup keys off the exact click (~1m precision), so a repeat
+    // click elsewhere on the same parcel misses. Serve from cache if the click
+    // falls inside a known parcel polygon before paying Regrid.
+    {
+      const geomCached = await getCachedParcelByPoint(latNum, lngNum);
+      if (geomCached && geomCached.coordinates) {
+        const gGeoType = geomCached.geometryType ||
+          (Array.isArray((geomCached.coordinates as any)[0]?.[0]?.[0]) ? 'MultiPolygon' : 'Polygon');
+        const gNorm = normalizeToOuterRing(
+          geomCached.coordinates as number[][][] | number[][][][],
+          gGeoType
+        );
+        if (gNorm) {
+          const gValidation = validateParcelGeometry(geomCached.coordinates, gGeoType);
+          const response: ParcelLookupResponse = {
+            found: true,
+            cached: true,
+            parcel: {
+              parcelId: geomCached.parcelId || 'Unknown',
+              address: geomCached.siteAddress || 'Unknown Address',
+              county: geomCached.county || 'Unknown',
+              state: geomCached.state || (inMO ? 'MO' : 'KS'),
+              acreage: geomCached.acreage || gValidation.area || calculateAcreage(gNorm),
+              owner: geomCached.owner || 'Unknown',
+              zoning: geomCached.zoning || 'N/A',
+              coordinates: geomCached.coordinates || [gNorm],
+              centroid: gValidation.centroid || calculateCentroid(gNorm),
+              bounds: gValidation.bounds || calculateBounds(gNorm),
+              geometryType: gGeoType === 'MultiPolygon' ? 'MultiPolygon' : 'Polygon',
+              legalDescription: geomCached.legalDescription || undefined,
+              plss: [geomCached.plssTownship, geomCached.plssRange, geomCached.plssSection]
                 .filter(Boolean).join(', ') || undefined,
             }
           };

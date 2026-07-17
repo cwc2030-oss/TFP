@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getCachedParcel, setCachedParcel, CachedParcelData } from "@/lib/regrid-cache";
+import { getCachedParcel, setCachedParcel, getCachedParcelByPoint, CachedParcelData } from "@/lib/regrid-cache";
 import { regridFetch } from "@/lib/regrid-client";
 import { recordCacheHitAsync } from "@/lib/cache-stats";
 import { geocodeAddress } from "@/lib/geocode-address";
@@ -202,6 +202,62 @@ export async function GET(request: NextRequest) {
         };
         return NextResponse.json({ parcels: [parcel], cached: true });
         }
+      }
+    }
+
+    // Point-in-polygon cache fallback: the direct-key lookup above only hits when
+    // a click lands ~1m from the stored key (and this route stores by centroid, not
+    // click). Before paying Regrid, check whether the click falls inside any cached
+    // parcel polygon nearby and serve that from cache.
+    if (effectiveLat && effectiveLng) {
+      const geomCached = await getCachedParcelByPoint(parseFloat(effectiveLat), parseFloat(effectiveLng));
+      if (geomCached && geomCached.coordinates) {
+        const parcel: ParcelResponse = {
+          parcelId: geomCached.parcelId,
+          owner: geomCached.owner,
+          mailingAddress: geomCached.mailingAddress,
+          siteAddress: geomCached.siteAddress,
+          acreage: geomCached.acreage,
+          sqft: geomCached.sqft,
+          zoning: geomCached.zoning,
+          useDescription: geomCached.useDescription,
+          coordinates: geomCached.coordinates || [],
+          geometryType: geomCached.geometryType || "Polygon",
+          lat: parseFloat(effectiveLat),
+          lng: parseFloat(effectiveLng),
+          regridPath: "",
+          marketValue: geomCached.marketValue,
+          landValue: geomCached.landValue,
+          improvementValue: geomCached.improvementValue,
+          taxYear: geomCached.taxYear,
+          saleDate: geomCached.saleDate,
+          salePrice: geomCached.salePrice,
+          lastOwnershipTransfer: null,
+          yearBuilt: null,
+          numStories: null,
+          numBedrooms: null,
+          numBathrooms: null,
+          buildingSqft: null,
+          legalDescription: geomCached.legalDescription,
+          subdivision: null,
+          plssTownship: geomCached.plssTownship,
+          plssRange: geomCached.plssRange,
+          plssSection: geomCached.plssSection,
+          censusTract: null,
+          censusBlock: null,
+          county: geomCached.county,
+          buildingFootprintSqft: null,
+          buildingCount: null,
+          isQualifiedOpportunityZone: geomCached.qozStatus === "Yes",
+          qozTract: null,
+          femaNriRiskRating: null,
+          femaFloodZone: geomCached.femaFloodZone || null,
+          femaFloodZoneSubtype: null,
+          elementarySchoolDistrict: geomCached.schoolDistrict || null,
+          secondarySchoolDistrict: null,
+          unifiedSchoolDistrict: null,
+        };
+        return NextResponse.json({ parcels: [parcel], cached: true });
       }
     }
 
