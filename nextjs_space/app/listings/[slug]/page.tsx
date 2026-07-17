@@ -162,6 +162,10 @@ export default async function PublicListingDetail({ params }: Props) {
   });
   const centroid = lookupCentroid(safe.state, safe.county);
   const grade = gradeFromScore(safe.terrainScore);
+  // ── PHASE 1 KILL-SWITCH (Jul 17 2026): hide non-discriminating v1 fab surfaces
+  // (letter grade, huntability score, bedding + funnel stat boxes) on the public
+  // listing detail until the gate-real rebuild (Phase 2) wires the backbone verdict.
+  const HIDE_FAB = true;
   const amenities = (safe.amenities as Record<string, boolean> | null) ?? null;
   const seasons = safe.seasonAvailability ?? [];
 
@@ -199,11 +203,15 @@ export default async function PublicListingDetail({ params }: Props) {
                     {safe.leaseType.replace('_', ' ')}
                   </span>
                 )}
-                {grade !== '—' && (
+                {!HIDE_FAB && grade !== '—' && (
                   <span className="text-xs px-2 py-0.5 rounded bg-emerald-900/60 border border-emerald-700 text-emerald-200 uppercase tracking-wide">
                     Grade {grade}
                   </span>
                 )}
+                {/* PHASE 2: neutral analysis-run marker (not a quality claim) */}
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-900/60 border border-emerald-700 text-emerald-200 uppercase tracking-wide">
+                  Terrain Analyzed
+                </span>
               </div>
               <div className="mt-6">
                 <Link
@@ -214,9 +222,11 @@ export default async function PublicListingDetail({ params }: Props) {
                 </Link>
               </div>
             </div>
-            <div className="shrink-0">
-              <GradeBadge score={safe.terrainScore ?? null} size="lg" />
-            </div>
+            {!HIDE_FAB && (
+              <div className="shrink-0">
+                <GradeBadge score={safe.terrainScore ?? null} size="lg" />
+              </div>
+            )}
           </div>
         </section>
 
@@ -258,24 +268,30 @@ export default async function PublicListingDetail({ params }: Props) {
             <section className="rounded-xl border border-stone-800 bg-stone-900/60 p-6">
               <h2 className="text-stone-100 text-lg font-semibold mb-4">Terrain intelligence</h2>
               <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <Stat label="Terrain grade" value={grade} />
-                <Stat
-                  label="Score"
-                  value={safe.terrainScore != null ? `${safe.terrainScore} / 100` : '—'}
-                />
+                {!HIDE_FAB && <Stat label="Terrain grade" value={grade} />}
+                {!HIDE_FAB && (
+                  <Stat
+                    label="Score"
+                    value={safe.terrainScore != null ? `${safe.terrainScore} / 100` : '—'}
+                  />
+                )}
                 <Stat label="Primary movement" value={safe.primaryMovement ?? '—'} />
-                <Stat
-                  label="Bedding"
-                  value={
-                    safe.bedAcres != null
-                      ? `${(safe.bedAcres as number).toFixed(1)} ac`
-                      : '—'
-                  }
-                />
-                <Stat
-                  label="Funnels detected"
-                  value={safe.funnelCount != null ? String(safe.funnelCount) : '—'}
-                />
+                {!HIDE_FAB && (
+                  <Stat
+                    label="Bedding"
+                    value={
+                      safe.bedAcres != null
+                        ? `${(safe.bedAcres as number).toFixed(1)} ac`
+                        : '—'
+                    }
+                  />
+                )}
+                {!HIDE_FAB && (
+                  <Stat
+                    label="Funnels detected"
+                    value={safe.funnelCount != null ? String(safe.funnelCount) : '—'}
+                  />
+                )}
                 <Stat
                   label="Acres"
                   value={safe.acres != null ? Math.round(safe.acres).toLocaleString('en-US') : '—'}

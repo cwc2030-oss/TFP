@@ -231,6 +231,10 @@ export default function TerrainBrainTeaser(props: Props) {
 
   const price = priceLabel(askingPriceMin, askingPriceMax);
   const seasons = seasonAvailability ?? [];
+  // ── PHASE 1 KILL-SWITCH (Jul 17 2026): hide non-discriminating v1 fab stats
+  // (huntability grade/score, corridor/funnel/intercept counts, bedding, season
+  // grades) until the gate-real rebuild (Phase 2) wires the backbone verdict.
+  const HIDE_FAB = true;
 
   return (
     <section className="rounded-2xl border border-amber-800/40 bg-gradient-to-br from-stone-900 via-amber-950/20 to-stone-900 overflow-hidden mb-8">
@@ -276,41 +280,57 @@ export default function TerrainBrainTeaser(props: Props) {
         {/* Right: stats grid */}
         <div className="p-5 space-y-4">
           {/* Top stats row */}
-          <div className="grid grid-cols-3 gap-3">
-            <StatBox
-              label="Huntability"
-              value={grade !== '—' ? `Grade ${grade}` : '—'}
-              sub={terrainScore != null ? `${terrainScore}/100` : undefined}
-              accent
-            />
-            <StatBox
-              label="Corridors"
-              value={corridorCount != null ? String(corridorCount) : '—'}
-              sub="flow paths"
-            />
-            <StatBox
-              label="Funnels"
-              value={funnelCount != null ? String(funnelCount) : '—'}
-              sub="pinch points"
-            />
-          </div>
+          {HIDE_FAB ? (
+            <div className="grid grid-cols-2 gap-3">
+              <StatBox
+                label="Acreage"
+                value={acres != null ? Math.round(acres).toLocaleString('en-US') : '—'}
+                sub="total acres"
+              />
+              <StatBox
+                label="Lease Price"
+                value={price}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <StatBox
+                  label="Huntability"
+                  value={grade !== '—' ? `Grade ${grade}` : '—'}
+                  sub={terrainScore != null ? `${terrainScore}/100` : undefined}
+                  accent
+                />
+                <StatBox
+                  label="Corridors"
+                  value={corridorCount != null ? String(corridorCount) : '—'}
+                  sub="flow paths"
+                />
+                <StatBox
+                  label="Funnels"
+                  value={funnelCount != null ? String(funnelCount) : '—'}
+                  sub="pinch points"
+                />
+              </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <StatBox
-              label="Intercepts"
-              value={interceptCount != null ? String(interceptCount) : '—'}
-              sub="convergence zones"
-            />
-            <StatBox
-              label="Acreage"
-              value={acres != null ? Math.round(acres).toLocaleString('en-US') : '—'}
-              sub="total acres"
-            />
-            <StatBox
-              label="Lease Price"
-              value={price}
-            />
-          </div>
+              <div className="grid grid-cols-3 gap-3">
+                <StatBox
+                  label="Intercepts"
+                  value={interceptCount != null ? String(interceptCount) : '—'}
+                  sub="convergence zones"
+                />
+                <StatBox
+                  label="Acreage"
+                  value={acres != null ? Math.round(acres).toLocaleString('en-US') : '—'}
+                  sub="total acres"
+                />
+                <StatBox
+                  label="Lease Price"
+                  value={price}
+                />
+              </div>
+            </>
+          )}
 
           {/* Additional context */}
           {primaryMovement && (
@@ -319,7 +339,7 @@ export default function TerrainBrainTeaser(props: Props) {
               <span className="text-stone-300">{primaryMovement}</span>
             </div>
           )}
-          {bedAcres != null && bedAcres > 0 && (
+          {!HIDE_FAB && bedAcres != null && bedAcres > 0 && (
             <div className="text-xs text-stone-400">
               <span className="text-stone-500">Bedding area:</span>{' '}
               <span className="text-stone-300">{bedAcres.toFixed(1)} ac</span>
@@ -327,7 +347,7 @@ export default function TerrainBrainTeaser(props: Props) {
           )}
 
           {/* Season grades */}
-          {seasons.length > 0 && (
+          {!HIDE_FAB && seasons.length > 0 && (
             <div>
               <div className="text-stone-500 text-xs uppercase tracking-wide mb-1.5">
                 Season grades

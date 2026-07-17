@@ -150,6 +150,14 @@ export interface HuntingReportPayload {
   territoryParcelCount?: number;
   territoryParcels?: any[] | null;
   savedPropertyId?: string | null;
+  /** PHASE 2: real backbone verdict (gate-real / pull-fake). Mirrors the map
+   *  render gate: derived from intelMetrics on the client. */
+  backbone?: {
+    state: 'confirmed' | 'marginal' | 'flat' | null;
+    ridgeSpineCount: number;
+    saddleCrossings: number;
+    convergenceCount: number;
+  } | null;
   /* Computed by the route before calling */
   reportId: string;
   generated: string;
@@ -171,6 +179,7 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
     territoryParcelCount = 1,
     territoryParcels: territoryParcelList = null,
     savedPropertyId = null,
+    backbone = null,
     reportId, generated, isFreeTier,
     mapImageBase64 = '',
     origin = 'https://terrafirma.partners',
@@ -219,14 +228,36 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
 
   const wm = isFreeTier ? ' preview-watermark' : '';
 
+  // ── PHASE 1 KILL-SWITCH (Jul 17 2026) ──────────────────────────────────────
+  // Marketplace is now public. The v1 huntability score / letter grade /
+  // "CERTIFIED HUNTABLE" badge / bedding + funnel + stand-count stat boxes are
+  // non-discriminating fabrications (flat parcels printed the same numbers as
+  // confirmed ones). Hide them on the live report + share link NOW to stop the
+  // fabrication; the Phase 2 gate-real rebuild wires in the real backbone verdict.
+  const HIDE_FAB_SCORES = true;
+
   // ── Lease Intelligence ──
   const leaseValuePerAcre = estimateLeasePerAcre({ topStandScore: summary?.topStandScore });
 
-  const certifiedBadge = (summary?.topStandScore ?? 0) >= 70
-    ? `<div style="background:#1a3a2a;color:#c9a84c;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10003; CERTIFIED HUNTABLE</div>`
-    : (summary?.topStandScore ?? 0) >= 40
-    ? `<div style="background:#8b6f47;color:white;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#9680; CONDITIONALLY HUNTABLE</div>`
-    : `<div style="background:#8b0000;color:white;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10007; LIMITED HUNTABILITY</div>`;
+  // ── PHASE 2: real backbone verdict (gate-real / pull-fake) ──────────────────
+  // Derived on the client from intelMetrics (same source as the map render gate).
+  const bbState: 'confirmed' | 'marginal' | 'flat' | null = backbone?.state ?? null;
+  const bbRidges = Number(backbone?.ridgeSpineCount ?? 0) || 0;
+  const bbSaddles = Number(backbone?.saddleCrossings ?? 0) || 0;
+  const bbConvergence = Number(backbone?.convergenceCount ?? 0) || 0;
+  const bbStateLabel = bbState === 'confirmed' ? 'Confirmed Ridge Backbone'
+    : bbState === 'marginal' ? 'Marginal Relief'
+    : bbState === 'flat' ? 'Flat \u2014 No Confirmed Backbone'
+    : 'Terrain Analyzed';
+  const bbStateColor = bbState === 'confirmed' ? '#1a3a2a'
+    : bbState === 'marginal' ? '#8b6f47'
+    : '#777';
+
+  // "CERTIFIED HUNTABLE" was a non-discriminating quality claim (flat parcels got
+  // the same badge as confirmed ones). It is retired. This badge is an
+  // analysis-run marker: it states the terrain WAS analyzed, NOT that it is
+  // guaranteed huntable.
+  const certifiedBadge = `<div style="background:#33413a;color:#c9a84c;padding:8px 20px;font-size:11px;letter-spacing:3px;font-weight:bold;display:inline-block">&#10003; TERRAIN ANALYZED</div>`;
 
   const carryingCapacity = Math.max(1, Math.round(safeAcreage / 40));
   const standInventory = (stands ?? []).length;
@@ -237,15 +268,15 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
     <div style="font-size:13px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;color:#1a3a2a">Lease Intelligence</div>
     ${certifiedBadge}
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:8px">
+  <div style="display:grid;grid-template-columns:repeat(${HIDE_FAB_SCORES ? 3 : 4},1fr);gap:10px;margin-bottom:8px">
     <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
       <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${leaseValuePerAcre}</div>
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Est. Lease / Acre / Yr</div>
     </div>
-    <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
+    ${HIDE_FAB_SCORES ? '' : `<div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
       <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${standInventory}</div>
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Prime Intercept Points</div>
-    </div>
+    </div>`}
     <div style="text-align:center;background:white;border:1px solid #ddd;padding:10px">
       <div style="font-size:20px;font-weight:bold;color:#1a3a2a">${carryingCapacity}</div>
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Est. Hunters Supported</div>
@@ -264,12 +295,37 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   </div>
 </div>`;
 
+  // ── PHASE 2: real terrain-backbone counts (differ per parcel; flat = zeros) ──
+  const backboneBlockHTML = `
+<div style="border:2px solid #1a3a2a;padding:12px 14px;margin-bottom:14px;background:#fff">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="font-size:13px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;color:#1a3a2a">Terrain Backbone</div>
+    <span style="background:${bbStateColor};color:#fff;padding:3px 10px;font-size:10px;letter-spacing:1px">${bbStateLabel.toUpperCase()}</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+    <div style="text-align:center;background:#f8f6f0;border:1px solid #ddd;padding:10px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${bbRidges}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Ridge Spines</div>
+    </div>
+    <div style="text-align:center;background:#f8f6f0;border:1px solid #ddd;padding:10px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${bbSaddles}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Saddle Crossings</div>
+    </div>
+    <div style="text-align:center;background:#f8f6f0;border:1px solid #ddd;padding:10px">
+      <div style="font-size:22px;font-weight:bold;color:#1a3a2a">${bbConvergence}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:2px">Convergence Zones</div>
+    </div>
+  </div>
+  ${bbState === 'flat' ? `<div style="margin-top:8px;background:#f0ede4;padding:7px 12px;border-left:3px solid #999;font-size:11px;color:#555;line-height:1.45">No confirmed ridge backbone detected on this parcel. Terrain is flat or low-relief; deer movement is not concentrated by topographic funnels here.</div>` : ''}
+  <div style="margin-top:6px;font-size:10px;color:#aaa;font-style:italic;line-height:1.3">Counts reflect terrain features detected by the analysis run. "Terrain Analyzed" indicates the parcel was processed, not a guarantee of hunting quality.</div>
+</div>`;
+
   const dualAudienceHTML = `
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:2px solid #1a3a2a;margin-bottom:14px">
   <div style="padding:12px 14px;border-right:1px solid #1a3a2a">
     <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:4px">For the Landowner</div>
     <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:4px">Lease With Confidence</div>
-    <div style="font-size:11px;color:#444;line-height:1.5">This terrain assessment certifies the hunting quality of your property using satellite intelligence. Share this report with prospective lessees to justify premium lease rates and attract serious hunters who understand land quality.</div>
+    <div style="font-size:11px;color:#444;line-height:1.5">This terrain assessment documents the topographic character of your property using satellite intelligence. Share this report with prospective lessees to show the terrain features present and attract serious hunters who understand land quality.</div>
   </div>
   <div style="padding:12px 14px;background:#f8f6f0">
     <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:4px">For the Hunter</div>
@@ -344,9 +400,9 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   const titleSubject = isTerritory
     ? `${territoryName} — ${territoryParcelCount} Parcels`
     : address;
-  const ogTitle = `${titleSubject} · Huntability Score: ${summary?.topStandScore ?? 'N/A'}`;
+  const ogTitle = HIDE_FAB_SCORES ? `${titleSubject} · Terrain Analyzed` : `${titleSubject} · Huntability Score: ${summary?.topStandScore ?? 'N/A'}`;
   const standCount = stands?.length ?? 0;
-  const ogDescription = `${safeAcreage} acres · ${standCount} stand locations · Verified Terrain · Powered by TFP Intelligence Engine`;
+  const ogDescription = HIDE_FAB_SCORES ? `${safeAcreage} acres · Terrain analysis · Powered by TFP Intelligence Engine` : `${safeAcreage} acres · ${standCount} stand locations · Verified Terrain · Powered by TFP Intelligence Engine`;
   const ogUrl = `${origin}/report/${reportId}`;
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
   const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static';
@@ -404,13 +460,15 @@ ${ogMeta}
     <span style="background:#1a3a2a;color:white;padding:3px 10px;font-size:10px;letter-spacing:1px">PRIMARY DRIVER: ${terrainDriver}</span>
   </div>` : ''}
 </div>` : ''}
-  <div class="score-hero">
-    <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:8px">Overall Huntability Score</div>
-    <div class="big-score" style="color:${scoreColor(summary?.topStandScore ?? 0)}">${summary?.topStandScore ?? 0}</div>
-    <div style="font-size:18px;letter-spacing:3px;margin-top:8px;color:${scoreColor(summary?.topStandScore ?? 0)}">${scoreLabel(summary?.topStandScore ?? 0)}</div>
-    <div class="score-sub">Based on terrain analysis, corridor strength, bedding proximity, and wind alignment</div>
-  </div>
+  ${bbState ? backboneBlockHTML : ''}
   ${leaseIntelHTML}
+  ${HIDE_FAB_SCORES ? `
+  <div class="grid-3" style="grid-template-columns:1fr">
+    <div class="stat-box">
+      <div class="stat-value">${corridorPrimary}</div>
+      <div class="stat-label">Primary Corridors</div>
+    </div>
+  </div>` : `
   <div class="grid-3">
     <div class="stat-box">
       <div class="stat-value">${summary?.totalBeddingAcres?.toFixed(1) ?? '0'}</div>
@@ -424,8 +482,9 @@ ${ogMeta}
       <div class="stat-value">${summary?.funnelCount ?? 0}</div>
       <div class="stat-label">Funnel Zones</div>
     </div>
-  </div>
+  </div>`}
   ${dualAudienceHTML}
+  ${HIDE_FAB_SCORES ? '' : `
   <div class="section-title">Seasonal Huntability</div>
   <div class="season-grid">
     ${['early','rut','late'].map((s: string) => {
@@ -440,7 +499,7 @@ ${ogMeta}
       ${isRec ? `<div style="display:inline-block;padding:4px 12px;font-size:11px;background:#c9a84c;color:#1a3a2a">★ RECOMMENDED</div>` : ''}
     </div>`;
     }).join('')}
-  </div>
+  </div>`}
   ${hasElevationData ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
     <div class="stat-box">
       <div class="stat-value">${summary?.analysisAreaAcres?.toFixed(0) ?? '0'}</div>
@@ -497,7 +556,7 @@ ${ogMeta}
           <div class="stand-tier">${stand.tier} · ${stand.resilience}</div>
         </div>
       </div>
-      <div class="stand-score-badge" style="background:${scoreColor(stand.score)}">${stand.score}</div>
+      ${HIDE_FAB_SCORES ? '' : `<div class="stand-score-badge" style="background:${scoreColor(stand.score)}">${stand.score}</div>`}
     </div>
     <div class="stand-body">
       <div class="stand-reasoning">"${stand.reasoning && stand.reasoning.trim().length > 10 ? stand.reasoning : `Intercept point at ${stand.elevation ? Math.round(stand.elevation * 3.281) + 'ft elevation' : 'optimal terrain position'} with ${stand.distToCorridorM ? Math.round(stand.distToCorridorM * 1.094) + ' yards to nearest corridor' : 'strong corridor access'}. Approach risk: ${stand.approachRisk || 'low'}.`}"</div>
@@ -612,7 +671,7 @@ ${mapImageBase64 ? `
       <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:2px">INTERCEPT</div>
       <div style="font-size:11px;font-weight:bold;color:#c9a84c;margin-bottom:4px">Intercept #${s.rank}</div>
       <div style="font-size:10px;color:#666;margin-bottom:6px">${s.tier}</div>
-      <div style="font-size:18px;font-weight:bold;color:#1a3a2a;margin-bottom:6px">${s.score}</div>
+      ${HIDE_FAB_SCORES ? '' : `<div style="font-size:18px;font-weight:bold;color:#1a3a2a;margin-bottom:6px">${s.score}</div>`}
       <div style="font-size:10px;color:#333">${s.coords ? `${s.coords[1].toFixed(5)}°N ${Math.abs(s.coords[0]).toFixed(5)}°W` : 'Coords unavailable'}</div>
       <div style="font-size:10px;color:#666;margin-top:4px">Elevation: ${s.elevation ? Math.round(s.elevation * 3.281) : '—'}ft</div>
     </div>`).join('')}
@@ -650,23 +709,23 @@ ${mapImageBase64 ? `
     <div style="border:3px solid #c9a84c;padding:32px 48px;width:100%;max-width:600px">
       <div style="font-size:13px;letter-spacing:3px;color:#666;margin-bottom:8px">${certificateTitle}</div>
       <div style="height:2px;background:linear-gradient(90deg,#c9a84c,#f0d080,#c9a84c);margin-bottom:20px"></div>
-      <div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
-      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:20px">HUNTABILITY GRADE</div>
+      ${HIDE_FAB_SCORES ? '' : `<div style="font-size:96px;font-weight:bold;color:${gradeColor};line-height:1;margin-bottom:8px">${huntGrade}</div>
+      <div style="font-size:13px;letter-spacing:2px;color:#666;margin-bottom:20px">HUNTABILITY GRADE</div>`}
       <div style="background:#f8f6f0;padding:16px;margin-bottom:16px;text-align:left">
         <div style="font-size:12px;font-weight:bold;color:#1a3a2a;margin-bottom:8px;letter-spacing:1px">PROPERTY</div>
         <div style="font-size:14px;color:#333;margin-bottom:4px">${address}</div>
         <div style="font-size:12px;color:#666">${Math.round(safeAcreage)} Acres${parsedCounty ? ` | ${parsedCounty} County, ${parsedState}` : ` | ${parsedState}`}</div>
       </div>
       ${territorySection}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-        <div style="background:#1a3a2a;color:white;padding:12px">
+      <div style="display:grid;grid-template-columns:${HIDE_FAB_SCORES ? '1fr' : '1fr 1fr 1fr'};gap:12px;margin-bottom:16px">
+        ${HIDE_FAB_SCORES ? '' : `<div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${summary?.topStandScore ?? 0}</div>
           <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">HUNTABILITY SCORE</div>
         </div>
         <div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${(stands ?? []).length}</div>
           <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">INTERCEPT POINTS</div>
-        </div>
+        </div>`}
         <div style="background:#1a3a2a;color:white;padding:12px">
           <div style="font-size:20px;font-weight:bold;color:#c9a84c">${movementFeatureTotal}</div>
           <div style="font-size:9px;letter-spacing:1px;opacity:0.8;margin-top:4px">CORRIDORS${funnelHard + funnelSlight > 0 ? ' + FUNNELS' : ''}</div>

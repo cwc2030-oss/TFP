@@ -167,7 +167,7 @@ export default function BrowseContent() {
           </h3>
           <p className="text-stone-500 max-w-md mx-auto">
             Try broadening your filters, or check back soon — new
-            terrain-certified properties are added regularly.
+            terrain-analyzed properties are added regularly.
           </p>
         </div>
       )}

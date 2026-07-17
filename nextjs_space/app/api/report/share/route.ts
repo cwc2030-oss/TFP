@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
       territoryParcelCount: body.territoryParcelCount,
       territoryParcels: body.territoryParcels,
       savedPropertyId: body.savedPropertyId,
+      // PHASE 2: persist the real backbone verdict so shared reports gate correctly
+      backbone: body.backbone ?? null,
     };
 
     const report = await prisma.huntingReport.create({

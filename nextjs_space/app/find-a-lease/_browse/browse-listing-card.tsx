@@ -68,6 +68,9 @@ export default function BrowseListingCard({ listing }: { listing: Listing }) {
   })}-${listing.id}`;
   const grade = gradeFromScore(listing.terrainScore);
   const price = priceLabel(listing.askingPriceMin, listing.askingPriceMax);
+  // ── PHASE 1 KILL-SWITCH (Jul 17 2026): hide non-discriminating v1 fab stats
+  // (corr/fun/int counts + flow meter) until the gate-real rebuild (Phase 2).
+  const HIDE_FAB = true;
 
   return (
     <Link
@@ -109,7 +112,7 @@ export default function BrowseListingCard({ listing }: { listing: Listing }) {
           )}
         </div>
         {/* Terrain Brain indicator + Flow meter */}
-        {(listing.corridorCount != null || listing.funnelCount != null || listing.interceptCount != null) && (
+        {!HIDE_FAB && (listing.corridorCount != null || listing.funnelCount != null || listing.interceptCount != null) && (
           <div className="mt-3 pt-3 border-t border-stone-800 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

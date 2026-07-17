@@ -332,6 +332,10 @@ export async function renderListingImagePng(
   const region = regionLabel(input.county, input.state);
   const acres = acresLabel(input.acres);
   const hasShape = !!input.paths && input.paths.length > 0;
+  // ── PHASE 1 KILL-SWITCH (Jul 17 2026): drop the non-discriminating v1
+  // "Terrain Certified" chip + letter grade from the social/OG listing image
+  // until the gate-real rebuild (Phase 2) wires the backbone verdict.
+  const HIDE_FAB = true;
 
   // "Terrain Certified" chip, shared by both variants.
   const certifiedChip = {
@@ -455,7 +459,7 @@ export async function renderListingImagePng(
               ],
             },
           },
-          certifiedChip,
+          ...(HIDE_FAB ? [] : [certifiedChip]),
         ],
       },
     });
@@ -463,7 +467,7 @@ export async function renderListingImagePng(
     // Data-only fallback card — centered stack.
     const grade = gradeFromScore(input.terrainScore ?? null);
     const cardChildren: any[] = [];
-    if (grade && grade !== '\u2014') {
+    if (!HIDE_FAB && grade && grade !== '\u2014') {
       cardChildren.push({
         type: 'div',
         props: {

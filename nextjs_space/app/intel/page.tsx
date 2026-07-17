@@ -5799,6 +5799,16 @@ const archetypeInitializedRef = useRef(false);
         ].filter(f => (f.properties as any)?.ridgeAligned === true).length : 0,
       },
       savedPropertyId: reportSavedPropertyId,
+      // PHASE 2: real backbone verdict (gate-real / pull-fake). Same source as the
+      // map render gate + in-page preview, so the report can never contradict them.
+      backbone: {
+        state: intelMetrics.tState,
+        ridgeSpineCount: intelMetrics.ridgeSpineCount,
+        saddleCrossings: intelMetrics.saddleCrossings,
+        convergenceCount: intelMetrics.tState === 'confirmed'
+          ? (terrainFlowData?.convergence_zones?.features?.length ?? 0)
+          : 0,
+      },
       seasonScores: {
         recommended: summary?.recommendedSeason ?? 'rut',
         topScore: summary?.topStandScore ?? 0,
@@ -5818,7 +5828,7 @@ const archetypeInitializedRef = useRef(false);
         county: p.county,
       })) : undefined,
     };
-  }, [alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, territoryName, territoryParcels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [alignedStands, address, lat, lng, acreageParam, windDirection, summary, tieredCorridorData, parcelPolygon, terrainStory, territoryName, territoryParcels, intelMetrics, terrainFlowData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Download Parcel-Hunt File PDF
   const handleDownloadParcelHuntFile = useCallback(async () => {

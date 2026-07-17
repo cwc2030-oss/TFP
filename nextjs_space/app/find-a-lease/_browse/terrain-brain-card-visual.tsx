@@ -67,7 +67,16 @@ export default function TerrainBrainCardVisual({
   // Scale corridor opacity with flowIndex
   const quality = Math.min((flowIndex ?? terrainScore ?? 0) / 100, 1);
   const corridorOpacity = 0.55 + quality * 0.37; // range 0.55 → 0.92
-  const hasCertified = terrainScore != null && terrainScore > 0;
+  // ── PHASE 1 KILL-SWITCH (Jul 17 2026) ──
+  // The v1 letter grade + "Terrain Certified" badge are non-discriminating
+  // fabrications (flat parcels scored the same as confirmed). Hide on public
+  // listing cards until the gate-real rebuild (Phase 2) wires the backbone verdict.
+  const HIDE_FAB = true;
+  const hasCertified = !HIDE_FAB && terrainScore != null && terrainScore > 0;
+  // PHASE 2: neutral analysis-run marker. Its EXISTENCE (terrainScore not null)
+  // means the parcel was processed by the terrain engine — it is NOT a quality
+  // claim, so we show it for every analyzed listing regardless of the (retired) score.
+  const hasAnalyzed = terrainScore != null;
 
   return (
     <div className="relative w-full h-full">
@@ -161,14 +170,14 @@ export default function TerrainBrainCardVisual({
       <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#0f1714]/90 to-transparent pointer-events-none" />
 
       {/* Grade badge — top-left */}
-      {grade !== '\u2014' && (
+      {!HIDE_FAB && grade !== '—' && (
         <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-gradient-to-b from-amber-50 to-amber-100 border border-amber-300/80 shadow text-emerald-900 font-serif font-bold text-sm tracking-wider">
           {grade}
         </div>
       )}
 
-      {/* Terrain Certified badge — top-right */}
-      {hasCertified && (
+      {/* Terrain Analyzed marker — top-right (analysis-run, not a quality claim) */}
+      {hasAnalyzed && (
         <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-950/80 border border-emerald-700/50 shadow">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="text-emerald-400">
             <path
@@ -186,7 +195,7 @@ export default function TerrainBrainCardVisual({
             />
           </svg>
           <span className="text-[10px] font-semibold text-emerald-300 tracking-wide uppercase">
-            Terrain Certified
+            Terrain Analyzed
           </span>
         </div>
       )}

@@ -109,7 +109,35 @@ export const BUILD_DATE = 'Jul 17';
 //      verified end-to-end (free user walls on the 4th read, Unlock creates a
 //      real checkout.stripe.com session). Env/gate-only flip — terrain cache
 //      and terrain output untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r10';
+// r11 (v6.3) — PHASE 1 report/badge honesty kill-switch: the v1
+//      non-discriminating fabrications were still live on the downloadable/
+//      shareable artifacts + public listing surfaces even after r7 honed the
+//      /intel view. A flat-vs-confirmed generated-report test proved the
+//      scorecard was byte-identical (a flat parcel printed the same CERTIFIED
+//      HUNTABLE / 78 / PRIME / Grade B as a confirmed one). Phase 1 HIDES the
+//      fabrications now to stop live fabrication, ahead of the Phase 2 gate-real
+//      rebuild: report + share link (lib/report/build-html.ts) drop the CERTIFIED
+//      HUNTABLE badge, huntability score-hero + seasonal letter grades, bedding/
+//      funnel/stand-count stat boxes, per-stand score badges, the certificate
+//      grade + score/intercept boxes, and the OG share title/desc score; public
+//      /find-a-lease cards + listing detail + teaser + social OG image drop the
+//      Terrain Certified badge, letter grade, and corr/fun/int/bedding/season
+//      stat boxes. UI/render-only — terrain cache untouched.
+// r12 (v6.3) — PHASE 2 gate-real / pull-fake rebuild. Report (lib/report/
+//      build-html.ts) now consumes a real `backbone` verdict (state +
+//      ridge-spine / saddle-crossing / convergence counts) carried in the
+//      client payload from intelMetrics — the SAME source as the map render
+//      gate + in-page preview, so the artifact can never contradict them.
+//      "CERTIFIED HUNTABLE" quality claim is retired -> honest "TERRAIN
+//      ANALYZED" analysis-run marker (report + listing cards + listing detail).
+//      New Terrain Backbone block prints the real counts; flat parcels show 0s
+//      + a "no confirmed backbone" note. Re-ran the flat-vs-confirmed report
+//      test: the two HTMLs now DIFFER (ridge spines 0 vs 4, FLAT vs CONFIRMED
+//      state label), no CERTIFIED HUNTABLE / HUNTABILITY SCORE anywhere.
+//      Listing card/detail fab numbers stay hidden (no per-listing backbone
+//      field yet); grade filter/sort/slug still rank on the v1 score — flagged
+//      as a follow-up. UI/render-only — terrain cache untouched.
+export const BUILD_REV = 'r12';
 
-// e.g. "build v6.3-flowing-form r1 · Jul 15"
+// e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
