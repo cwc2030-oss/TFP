@@ -87,7 +87,19 @@ export const BUILD_DATE = 'Jul 17';
 //      a gentle parcel can never print a premium score/grade. Copy numbers replaced
 //      with real ridge-spine + saddle-crossing counts. UI/render-only — terrain
 //      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r7';
+// r8 (v6.3) — neighborhood-window fix: verdict window ≡ flow window ≡ compute
+//      window. The relevance filter AND the Modal DEM compute AOI both used to
+//      scale with parcel size, so the same location returned different ridges
+//      (and a different verdict) at different sizes — the non-monotonic 89-ac
+//      flip, and tiny real parcels reading flat despite rolling ground. Now the
+//      relevance window (lib/terrain-flow-v3.ts neighborhoodRelevanceBbox) and
+//      the compute AOI (app/api/terrain-flow/route.ts) are both floored to the
+//      A-300 hunt-zone circle (~622m) at the parcel centroid for any parcel
+//      under 300 ac, so every sub-300-ac parcel at a location shares ONE stable
+//      AOI -> one verdict. Audit: non-monotonic flips gone, flat-ag guards stay
+//      flat, natural marginals appear. Env NEIGHBORHOOD_AOI=0 reverts. Terrain
+//      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r8';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
