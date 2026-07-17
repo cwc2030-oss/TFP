@@ -2440,6 +2440,19 @@ function DeerIntelContent() {
   const huntZoneDraggingRef = useRef<boolean>(false);
   // Live center tracked during a drag (before snap/commit).
   const huntZoneDragCenterRef = useRef<[number, number] | null>(null);
+  // Screen-space point where the current ring gesture began (set on mousedown).
+  // Used to tell a plain CLICK (a "read" — recompute flow at the CURRENT center,
+  // never translate the scope) from a real DRAG (a "move" — translate the scope
+  // to the release point). Movement under CLICK_SLOP_PX counts as a read.
+  const huntZoneDownPtRef = useRef<{ x: number; y: number } | null>(null);
+  // Non-React mirror of huntZoneCenterOverride so the imperative drag handlers
+  // (whose closure is keyed on [mapReady] only) can read the CURRENT override
+  // without capturing a stale value.
+  const huntZoneCenterOverrideRef = useRef<[number, number] | null>(null);
+  // Key of the scope compute currently in flight (native MISS path). A "read"
+  // retry that resolves to this exact key must NOT abort+restart it — it lets
+  // the in-flight compute finish, so a re-click never resets the 2-6s clock.
+  const huntZoneInflightKeyRef = useRef<string | null>(null);
   // ═══ PIECE 4 — NATIVE PER-SCOPE FLOW COMPUTE + CACHE ═══
   // huntZoneRingGeomRef: current 300-ac ring polygon (written by the main source
   // effect). When a drag override is active, the flow-display clip uses THIS ring
@@ -7321,20 +7334,65 @@ const archetypeInitializedRef = useRef(false);
       setRingAt(c); // visual only — no state, no clip/compute
     };
 
-    const onUp = () => {
+    // Pointer travel (screen px) under this counts as a CLICK (read), not a DRAG (move).
+    const CLICK_SLOP_PX = 8;
+
+    const onUp = (e: mapboxgl.MapMouseEvent) => {
       if (!huntZoneDraggingRef.current) return;
       huntZoneDraggingRef.current = false;
       map.off('mousemove', onMove);
       try { (map as any).dragPan.enable(); } catch { /* noop */ }
       map.getCanvas().style.cursor = '';
+
+      const down = huntZoneDownPtRef.current;
+      huntZoneDownPtRef.current = null;
       const live = huntZoneDragCenterRef.current;
       huntZoneDragCenterRef.current = null;
+
+      // How far the pointer travelled on screen between down and up.
+      const movedPx = down ? Math.hypot(e.point.x - down.x, e.point.y - down.y) : 0;
+
+      if (movedPx < CLICK_SLOP_PX) {
+        // ── READ (click, not drag): recompute flow at the CURRENT center. ──
+        // Never translate the scope. Snap the ring visual back to where it was
+        // (a click may have nudged the drag-center ref by a pixel), then re-fire
+        // the Piece-4 compute at the current center.
+        const cur = huntZoneCenterRef.current;
+        if (cur) setRingAt(cur);
+        const ov = huntZoneCenterOverrideRef.current;
+        if (cur && ov && ov[0] === cur[0] && ov[1] === cur[1]) {
+          // Scope already committed at this exact center. FIX 2: if a native
+          // compute for THIS scope is still in flight, ignore the re-click
+          // entirely — do NOT setScopeRetryNonce, which would tear down and
+          // restart the running compute (the old "two-click" reset). Let it
+          // finish and paint on its own.
+          const curKey = huntZoneScopeKey(
+            { lat: cur[1], lng: cur[0] }, RING_RADIUS_M, TERRAIN_ENGINE_VERSION,
+          );
+          if (huntZoneInflightKeyRef.current === curKey) {
+            console.log('[MAP] Hunt Zone read ignored — compute already in flight', curKey);
+            return;
+          }
+          // Otherwise the scope is already computed/cached → re-fire at the SAME
+          // key. That is a cache hit (memory/persistent) → instant, no blank.
+          setScopeRetryNonce(n => n + 1);
+        } else if (cur) {
+          // First read at this center (initial placement, or center just changed):
+          // commit the CURRENT center. Same location — a read, not a move.
+          huntZoneCenterRef.current = cur;
+          setHuntZoneCenterOverride(cur);
+        }
+        console.log('[MAP] Hunt Zone read (click) — recompute at current center', cur, `movedPx=${movedPx.toFixed(1)}`);
+        return;
+      }
+
+      // ── MOVE (drag): translate the scope to the (snapped) release point. ──
       if (live) {
         const snapped = snapToGrid(live[0], live[1]);
         setRingAt(snapped);                 // settle on grid immediately (round + scaled)
         huntZoneCenterRef.current = snapped;
         setHuntZoneCenterOverride(snapped); // SINGLE clip/compute fires here, on release
-        console.log('[MAP] Hunt Zone ring released — snapped center', snapped);
+        console.log('[MAP] Hunt Zone ring released — snapped center', snapped, `movedPx=${movedPx.toFixed(1)}`);
       }
     };
 
@@ -7345,6 +7403,7 @@ const archetypeInitializedRef = useRef(false);
       (e as any).preventDefault(); // stop the map's default drag-pan for this gesture
       huntZoneDraggingRef.current = true;
       huntZoneDragCenterRef.current = [e.lngLat.lng, e.lngLat.lat];
+      huntZoneDownPtRef.current = { x: e.point.x, y: e.point.y };
       try { (map as any).dragPan.disable(); } catch { /* noop */ }
       map.getCanvas().style.cursor = 'grabbing';
       map.on('mousemove', onMove);
@@ -7376,6 +7435,12 @@ const archetypeInitializedRef = useRef(false);
     setHuntZoneCenterOverride(null);
     huntZoneCenterRef.current = null;
   }, [parcelPolygon?.properties?.parcelId]);
+
+  // Keep the non-React override mirror in sync so the [mapReady]-scoped drag
+  // handlers can read the CURRENT committed center (see huntZoneCenterOverrideRef).
+  useEffect(() => {
+    huntZoneCenterOverrideRef.current = huntZoneCenterOverride;
+  }, [huntZoneCenterOverride]);
 
   // QA-only (admin, ?debug=true): expose a console hook to drive precise, rapid
   // scope moves for the pile-up/abort acceptance test. Committing a snapped
@@ -7415,6 +7480,10 @@ const archetypeInitializedRef = useRef(false);
 
     const radiusM = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
     const key = huntZoneScopeKey({ lat, lng }, radiusM, TERRAIN_ENGINE_VERSION);
+    // NOTE: same-scope "read" re-clicks are de-duped at the CLICK source (the
+    // onUp read branch skips setScopeRetryNonce while huntZoneInflightKeyRef
+    // matches the current scope), so a first-placement compute is never torn
+    // down and restarted by a re-click. See FIX 2 in the drag handler.
     const seq = ++huntZoneComputeSeqRef.current;
     let cancelled = false;
 
@@ -7451,6 +7520,10 @@ const archetypeInitializedRef = useRef(false);
     };
 
     const run = async () => {
+      // Mark this scope as in flight for the WHOLE compute (cache checks +
+      // native compute), so a same-scope "read" re-click de-dupes against it
+      // (see the onUp read branch) instead of tearing down and restarting.
+      huntZoneInflightKeyRef.current = key;
       setTerrainFlowLoading(true);
       try {
         // 1) Session memory cache — truly instant, no network.
@@ -7564,6 +7637,9 @@ const archetypeInitializedRef = useRef(false);
           failScope(err instanceof Error ? err.message : String(err));
         }
       } finally {
+        // Clear the in-flight marker only if it still points at THIS key (a newer
+        // move may have already claimed it).
+        if (huntZoneInflightKeyRef.current === key) huntZoneInflightKeyRef.current = null;
         if (!cancelled && seq === huntZoneComputeSeqRef.current) setTerrainFlowLoading(false);
       }
     };
