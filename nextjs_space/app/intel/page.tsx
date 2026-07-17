@@ -6911,15 +6911,32 @@ const archetypeInitializedRef = useRef(false);
               // Keep the imperative drag handlers' baseline center in sync.
               huntZoneCenterRef.current = [Number(coords[0]), Number(coords[1])];
               huntzoneSource.setData({ type: 'FeatureCollection', features: [ring] } as any);
+              // A-300 maker's mark — anchor at the ring's 12 o'clock (north) point.
+              const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+              if (labelSrc) {
+                const northPt = turf.destination(
+                  [Number(coords[0]), Number(coords[1])],
+                  acresToRadiusMeters(MAX_ANALYSIS_ACRES),
+                  0, // bearing 0 = due north = 12 o'clock
+                  { units: 'meters' }
+                );
+                labelSrc.setData({ type: 'FeatureCollection', features: [northPt] } as any);
+              }
             } else {
               huntzoneSource.setData(EMPTY_FC);
+              const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+              if (labelSrc) labelSrc.setData(EMPTY_FC);
             }
           } catch (err) {
             console.warn('[MAP] Hunt Zone ring build failed', err);
             huntzoneSource.setData(EMPTY_FC);
+            const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+            if (labelSrc) labelSrc.setData(EMPTY_FC);
           }
         } else {
           huntzoneSource.setData(EMPTY_FC);
+          const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+          if (labelSrc) labelSrc.setData(EMPTY_FC);
         }
       }
 
@@ -7317,6 +7334,12 @@ const archetypeInitializedRef = useRef(false);
         const ring = turf.circle(center, RING_RADIUS_M, { units: 'meters', steps: 64 });
         const src = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
         if (src) src.setData({ type: 'FeatureCollection', features: [ring] } as any);
+        // Keep the A-300 maker's mark pinned to 12 o'clock as the ring travels.
+        const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+        if (labelSrc) {
+          const northPt = turf.destination(center, RING_RADIUS_M, 0, { units: 'meters' });
+          labelSrc.setData({ type: 'FeatureCollection', features: [northPt] } as any);
+        }
       } catch { /* non-fatal */ }
     };
 
@@ -10899,6 +10922,49 @@ const archetypeInitializedRef = useRef(false);
               'line-opacity': 0.9,
             },
           });
+          // ── A-300 maker's mark ──────────────────────────────────────────
+          // A whisper-quiet "A-300" wordmark pinned to the 12 o'clock inside
+          // edge of the scope ring — optic-engraving aesthetic (rifle-scope
+          // maker's mark), NOT a badge. Low-opacity cream/parchment so terrain
+          // and flow read straight through it. Its anchor point is the north
+          // point ON the ring, recomputed wherever the ring is set, so the mark
+          // travels and rescales with the circle. Dedicated source (a single
+          // point) keeps it independent of the ring polygon.
+          map.addSource('tfp-huntzone-label', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'tfp-huntzone-label',
+            type: 'symbol',
+            source: 'tfp-huntzone-label',
+            layout: {
+              'text-field': 'A-300',
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+              'text-transform': 'uppercase',
+              'text-letter-spacing': 0.38,
+              // Scales with the ring: as zoom climbs the ring grows in pixels
+              // and so does the mark, staying proportional and tasteful.
+              'text-size': [
+                'interpolate', ['exponential', 1.3], ['zoom'],
+                11, 7,
+                14, 11,
+                17, 17,
+                20, 26,
+              ],
+              // Anchor the text's TOP edge at the ring's north point so the
+              // wordmark hangs just INSIDE the ring (toward center).
+              'text-anchor': 'top',
+              'text-offset': [0, 0.32],
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
+              'symbol-z-order': 'source',
+            },
+            paint: {
+              'text-color': '#e8dcc4',       // cream / parchment
+              'text-opacity': 0.7,           // engraved whisper — terrain reads through
+              'text-halo-color': '#0c0a09',  // faint dark halo for legibility over any base
+              'text-halo-width': 0.6,
+              'text-halo-blur': 0.5,
+            },
+          });
         }
         
         // QA Parcel boundary source (for KS/MO validation workflow)
@@ -12874,6 +12940,7 @@ const archetypeInitializedRef = useRef(false);
           'tfp-huntzone-fill',             // Piece 3: Hunt Zone lens fill (drag grab-target)
           'tfp-huntzone-glow',             // Piece 2: Hunt Zone lens glow (with parcel boundary)
           'tfp-huntzone-ring',             // Piece 2: Hunt Zone 300-ac scope ring
+          'tfp-huntzone-label',            // A-300 maker's mark (12 o'clock inside edge)
           // Terrain structure
           'tfp-bedding-fill',
           'tfp-bedding-outline',
