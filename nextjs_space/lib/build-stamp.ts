@@ -99,7 +99,7 @@ export const BUILD_DATE = 'Jul 17';
 //      AOI -> one verdict. Audit: non-monotonic flips gone, flat-ag guards stay
 //      flat, natural marginals appear. Env NEIGHBORHOOD_AOI=0 reverts. Terrain
 //      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r8';
+export const BUILD_REV = 'r9';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
