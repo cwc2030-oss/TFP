@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 16';
+export const BUILD_DATE = 'Jul 17';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -66,7 +66,15 @@ export const BUILD_DATE = 'Jul 16';
 //      service v1.3.0). Investigates whether length/coherence/flank can separate
 //      genuine single spines from flat-ag artifacts where prominence alone could not.
 //      Purely additive diagnostics — no gate/threshold/terrain-output change, cache untouched.
-export const BUILD_REV = 'r5';
+// r6 (v6.3) — single-parcel geom-fallback on the parcel cache: point-in-polygon
+//      (ray-casting) read fallback (getCachedParcelByPoint) added to /api/parcels
+//      and /api/parcels/lookup so a repeat click ANYWHERE inside an already-cached
+//      parcel hits [CACHE HIT · geom] even when the click point rounds to a different
+//      lat/lng key than the stored centroid. Fixes the read=click/write=centroid key
+//      mismatch that pinned the single-parcel hit rate near 7%. Purely a parcel-cache
+//      READ path — no terrain/flow change, r5 flank instrumentation and terrain cache
+//      fully preserved. Neighbor/adjacent re-key parked as a separate follow-up.
+export const BUILD_REV = 'r6';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
