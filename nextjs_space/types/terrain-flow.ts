@@ -144,6 +144,18 @@ export interface TerrainFlowMetadata {
 // Shared backbone determination shape (see lib/terrain-backbone.ts).
 export interface BackboneVerdict {
   hasRealBackbone: boolean;
+  // THREE honest states off the ONE verdict (v6.5):
+  //   'confirmed' — real backbone (hasRealBackbone true): multi-line network
+  //                 (>=2 prominence-qualified lines) OR a lone spine clearing the
+  //                 60ft lone-spine bar. Draws flow + confident narrative/badges.
+  //   'marginal'  — starved of a confident backbone but a single qualified spine
+  //                 sits in the honest gap band [FLOW_MARGINAL_SPINE_MIN_FT, 60):
+  //                 above the ~53ft road-berm artifact ceiling, below the lone-
+  //                 spine bar. "Detected but unconfirmed — scout it." NO drawn flow,
+  //                 single spine render only, NO saddle lattice.
+  //   'flat'      — honest-empty: no qualified spine above the marginal floor.
+  // Every text/badge/render surface reads THIS field so nothing can contradict.
+  state: 'confirmed' | 'marginal' | 'flat';
   // Count of PROMINENCE-QUALIFIED traced ridge lines (each >= NETWORK_LINE_MIN_FT),
   // NOT the raw traced-line count. Weak sub-floor artifact spines are excluded so
   // a flat parcel can't clear the multi-line side of the gate on count alone.

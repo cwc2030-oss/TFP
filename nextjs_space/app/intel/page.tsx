@@ -3832,6 +3832,28 @@ const archetypeInitializedRef = useRef(false);
     return stands;
   }, [alignedStands, hunterType, cdlData]);
 
+  // ── Gate-real / pull-fake intelligence metrics ──
+  // Every intelligence-readout number keys off the ONE shared backbone verdict
+  // (terrainStory.terrainState) so copy, badges, metrics, the Hunt Report and the
+  // map render can never contradict. The v1 fabrications (summary.funnelCount,
+  // summary.topStandScore, stand count) were byte-identical across flat / marginal /
+  // confirmed parcels, so they are pulled from every narrative surface and replaced
+  // with real ridge-spine + saddle-crossing counts that mirror the render gate.
+  const intelMetrics = useMemo(() => {
+    const tState: 'confirmed' | 'marginal' | 'flat' | null =
+      terrainStory?.terrainState ?? (summary ? 'flat' : null);
+    const primaryRidges = ridgeSpineData?.ridges_primary?.features?.length ?? 0;
+    const rawSaddles = ridgeSpineData?.metadata?.saddle_count ?? 0;
+    // Ridge-spine count mirrors the render gate exactly:
+    //   confirmed -> full primary spine set, marginal -> single spine, flat -> none
+    const ridgeSpineCount =
+      tState === 'confirmed' ? primaryRidges :
+      tState === 'marginal' ? 1 : 0;
+    // Saddle crossings only exist in the confirmed state (matches the saddle-node render gate)
+    const saddleCrossings = tState === 'confirmed' ? rawSaddles : 0;
+    return { tState, ridgeSpineCount, saddleCrossings };
+  }, [terrainStory?.terrainState, ridgeSpineData, summary]);
+
   // Keep map pin in sync with active decision card (one pin at a time)
   // Single source of truth: visible rank == decisionCardIdx, clamped to available stands.
   useEffect(() => {
@@ -6900,7 +6922,9 @@ const archetypeInitializedRef = useRef(false);
       // ═══ BEDDING STABILITY — prefer previous geometry when zones overlap ═══
       const beddingSource = map.getSource('tfp-bedding') as mapboxgl.GeoJSONSource;
       if (beddingSource) {
-        let beddingFC = layers?.beddingPolygons ? validateGeoJSON(layers.beddingPolygons) : EMPTY_FC;
+        // Gate-real / pull-fake: v1 bedding polygons are non-discriminative fabrications
+        // (byte-identical flat -> confirmed) — pulled from render. Never draw speculative bedding.
+        let beddingFC = EMPTY_FC as GeoJSON.FeatureCollection;
         beddingFC = filterBeddingNearBuildings(beddingFC, map, 120);
         let polygonsOnly = filterByGeometryType(beddingFC, ['Polygon', 'MultiPolygon']);
 
@@ -6984,7 +7008,8 @@ const archetypeInitializedRef = useRef(false);
       // Update funnel lines (draws, corridors)
       const funnelLinesSource = map.getSource('tfp-funnels-lines') as mapboxgl.GeoJSONSource;
       if (funnelLinesSource) {
-        const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
+        // Gate-real / pull-fake: v1 funnel lines are non-discriminative fabrications — pulled from render.
+        const funnelsFC = EMPTY_FC as GeoJSON.FeatureCollection;
         let lines = filterByGeometryType(funnelsFC, ['LineString', 'MultiLineString']);
         // Piece 2 close-out (defensive): funnel/draw lines are flow-shaped, so clip them
         // to the SAME 300-ac ring the Hunt Zone lens draws. Nothing renders these today
@@ -7009,7 +7034,8 @@ const archetypeInitializedRef = useRef(false);
       // ═══ SADDLE POLYGON STABILITY — prefer previous geometry when zones overlap ═══
       const funnelPolysSource = map.getSource('tfp-funnels-polys') as mapboxgl.GeoJSONSource;
       if (funnelPolysSource) {
-        const funnelsFC = layers?.funnels ? validateGeoJSON(layers.funnels) : EMPTY_FC;
+        // Gate-real / pull-fake: v1 funnel/saddle polygons are non-discriminative fabrications — pulled from render.
+        const funnelsFC = EMPTY_FC as GeoJSON.FeatureCollection;
         const polysRaw = filterByGeometryType(funnelsFC, ['Polygon', 'MultiPolygon']);
 
         // Clip: keep only funnel polys whose centroid is inside the parcel boundary
@@ -8229,19 +8255,64 @@ const archetypeInitializedRef = useRef(false);
     const map = mapRef.current;
     if (!map || !mapReady || !overlaySourcesCreated.current || !ridgeSpineData) return;
 
+    // ═══ 3-STATE RENDER GATE (v6.5) ═══
+    // Ridge + saddle render layers now honor the SAME shared backbone verdict the
+    // flow + story consult (terrainStory.terrainState mirrors metadata.backbone.state).
+    // The ridge endpoint is NOT backbone-gated upstream, so flat-ag parcels return
+    // road-berm/DEM artifact spines + saddle noise (audit: flat Putnam drew 7 saddles
+    // + 1 secondary spine — MORE than confirmed Dietzfelbinger's 2). We gate here:
+    //   confirmed → primary + secondary ridges + saddle nodes (current behavior)
+    //   marginal  → a SINGLE strongest spine only, NO saddle lattice
+    //   flat      → hidden (empty)
+    //   pending (verdict not yet in — flow resolves ~20s after ridges) → hidden;
+    //     fail-closed so we never flash artifact structure before it's earned. The
+    //     effect re-runs when terrainState arrives (in deps) and reveals if earned.
+    const tState: 'confirmed' | 'marginal' | 'flat' | null = terrainStory?.terrainState ?? null;
+    const showConfirmed = tState === 'confirmed';
+    const showMarginal = tState === 'marginal';
+
+    // Pick the single strongest spine (longest by vertex count) across primary+secondary
+    // for the marginal single-spine render.
+    const pickSingleSpine = (): GeoJSON.FeatureCollection => {
+      const all = [
+        ...((ridgeSpineData.ridges_primary?.features as any[]) || []),
+        ...((ridgeSpineData.ridges_secondary?.features as any[]) || []),
+      ];
+      if (!all.length) return { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
+      const coordLen = (f: any): number => {
+        const g = f?.geometry;
+        if (!g) return 0;
+        if (g.type === 'LineString') return g.coordinates?.length || 0;
+        if (g.type === 'MultiLineString') return (g.coordinates || []).reduce((s: number, c: any[]) => s + (c?.length || 0), 0);
+        return 0;
+      };
+      let best = all[0]; let bestLen = coordLen(all[0]);
+      for (const f of all) { const l = coordLen(f); if (l > bestLen) { best = f; bestLen = l; } }
+      return { type: 'FeatureCollection', features: [best] } as GeoJSON.FeatureCollection;
+    };
+
     try {
       // Update primary ridges source (smoothed for clean Niehues-style rendering)
       // Phase B / Item 1 fix: Catmull-Rom spline (was Chaikin corner-cutting)
       // Same DP→CR pipeline as flow lines, pathSmoothing 0.7 for natural S-curves
       const primarySource = map.getSource('tfp-ridges-primary') as mapboxgl.GeoJSONSource;
       if (primarySource) {
-        primarySource.setData(smoothFlowFeatureCollection(ridgeSpineData.ridges_primary, 0.7));
+        const primaryData = showConfirmed
+          ? smoothFlowFeatureCollection(ridgeSpineData.ridges_primary, 0.7)
+          : showMarginal
+            ? smoothFlowFeatureCollection(pickSingleSpine(), 0.7)
+            : EMPTY_FC;
+        primarySource.setData(primaryData);
       }
 
-      // Update secondary ridges source (smoothed via Catmull-Rom)
+      // Update secondary ridges source (smoothed via Catmull-Rom).
+      // Only confirmed shows secondary spines; marginal collapses to the single
+      // strongest spine (rendered in the primary source above), flat hides them.
       const secondarySource = map.getSource('tfp-ridges-secondary') as mapboxgl.GeoJSONSource;
       if (secondarySource) {
-        secondarySource.setData(smoothFlowFeatureCollection(ridgeSpineData.ridges_secondary, 0.7));
+        secondarySource.setData(showConfirmed
+          ? smoothFlowFeatureCollection(ridgeSpineData.ridges_secondary, 0.7)
+          : EMPTY_FC);
       }
 
       // Update saddle nodes source
@@ -8258,7 +8329,10 @@ const archetypeInitializedRef = useRef(false);
       // ═══ SADDLE NODE STABILITY — snap new nodes to previous positions within tolerance ═══
       const saddleSource = map.getSource('tfp-saddle-nodes') as mapboxgl.GeoJSONSource;
       if (saddleSource) {
-        let newNodes = ridgeSpineData.saddle_nodes;
+        // 3-state gate: saddle nodes render ONLY on confirmed. On marginal we show
+        // the single spine but NO saddle lattice; on flat/pending, nothing. Feeding
+        // EMPTY through the existing ring-clip/stability path yields a clean empty.
+        let newNodes = showConfirmed ? ridgeSpineData.saddle_nodes : EMPTY_FC;
         // Build the Hunt Zone ring for this parcel (same primitives as the ring draw).
         let saddleRingGeom: GeoJSON.Polygon | null = null;
         if (parcelPolygon) {
@@ -8351,7 +8425,7 @@ const archetypeInitializedRef = useRef(false);
     } catch (err) {
       console.error('[Backbone] Error updating map sources (non-fatal):', err);
     }
-  }, [ridgeSpineData, mapReady, parcelPolygon, huntZoneCenterOverride]); // eslint-disable-line react-hooks/exhaustive-deps -- huntZoneCenterOverride re-clips saddle nodes to the dragged ring
+  }, [ridgeSpineData, mapReady, parcelPolygon, huntZoneCenterOverride, terrainStory?.terrainState]); // eslint-disable-line react-hooks/exhaustive-deps -- huntZoneCenterOverride re-clips saddle nodes to the dragged ring; terrainState re-runs the gate when the backbone verdict arrives (flow resolves after ridges)
 
   // ========== HUNTABILITY ENGINE — BIG BEAUTIFUL MAP v1 ==========
   useEffect(() => {
@@ -17631,24 +17705,19 @@ const archetypeInitializedRef = useRef(false);
                       <p className="text-[10px] text-emerald-400/80 font-semibold uppercase tracking-wider mb-1">What We Found</p>
                       <p className="text-[11px] text-white/85 leading-relaxed">
                         {(() => {
-                          const stands = filteredStands.length;
-                          const score = summary.topStandScore;
-                          const funnels = summary.funnelCount;
                           const acres = acreageParam || summary.analysisAreaAcres?.toFixed(0) || '—';
-
-                          // v3.8.2: Bedding removed from narrative — speculative, not decision-grade
-                          const quality = score >= 80 ? 'excellent' : score >= 65 ? 'strong' : score >= 50 ? 'moderate' : 'limited';
-                          // Piece 5: stand claims removed from narrative unless flag ON.
-                          if (STANDS_ENABLED) {
-                            const standPhrase = stands > 0 
-                              ? `We identified ${stands} stand placement${stands > 1 ? 's' : ''} with ${quality} alignment to the terrain` 
-                              : 'No stand placements met our quality threshold on this parcel';
-                            const funnelPhrase = funnels > 2 ? `, and ${funnels} natural funnels that concentrate movement` : funnels > 0 ? ` with ${funnels} natural funnel${funnels > 1 ? 's' : ''}` : '';
-                            return `${standPhrase}${funnelPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
+                          const { tState, ridgeSpineCount, saddleCrossings } = intelMetrics;
+                          if (tState === 'confirmed') {
+                            const spinePhrase = `${ridgeSpineCount} ridge spine${ridgeSpineCount === 1 ? '' : 's'}`;
+                            const saddlePhrase = saddleCrossings > 0
+                              ? ` and ${saddleCrossings} saddle crossing${saddleCrossings === 1 ? '' : 's'} that concentrate movement`
+                              : '';
+                            return `We mapped confirmed terrain structure — ${spinePhrase}${saddlePhrase}. This ${acres}-acre property shows real hunting potential.`;
                           }
-                          // Terrain/flow-focused narrative (no stand claims)
-                          const terrainPhrase = funnels > 2 ? `${funnels} natural funnels that concentrate movement` : funnels > 0 ? `${funnels} natural funnel${funnels > 1 ? 's' : ''}` : 'terrain features worth scouting';
-                          return `We mapped ${quality} terrain structure with ${terrainPhrase}. This ${acres}-acre property ${score >= 65 ? 'shows real hunting potential' : 'has some terrain features worth scouting'}.`;
+                          if (tState === 'marginal') {
+                            return `We detected a single ridge spine on this ${acres}-acre property, but it's unconfirmed — not enough backbone to map confident movement. Worth scouting on foot.`;
+                          }
+                          return `This ${acres}-acre property reads as gentle, low-relief ground — no significant ridge structure to concentrate deer movement. Best scouted for sign rather than terrain funnels.`;
                         })()}
                       </p>
                     </div>
@@ -17669,21 +17738,37 @@ const archetypeInitializedRef = useRef(false);
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[9px] text-stone-500/70 uppercase tracking-wider font-medium">Parcel Character</span>
                       {terrainStory && (
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                          terrainStory.confidence === 'high' ? 'bg-emerald-500/15 text-emerald-400' :
-                          terrainStory.confidence === 'medium' ? 'bg-amber-500/15 text-amber-400' :
-                          'bg-stone-500/15 text-stone-400'
-                        }`}>
-                          {terrainStory.confidence === 'high' ? '● High Confidence' : terrainStory.confidence === 'medium' ? '● Medium' : '● Low'}
-                        </span>
+                        intelMetrics.tState === 'marginal' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400">
+                            ● Unconfirmed — Scout
+                          </span>
+                        ) : intelMetrics.tState === 'flat' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-stone-500/15 text-stone-400">
+                            ● Low Relief
+                          </span>
+                        ) : (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                            terrainStory.confidence === 'high' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-500/15 text-emerald-400'
+                          }`}>
+                            {terrainStory.confidence === 'high' ? '● High Confidence' : '● Confirmed'}
+                          </span>
+                        )
                       )}
                     </div>
                     {/* Character description derived from data */}
                     <p className="text-[10px] text-white/70 leading-relaxed">
-                      {summary.funnelCount > 3 ? 'Heavy funnel density' : summary.funnelCount > 1 ? 'Natural funneling present' : 'Limited funneling'}
-                      {STANDS_ENABLED
-                        ? (summary.topStandScore >= 80 ? ' — premium stand opportunities.' : summary.topStandScore >= 60 ? ' — solid stand potential.' : ' — marginal stand options.')
-                        : (summary.topStandScore >= 80 ? ' — premium terrain structure.' : summary.topStandScore >= 60 ? ' — solid terrain structure.' : ' — marginal terrain structure.')}
+                      {(() => {
+                        const { tState, ridgeSpineCount, saddleCrossings } = intelMetrics;
+                        if (tState === 'confirmed') {
+                          const spine = `${ridgeSpineCount} ridge spine${ridgeSpineCount === 1 ? '' : 's'}`;
+                          const saddle = saddleCrossings > 0 ? `, ${saddleCrossings} saddle crossing${saddleCrossings === 1 ? '' : 's'}` : '';
+                          return `Confirmed ridge structure — ${spine}${saddle}.`;
+                        }
+                        if (tState === 'marginal') {
+                          return 'Single spine detected — unconfirmed. Scout on foot before committing.';
+                        }
+                        return 'Low-relief ground — limited terrain structure to concentrate movement.';
+                      })()}
                     </p>
                   </div>
 
@@ -17704,12 +17789,12 @@ const archetypeInitializedRef = useRef(false);
                   {/* ── Key Metrics Row ── */}
                   <div className={`grid ${STANDS_ENABLED ? 'grid-cols-4' : 'grid-cols-2'} gap-1 mb-2`}>
                     <div className="text-center">
-                      <p className="text-sm text-white font-bold">{ridgeSpineData?.ridges_primary?.features?.length ?? 0}</p>
+                      <p className="text-sm text-white font-bold">{intelMetrics.ridgeSpineCount}</p>
                       <p className="text-[8px] text-stone-500/70 uppercase">Ridge spines</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-sm text-white font-bold">{summary.funnelCount}</p>
-                      <p className="text-[8px] text-stone-500/70 uppercase">Funnels</p>
+                      <p className="text-sm text-white font-bold">{intelMetrics.saddleCrossings}</p>
+                      <p className="text-[8px] text-stone-500/70 uppercase">Saddle crossings</p>
                     </div>
                     {STANDS_ENABLED && (
                       <div className="text-center">
@@ -19531,11 +19616,17 @@ const archetypeInitializedRef = useRef(false);
       {/* ========== REPORT PREVIEW MODAL (inline JSX — no API fetch) ========== */}
       {showReportPreview && (() => {
         const top3 = filteredStands; // filtered by hunter type
-        const topScore = summary?.topStandScore ?? 0;
-        const _scoreColor = topScore >= 70 ? '#2d6a4f' : topScore >= 40 ? '#d4a017' : '#c0392b';
-        const _scoreLabel = topScore >= 70 ? 'PRIME' : topScore >= 40 ? 'HUNTABLE' : 'MARGINAL';
-        const _grade = topScore >= 90 ? 'A+' : topScore >= 80 ? 'A' : topScore >= 70 ? 'B' : topScore >= 60 ? 'C' : 'D';
-        const _gradeColor = topScore >= 70 ? '#1a3a2a' : topScore >= 50 ? '#8b6f47' : '#8b0000';
+        // Gate-real / pull-fake: the v1 huntability score (topStandScore) is a
+        // non-discriminative fabrication (flat parcels scored as high as confirmed).
+        // The report headline now keys off the shared backbone verdict so a gentle
+        // parcel can never print a premium score / grade.
+        const _tState = intelMetrics.tState;
+        const _confirmed = _tState === 'confirmed';
+        const topScore = _confirmed ? (summary?.topStandScore ?? 0) : 0;
+        const _scoreColor = !_confirmed ? '#8b6f47' : topScore >= 70 ? '#2d6a4f' : topScore >= 40 ? '#d4a017' : '#c0392b';
+        const _scoreLabel = _tState === 'flat' ? 'LOW RELIEF' : _tState === 'marginal' ? 'SCOUT · UNCONFIRMED' : topScore >= 70 ? 'PRIME' : topScore >= 40 ? 'HUNTABLE' : 'MARGINAL';
+        const _grade = !_confirmed ? '—' : topScore >= 90 ? 'A+' : topScore >= 80 ? 'A' : topScore >= 70 ? 'B' : topScore >= 60 ? 'C' : 'D';
+        const _gradeColor = !_confirmed ? '#8b6f47' : topScore >= 70 ? '#1a3a2a' : topScore >= 50 ? '#8b6f47' : '#8b0000';
         const _riskColor = (r: string) => r === 'low' ? '#2d6a4f' : r === 'medium' ? '#d4a017' : '#c0392b';
         const isTerritory = territoryParcelsRef.current.length > 1;
         const displayAcreage = isTerritory
@@ -19625,7 +19716,7 @@ const archetypeInitializedRef = useRef(false);
               {/* Score hero */}
               <div style={{ textAlign: 'center', padding: '24px', background: '#f8f6f0', border: '2px solid #1a3a2a', marginBottom: '24px' }}>
                 <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px', color: '#666', marginBottom: '8px' }}>Overall Huntability Score</div>
-                <div style={{ fontSize: '64px', fontWeight: 'bold', lineHeight: 1, color: _scoreColor }}>{topScore}</div>
+                <div style={{ fontSize: '64px', fontWeight: 'bold', lineHeight: 1, color: _scoreColor }}>{_confirmed ? topScore : '—'}</div>
                 <div style={{ fontSize: '16px', letterSpacing: '3px', marginTop: '8px', color: _scoreColor }}>{_scoreLabel}</div>
                 <div style={{ fontSize: '11px', color: '#999', fontStyle: 'italic', marginTop: '8px' }}>Score reflects current wind and season conditions</div>
               </div>
@@ -19641,8 +19732,8 @@ const archetypeInitializedRef = useRef(false);
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Primary Corridors</div>
                 </div>
                 <div style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{summary?.funnelCount ?? 0}</div>
-                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Funnel Zones</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a3a2a' }}>{intelMetrics.saddleCrossings}</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Saddle Crossings</div>
                 </div>
               </div>
 
@@ -19922,7 +20013,7 @@ const archetypeInitializedRef = useRef(false);
                 <div style={{ fontSize: '13px', letterSpacing: '2px', color: '#666', marginBottom: '24px' }}>HUNTABILITY GRADE</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
                   <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
-                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{topScore}</div>
+                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{_confirmed ? topScore : '—'}</div>
                     <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>HUNTABILITY SCORE</div>
                   </div>
                   <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>

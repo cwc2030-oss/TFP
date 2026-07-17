@@ -44,6 +44,14 @@ export const FLOW_LONE_SPINE_MIN_FT = Number(process.env.FLOW_LONE_SPINE_MIN_FT 
 // genuine network line kept (gasconade 41 ft). Tunable via env; default 40 ft.
 export const NETWORK_LINE_MIN_FT = Number(process.env.FLOW_NETWORK_LINE_MIN_FT || 40);
 
+// Marginal-spine floor (ft). A starved parcel (no confident backbone) whose single
+// qualified spine sits in the band [MARGINAL_SPINE_MIN_FT, FLOW_LONE_SPINE_MIN_FT)
+// is 'marginal' — detected but unconfirmed, worth scouting — rather than flat.
+// Set just ABOVE the ~53 ft road-berm/DEM artifact ceiling so an artifact spine
+// can never masquerade as marginal. Below this floor the parcel reads honest-flat.
+// Tunable via env; default 54 ft.
+export const FLOW_MARGINAL_SPINE_MIN_FT = Number(process.env.FLOW_MARGINAL_SPINE_MIN_FT || 54);
+
 /**
  * Decide whether a parcel has a real terrain backbone.
  *
@@ -67,15 +75,25 @@ export function assessBackbone(
   // networkLines <= 1 and (being sub-floor) a maxProm below the bar -> starved.
   const starved = networkLines <= 1 && maxProminenceFt < loneSpineMinFt;
   if (starved) {
+    // Split the starved band into 'marginal' vs 'flat' on the marginal-spine floor.
+    // A single qualified spine sitting ABOVE the artifact ceiling (>= 54 ft) but
+    // BELOW the lone-spine bar (< 60 ft) is real-but-unconfirmed => marginal.
+    // Anything below the floor is honest-flat. (maxProm >= floor implies the top
+    // line cleared the 40 ft per-line qualification, so networkLines >= 1 here.)
+    const isMarginal = maxProminenceFt >= FLOW_MARGINAL_SPINE_MIN_FT;
     return {
       hasRealBackbone: false,
+      state: isMarginal ? 'marginal' : 'flat',
       networkLines,
       maxProminenceFt,
-      reason: `low-relief: ${networkLines} prominence-qualified spine (>=${NETWORK_LINE_MIN_FT}ft) below the ${loneSpineMinFt}ft lone-spine bar (maxProm=${Math.round(maxProminenceFt)}ft)`,
+      reason: isMarginal
+        ? `marginal: single ${Math.round(maxProminenceFt)}ft spine in the [${FLOW_MARGINAL_SPINE_MIN_FT},${loneSpineMinFt}) gap band — detected but below the ${loneSpineMinFt}ft confidence bar`
+        : `low-relief: ${networkLines} prominence-qualified spine (>=${NETWORK_LINE_MIN_FT}ft) below the ${FLOW_MARGINAL_SPINE_MIN_FT}ft marginal floor (maxProm=${Math.round(maxProminenceFt)}ft)`,
     };
   }
   return {
     hasRealBackbone: true,
+    state: 'confirmed',
     networkLines,
     maxProminenceFt,
     reason: `real backbone: ${networkLines} prominence-qualified line(s) (>=${NETWORK_LINE_MIN_FT}ft), maxProm=${Math.round(maxProminenceFt)}ft`,

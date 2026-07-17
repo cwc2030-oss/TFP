@@ -1466,6 +1466,7 @@ export function generateTerrainFlowV3(
   // permissive verdict for the retired legacy template path.
   let backboneVerdict: BackboneVerdict = {
     hasRealBackbone: true,
+    state: 'confirmed',
     networkLines: 0,
     maxProminenceFt: 0,
     reason: 'not assessed (legacy template path)',

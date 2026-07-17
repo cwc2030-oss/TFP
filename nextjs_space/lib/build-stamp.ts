@@ -74,7 +74,20 @@ export const BUILD_DATE = 'Jul 17';
 //      mismatch that pinned the single-parcel hit rate near 7%. Purely a parcel-cache
 //      READ path — no terrain/flow change, r5 flank instrumentation and terrain cache
 //      fully preserved. Neighbor/adjacent re-key parked as a separate follow-up.
-export const BUILD_REV = 'r6';
+// r7 (v6.3) — gate-real / pull-fake terrain honesty pass: ONE shared 3-state
+//      backbone verdict (metadata.backbone.state = confirmed | marginal | flat,
+//      marginal floor FLOW_MARGINAL_SPINE_MIN_FT = 54 ft) now drives EVERY intel
+//      surface. v1 non-discriminative fabrications pulled from render + copy:
+//      bedding polygons, v1 funnel lines/polys, and the v1 huntability score +
+//      funnel count (which were byte-identical flat -> confirmed). Ridge/saddle
+//      render layers gated on state (confirmed -> full spines + saddles; marginal
+//      -> single spine, no saddles; flat -> hidden). Intelligence readout, Parcel
+//      Character, confidence badge, key-metrics row and the Pro Hunt Report score/
+//      grade/stats all key off the shared verdict so nothing can contradict, and
+//      a gentle parcel can never print a premium score/grade. Copy numbers replaced
+//      with real ridge-spine + saddle-crossing counts. UI/render-only — terrain
+//      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r7';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

@@ -77,6 +77,14 @@ export interface TerrainStorySummary {
   // When false, the ground is flat / low-relief and the UI must present the
   // story honestly (gentle terrain, estimated Bench/Ridge, no "High confidence").
   reliefMeasured: boolean;
+
+  // THREE honest states mirrored from the shared backbone verdict
+  // (metadata.backbone.state). The single field every UI surface keys off so
+  // narrative, badges, funnel-count copy, and map render can never contradict:
+  //   'confirmed' — real backbone, draw flow + confident copy
+  //   'marginal'  — single spine in the gap band, "detected — scout it", no flow
+  //   'flat'      — honest low-relief / empty
+  terrainState: 'confirmed' | 'marginal' | 'flat';
 }
 
 // ========== DRIVER LABELS ==========
@@ -366,10 +374,21 @@ export function generateTerrainStory(
   // raw saddle counts. This is the shared verdict both readings consult — the
   // story is NOT reading the flow line count; it reads the one stamped verdict.
   const backbone = (flowData.metadata as any)?.backbone;
-  if (backbone && backbone.hasRealBackbone === false) {
+  // THREE honest states off the ONE verdict. Prefer the explicit state field;
+  // fall back to the boolean for any legacy envelope that predates it.
+  const bbState: 'confirmed' | 'marginal' | 'flat' | undefined =
+    backbone?.state ?? (backbone ? (backbone.hasRealBackbone === false ? 'flat' : 'confirmed') : undefined);
+  if (bbState === 'marginal') {
+    console.log(
+      '[TerrainStory] Honoring shared MARGINAL verdict — detected-but-unconfirmed story. reason=%s',
+      backbone?.reason,
+    );
+    return getMarginalStory(backbone?.maxProminenceFt);
+  }
+  if (bbState === 'flat') {
     console.log(
       '[TerrainStory] Honoring shared no-backbone verdict — low-relief story. reason=%s',
-      backbone.reason,
+      backbone?.reason,
     );
     return getLowReliefStory();
   }
@@ -412,6 +431,7 @@ export function generateTerrainStory(
     narrative,
     confidence,
     reliefMeasured,
+    terrainState: 'confirmed',
   };
   } catch (err) {
     // Analysis compute must never throw and blank the intel view. Surface the
@@ -448,6 +468,31 @@ function getEmptyStory(): TerrainStorySummary {
     narrative: 'Run terrain flow analysis to reveal movement patterns and opportunity zones.',
     confidence: 'low',
     reliefMeasured: false,
+    terrainState: 'flat',
+  };
+}
+
+// Honest MARGINAL reading. Returned when the shared backbone verdict says a
+// single qualified spine sits in the gap band [54,60) ft — real relief was
+// detected but it does not clear the confidence bar. Distinct from low-relief
+// (nothing there) and from confirmed (draw flow): here we tell the hunter what
+// IS there and to go scout it, WITHOUT drawing flow that would over-claim.
+function getMarginalStory(maxProminenceFt?: number): TerrainStorySummary {
+  const relief = maxProminenceFt ? `~${Math.round(maxProminenceFt)} ft of relief` : 'some relief';
+  return {
+    primaryDriver: { type: 'mixed-terrain', label: 'Marginal Structure', confidence: 0.45 },
+    secondaryDriver: null,
+    keyOpportunity: null,
+    drivers: getEmptyDrivers(),
+    headline: 'Marginal structure — a single spine detected, unconfirmed',
+    narrative:
+      `We picked up a single ridge spine carrying ${relief} on this parcel, but it sits below the ` +
+      'threshold where terrain reliably funnels deer. There is something here worth a look — walk the ' +
+      'spine and its ends for sign, benches, and pinch points — but treat it as a scouting lead, not a ' +
+      'confirmed terrain funnel. We are not drawing movement flow until the structure earns it.',
+    confidence: 'low',
+    reliefMeasured: true,
+    terrainState: 'marginal',
   };
 }
 
@@ -468,6 +513,7 @@ function getLowReliefStory(): TerrainStorySummary {
       'edges, and sign rather than terrain pinch points.',
     confidence: 'low',
     reliefMeasured: false,
+    terrainState: 'flat',
   };
 }
 
