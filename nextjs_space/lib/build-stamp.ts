@@ -99,7 +99,17 @@ export const BUILD_DATE = 'Jul 17';
 //      AOI -> one verdict. Audit: non-monotonic flips gone, flat-ag guards stay
 //      flat, natural marginals appear. Env NEIGHBORHOOD_AOI=0 reverts. Terrain
 //      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r9';
+// r9 — A-300 maker's-mark wordmark added to the hunt-zone scope ring.
+// r10 — LAUNCH: marketplace gate opened (TFP_MARKETPLACE_OPEN=true). The
+//      coming-soon wall comes down and the marketplace/listings + hunter
+//      inquiry surfaces go live to the founding 120 + public. Pre-flight
+//      confirmed green before flip: r9 live on all 11 hosts (stamp reads r9),
+//      $19 Season Pass Stripe checkout live ($19.00 one_time livemode price),
+//      and the free-read meter (3/season) -> paywall -> Season Pass handoff
+//      verified end-to-end (free user walls on the 4th read, Unlock creates a
+//      real checkout.stripe.com session). Env/gate-only flip — terrain cache
+//      and terrain output untouched (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r10';
 
 // e.g. "build v6.3-flowing-form r1 · Jul 15"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

@@ -200,13 +200,13 @@ function FlowSchematic({
       {interceptDots}
 
       {/* Labels */}
-      <text x={15} y={18} fill="rgba(168,162,158,0.5)" fontSize={9} fontFamily="sans-serif">
+      <text x={15} y={20} fill="currentColor" style={{ color: '#e7e5e4' }} fontSize={13} fontWeight={700} fontFamily="sans-serif">
         Corridors
       </text>
-      <text x={190} y={18} fill="rgba(168,162,158,0.5)" fontSize={9} fontFamily="sans-serif">
+      <text x={180} y={20} fill="currentColor" style={{ color: '#e7e5e4' }} fontSize={13} fontWeight={700} fontFamily="sans-serif">
         Pinch Points
       </text>
-      <text x={310} y={18} fill="rgba(168,162,158,0.5)" fontSize={9} fontFamily="sans-serif">
+      <text x={310} y={20} fill="currentColor" style={{ color: '#e7e5e4' }} fontSize={13} fontWeight={700} fontFamily="sans-serif">
         Intercepts
       </text>
     </svg>
