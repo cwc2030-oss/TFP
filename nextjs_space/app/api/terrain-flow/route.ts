@@ -43,8 +43,9 @@ import {
 import type { TerrainFlowResponse } from '@/types/terrain-flow';
 import { buildFlowScope, toFlowLines } from '@/lib/flow-contract';
 import { TERRAIN_ENGINE_VERSION } from '@/lib/terrain-engine-version';
-import { syntheticFlowEnabled, MAX_ANALYSIS_ACRES } from '@/lib/flow-flags';
+import { syntheticFlowEnabled, MAX_ANALYSIS_ACRES, acresToRadiusMeters } from '@/lib/flow-flags';
 import { clipFlowToAcreLimit } from '@/lib/flow-cap';
+import { buildHuntZoneCircle } from '@/lib/huntzone-scope';
 import * as turf from '@turf/turf';
 
 /**
@@ -200,6 +201,39 @@ export async function POST(request: NextRequest) {
       ANALYSIS_BUFFER_MAX_M
     );
 
+    // ─── Neighborhood-AOI normalization (verdict window ≡ flow window) ──
+    // The DEM/Modal compute window used to scale with parcel size (parcel
+    // bbox + buffer), so the same hilly location returned DIFFERENT ridge
+    // geometry — and thus a different verdict — at different parcel sizes
+    // (the 89-ac non-monotonic flip). We floor the COMPUTE geometry to the
+    // A-300 hunt-zone circle centered on the parcel centroid whenever the
+    // parcel is smaller than the 300-ac analysis scope. All sub-300-ac
+    // parcels at a given location now share the SAME compute AOI → the same
+    // ridges → a stable verdict. Larger parcels keep their own footprint.
+    // Guard with NEIGHBORHOOD_AOI=0 to fall back to the legacy per-parcel AOI.
+    let effParcel = parcel;
+    if (process.env.NEIGHBORHOOD_AOI !== '0' && options.mode !== 'synthetic') {
+      try {
+        const areaAcres = turf.area(parcel as any) / 4046.8564224;
+        if (Number.isFinite(areaAcres) && areaAcres < MAX_ANALYSIS_ACRES) {
+          const c = turf.centerOfMass(parcel as any);
+          const coords = c?.geometry?.coordinates;
+          if (Array.isArray(coords) && coords.length >= 2) {
+            const center = { lat: Number(coords[1]), lng: Number(coords[0]) };
+            if (Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+              const radiusM = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
+              effParcel = buildHuntZoneCircle(center, radiusM) as any;
+              console.log(
+                `[TerrainFlow] Neighborhood-AOI normalize: parcel ${areaAcres.toFixed(1)}ac -> A-${MAX_ANALYSIS_ACRES} circle r=${radiusM.toFixed(0)}m @ ${center.lat.toFixed(4)},${center.lng.toFixed(4)}`,
+              );
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[TerrainFlow] Neighborhood-AOI normalize failed, using raw parcel:', e);
+      }
+    }
+
     // Terrain debug block — always returned
     const terrainDebug: Record<string, any> = {
       terrain_source: 'unknown',
@@ -266,8 +300,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Create buffered parcel for landscape context
-    const bufferedParcel = createBufferedParcel(parcel, effectiveBuffer);
+    // Create buffered parcel for landscape context (uses the neighborhood-
+    // normalized AOI so the DEM window is stable across parcel sizes).
+    const bufferedParcel = createBufferedParcel(effParcel, effectiveBuffer);
     
     // Try calling Modal backend for DEM-based corridor data
     let corridorData: any = null;
@@ -489,7 +524,7 @@ export async function POST(request: NextRequest) {
     // Generate terrain-driven flow
     console.log('[TerrainFlow] Generating terrain-driven flow');
     const flowData = generateTerrainDrivenFlow(
-      parcel,
+      effParcel,
       corridorData,
       ridgeData,
       options.includeDebugLayers || false

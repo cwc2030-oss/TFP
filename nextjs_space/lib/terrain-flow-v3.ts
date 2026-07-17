@@ -30,6 +30,7 @@ import type {
 } from '@/types/terrain-flow';
 import { sRand } from './seeded-rng';
 import { assessBackbone, NETWORK_LINE_MIN_FT, type BackboneVerdict } from './terrain-backbone';
+import { MAX_ANALYSIS_ACRES, acresToRadiusMeters } from './flow-flags';
 
 import {
   TERRAIN_FLOW_WEIGHTS,
@@ -841,6 +842,53 @@ const RIDGE_TRACE_MAX_PER_TIER = 30;
 // (roughly the buffered analysis window / visible map extent).
 const RIDGE_RELEVANCE_MARGIN_M = 300;
 
+// ── Neighborhood verdict window (v6.5): the parcel-scoped +300m relevance window
+// under-read small/mid parcels. A tiny lot in genuinely rolling hills kept ZERO
+// of the real ridge lines the DEM found (the +300m box fell inside the valley
+// below the surrounding spines), so the verdict read FLAT while the A-300
+// hunt-zone scope at the exact same spot read CONFIRMED. Worse, the single-vertex
+// bbox test made mid-size parcels non-monotonic (40ac flat, 10ac & 200ac
+// confirmed at one hilly center) — pure alignment luck. Deer move by neighborhood
+// terrain, not parcel lines, and the whole product is the 300-ac scope, so the
+// USER-FACING verdict must be judged on the SAME neighborhood window the flow and
+// map already compute on. We floor the relevance window to the A-300 hunt-zone
+// radius centered on the parcel centroid: small/mid parcels now see the
+// neighborhood ridges; large parcels (>300ac) keep their own bigger window via
+// the union; and the hunt-zone circle path is byte-for-byte unchanged (its own
+// bbox already equals the neighborhood floor, so the union is a no-op there).
+// Flat-ag guards stay flat because a genuinely flat neighborhood has no
+// prominence-qualified ridge inside this window either — exactly why the flow
+// path already keeps those guards empty.
+const NEIGHBORHOOD_VERDICT_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES); // ~621.7m (A-300)
+
+/**
+ * Relevance window for the honest verdict + tracing. Floors the parcel bbox to a
+ * minimum A-300 hunt-zone window centered on the parcel centroid, unions with the
+ * parcel's own (possibly larger) bbox, then applies the standard relevance margin
+ * (plus any caller-supplied extra reach, e.g. the saddle max-ridge distance).
+ */
+function neighborhoodRelevanceBbox(
+  parcelRings: number[][][],
+  extraMarginM: number = 0,
+): [number, number, number, number] {
+  const flat = parcelRings.flat();
+  const parcelBbox = getBbox(flat);
+  const centroid = getCentroid(flat);
+  // A-300 hunt-zone box centered on the parcel centroid (the flow/map window).
+  const floorBbox = expandBbox(
+    [centroid[0], centroid[1], centroid[0], centroid[1]],
+    NEIGHBORHOOD_VERDICT_RADIUS_M,
+  );
+  // Union so large parcels keep their own bigger window; small parcels get floored.
+  const unioned: [number, number, number, number] = [
+    Math.min(parcelBbox[0], floorBbox[0]),
+    Math.min(parcelBbox[1], floorBbox[1]),
+    Math.max(parcelBbox[2], floorBbox[2]),
+    Math.max(parcelBbox[3], floorBbox[3]),
+  ];
+  return expandBbox(unioned, RIDGE_RELEVANCE_MARGIN_M + extraMarginM);
+}
+
 // ── Honest-flow gates (v6.4): stop the saddle-crossing lattice from standing in
 // for a real ridge network on starved parcels — the "wiggly rectangles following
 // roads" failure. CALIBRATED BY EVIDENCE (Jul 16 probe spread), not feel:
@@ -956,17 +1004,17 @@ function traceFlowFromRidges(
   }
 
   // The ridge service returns spines for a large buffered window (up to ~1 km
-  // around the parcel). Only ridges near the parcel are relevant to on-parcel
-  // deer flow, so scope to the parcel bbox expanded by a margin BEFORE both the
-  // honest gate and tracing. This keeps the gate reason and the rendered output
-  // consistent: gate-pass ⟺ at least one traceable ridge near the parcel.
-  const parcelBbox = getBbox(parcelRings.flat());
-  const relevanceBbox = expandBbox(parcelBbox, RIDGE_RELEVANCE_MARGIN_M);
+  // around the parcel). Scope to the NEIGHBORHOOD window (A-300 hunt-zone floor,
+  // unioned with the parcel bbox) BEFORE both the honest gate and tracing, so the
+  // verdict is judged on the same neighborhood terrain the flow/map render on —
+  // small parcels no longer under-read the surrounding ridges. gate-pass ⟺ at
+  // least one traceable ridge in the neighborhood window.
+  const relevanceBbox = neighborhoodRelevanceBbox(parcelRings);
   const primaryRidges = primaryRidgesAll.filter((r) => polylineInBbox(r.coords, relevanceBbox));
   const secondaryRidges = secondaryRidgesAll.filter((r) => polylineInBbox(r.coords, relevanceBbox));
 
   if (primaryRidges.length === 0 && secondaryRidges.length === 0) {
-    console.log('[RidgeTrace] No ridge within %d m of parcel — empty flow (honest gate).', RIDGE_RELEVANCE_MARGIN_M);
+    console.log('[RidgeTrace] No ridge in neighborhood window (A-300 floor) — empty flow (honest gate).');
     return { primary: [], secondary: [], maxProminenceFt: 0, strongLineCount: 0, linePromsFt: [], lineLensM: [], lineCoherence: [], lineFlankFt: [] };
   }
 
@@ -1169,12 +1217,11 @@ function traceSaddleCrossings(
     return { primary, secondary };
   }
 
-  const parcelBbox = getBbox(parcelRings.flat());
-  // Cheap pre-filter window. Traced ridges already live within parcel+300m; a
-  // valid saddle only needs to be within SADDLE_MAX_RIDGE_DIST_M of one of them,
-  // so widen the pre-filter by that reach to avoid clipping edge saddles. The
-  // real relevance gate is the distance-to-traced-ridge test below.
-  const relevanceBbox = expandBbox(parcelBbox, RIDGE_RELEVANCE_MARGIN_M + SADDLE_MAX_RIDGE_DIST_M);
+  // Cheap pre-filter window. Traced ridges already live within the neighborhood
+  // window; a valid saddle only needs to be within SADDLE_MAX_RIDGE_DIST_M of one
+  // of them, so widen the pre-filter by that reach to avoid clipping edge saddles.
+  // The real relevance gate is the distance-to-traced-ridge test below.
+  const relevanceBbox = neighborhoodRelevanceBbox(parcelRings, SADDLE_MAX_RIDGE_DIST_M);
   const [minLng, minLat, maxLng, maxLat] = relevanceBbox;
   const inBbox = (c: [number, number]) =>
     c[0] >= minLng && c[0] <= maxLng && c[1] >= minLat && c[1] <= maxLat;
