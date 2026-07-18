@@ -62,6 +62,12 @@ export interface RidgeRequestParams {
   parcel: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
   parcel_id: string;
   bufferMeters?: number;
+  /**
+   * v6.3 leak-fix: optional external abort signal. When the caller (the ridge
+   * effect) moves to a new parcel it aborts this signal so the abandoned-parcel
+   * ridge request is actually torn down instead of piling up on the backend.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RidgeFetchResult {
@@ -91,6 +97,16 @@ export async function fetchRidgeSpines(
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    // v6.3 leak-fix: bridge an external abort signal (parcel roam) into this
+    // fetch's controller so a superseded parcel's request is cancelled at once.
+    if (params.signal) {
+      if (params.signal.aborted) {
+        controller.abort();
+      } else {
+        params.signal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
+    }
     
     const response = await fetch(RIDGE_API_URL, {
       method: 'POST',

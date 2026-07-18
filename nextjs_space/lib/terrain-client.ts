@@ -10,6 +10,13 @@ export interface TerrainRequestParams {
   seasonProfile: SeasonProfile;
   prevailingWinds: WindDirection[];
   bufferMeters?: number;
+  /**
+   * v6.3 leak-fix: optional external abort signal. When the hunter roams to a
+   * new parcel the caller aborts this signal so an abandoned analysis (and its
+   * 10s-delay cold-start retry loop) is torn down instead of piling up on the
+   * shared backend — the pileup was what surfaced "warming up" after ~5 visits.
+   */
+  signal?: AbortSignal;
 }
 
 export interface TerrainFetchResult {
@@ -80,7 +87,25 @@ export async function fetchTerrainAnalysis(
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 10_000;
 
+  // v6.3 leak-fix: if the caller already moved on before we even started, bail.
+  if (params.signal?.aborted) {
+    clearInterval(progressInterval);
+    return { success: false, error: 'aborted', durationMs: Date.now() - startTime };
+  }
+
+  // v6.3 leak-fix: an abortable sleep so the 10s retry delay is cut short the
+  // moment the caller aborts (roam) instead of blocking a dead request.
+  const abortableDelay = (ms: number) => new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    params.signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+  });
+
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    // v6.3 leak-fix: stop retrying the instant the caller aborts (roam).
+    if (params.signal?.aborted) {
+      clearInterval(progressInterval);
+      return { success: false, error: 'aborted', durationMs: Date.now() - startTime };
+    }
     try {
       // Create abort controller for timeout
       const controller = new AbortController();
@@ -88,6 +113,15 @@ export async function fetchTerrainAnalysis(
         controller.abort();
         console.log('[TerrainClient] Request timed out after', timeoutMs, 'ms (attempt', attempt + ')');
       }, timeoutMs);
+
+      // v6.3 leak-fix: bridge external roam-abort into this attempt's controller.
+      if (params.signal) {
+        if (params.signal.aborted) {
+          controller.abort();
+        } else {
+          params.signal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+      }
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -188,12 +222,19 @@ export async function fetchTerrainAnalysis(
       const duration = Date.now() - startTime;
 
       if (err instanceof Error && err.name === 'AbortError') {
+        // v6.3 leak-fix: distinguish a roam-abort from a timeout — a roam-abort
+        // must NOT retry (the hunter is gone); return immediately.
+        if (params.signal?.aborted) {
+          clearInterval(progressInterval);
+          console.log('[TerrainClient] Request aborted (caller roamed) attempt', attempt);
+          return { success: false, error: 'aborted', durationMs: duration };
+        }
         console.log('[TerrainClient] Request aborted (timeout) attempt', attempt);
         // Timeouts on earlier attempts get retried too
         if (attempt < MAX_RETRIES) {
           onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
           console.log(`[TerrainClient] Retrying after timeout in ${RETRY_DELAY_MS / 1000}s...`);
-          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          await abortableDelay(RETRY_DELAY_MS);
           continue;
         }
         clearInterval(progressInterval);
@@ -205,11 +246,16 @@ export async function fetchTerrainAnalysis(
         };
       }
 
+      // v6.3 leak-fix: bail on roam-abort before any retry.
+      if (params.signal?.aborted) {
+        clearInterval(progressInterval);
+        return { success: false, error: 'aborted', durationMs: duration };
+      }
       // Network errors on earlier attempts get retried
       if (attempt < MAX_RETRIES) {
         console.log(`[TerrainClient] Network error (attempt ${attempt}), retrying in ${RETRY_DELAY_MS / 1000}s:`, err);
         onProgress?.('Terrain servers warming up — retrying automatically...', Math.min(progressTick, 30));
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        await abortableDelay(RETRY_DELAY_MS);
         continue;
       }
 

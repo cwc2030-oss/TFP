@@ -8264,6 +8264,7 @@ const archetypeInitializedRef = useRef(false);
           parcel: parcelPolygon,
           parcel_id: parcelId,
           bufferMeters: 300, // Smaller buffer for ridge extraction
+          signal: abortController.signal, // v6.3 leak-fix: real cancellation on roam
         });
 
         // Bail out if this effect was superseded by a newer parcelPolygon
@@ -8710,8 +8711,16 @@ const archetypeInitializedRef = useRef(false);
       return;
     }
 
-    // AbortController prevents stale flow fetches from accumulating
+    // AbortController prevents stale flow fetches from accumulating.
+    // v6.3 leak-fix: previously only a `cancelled` flag was flipped in cleanup,
+    // which discards the RESULT but leaves the in-flight XHR (and any internal
+    // retry loop) running against the shared terrain backend. Roaming parcels
+    // stacked abandoned requests → backend contention → "warming up"/flow-quiet
+    // after ~5 visits. We now hold a real AbortController, pass its signal into
+    // the fetcher, and abort() on cleanup so abandoned-parcel requests are
+    // actually torn down the moment the hunter moves on.
     let cancelled = false;
+    const flowAbort = new AbortController();
 
     const generateFlowData = async () => {
       setTerrainFlowLoading(true);
@@ -8750,10 +8759,11 @@ const archetypeInitializedRef = useRef(false);
           parcel: parcelPolygon,
           parcel_id: parcelId,
           bufferMeters: 1000, // 1km buffer for landscape context
+          signal: flowAbort.signal, // v6.3 leak-fix: real cancellation on roam
         }, 75000);
 
         let result = await runMainFetch();
-        if (!cancelled && !result.success) {
+        if (!cancelled && !flowAbort.signal.aborted && !result.success) {
           console.warn('[TerrainFlow] Main flow compute failed on first attempt — auto-retrying once', { error: result.error });
           result = await runMainFetch();
         }
@@ -8864,9 +8874,12 @@ const archetypeInitializedRef = useRef(false);
 
     generateFlowData();
 
-    // Cleanup: mark this effect as superseded when parcelPolygon changes
+    // Cleanup: mark this effect as superseded AND abort the in-flight fetch so
+    // the abandoned-parcel request (plus any internal retry) is actually torn
+    // down — no more pileup against the shared backend when roaming.
     return () => {
       cancelled = true;
+      flowAbort.abort();
     };
     // mainRetryNonce is bumped by the retry banner to re-run this compute on demand.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8953,6 +8966,10 @@ const archetypeInitializedRef = useRef(false);
     if (territoryAssemblyRef.current || territoryModeRef.current) return;
 
     let cancelled = false;
+    // v6.3 leak-fix: real controller so an abandoned parcel's CDL request is
+    // aborted on roam instead of running to its 45s timeout against the backend.
+    const cdlAbort = new AbortController();
+    const cdlTimeout = setTimeout(() => cdlAbort.abort(), 45000);
 
     const fetchCDL = async () => {
       try {
@@ -8983,7 +9000,7 @@ const archetypeInitializedRef = useRef(false);
 
         console.log('[CDL] Fetching CDL analysis for parcel bbox...');
         const res = await fetch(`/api/cdl-analysis?bbox=${bbox}&lat=${lat}&lng=${lng}`, {
-          signal: AbortSignal.timeout(45000),
+          signal: cdlAbort.signal,
         });
 
         if (cancelled) return;
@@ -9030,7 +9047,11 @@ const archetypeInitializedRef = useRef(false);
     };
 
     fetchCDL();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(cdlTimeout);
+      cdlAbort.abort();
+    };
   }, [parcelPolygon]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ========== CDL × TERRAIN CROSS-REFERENCE ==========

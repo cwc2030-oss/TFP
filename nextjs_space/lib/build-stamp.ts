@@ -154,7 +154,23 @@ export const BUILD_DATE = 'Jul 18';
 //      panels — "too flat" only shows when compute succeeded AND the verdict is
 //      genuinely flat; never on a failed compute, never when the verdict reads
 //      Confirmed/Marginal. No detection bar changed; terrain cache untouched.
-export const BUILD_REV = 'r14';
+// r15: client-side flow-leak fix ("goes quiet after ~5 parcels"). Profiled a
+//      roam: the four suspected counters (Mapbox layers 193, sources 57, map
+//      listeners 120, DOM markers 0) + JS heap were ALL flat — no leak there.
+//      Real cause: parcel-keyed fetches were never cancelled on roam. The main
+//      flow effect only flipped a `cancelled` flag (discarded the RESULT but
+//      left the XHR + its auto-retry running); fetchRidgeSpines/CDL had no
+//      external abort; fetchTerrainAnalysis kept a 10s-delay cold-start retry
+//      loop alive. Abandoned-parcel requests piled up on the shared backend →
+//      contention/cold-start → "warming up"/flow-quiet (a reload fixed it by
+//      tearing down the piled XHRs). Fix: real AbortController per parcel on the
+//      flow/ridge/CDL effects (abort() on cleanup + signal passed through), and
+//      external-signal support + retry-loop bail in fetchRidgeSpines /
+//      fetchTerrainAnalysis. Verified a 22-parcel no-reload roam: peak concurrent
+//      terrain requests = 1, 148 stale requests aborted, layers/sources/heap
+//      flat, flow delivered crisply post-roam. No detection bar changed; terrain
+//      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r15';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
