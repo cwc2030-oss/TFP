@@ -253,6 +253,13 @@ model SavedProperty {
   funnelCount     Int?
   standCount      Int?
   bedAcres        Float?
+  // Real terrain backbone verdict (3-state gate) — same source as map + report
+  backboneState        String?
+  backboneRank         Int?
+  ridgeSpineCount      Int?
+  saddleCrossings      Int?
+  convergenceZoneCount Int?
+  backboneComputedAt   DateTime?
   notes           String?
   shareId         String?  @unique @default(cuid())
   isShared        Boolean  @default(false)

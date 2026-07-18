@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
     name, type, parcels, totalAcres,
     centroidLat, centroidLng,
     terrainScore, primaryMovement,
-    funnelCount, standCount, bedAcres
+    funnelCount, standCount, bedAcres,
+    backboneState, backboneRank, ridgeSpineCount,
+    saddleCrossings, convergenceZoneCount
   } = body;
 
   const saved = await prisma.savedProperty.create({
@@ -23,7 +25,13 @@ export async function POST(req: NextRequest) {
       name, type, parcels, totalAcres,
       centroidLat, centroidLng,
       terrainScore, primaryMovement,
-      funnelCount, standCount, bedAcres
+      funnelCount, standCount, bedAcres,
+      backboneState: backboneState ?? null,
+      backboneRank: backboneRank ?? null,
+      ridgeSpineCount: ridgeSpineCount ?? null,
+      saddleCrossings: saddleCrossings ?? null,
+      convergenceZoneCount: convergenceZoneCount ?? null,
+      backboneComputedAt: backboneState != null ? new Date() : null
     }
   });
 

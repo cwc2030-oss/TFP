@@ -56,6 +56,12 @@ export async function POST(req: NextRequest) {
       funnelCount: source.funnelCount,
       standCount: source.standCount,
       bedAcres: source.bedAcres,
+      backboneState: source.backboneState,
+      backboneRank: source.backboneRank,
+      ridgeSpineCount: source.ridgeSpineCount,
+      saddleCrossings: source.saddleCrossings,
+      convergenceZoneCount: source.convergenceZoneCount,
+      backboneComputedAt: source.backboneComputedAt,
       notes: `Claimed from shared territory by ${source.userId}`
     }
   });

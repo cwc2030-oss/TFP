@@ -3886,6 +3886,27 @@ const archetypeInitializedRef = useRef(false);
     terrainStory?.reliefMeasured === false &&
     terrainStory?.headline !== 'Terrain analysis incomplete';
 
+  // ── Real backbone verdict snapshot (persisted on Save / Share) ──
+  // Single source shared by the map, the Hunt Report AND now the territory share
+  // page + social ScoreCard. Keyed off intelMetrics (the ONE 3-state verdict) so a
+  // saved / shared parcel can never show a different terrain read than /intel did.
+  // Counts already zeroed for non-earned states inside intelMetrics; convergence
+  // mirrors the report block (confirmed-only).
+  const backboneSnapshot = useMemo(() => {
+    const tState = intelMetrics.tState;
+    if (!tState) return null;
+    return {
+      backboneState: tState,
+      backboneRank: tState === 'confirmed' ? 2 : tState === 'marginal' ? 1 : 0,
+      ridgeSpineCount: intelMetrics.ridgeSpineCount,
+      saddleCrossings: intelMetrics.saddleCrossings,
+      convergenceZoneCount:
+        tState === 'confirmed'
+          ? (terrainFlowData?.convergence_zones?.features?.length ?? 0)
+          : 0,
+    };
+  }, [intelMetrics, terrainFlowData]);
+
   // Keep map pin in sync with active decision card (one pin at a time)
   // Single source of truth: visible rank == decisionCardIdx, clamped to available stands.
   useEffect(() => {
@@ -5616,7 +5637,8 @@ const archetypeInitializedRef = useRef(false);
       primaryMovement: currentPrimaryMovement,
       funnelCount: currentFunnelCount,
       standCount: currentStandCount,
-      bedAcres: currentBedAcres
+      bedAcres: currentBedAcres,
+      ...(backboneSnapshot ?? {})
     } : {
       name: activeAddress || 'Saved Parcel',
       type: 'single',
@@ -5632,7 +5654,8 @@ const archetypeInitializedRef = useRef(false);
       primaryMovement: currentPrimaryMovement,
       funnelCount: currentFunnelCount,
       standCount: currentStandCount,
-      bedAcres: currentBedAcres
+      bedAcres: currentBedAcres,
+      ...(backboneSnapshot ?? {})
     };
 
     const res = await fetch('/api/properties/save', {
@@ -5699,7 +5722,8 @@ const archetypeInitializedRef = useRef(false);
         primaryMovement: currentPrimaryMovement,
         funnelCount: currentFunnelCount,
         standCount: currentStandCount,
-        bedAcres: currentBedAcres
+        bedAcres: currentBedAcres,
+        ...(backboneSnapshot ?? {})
       } : {
         name: activeAddress || 'Saved Parcel',
         type: 'single',
@@ -5711,7 +5735,8 @@ const archetypeInitializedRef = useRef(false);
         primaryMovement: currentPrimaryMovement,
         funnelCount: currentFunnelCount,
         standCount: currentStandCount,
-        bedAcres: currentBedAcres
+        bedAcres: currentBedAcres,
+        ...(backboneSnapshot ?? {})
       };
       const saveRes = await fetch('/api/properties/save', {
         method: 'POST',
@@ -19809,8 +19834,10 @@ const archetypeInitializedRef = useRef(false);
         </div>
       </div>
 
-      {/* ========== SCORE CARD MODAL ========== */}
-      {showScoreCard && summary && (
+      {/* ========== TERRAIN VERDICT CARD MODAL ========== */}
+      {/* Social share card now mirrors the ONE 3-state backbone verdict (same source
+          as the map + Hunt Report). No fabricated score / grade / funnel counts. */}
+      {showScoreCard && summary && backboneSnapshot && (
         <ScoreCard
           address={
             territoryMode
@@ -19822,20 +19849,11 @@ const archetypeInitializedRef = useRef(false);
               ? totalTerritoryAcres
               : (parseFloat(activeAcreage || '0') || summary?.analysisAreaAcres || 0)
           }
-          score={summary.topStandScore || 0}
-          grade={
-            (summary.topStandScore >= 90) ? 'A+' :
-            (summary.topStandScore >= 80) ? 'A' :
-            (summary.topStandScore >= 70) ? 'B+' :
-            (summary.topStandScore >= 60) ? 'B' :
-            (summary.topStandScore >= 50) ? 'C+' :
-            (summary.topStandScore >= 40) ? 'C' : 'D'
-          }
-          primaryMovement={terrainStory?.primaryDriver?.label || 'Terrain-driven'}
-          funnelCount={summary.funnelCount || 0}
-          standCount={alignedStands?.length || 0}
-          bedAcres={Math.round((summary.totalBeddingAcres || 0) * 10) / 10}
-          ridgeCount={ridgeSpineData?.ridges_primary?.features?.length ?? 0}
+          backboneState={backboneSnapshot.backboneState}
+          ridgeSpineCount={backboneSnapshot.ridgeSpineCount}
+          saddleCrossings={backboneSnapshot.saddleCrossings}
+          convergenceZoneCount={backboneSnapshot.convergenceZoneCount}
+          primaryMovement={terrainStory?.primaryDriver?.label || undefined}
           onClose={() => setShowScoreCard(false)}
         />
       )}

@@ -30,6 +30,11 @@ export async function GET(
     funnelCount: property.funnelCount,
     standCount: property.standCount,
     bedAcres: property.bedAcres,
+    backboneState: property.backboneState,
+    backboneRank: property.backboneRank,
+    ridgeSpineCount: property.ridgeSpineCount,
+    saddleCrossings: property.saddleCrossings,
+    convergenceZoneCount: property.convergenceZoneCount,
     sharedBy: property.user.name || property.user.company || 'Terra Firma User',
     createdAt: property.createdAt
   });

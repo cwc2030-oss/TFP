@@ -4,9 +4,10 @@ import { Suspense, useEffect, useState, useRef } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { MapPin, TreePine, Crosshair, Layers, ArrowRight, Share2, Loader2, ExternalLink, Star } from 'lucide-react';
+import { MapPin, TreePine, ArrowRight, Share2, Loader2, ExternalLink, Star, Mountain, Route, GitMerge } from 'lucide-react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import type { BackboneState } from '@/lib/listing-backbone';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,12 @@ interface TerritoryData {
   funnelCount: number | null;
   standCount: number | null;
   bedAcres: number | null;
+  // Real 3-state backbone verdict (same source as the map + Hunt Report)
+  backboneState: BackboneState | null;
+  backboneRank: number | null;
+  ridgeSpineCount: number | null;
+  saddleCrossings: number | null;
+  convergenceZoneCount: number | null;
   sharedBy: string;
   createdAt: string;
 }
@@ -253,10 +260,35 @@ function SharedTerritoryContent() {
     );
   }
 
-  const scoreColor = (territory.terrainScore ?? 0) >= 80 ? 'text-green-400' :
-    (territory.terrainScore ?? 0) >= 60 ? 'text-yellow-400' : 'text-red-400';
-
   const onxUrl = `https://app.onxmaps.com/hunt/map/14/${territory.centroidLat}/${territory.centroidLng}`;
+
+  // Real 3-state backbone verdict (same read the map + Hunt Report use).
+  const bbState = territory.backboneState;
+  const verdict = bbState
+    ? {
+        confirmed: {
+          label: 'Confirmed Backbone',
+          headline: 'Real terrain backbone confirmed',
+          sub: 'Ridge structure, saddle crossings and convergence detected — terrain-driven movement.',
+          accent: 'text-emerald-400',
+          ring: 'border-emerald-700/50 bg-emerald-950/30',
+        },
+        marginal: {
+          label: 'Marginal Backbone',
+          headline: 'Some structure, not a full backbone',
+          sub: 'A modest spine reads here, but the terrain does not fully commit deer to it.',
+          accent: 'text-amber-400',
+          ring: 'border-amber-700/50 bg-amber-950/30',
+        },
+        flat: {
+          label: 'Flat / Low-Relief',
+          headline: 'No confirmed terrain backbone',
+          sub: 'Gentle, low-relief ground — movement here is dispersed, not funneled. Read the food, cover and sign.',
+          accent: 'text-stone-300',
+          ring: 'border-stone-700/50 bg-stone-900/40',
+        },
+      }[bbState]
+    : null;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -299,30 +331,38 @@ function SharedTerritoryContent() {
         />
       </div>
 
-      {/* Stats */}
-      {territory.terrainScore !== null && (
+      {/* Terrain Backbone verdict — the real 3-state read (map + report source) */}
+      {verdict && (
         <div className="max-w-6xl mx-auto px-4 pb-8">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatCard
-              icon={<Crosshair className="w-5 h-5" />}
-              label="Terrain Score"
-              value={<span className={scoreColor}>{territory.terrainScore}/100</span>}
-            />
-            <StatCard
-              icon={<Layers className="w-5 h-5" />}
-              label="Funnels"
-              value={territory.funnelCount ?? '—'}
-            />
-            <StatCard
-              icon={<MapPin className="w-5 h-5" />}
-              label="Intercept Sites"
-              value={territory.standCount ?? '—'}
-            />
-            <StatCard
-              icon={<TreePine className="w-5 h-5" />}
-              label="Bedding Acres"
-              value={territory.bedAcres != null ? territory.bedAcres.toFixed(1) : '—'}
-            />
+          <div className={`rounded-xl border p-5 ${verdict.ring}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <Mountain className={`w-5 h-5 ${verdict.accent}`} />
+              <span className={`text-sm font-bold tracking-wide uppercase ${verdict.accent}`}>
+                {verdict.label}
+              </span>
+            </div>
+            <p className="text-lg font-semibold text-white">{verdict.headline}</p>
+            <p className="text-sm text-gray-400 mt-1 max-w-2xl">{verdict.sub}</p>
+
+            {bbState !== 'flat' && (
+              <div className="grid grid-cols-3 gap-3 mt-4">
+                <StatCard
+                  icon={<Mountain className="w-5 h-5" />}
+                  label="Ridge Spines"
+                  value={territory.ridgeSpineCount ?? 0}
+                />
+                <StatCard
+                  icon={<Route className="w-5 h-5" />}
+                  label="Saddle Crossings"
+                  value={territory.saddleCrossings ?? 0}
+                />
+                <StatCard
+                  icon={<GitMerge className="w-5 h-5" />}
+                  label="Convergence Zones"
+                  value={territory.convergenceZoneCount ?? 0}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -343,29 +383,11 @@ function SharedTerritoryContent() {
         </div>
       </div>
 
-      {/* Action Buttons: onX → Claim → Pro Nudge */}
+      {/* Action Buttons: Claim (primary) → Pro Nudge → onX (quiet secondary) */}
       <div className="max-w-6xl mx-auto px-4 pb-8">
         <div className="flex flex-col gap-3 max-w-md mx-auto">
 
-          {/* Button 1 — onX (orange) */}
-          <a
-            href={onxUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2.5 w-full px-5 py-3 rounded-xl
-                       font-semibold text-white transition-all duration-200
-                       shadow-lg shadow-orange-900/20 hover:shadow-orange-900/40"
-            style={{ backgroundColor: '#FF6B00' }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e05f00')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF6B00')}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/onx-icon.png" alt="" className="h-5 w-5 rounded-sm" />
-            <span>Open Territory in onX Hunt</span>
-            <ExternalLink className="w-4 h-4 opacity-70" />
-          </a>
-
-          {/* Button 2 — Claim (amber) */}
+          {/* Primary — Claim (amber) */}
           {!claimed ? (
             <div>
               <button
@@ -410,6 +432,22 @@ function SharedTerritoryContent() {
               </div>
             </div>
           )}
+
+          {/* Secondary (quiet) — open the same coordinates in onX. This leaves TerraFirma
+              and carries none of our terrain read, so it stays a low-emphasis text link. */}
+          <a
+            href={onxUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg
+                       text-sm font-medium text-gray-400 hover:text-gray-200
+                       border border-gray-800 hover:border-gray-700 bg-transparent transition-colors"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/onx-icon.png" alt="" className="h-4 w-4 rounded-sm opacity-80" />
+            <span>View location in onX</span>
+            <ExternalLink className="w-3.5 h-3.5 opacity-60" />
+          </a>
         </div>
       </div>
 

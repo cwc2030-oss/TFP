@@ -183,7 +183,28 @@ export const BUILD_DATE = 'Jul 18';
 //      signal (compute succeeded + shared verdict flat + reliefMeasured false);
 //      confirmed & marginal states are untouched. UI/render-only — no detection
 //      bar changed, terrain cache untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r16';
+// r17: gate-real on the last two v1 surfaces that missed the honesty sweep —
+//      the TERRITORY SHARE PAGE (app/territory/[shareId]) and the social
+//      SCORECARD. Both still ran the retired v1 fabrications: a color-graded
+//      terrainScore/100, a "Funnels" count, "Intercept Sites" (=stand count),
+//      "Bedding Acres," a letter grade badge, and "My land scored X/100" share
+//      copy — none of which read differently across flat/marginal/confirmed.
+//      All pulled. Both surfaces now show the SAME 3-state backbone verdict the
+//      map + Hunt Report use (confirmed / marginal / flat) with the real
+//      ridge-spine, saddle-crossing and convergence counts (zeroed on unearned
+//      states). Persisted: SavedProperty gained backboneState/backboneRank/
+//      ridgeSpineCount/saddleCrossings/convergenceZoneCount/backboneComputedAt,
+//      written on Save + Share (one backboneSnapshot built from intelMetrics),
+//      copied on Claim, returned by the share API; all 12 live shared rows were
+//      backfilled through the same terrain-flow path (10 confirmed, 2 flat —
+//      incl. a "Sample Property" that used to fake a 90/100). Verified flat vs
+//      confirmed read differently end-to-end via the share API. Also relabeled
+//      the onX button "Open Territory in onX Hunt" -> "View location in onX" and
+//      demoted it from the bright-orange PRIMARY to a quiet secondary link
+//      below Claim (it leaves TFP carrying none of our terrain read). Render +
+//      persistence only; no detection bar changed, terrain cache untouched
+//      (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r17';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
