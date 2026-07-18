@@ -24,6 +24,7 @@ import {
   stripForPublic,
   gradeFromScore,
 } from '@/lib/listings';
+import { backboneStateLabel } from '@/lib/listing-backbone';
 import { lookupCentroid } from '@/lib/county-centroids';
 import { isMarketplaceOpen, COMING_SOON_PATH } from '@/lib/marketplace-gate';
 import GradeBadge from './_components/grade-badge';
@@ -51,6 +52,7 @@ async function loadPublished(id: string) {
       county: true,
       acres: true,
       terrainScore: true,
+      backboneState: true,
       primaryMovement: true,
       bedAcres: true,
       funnelCount: true,
@@ -80,10 +82,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     county: l.county,
     state: l.state,
   });
-  const grade = gradeFromScore(l.terrainScore);
+  const backboneLabel = backboneStateLabel((l as any).backboneState ?? null);
   const description = l.description
     ? l.description.slice(0, 240)
-    : `Terrain grade ${grade} hunt-lease in ${l.county ?? ''}${l.county ? ', ' : ''}${
+    : `${backboneLabel} hunt-lease in ${l.county ?? ''}${l.county ? ', ' : ''}${
         l.state ?? ''
       }. Anchored to a Terra Firma Partners hunt-report.`;
   const ogImage = l.photos?.[0];
@@ -131,7 +133,7 @@ export default async function PublicListingDetail({ params }: Props) {
     state: listing.state,
     county: listing.county,
     acres: listing.acres,
-    terrainScore: listing.terrainScore,
+    backboneState: listing.backboneState,
     leaseType: listing.leaseType,
   })}-${listing.id}`;
   if (params.slug !== canonical) {
@@ -224,7 +226,7 @@ export default async function PublicListingDetail({ params }: Props) {
             </div>
             {!HIDE_FAB && (
               <div className="shrink-0">
-                <GradeBadge score={safe.terrainScore ?? null} size="lg" />
+                <GradeBadge backboneState={(safe as any).backboneState ?? null} size="lg" />
               </div>
             )}
           </div>

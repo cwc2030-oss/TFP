@@ -4,7 +4,11 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { US_STATES } from '@/app/_landing-shared/states';
 
-const GRADE_OPTIONS = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+'] as const;
+// Real terrain verdict floor (replaces the retired v1 letter-grade filter).
+const BACKBONE_OPTIONS = [
+  { value: 'confirmed', label: 'Confirmed backbone' },
+  { value: 'marginal', label: 'Marginal or better' },
+] as const;
 const LEASE_TYPE_OPTIONS = [
   'ANNUAL',
   'SEASON_FULL',
@@ -16,7 +20,7 @@ const LEASE_TYPE_OPTIONS = [
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest' },
   { value: 'deerFlow', label: 'Deer flow (high → low)' },
-  { value: 'highScore', label: 'Highest grade' },
+  { value: 'backbone', label: 'Strongest backbone' },
   { value: 'lowPrice', label: 'Lowest price' },
   { value: 'largestAcres', label: 'Largest acres' },
 ] as const;
@@ -35,7 +39,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState(params?.get('state') ?? '');
   const [county, setCounty] = useState(params?.get('county') ?? '');
-  const [grade, setGrade] = useState(params?.get('grade') ?? '');
+  const [backbone, setBackbone] = useState(params?.get('backbone') ?? '');
   const [leaseType, setLeaseType] = useState(params?.get('leaseType') ?? '');
   const [acresMin, setAcresMin] = useState(params?.get('acresMin') ?? '');
   const [acresMax, setAcresMax] = useState(params?.get('acresMax') ?? '');
@@ -48,7 +52,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
     const next = new URLSearchParams();
     if (state) next.set('state', state);
     if (county.trim()) next.set('county', county.trim());
-    if (grade) next.set('grade', grade);
+    if (backbone) next.set('backbone', backbone);
     if (leaseType) next.set('leaseType', leaseType);
     if (acresMin) next.set('acresMin', acresMin);
     if (acresMax) next.set('acresMax', acresMax);
@@ -66,7 +70,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
   function reset() {
     setState('');
     setCounty('');
-    setGrade('');
+    setBackbone('');
     setLeaseType('');
     setAcresMin('');
     setAcresMax('');
@@ -85,7 +89,7 @@ export default function BrowseFilterBar({ onApply }: Props) {
     onApply(next);
   }
 
-  const activeCount = [state, county, grade, leaseType, acresMin, acresMax, priceMin, priceMax, flowMin].filter(Boolean).length;
+  const activeCount = [state, county, backbone, leaseType, acresMin, acresMax, priceMin, priceMax, flowMin].filter(Boolean).length;
 
   const selectClass =
     'w-full bg-stone-950 border border-stone-700 rounded-md px-2 py-1.5 text-stone-100 text-sm focus:border-emerald-500 focus:outline-none';
@@ -150,12 +154,12 @@ export default function BrowseFilterBar({ onApply }: Props) {
               />
             </div>
             <div>
-              <label className="block text-xs text-stone-500 mb-1 uppercase tracking-wide">Min grade</label>
-              <select value={grade} onChange={(e) => setGrade(e.target.value)} className={selectClass}>
+              <label className="block text-xs text-stone-500 mb-1 uppercase tracking-wide">Terrain backbone</label>
+              <select value={backbone} onChange={(e) => setBackbone(e.target.value)} className={selectClass}>
                 <option value="">Any</option>
-                {GRADE_OPTIONS.map((g) => (
-                  <option key={g} value={g}>
-                    {g} or better
+                {BACKBONE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </select>

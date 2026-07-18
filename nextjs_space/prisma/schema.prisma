@@ -317,6 +317,19 @@ model Listing {
   // OPSEC-safe field name: does NOT match /lat|lng|long|geom|polygon|address|coord/i
   terrainFlowSnapshot      String?         @db.Text
 
+  // ── Phase 3: REAL backbone verdict (the honest engine's determination) ──
+  // Populated at publish time and by the one-time backfill from the SAME
+  // shared verdict the intel readout consults (metadata.backbone). Browse
+  // sort/filter and the URL slug rank on THESE fields, never on terrainScore
+  // (the retired v1 fabricated score). All nullable: a listing with no real
+  // verdict yet (cache/compute miss) ranks as unranked (lowest).
+  backboneState            String?         // 'confirmed' | 'marginal' | 'flat'
+  backboneRank             Int?            // sortable: confirmed=2, marginal=1, flat=0; null = unranked
+  ridgeSpineCount          Int?            // prominence-qualified traced ridge lines (metadata.backbone.networkLines)
+  saddleCrossings          Int?            // saddle nodes on the backbone (ridge_saddle_count)
+  convergenceZoneCount     Int?            // real convergence zones (metadata.stats.convergence_count)
+  backboneComputedAt       DateTime?       // provenance: when the real verdict was last computed
+
   // Contact
   contactMethod            ContactMethod?
   contactEmail             String?
@@ -334,6 +347,7 @@ model Listing {
 
   @@index([ownerUserId, status])
   @@index([state, status])
+  @@index([status, backboneRank])
 }
 
 enum ListingStatus {

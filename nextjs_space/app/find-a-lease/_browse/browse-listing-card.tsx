@@ -11,6 +11,7 @@ interface Listing {
   county: string | null;
   acres: number | null;
   terrainScore: number | null;
+  backboneState?: string | null;
   primaryMovement: string | null;
   leaseType: string | null;
   askingPriceMin: number | null;
@@ -63,7 +64,7 @@ export default function BrowseListingCard({ listing }: { listing: Listing }) {
     state: listing.state,
     county: listing.county,
     acres: listing.acres,
-    terrainScore: listing.terrainScore,
+    backboneState: listing.backboneState,
     leaseType: listing.leaseType as any,
   })}-${listing.id}`;
   const grade = gradeFromScore(listing.terrainScore);

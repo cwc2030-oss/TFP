@@ -137,7 +137,15 @@ export const BUILD_DATE = 'Jul 17';
 //      Listing card/detail fab numbers stay hidden (no per-listing backbone
 //      field yet); grade filter/sort/slug still rank on the v1 score — flagged
 //      as a follow-up. UI/render-only — terrain cache untouched.
-export const BUILD_REV = 'r12';
+//  r13: Closed the last tendril — listing RANKING now runs on the REAL backbone
+//      verdict, not the v1 score. Added per-listing backbone fields
+//      (backboneState/backboneRank/ridgeSpineCount/saddleCrossings/
+//      convergenceZoneCount/backboneComputedAt), backfilled all published
+//      listings via the honest engine, switched browse sort/filter to
+//      backboneRank (nulls last = unranked), publish path now computes+stores
+//      the verdict, and the URL slug + detail badge + meta description carry the
+//      real state (dropped the v1 letter grade). Terrain cache untouched.
+export const BUILD_REV = 'r13';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

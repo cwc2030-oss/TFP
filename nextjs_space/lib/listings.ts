@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import type { Listing, SavedProperty } from '@prisma/client';
+import { backboneStateSlug } from '@/lib/listing-backbone';
 
 // ---------------------------------------------------------------------------
 // Wizard step typing
@@ -258,13 +259,26 @@ export function gradeFromScore(score: number | null | undefined): string {
 // Build a kebab slug from listing snapshot fields. Used as the public URL
 // path: /listings/<slug>-<id>. The slug is purely cosmetic / SEO; lookup
 // always happens by id.
-export function listingSlug(l: Pick<Listing, 'state' | 'county' | 'acres' | 'terrainScore' | 'leaseType'>): string {
-  const grade = gradeFromScore(l.terrainScore).toLowerCase().replace('+', '-plus').replace('\u2014', 'na');
+//
+// Phase 3 honesty: the URL used to embed gradeFromScore(terrainScore) — the
+// retired v1 fabricated letter. Per the "base it on the real verdict or drop
+// the letter" call, the slug now carries the REAL backbone state when it is
+// known (confirmed / marginal / flat) and simply omits any quality token
+// otherwise. It NEVER derives a token from terrainScore. `terrainScore` stays
+// in the accepted type only for back-compat with existing call sites that still
+// pass it; it is intentionally unused.
+export function listingSlug(
+  l: Pick<Listing, 'state' | 'county' | 'acres' | 'leaseType'> & {
+    terrainScore?: Listing['terrainScore'];
+    backboneState?: string | null;
+  },
+): string {
   const parts: string[] = [];
   if (l.state) parts.push(l.state.toLowerCase());
   if (l.county) parts.push(l.county.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
   if (l.acres != null) parts.push(`${Math.round(l.acres)}ac`);
-  if (grade && grade !== 'na') parts.push(grade);
+  const stateSlug = backboneStateSlug(l.backboneState as any);
+  if (stateSlug) parts.push(stateSlug);
   if (l.leaseType) parts.push(l.leaseType.toLowerCase().replace(/_/g, '-'));
   const cleaned = parts.filter(Boolean).join('-');
   return cleaned || 'listing';

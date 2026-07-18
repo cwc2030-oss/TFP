@@ -12,30 +12,42 @@
  *   acresMax      number
  *   priceMin      number  (askingPriceMin >=)
  *   priceMax      number  (askingPriceMax <=)
- *   grade         letter grade — maps to minimum terrainScore
+ *   backbone      real terrain verdict floor — 'confirmed' | 'marginal'
+ *                 (ranks/filters on the honest backbone verdict, NOT the
+ *                 retired v1 terrainScore). Legacy `grade` param is ignored.
  *   leaseType     enum
  *   season        string — matches any element in seasonAvailability[]
  *   flowMin       1–5 (minimum flow segments)
- *   sort          newest | highScore | lowPrice | largestAcres | deerFlow
+ *   sort          newest | backbone | lowPrice | largestAcres | deerFlow
+ *                 ('highScore' accepted as a legacy alias for 'backbone')
  *   cursor        id of last listing from previous page
  *   limit         1–48 (default 24)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { stripForPublic, gradeMinScore, flowSegments } from '@/lib/listings';
+import { stripForPublic, flowSegments } from '@/lib/listings';
+import { deriveBackboneRank, type BackboneState } from '@/lib/listing-backbone';
 import { isMarketplaceOpen } from '@/lib/marketplace-gate';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_SORTS = ['newest', 'highScore', 'lowPrice', 'largestAcres', 'deerFlow'] as const;
+// 'highScore' is kept as an accepted legacy alias so old links/clients keep
+// working, but it now ranks on the REAL backbone verdict, never terrainScore.
+const ALLOWED_SORTS = ['newest', 'backbone', 'highScore', 'lowPrice', 'largestAcres', 'deerFlow'] as const;
 type SortKey = (typeof ALLOWED_SORTS)[number];
 
 function orderByClause(sort: SortKey) {
   switch (sort) {
+    case 'backbone':
     case 'highScore':
-      return [{ terrainScore: 'desc' as const }, { publishedAt: 'desc' as const }];
+      // Rank on the honest verdict. Unranked (null) listings sort last so a
+      // listing with no real verdict never floats above a confirmed one.
+      return [
+        { backboneRank: { sort: 'desc' as const, nulls: 'last' as const } },
+        { publishedAt: 'desc' as const },
+      ];
     case 'lowPrice':
       return [{ askingPriceMin: 'asc' as const }, { publishedAt: 'desc' as const }];
     case 'largestAcres':
@@ -55,6 +67,11 @@ const BROWSE_SELECT = {
   county: true,
   acres: true,
   terrainScore: true,
+  backboneState: true,
+  backboneRank: true,
+  ridgeSpineCount: true,
+  saddleCrossings: true,
+  convergenceZoneCount: true,
   primaryMovement: true,
   leaseType: true,
   askingPriceMin: true,
@@ -87,7 +104,9 @@ export async function GET(req: NextRequest) {
   const acresMax = Number(sp.get('acresMax')) || undefined;
   const priceMin = Number(sp.get('priceMin')) || undefined;
   const priceMax = Number(sp.get('priceMax')) || undefined;
-  const gradeFilter = sp.get('grade') || undefined;
+  // Real-verdict floor. 'grade' (the retired v1 letter filter) is intentionally
+  // NOT read here — no browse control may ever rank/filter on terrainScore.
+  const backboneFilter = sp.get('backbone')?.toLowerCase() || undefined;
   const leaseType = sp.get('leaseType') || undefined;
   const season = sp.get('season') || undefined;
   const flowMinRaw = sp.get('flowMin') || undefined;
@@ -120,10 +139,10 @@ export async function GET(req: NextRequest) {
   if (priceMax != null) {
     where.askingPriceMax = { lte: priceMax };
   }
-  if (gradeFilter) {
-    const minScore = gradeMinScore(gradeFilter);
-    if (minScore > 0) {
-      where.terrainScore = { gte: minScore };
+  if (backboneFilter === 'confirmed' || backboneFilter === 'marginal') {
+    const minRank = deriveBackboneRank(backboneFilter as BackboneState);
+    if (minRank != null) {
+      where.backboneRank = { gte: minRank };
     }
   }
   if (leaseType) {

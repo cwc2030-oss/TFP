@@ -13,6 +13,7 @@ interface Listing {
   county: string | null;
   acres: number | null;
   terrainScore: number | null;
+  backboneState?: string | null;
   primaryMovement: string | null;
   leaseType: string | null;
   askingPriceMin: number | null;

@@ -23,6 +23,7 @@ import { authOptions } from '@/lib/auth-options';
 import { snapshotFromSavedProperty, validateForPublish, computeFlowIndex } from '@/lib/listings';
 import { buildFlowSnapshot } from '@/lib/listing-flow-snapshot';
 import { ensureAutoListingImage } from '@/lib/parcel-listing-image';
+import { computeListingBackbone } from '@/lib/listing-backbone';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,11 +123,32 @@ export async function POST(
     console.warn('[Publish] Flow snapshot failed (non-fatal):', e);
   }
 
+  // Compute the REAL backbone verdict (state + ridge/saddle/convergence) from
+  // the honest engine so browse ranking / filters / URLs run on reality, not
+  // the legacy v1 terrainScore. Best-effort: on failure the fields stay null
+  // (the listing sorts last as "unranked" and the one-time backfill can retry).
+  let backboneVerdict: Awaited<ReturnType<typeof computeListingBackbone>> = null;
+  try {
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    backboneVerdict = await computeListingBackbone(listing.savedProperty, baseUrl, {
+      parcelId: `publish_${listing.id}`,
+    });
+  } catch (e) {
+    console.warn('[Publish] Backbone verdict failed (non-fatal):', e);
+  }
+
   const auto = autoApproveEnabled();
   const now = new Date();
   const updated = await prisma.listing.update({
     where: { id: listing.id },
     data: {
+      // Real backbone verdict (null if compute failed → sorts last, unranked)
+      backboneState: backboneVerdict?.backboneState ?? null,
+      backboneRank: backboneVerdict?.backboneRank ?? null,
+      ridgeSpineCount: backboneVerdict?.ridgeSpineCount ?? null,
+      saddleCrossings: backboneVerdict?.saddleCrossings ?? null,
+      convergenceZoneCount: backboneVerdict?.convergenceZoneCount ?? null,
+      backboneComputedAt: backboneVerdict ? now : null,
       // Snapshot refresh
       acres: snap.acres,
       terrainScore: snap.terrainScore,
