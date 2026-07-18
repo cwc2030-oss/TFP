@@ -83,6 +83,7 @@ import AnalysisQualityBadge, { AnalysisQualityInline } from '@/components/terrai
 import ParcelLookupCard, { ParcelLookupLoading, ParcelLookupError, RandomParcelPicker, type LookupParcel } from '@/components/terrain/parcel-lookup-card';
 import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type QAEntry, type QARating } from '@/components/terrain/qa-scorecard';
 import TerrainStoryPanel, { TerrainStoryExportLegend, StructuralDriversGrid } from '@/components/terrain/terrain-story-panel';
+import FlatTerrainNotice from '@/components/terrain/flat-terrain-notice';
 import TerrainLoadingBar from '@/components/terrain/terrain-loading-bar';
 import { generateTerrainStory, computeStructuralDrivers, type TerrainStorySummary } from '@/lib/terrain-story';
 import HuntingPotentialCard, { computeHuntingPotential, type HuntingPotentialScore } from '@/components/terrain/hunting-potential-card';
@@ -3866,6 +3867,24 @@ const archetypeInitializedRef = useRef(false);
     const saddleCrossings = tState === 'confirmed' ? rawSaddles : 0;
     return { tState, ridgeSpineCount, saddleCrossings };
   }, [terrainStory?.terrainState, ridgeSpineData, summary]);
+
+  // ── Genuine-FLAT gate (consolidated empty state) ──
+  // TRUE only when the flow compute SUCCEEDED (real data present, no error, not
+  // loading) and the ONE shared backbone verdict is genuinely flat low-relief.
+  // This is the single signal that swaps the three scattered "nothing here"
+  // fragments (Deer Flow "not detected", the Terrain Story headline, and the four
+  // 0% driver bars) for one dignified FlatTerrainNotice. It excludes:
+  //   • marginal (reliefMeasured === true) and confirmed — real structure
+  //   • loading / mainFlowError / scopeFlowError — a choke is not a flat parcel
+  //   • "Terrain analysis incomplete" (getEmptyStory) — analysis did not finish
+  const genuineFlat =
+    !terrainFlowLoading &&
+    !mainFlowError &&
+    !scopeFlowError &&
+    !!terrainFlowData &&
+    terrainStory?.terrainState === 'flat' &&
+    terrainStory?.reliefMeasured === false &&
+    terrainStory?.headline !== 'Terrain analysis incomplete';
 
   // Keep map pin in sync with active decision card (one pin at a time)
   // Single source of truth: visible rank == decisionCardIdx, clamped to available stands.
@@ -18870,8 +18889,11 @@ const archetypeInitializedRef = useRef(false);
                 </div>
 
                 
-                {/* Expanded details when any flow toggle is on */}
-                {(anyFlowTierOn || flowVisibility.convergenceZones) && (
+                {/* Expanded details when any flow toggle is on. Suppressed on a
+                    genuinely-flat verdict: its only flat output is now null (the
+                    consolidated FlatTerrainNotice carries the statement), so this
+                    avoids leaving an empty padded container behind. */}
+                {(anyFlowTierOn || flowVisibility.convergenceZones) && !genuineFlat && (
                   <div className="mt-2 space-y-2 px-1">
                     {(() => {
                       const greenCount = flowTierCounts.green;
@@ -19018,6 +19040,13 @@ const archetypeInitializedRef = useRef(false);
                           </div>
                         );
                       }
+                      // Genuine low-relief flat: the consolidated FlatTerrainNotice
+                      // below (in the Terrain Story slot) now carries the ONE honest
+                      // statement, so this panel stays quiet rather than repeating a
+                      // second "not detected" fragment for the same verdict.
+                      if (genuineFlat) {
+                        return null;
+                      }
                       return (
                         <div className="text-stone-500 bg-stone-800/30 rounded p-2">
                           <p className="italic text-[10px]">Not detected on this parcel</p>
@@ -19033,7 +19062,15 @@ const archetypeInitializedRef = useRef(false);
 
 
               {/* ========== TERRAIN STORY PANEL (Secondary detail) ========== */}
-              {(terrainStory || terrainFlowLoading) && !exportMode && (
+              {/* Genuine low-relief flat -> ONE consolidated, dignified statement.
+                  Replaces the compact Terrain Story panel (its "gentle low-relief"
+                  headline + the four 0% driver bars) so the flat verdict speaks
+                  once, in its own lane. Confirmed / marginal keep the full panel. */}
+              {genuineFlat && !exportMode ? (
+                <div className="p-3 border-b border-white/[0.06]">
+                  <FlatTerrainNotice />
+                </div>
+              ) : (terrainStory || terrainFlowLoading) && !exportMode ? (
                 <div className="p-3 border-b border-white/[0.06]">
                   <TerrainStoryPanel 
                     story={terrainStory}
@@ -19043,7 +19080,7 @@ const archetypeInitializedRef = useRef(false);
                     compact={true}
                   />
                 </div>
-              )}
+              ) : null}
 
               {/* Terrain Rating panel removed — data (qaBrokerScore) still computed for export/tooltips */}
 

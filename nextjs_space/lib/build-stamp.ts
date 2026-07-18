@@ -170,7 +170,20 @@ export const BUILD_DATE = 'Jul 18';
 //      terrain requests = 1, 148 stale requests aborted, layers/sources/heap
 //      flat, flow delivered crisply post-roam. No detection bar changed; terrain
 //      cache untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r15';
+// r16: consolidated FLAT empty state. The three scattered "nothing here"
+//      fragments that used to fire together for a genuinely-flat verdict — the
+//      Deer Flow panel's "Not detected on this parcel / too flat or uniform,"
+//      the Terrain Story headline "Gentle, low-relief terrain," and the four 0%
+//      structural-driver bars — are replaced by ONE dignified statement
+//      (components/terrain/flat-terrain-notice.tsx): "No terrain-driven
+//      movement — dispersed, not funneled — hunt food/cover/sign." It states
+//      what the tool sees (no terrain funneling) and stays in its lane: never
+//      "unhuntable," never a verdict on the land's hunting value, because the
+//      tool reads terrain, not food/cover/deer. Gated on a single genuineFlat
+//      signal (compute succeeded + shared verdict flat + reliefMeasured false);
+//      confirmed & marginal states are untouched. UI/render-only — no detection
+//      bar changed, terrain cache untouched (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r16';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
