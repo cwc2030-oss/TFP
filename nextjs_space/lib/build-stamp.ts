@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 17';
+export const BUILD_DATE = 'Jul 18';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -145,7 +145,16 @@ export const BUILD_DATE = 'Jul 17';
 //      backboneRank (nulls last = unranked), publish path now computes+stores
 //      the verdict, and the URL slug + detail badge + meta description carry the
 //      real state (dropped the v1 letter grade). Terrain cache untouched.
-export const BUILD_REV = 'r13';
+// r14: flow↔verdict unification. (1) One window — single-parcel flow display
+//      clips to the SAME A-300 neighborhood ring the backbone verdict is
+//      computed on (was the tiny deed → Jackson "flow empty / verdict
+//      Confirmed"). (2) One shared state — the Hunt Zone scope-move path now
+//      regenerates the verdict/story from the SAME response it draws flow from
+//      (was flow-only → Jefferson frozen-flat story). (3) failure ≠ flat across
+//      panels — "too flat" only shows when compute succeeded AND the verdict is
+//      genuinely flat; never on a failed compute, never when the verdict reads
+//      Confirmed/Marginal. No detection bar changed; terrain cache untouched.
+export const BUILD_REV = 'r14';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

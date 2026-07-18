@@ -7535,6 +7535,23 @@ const archetypeInitializedRef = useRef(false);
       setScopeFlowError(null);
       setTerrainFlowData(payload);
       terrainFlowRawRef.current = payload;
+      // Fix #2 (one shared state): regenerate the verdict/story from the SAME
+      // scope response every time the flow layer moves. Before this, the scope
+      // path updated flow only and the story stayed frozen at the prior
+      // position (Jefferson: flow flips while story sits at flat 0/0). Reads
+      // the stamped verdict carried in payload.metadata.backbone.
+      try {
+        const storyAcreage = qaParcel?.acreage
+          || (parcelPolygon?.properties as any)?.ll_gisacre
+          || (parcelPolygon?.properties as any)?.acreage
+          || undefined;
+        const storyAddress = qaParcel?.address || address || undefined;
+        const scopeStory = generateTerrainStory(payload, storyAcreage, storyAddress, ridgeSpineDataRef.current || ridgeSpineData);
+        setTerrainStory(scopeStory);
+        console.log(`[HuntZoneFlow] Story regenerated (${srcLabel}) → ${scopeStory.terrainState} — ${scopeStory.headline}`);
+      } catch (storyErr) {
+        console.warn('[HuntZoneFlow] scope story regen failed', storyErr);
+      }
       console.log(`[HuntZoneFlow] Applied ${srcLabel} flow for`, key, {
         primary: payload?.flow_primary?.features?.length ?? 0,
         secondary: payload?.flow_secondary?.features?.length ?? 0,
@@ -7549,6 +7566,10 @@ const archetypeInitializedRef = useRef(false);
       console.warn('[HuntZoneFlow] scope compute failed —', reason, 'for', key);
       setTerrainFlowData(null);
       terrainFlowRawRef.current = null;
+      // Fix #3 (failure ≠ flat): clear the verdict/story too, so a stale
+      // Confirmed/flat reading from the previous scope never lingers over a
+      // FAILED compute. The retry banner (not a flat story) is the honest UI.
+      setTerrainStory(null);
       setScopeFlowError({ lng, lat });
     };
 
@@ -7560,8 +7581,12 @@ const archetypeInitializedRef = useRef(false);
       setTerrainFlowLoading(true);
       try {
         // 1) Session memory cache — truly instant, no network.
+        // Self-heal: require the stamped verdict on any cached payload. Legacy
+        // scope-cache entries predate Fix #2 and lack metadata.backbone; treat
+        // those as a MISS so we recompute natively and re-cache WITH the
+        // verdict (guaranteeing flow+story derive from the same response).
         const mem = huntZoneFlowCacheRef.current.get(key);
-        if (mem) {
+        if (mem && (mem as any)?.metadata?.backbone) {
           // Fire-and-forget server GET so the cache hit still registers in
           // /admin/usage, without blocking the instant memory return.
           fetch(`/api/terrain-cache?parcelIds=${encodeURIComponent(key)}`, { cache: 'no-store' }).catch(() => {});
@@ -7575,7 +7600,7 @@ const archetypeInitializedRef = useRef(false);
           if (!cancelled && resp.ok) {
             const json = await resp.json();
             const hit = json?.results?.[key]?.terrainFlowData;
-            if (hit) {
+            if (hit && (hit as any)?.metadata?.backbone) {
               huntZoneFlowCacheRef.current.set(key, hit);
               applyFlow(hit, 'persistent-cache');
               return;
@@ -7640,6 +7665,12 @@ const archetypeInitializedRef = useRef(false);
               mode: d.metadata.mode,
               dem_source: d.metadata.dem_source,
               fallback_reason: d.metadata.fallback_reason,
+              // Fix #2 (one shared analysis): carry the SAME stamped backbone
+              // verdict + stats the story reads, so the scope-move path can
+              // regenerate the verdict/story from this exact response instead
+              // of leaving the story frozen at the previous position.
+              backbone: d.metadata.backbone,
+              stats: d.metadata.stats,
             },
           };
           huntZoneFlowCacheRef.current.set(key, payload);
@@ -9925,21 +9956,6 @@ const archetypeInitializedRef = useRef(false);
         };
       };
 
-      // v3.9.3: Clip display lines to parcel + 50m buffer (terrain brain still uses full 800m context)
-      // In territory mode with >1 parcels, use merged territory polygon as clip boundary
-      let clipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-      if (huntZoneCenterOverride && huntZoneRingGeomRef.current) {
-        // Piece 4: a dragged Hunt Zone scopes display flow to the 300-ac ring the
-        // native compute was run for — not the whole parcel — so what renders is
-        // exactly the circle's native flow.
-        clipGeom = huntZoneRingGeomRef.current as GeoJSON.Polygon;
-      } else if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
-        const merged = mergeParcelPolygons(territoryParcelsRef.current);
-        clipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-      } else {
-        clipGeom = parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
-      }
-
       // Containment: build the 300-ac Hunt Zone ring for THIS parcel (same primitives
       // as the ring draw — override-or-centroid center + acresToRadiusMeters(MAX_ANALYSIS_ACRES),
       // turf.circle steps:64/units:'meters'). On a >300-ac parcel the undragged clipGeom is
@@ -9948,6 +9964,9 @@ const archetypeInitializedRef = useRef(false);
       // On a <=300-ac parcel the ring is larger than the parcel, so this is a no-op there.
       // Built locally (not read from huntZoneRingGeomRef) to avoid a ref-timing race with the
       // main source effect.
+      // NOTE (Fix #1): built ABOVE the clipGeom selection so the single-parcel
+      // display window can be floored to this SAME A-300 neighborhood ring the
+      // backbone verdict is computed on.
       let flowRingGeom: GeoJSON.Polygon | null = null;
       // Phase 5 Step 2: a larger "reach" ring the faded corridor tail is bounded
       // to, so the flow keeps flowing into the surrounding real terrain beyond
@@ -9982,6 +10001,28 @@ const archetypeInitializedRef = useRef(false);
             console.warn('[MAP] Flow ring clip build failed', ringErr);
           }
         }
+      }
+
+      // v3.9.3 + Fix #1 (flow↔verdict one window): choose the DISPLAY clip window.
+      //  • dragged Hunt Zone → the dragged 300-ac ring (native compute AOI).
+      //  • multi-parcel territory → the merged territory polygon.
+      //  • single parcel → the A-300 NEIGHBORHOOD ring (flowRingGeom) the
+      //    backbone VERDICT is computed on — NOT the tiny deed outline. Flooring
+      //    display to the deed was discarding real neighborhood structure the
+      //    verdict counts (the Jackson "flow empty / verdict Confirmed"
+      //    contradiction). We only ever draw lines the engine actually traced on
+      //    real terrain, so a genuinely-flat parcel (0 traced lines) still draws
+      //    nothing — no distant ridge is pulled in. Falls back to the deed if the
+      //    ring failed to build.
+      let clipGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      if (huntZoneCenterOverride && huntZoneRingGeomRef.current) {
+        clipGeom = huntZoneRingGeomRef.current as GeoJSON.Polygon;
+      } else if (territoryModeRef.current && territoryParcelsRef.current.length > 1) {
+        const merged = mergeParcelPolygons(territoryParcelsRef.current);
+        clipGeom = merged?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined;
+      } else {
+        clipGeom = (flowRingGeom as GeoJSON.Polygon | undefined)
+          ?? (parcelPolygonRef.current?.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon | undefined);
       }
 
       // Phase B: Merge primary+secondary into unified classified source
@@ -18915,6 +18956,47 @@ const archetypeInitializedRef = useRef(false);
                         );
                       }
                       
+                      // Fix #3 (failure ≠ flat, enforced ACROSS panels): only ever
+                      // show "too flat" when the compute SUCCEEDED and the shared
+                      // backbone verdict is genuinely flat. Never when a scope
+                      // compute failed, and never when the verdict reads
+                      // Confirmed/Marginal — that guarantees the flow panel and the
+                      // story/verdict panel can no longer contradict each other.
+                      const verdictState = terrainStory?.terrainState;
+                      if (scopeFlowError) {
+                        return (
+                          <div className="bg-amber-900/20 border border-amber-700/40 rounded p-2">
+                            <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Couldn't load terrain flow for this scope
+                            </p>
+                            <p className="text-stone-400 mt-1 text-[9px]">
+                              The analysis didn't finish — this isn't a "no flow" result. Nudge the scope again or tap retry.
+                            </p>
+                            <button
+                              onClick={() => { setScopeFlowError(null); setScopeRetryNonce(n => n + 1); }}
+                              className="mt-1.5 w-full bg-amber-400 hover:bg-amber-300 text-black font-semibold text-[10px] px-2 py-1 rounded transition-colors"
+                            >
+                              Tap to retry
+                            </button>
+                          </div>
+                        );
+                      }
+                      if (verdictState === 'confirmed' || verdictState === 'marginal') {
+                        // The verdict found real structure on the neighborhood
+                        // ridge network. Its flow lines render on the map (crisp
+                        // within the analysis ring, faded past it). Never claim
+                        // "too flat" here — that would contradict the verdict.
+                        return (
+                          <div className="text-stone-400 bg-stone-800/30 rounded p-2">
+                            <p className="text-[10px] font-medium text-emerald-400 flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3" /> Structure detected nearby
+                            </p>
+                            <p className="text-stone-500 mt-1 text-[9px]">
+                              The backbone runs through the surrounding ridge network — see the flow lines on the map. Drag the scope over the ridge to trace the runs right here.
+                            </p>
+                          </div>
+                        );
+                      }
                       return (
                         <div className="text-stone-500 bg-stone-800/30 rounded p-2">
                           <p className="italic text-[10px]">Not detected on this parcel</p>
