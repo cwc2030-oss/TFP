@@ -18359,24 +18359,32 @@ const archetypeInitializedRef = useRef(false);
                 )}
                 <button
                   onClick={() => {
-                    // v3.9.2 — Re-Align only re-centers map on parcel, no terrain brain API call
+                    // Re-Load (Clark, Jul 19) — the everyday "read this ground
+                    // again" action. Triggers a GENUINE fresh terrain read: the
+                    // single-parcel main-flow effect is keyed on mainRetryNonce and
+                    // always computes fresh, so bumping it re-reads the parcel. Also
+                    // re-centers the map. This is a user-chosen re-read — distinct
+                    // from the failure-only "Retry" state, which appears ONLY when a
+                    // compute actually breaks.
+                    setMainFlowError(false);
+                    setMainRetryNonce(n => n + 1);
                     const _map = mapRef.current;
                     if (_map && lat && lng) {
                       _map.flyTo({ center: [lng, lat], zoom: 15, duration: 1200 });
                     }
-                    console.log('[ReAlign] Map re-centered on parcel. No analysis triggered.');
+                    console.log('[ReLoad] Fresh terrain read triggered + map re-centered.');
                   }}
                   className="group relative w-full overflow-hidden rounded-xl px-4 py-3.5 font-semibold text-sm tracking-wide transition-all duration-300 ease-out focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:ring-offset-2 focus:ring-offset-gray-950 bg-gradient-to-r from-amber-600 via-amber-500 to-orange-500 hover:from-amber-500 hover:via-amber-400 hover:to-orange-400 text-white shadow-lg shadow-amber-900/30 hover:shadow-amber-800/40 hover:shadow-xl active:scale-[0.98] border border-amber-500/20"
                 >
                   <div className="relative flex items-center justify-center gap-2.5">
                     <RefreshCw className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
-                    <span>Re-Align Terrain</span>
+                    <span>Re-Load</span>
                   </div>
                 </button>
                 {/* Contextual hint */}
                 {!summary && (
                   <p className="text-[10px] text-stone-500/60 text-center mt-2 leading-relaxed">
-                    Re-centers the map on the current parcel
+                    Reads this ground again with a fresh terrain scan
                   </p>
                 )}
                 {/* Clear Cache & Re-Analyze — subtle secondary action */}
@@ -18554,137 +18562,6 @@ const archetypeInitializedRef = useRef(false);
                 <p className="text-[9px] text-stone-600 mt-1 leading-relaxed">How terrain shapes where deer travel</p>
               </div>
 
-              {/* Travel Corridor Layer (Primary Path) — admin/debug only
-                  Hidden from hunters: squiggly rendering hurts polish.
-                  Default OFF, smoothing fix planned as separate patch. */}
-              {role === 'admin' && (
-              <div className="p-3 border-b border-white/[0.06]">
-                <h3 className="font-medium text-white flex items-center gap-2 mb-2 text-sm">
-                  <Mountain className="h-4 w-4 text-stone-400" />
-                  Travel Corridor
-                  <span className="text-[8px] text-stone-600 bg-stone-800/60 px-1.5 py-0.5 rounded ml-auto">DEBUG</span>
-                </h3>
-                <div className="space-y-1">
-                  {(() => {
-                    const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
-                    const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
-                    const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
-                    const totalFeatures = primaryCount + secondaryCount + saddleCount;
-                    const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
-                                           ridgeSpineData?.metadata?.dem_source === 'NONE' ||
-                                           !ridgeSpineData;
-                    const hasFeatures = totalFeatures > 0;
-                    
-                    return (
-                      <button
-                        onClick={() => setVisibility(v => ({ ...v, ridgeSpines: !v.ridgeSpines }))}
-                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                          visibility.ridgeSpines ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                        }`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.ridgePrimary, opacity: visibility.ridgeSpines ? 1 : 0.4 }} />
-                        <span className={`flex-1 text-left ${visibility.ridgeSpines ? 'text-white' : 'text-stone-500'}`}>Primary Path</span>
-                        {hasFeatures ? (
-                          <span className="text-[9px] text-green-400 px-1.5 py-0.5 bg-green-900/40 rounded">
-                            {primaryCount}{secondaryCount > 0 ? `+${secondaryCount}` : ''}
-                          </span>
-                        ) : isAwaitingData ? (
-                          <span className="text-[9px] text-stone-500 px-1.5 py-0.5 bg-stone-800 rounded">—</span>
-                        ) : null}
-                      </button>
-                    );
-                  })()}
-                </div>
-                
-                {visibility.ridgeSpines && (
-                  <div className="mt-2 text-[10px] space-y-1 px-1">
-                    {(() => {
-                      const primaryCount = ridgeSpineData?.metadata?.ridge_count_primary || 0;
-                      const secondaryCount = ridgeSpineData?.metadata?.ridge_count_secondary || 0;
-                      const saddleCount = ridgeSpineData?.metadata?.saddle_count || 0;
-                      const totalFeatures = primaryCount + secondaryCount + saddleCount;
-                      const isAwaitingData = ridgeSpineData?.metadata?.dem_source === 'AWAITING_DEM' || 
-                                             ridgeSpineData?.metadata?.dem_source === 'NONE' ||
-                                             !ridgeSpineData;
-                      
-                      if (totalFeatures > 0) {
-                        return (
-                          <div className="text-stone-400 space-y-0.5">
-                            <div className="flex justify-between">
-                              <span>Primary Spines</span>
-                              <span className="text-white">{primaryCount}</span>
-                            </div>
-                            {secondaryCount > 0 && (
-                              <div className="flex justify-between">
-                                <span>Secondary</span>
-                                <span className="text-white">{secondaryCount}</span>
-                              </div>
-                            )}
-                            {saddleCount > 0 && (
-                              <div className="flex justify-between">
-                                <span>Saddles</span>
-                                <span className="text-white">{saddleCount}</span>
-                              </div>
-                            )}
-                            {ridgeSpineData?.metadata?.total_ridge_length_m && ridgeSpineData.metadata.total_ridge_length_m > 0 && (
-                              <div className="flex justify-between text-stone-500 pt-0.5 border-t border-white/5">
-                                <span>Total Length</span>
-                                <span>{Math.round(ridgeSpineData.metadata.total_ridge_length_m)}m</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
-                      
-                      return (
-                        <div className="text-stone-500 bg-stone-800/30 rounded p-2">
-                          <p className="italic">Not detected on this parcel</p>
-                          <p className="text-stone-600 mt-1 text-[9px]">
-                            Terrain may be too flat or uniform for distinct spine features.
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
-              )}
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, saddles: !v.saddles }))}
-                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                      visibility.saddles ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                    }`}
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.funnelSaddle, opacity: visibility.saddles ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.saddles ? 'text-white' : 'text-stone-500'}`}>
-                      Saddles
-                    </span>
-                  </button>
-                  {/* CDL Field Edge toggle — only shown when CDL data has edge features */}
-                  {(() => {
-                    const fieldEdgeCount = (cdlData?.agEdgeLines?.features?.length ?? 0) + (cdlData?.insideCorners?.features?.length ?? 0);
-                    if (FLOW_ONLY_UI || !cdlData || fieldEdgeCount === 0) return null;
-                    return (
-                      <button
-                        onClick={() => setShowTerrainReasons(v => !v)}
-                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                          (showTerrainReasons && cdlData) ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                        }`}
-                      >
-                        <span className="w-3 h-[2px] rounded-full" style={{ background: LAYER_COLORS.agFieldEdge, opacity: (showTerrainReasons && cdlData) ? 1 : 0.4, borderStyle: 'dashed' }} />
-                        <span className={`flex-1 text-left ${(showTerrainReasons && cdlData) ? 'text-white' : 'text-stone-500'}`}>
-                          Field Edge
-                        </span>
-                        <span className="text-[9px] text-amber-400 px-1.5 py-0.5 bg-amber-900/40 rounded">
-                          {fieldEdgeCount}
-                        </span>
-                      </button>
-                    );
-                  })()}
-                </div>
-              </div>
               {/* Legacy "Bedding" toggle removed — replaced by Bedding Zones (tfp-bedding-probability) */}
               {!FLOW_ONLY_UI && (
               <div className="p-3 border-b border-white/[0.06]">
@@ -18994,37 +18871,6 @@ const archetypeInitializedRef = useRef(false);
                               </div>
                             </div>
                             
-                            {/* Movement summary — plain language */}
-                            <div className="text-[10px] text-stone-400 space-y-0.5">
-                              {greenCount > 0 && (
-                                <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-[7px] h-[7px] rounded-full" style={{background:'#2D6A4F'}}/>Green Runs</span>
-                                  <span style={{color:'#2D6A4F'}}>{greenCount}</span>
-                                </div>
-                              )}
-                              {blueCount > 0 && (
-                                <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-[7px] h-[7px] rounded-[1px]" style={{background:'#3B6FA0'}}/>Blue Runs</span>
-                                  <span style={{color:'#3B6FA0'}}>{blueCount}</span>
-                                </div>
-                              )}
-                              {blackCount > 0 && (
-                                <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-[6px] h-[6px] rotate-45 rounded-[1px]" style={{background:'#1A1A1A', border:'1px solid #F5EDDC'}}/>Black Runs</span>
-                                  <span className="text-stone-300">{blackCount}</span>
-                                </div>
-                              )}
-                              {convergenceCount > 0 && (
-                                <div className="flex justify-between">
-                                  <span className="flex items-center gap-1"><span className="inline-block w-[7px] h-[7px] rounded-full" style={{background: LAYER_COLORS.flowConvergence}}/>Pinch Points</span>
-                                  <span className="text-amber-400">{convergenceCount}</span>
-                                </div>
-                              )}
-                            </div>
-                            {/* Intensity key */}
-                            <div className="text-[8px] text-stone-600 text-center pt-0.5">
-                              Run intensity: <span className="inline-block w-[5px] h-[5px] rounded-full align-middle" style={{background:'#2D6A4F'}}/> steady <span className="mx-0.5">·</span> <span className="inline-block w-[5px] h-[5px] rounded-[1px] align-middle" style={{background:'#3B6FA0'}}/> building <span className="mx-0.5">·</span> <span className="inline-block w-[4px] h-[4px] rotate-45 rounded-[0.5px] align-middle" style={{background:'#1A1A1A', border:'0.5px solid #F5EDDC'}}/> peak
-                            </div>
                             
                             {/* Click instruction - highlighted when inspect mode is on */}
                             <div className={`text-[9px] text-center pt-1 border-t border-white/5 ${
@@ -19050,16 +18896,15 @@ const archetypeInitializedRef = useRef(false);
                       // Confirmed/Marginal — that guarantees the flow panel and the
                       // story/verdict panel can no longer contradict each other.
                       const verdictState = terrainStory?.terrainState;
-                      // Real-data gate for the "drag over the ridge to trace it here"
-                      // nudge. The confirmed/marginal LABEL means relief was measured,
-                      // but it does NOT guarantee any ridge/flow feature is actually
-                      // drawn on the map nearby for the hunter to see and drag over.
-                      // Only promise a ridge to trace when one is genuinely rendered.
-                      const hasNearbyStructure =
-                        ((ridgeSpineData?.ridges_primary?.features?.length ?? 0) +
-                          (ridgeSpineData?.ridges_secondary?.features?.length ?? 0)) > 0 ||
-                        (terrainFlowData?.metadata?.convergence_count ?? 0) > 0 ||
-                        flowTierCounts.total > 0;
+                      // HONESTY GATE (Clark, Jul 19): the "see the flow lines on the
+                      // map / drag the scope over the ridge" nudge may ONLY appear
+                      // when flow lines are ACTUALLY drawn on the map right now —
+                      // never on structure-exists or verdict alone. In this branch
+                      // totalFeatures === 0, so flowTierCounts.total is always 0 and
+                      // this nudge is intentionally unreachable here. Marginal with
+                      // no drawn flow gets ONLY the honest "scout it" copy, with zero
+                      // reference to flow lines.
+                      const flowLinesDrawn = flowTierCounts.total > 0;
                       if (scopeFlowError) {
                         return (
                           <div className="bg-amber-900/20 border border-amber-700/40 rounded p-2">
@@ -19078,11 +18923,11 @@ const archetypeInitializedRef = useRef(false);
                           </div>
                         );
                       }
-                      if ((verdictState === 'confirmed' || verdictState === 'marginal') && hasNearbyStructure) {
-                        // The verdict found real structure AND ridge/flow features
-                        // are genuinely rendered nearby. Its flow lines render on the
-                        // map (crisp within the analysis ring, faded past it). Only
-                        // here do we promise a ridge to drag the scope over.
+                      if (flowLinesDrawn && (verdictState === 'confirmed' || verdictState === 'marginal')) {
+                        // Flow lines are GENUINELY drawn on the map right now, so it's
+                        // honest to point the hunter at them. (Unreachable in this
+                        // zero-features branch by construction — kept as the single
+                        // gated home for the "see the flow lines" nudge.)
                         return (
                           <div className="text-stone-400 bg-stone-800/30 rounded p-2">
                             <p className="text-[10px] font-medium text-emerald-400 flex items-center gap-1">
@@ -19094,11 +18939,25 @@ const archetypeInitializedRef = useRef(false);
                           </div>
                         );
                       }
-                      if (verdictState === 'confirmed' || verdictState === 'marginal') {
-                        // The verdict read relief on this parcel, but no ridge or
-                        // flow feature is actually drawn nearby right now — so we do
-                        // NOT promise a ridge to drag over. Honest, non-contradictory
-                        // acknowledgement instead of an over-promise.
+                      if (verdictState === 'marginal') {
+                        // Marginal + NO flow drawn: a single unconfirmed spine. Never
+                        // mention flow lines — none are on the map. Honest scout-it
+                        // guidance only, matching the left-panel verdict copy.
+                        return (
+                          <div className="text-stone-400 bg-stone-800/30 rounded p-2">
+                            <p className="text-[10px] font-medium text-amber-400 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Single spine detected
+                            </p>
+                            <p className="text-stone-500 mt-1 text-[9px]">
+                              Single spine detected — unconfirmed. Scout on foot before committing.
+                            </p>
+                          </div>
+                        );
+                      }
+                      if (verdictState === 'confirmed') {
+                        // Confirmed relief but no flow feature drawn nearby right now
+                        // — so we do NOT promise a ridge to drag over. Honest,
+                        // non-contradictory acknowledgement instead of an over-promise.
                         return (
                           <div className="text-stone-400 bg-stone-800/30 rounded p-2">
                             <p className="text-[10px] font-medium text-emerald-400 flex items-center gap-1">
@@ -19145,9 +19004,9 @@ const archetypeInitializedRef = useRef(false);
                   <TerrainStoryPanel 
                     story={terrainStory}
                     isLoading={terrainFlowLoading}
-                    defaultExpanded={false}
+                    defaultExpanded={true}
                     showNarrative={true}
-                    compact={true}
+                    compact={false}
                   />
                 </div>
               ) : null}
@@ -19501,45 +19360,6 @@ const archetypeInitializedRef = useRef(false);
               </>)}
 
 
-              {/* ─── CORRIDORS & ALIGNMENT ─── */}
-              <div className="px-3 pt-3 pb-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                  <span className="text-[10px] text-stone-500/80 uppercase tracking-[0.2em] font-medium">Corridors &amp; Alignment</span>
-                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-                </div>
-              </div>
-
-              <div className="p-3 border-b border-white/[0.06]">
-                <div className="space-y-1">
-                  {/* Primary Corridors */}
-                  {!TERRAIN_WORK_MODE && (
-                    <button
-                      onClick={() => setVisibility(v => ({ ...v, corridors: !v.corridors }))}
-                      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                        visibility.corridors ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                      }`}
-                    >
-                      <span className="w-3 h-[3px] rounded-full" style={{ background: LAYER_COLORS.corridorHigh, opacity: visibility.corridors ? 1 : 0.4 }} />
-                      <span className={`flex-1 text-left ${visibility.corridors ? 'text-white' : 'text-stone-500'}`}>
-                        Primary Corridors
-                      </span>
-                    </button>
-                  )}
-                  {/* Draws — terrain channels */}
-                  <button
-                    onClick={() => setVisibility(v => ({ ...v, draws: !v.draws }))}
-                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-all text-xs ${
-                      visibility.draws ? 'bg-white/[0.08] border border-white/[0.12]' : 'bg-white/[0.03] hover:bg-white/[0.06] border border-transparent'
-                    }`}
-                  >
-                    <span className="w-3 h-[2px] rounded-full" style={{ background: LAYER_COLORS.funnelDraw, opacity: visibility.draws ? 1 : 0.4 }} />
-                    <span className={`flex-1 text-left ${visibility.draws ? 'text-white' : 'text-stone-500'}`}>
-                      Draws
-                    </span>
-                  </button>
-                </div>
-              </div>
               {(() => {
                 const edgeCorridors = edgeIntelData?.corridorArrows?.features?.length || 0;
                 const edgeSaddles = edgeIntelData?.ghostSaddles?.features?.length || 0;

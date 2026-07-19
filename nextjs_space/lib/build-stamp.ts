@@ -250,7 +250,23 @@ export const BUILD_DATE = 'Jul 19';
 //      cold-start backoff) so a single cold hit self-heals inside the same
 //      request. Applies to both corridor + ridge; terrain OUTPUT unchanged, so
 //      the terrain engine key is deliberately NOT bumped (cache preserved).
-export const BUILD_REV = 'r20';
+// r21 (Intel panel redesign + honesty fix, UI-only, NO engine bump):
+//      Clark's redesign — two hero panels front-and-center: Terrain Story (all
+//      four Bench/Saddle/Ridge/Convergence % bars, now expanded/non-compact) and
+//      the Terrain Flow info panel. Cut the clutter: the admin "Travel Corridor"
+//      DEBUG block, the standalone Saddles toggle block, the "Corridors &
+//      Alignment" section (Primary Corridors + Draws), and the redundant
+//      movement-summary run-count rows (Green/Blue/Black/Pinch) + intensity key.
+//      Re-Align Terrain button relabeled "Re-Load" and rewired to trigger a
+//      GENUINE fresh terrain read (bumps mainRetryNonce) + recenter — the
+//      everyday read-again action, distinct from the failure-only "Retry" state.
+//      HONESTY FIX: the "see the flow lines on the map / drag the scope over the
+//      ridge" nudge is now gated on flow lines ACTUALLY drawn (flowTierCounts
+//      .total > 0), never on structure-exists or verdict alone; in the zero-
+//      features branch it is unreachable. Marginal-with-no-flow now shows ONLY
+//      "Single spine detected — unconfirmed. Scout on foot before committing."
+//      with zero flow-line reference. UI-only — terrain engine key NOT bumped.
+export const BUILD_REV = 'r21';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
