@@ -19050,6 +19050,16 @@ const archetypeInitializedRef = useRef(false);
                       // Confirmed/Marginal — that guarantees the flow panel and the
                       // story/verdict panel can no longer contradict each other.
                       const verdictState = terrainStory?.terrainState;
+                      // Real-data gate for the "drag over the ridge to trace it here"
+                      // nudge. The confirmed/marginal LABEL means relief was measured,
+                      // but it does NOT guarantee any ridge/flow feature is actually
+                      // drawn on the map nearby for the hunter to see and drag over.
+                      // Only promise a ridge to trace when one is genuinely rendered.
+                      const hasNearbyStructure =
+                        ((ridgeSpineData?.ridges_primary?.features?.length ?? 0) +
+                          (ridgeSpineData?.ridges_secondary?.features?.length ?? 0)) > 0 ||
+                        (terrainFlowData?.metadata?.convergence_count ?? 0) > 0 ||
+                        flowTierCounts.total > 0;
                       if (scopeFlowError) {
                         return (
                           <div className="bg-amber-900/20 border border-amber-700/40 rounded p-2">
@@ -19068,11 +19078,11 @@ const archetypeInitializedRef = useRef(false);
                           </div>
                         );
                       }
-                      if (verdictState === 'confirmed' || verdictState === 'marginal') {
-                        // The verdict found real structure on the neighborhood
-                        // ridge network. Its flow lines render on the map (crisp
-                        // within the analysis ring, faded past it). Never claim
-                        // "too flat" here — that would contradict the verdict.
+                      if ((verdictState === 'confirmed' || verdictState === 'marginal') && hasNearbyStructure) {
+                        // The verdict found real structure AND ridge/flow features
+                        // are genuinely rendered nearby. Its flow lines render on the
+                        // map (crisp within the analysis ring, faded past it). Only
+                        // here do we promise a ridge to drag the scope over.
                         return (
                           <div className="text-stone-400 bg-stone-800/30 rounded p-2">
                             <p className="text-[10px] font-medium text-emerald-400 flex items-center gap-1">
@@ -19080,6 +19090,22 @@ const archetypeInitializedRef = useRef(false);
                             </p>
                             <p className="text-stone-500 mt-1 text-[9px]">
                               The backbone runs through the surrounding ridge network — see the flow lines on the map. Drag the scope over the ridge to trace the runs right here.
+                            </p>
+                          </div>
+                        );
+                      }
+                      if (verdictState === 'confirmed' || verdictState === 'marginal') {
+                        // The verdict read relief on this parcel, but no ridge or
+                        // flow feature is actually drawn nearby right now — so we do
+                        // NOT promise a ridge to drag over. Honest, non-contradictory
+                        // acknowledgement instead of an over-promise.
+                        return (
+                          <div className="text-stone-400 bg-stone-800/30 rounded p-2">
+                            <p className="text-[10px] font-medium text-emerald-400 flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3" /> Structure detected on this parcel
+                            </p>
+                            <p className="text-stone-500 mt-1 text-[9px]">
+                              The verdict read relief here, but no distinct flow lines are drawing nearby yet. Nudge the scope across the parcel to search for runs.
                             </p>
                           </div>
                         );

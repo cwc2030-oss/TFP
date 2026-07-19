@@ -36,7 +36,7 @@ export default function FlatTerrainNotice() {
           The Terrain Brain scanned this parcel and found no ridge backbone,
           saddle, or pinch point to concentrate movement. On ground like this,
           travel is <span className="text-stone-100 font-medium">dispersed rather than funneled</span> —
-          there is no terrain structure to read.
+          there is no terrain structure to read on this parcel.
         </p>
 
         {/* Stay-in-lane guidance — a read on the land's SHAPE, not its value */}
