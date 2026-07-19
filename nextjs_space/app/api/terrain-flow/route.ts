@@ -139,11 +139,26 @@ async function fetchWithRetry(
         console.warn(`[TerrainFlow] ${label} attempt ${attempt} aborted — superseded by newer scope move (client cancelled)`);
         return null;
       }
-      if (attempt < maxAttempts && isTimeout) {
-        console.warn(`[TerrainFlow] ${label} attempt ${attempt} timed out after ${init.timeout}ms — retrying`);
+      // r20 single-parcel-instant-retry fix: previously we ONLY retried on
+      // timeouts. A COLD Modal container often fast-errors on the first hit
+      // (connection reset / transient 5xx surfaced as a throw, NOT an abort).
+      // That returned null after ONE attempt → main path saw usedRealDEM=false
+      // → 502 → the hunter got an INSTANT "tap to retry" that then healed on
+      // the client auto-retry once the container was warm. Retry on ANY
+      // non-abort error (with a brief backoff to let a cold container finish
+      // spinning up) so a single cold hit self-heals inside the same request.
+      // This is output-neutral: same terrain result, fewer spurious retries.
+      if (attempt < maxAttempts) {
+        const reason = isTimeout ? `timed out after ${init.timeout}ms` : `errored (${errMsg})`;
+        console.warn(`[TerrainFlow] ${label} attempt ${attempt} ${reason} — retrying`);
+        // Cold-start backoff only for non-timeout errors; timeouts already waited.
+        if (!isTimeout && !parentSignal?.aborted) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        if (parentSignal?.aborted) return null;
         continue;
       }
-      console.warn(`[TerrainFlow] ${label} attempt ${attempt} failed: ${errMsg}`);
+      console.warn(`[TerrainFlow] ${label} attempt ${attempt} failed (final): ${errMsg}`);
       return null;
     } finally {
       if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);

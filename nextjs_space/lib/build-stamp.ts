@@ -236,7 +236,21 @@ export const BUILD_DATE = 'Jul 19';
 //      fresh. UNLIKE prior r-series entries, this one DOES bump the terrain
 //      engine key on purpose (one-time poison flush) -> expect a one-time
 //      recompute wave across cached parcels after deploy.
-export const BUILD_REV = 'r19';
+// r20 (single-parcel instant-"tap to retry" fix, output-neutral, NO engine bump):
+//      Clark isolated the slowness/instant-retry to the Pick Parcel (single-
+//      parcel) path while the scope path worked. Root cause is NOT the r19
+//      write-guard (git diff proves the only r19 change to intel/page.tsx is a
+//      fire-and-forget cache-WRITE guard that can't throw or set the retry
+//      banner) and NOT the engine bump (single-parcel main path never reads the
+//      terrain cache). Real mechanism: fetchWithRetry only retried on TIMEOUTS,
+//      so a COLD Modal container that fast-errors on the first hit returned null
+//      after ONE attempt -> main path usedRealDEM=false -> instant 502 -> the
+//      hunter saw an immediate "tap to retry" that healed on the client auto-
+//      retry once warm. Fix: retry on ANY non-abort upstream error (with a brief
+//      cold-start backoff) so a single cold hit self-heals inside the same
+//      request. Applies to both corridor + ridge; terrain OUTPUT unchanged, so
+//      the terrain engine key is deliberately NOT bumped (cache preserved).
+export const BUILD_REV = 'r20';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
