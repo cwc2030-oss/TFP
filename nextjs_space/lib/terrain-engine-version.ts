@@ -36,6 +36,23 @@
  *   Tier 1 engine (raw traced geometry drives convergence; polish is visual
  *   only and never moves flow off the real terrain).
  *
+ * Prior engine: v6.1-flowing-form (see below). Bumped to v6.4-cache-integrity
+ *   to FLUSH stale-poisoned cache entries. Root cause (2026-07-19): the
+ *   single-parcel cache WRITE path (app/intel/page.tsx) was missing the
+ *   synthetic/empty-flow guard that the scope path already had, so a
+ *   transiently-degraded whole-parcel compute (real-DEM flagged, but empty /
+ *   marginal) was persisted under the CURRENT engine version with a 7-day TTL
+ *   and then served forever as a valid hit. Nussbaum's parcel
+ *   (05-4.0-017-00-000-0012.02, lat 37.99884 lng -90.281) read cached
+ *   flow_p=0 / marginal while a forced-fresh recompute returned flow_p=7 /
+ *   confirmed (maxProm 91 ft), identical across 3/3 runs (i.e. NOT a compute
+ *   race — a genuinely stale poisoned entry). The write path now carries the
+ *   integrity guard (never persist synthetic or zero-flow), and this version
+ *   bump invalidates every v6.1 entry so the poison is flushed and all cells
+ *   lazily recompute fresh. Expect a one-time recompute wave across cached
+ *   parcels after deploy. NOTE: engine-key semver is intentionally ahead of
+ *   the v6.1 lineage and does not need to track the decoupled BUILD_VERSION.
+ *
  * Prior engine: v5.2-relief-gate. v5.2 fixes the v5.1 prominence gate, which
  *   only looked at PRIMARY ridge prominence and required 50 ft — erasing flow
  *   on real moderate/rolling hunting ground that carries its relief in
@@ -47,4 +64,4 @@
  *   stale empty-flow entries produced by v5.1 on moderate ground) miss and
  *   recompute lazily under the corrected gate.
  */
-export const TERRAIN_ENGINE_VERSION = 'v6.1-flowing-form';
+export const TERRAIN_ENGINE_VERSION = 'v6.4-cache-integrity';

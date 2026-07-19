@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 18';
+export const BUILD_DATE = 'Jul 19';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -221,7 +221,22 @@ export const BUILD_DATE = 'Jul 18';
 //      only). Deferred (not built): review engine, insurance integration,
 //      payments/escrow, matching algorithm, trophy room. No terrain/detection
 //      change; terrain cache untouched (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r18';
+// r19 (ENGINE BUMP v6.1 -> v6.4-cache-integrity): stale-cache-poison fix.
+//      Root cause of the Nussbaum's-parcel flip (flat vs confirmed on a slight
+//      ring move): the single-parcel terrain cache WRITE path was missing the
+//      synthetic/empty-flow guard the scope path already had, so a transiently
+//      degraded whole-parcel compute (real-DEM flagged but empty/marginal) got
+//      persisted under the CURRENT engine version with a 7-day TTL and served
+//      forever as a valid hit. Confirmed via DB + forced-fresh recompute:
+//      cached flow_p=0 / marginal vs fresh flow_p=7 / confirmed (maxProm 91 ft),
+//      identical 3/3 runs (NOT a compute race). Two-part fix: (1) integrity
+//      guard on the single-parcel write (never persist synthetic or zero-flow),
+//      (2) TERRAIN_ENGINE_VERSION bumped v6.1-flowing-form -> v6.4-cache-integrity
+//      to invalidate every poisoned v6.1 entry so all cells lazily recompute
+//      fresh. UNLIKE prior r-series entries, this one DOES bump the terrain
+//      engine key on purpose (one-time poison flush) -> expect a one-time
+//      recompute wave across cached parcels after deploy.
+export const BUILD_REV = 'r19';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

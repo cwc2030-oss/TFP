@@ -8973,6 +8973,25 @@ const archetypeInitializedRef = useRef(false);
                      (parcelPolygon.properties as any)?.ll_uuid;
     if (!parcelId) return; // Synthetic parcels don't get cached
 
+    // v6.2 CACHE-INTEGRITY GUARD: never persist a synthetic fallback OR an
+    // empty-flow result on the single-parcel path. This mirrors the scope
+    // path's `if (!result.isSynthetic)` guard, which this write path was
+    // missing. Without it, a transiently-degraded compute (a synthetic
+    // fallback, or a real-DEM response that came back with low prominence /
+    // zero flow) is written under the CURRENT engine version with a 7-day TTL
+    // and then served forever as a "valid" hit — the exact stale-flat-where-
+    // fresh-reads-confirmed poisoning observed on Nussbaum's parcel
+    // (05-4.0-017-00-000-0012.02: cached flow_p=0/marginal vs fresh
+    // flow_p=7/confirmed, maxProm 91ft). A genuinely flat parcel simply
+    // recomputes on each visit (cheap, honest); a real-flow parcel still
+    // populates the cache on any good compute.
+    const _cacheFp = terrainFlowData?.flow_primary?.features?.length ?? 0;
+    const _cacheFs = terrainFlowData?.flow_secondary?.features?.length ?? 0;
+    if ((terrainFlowData as any)?.isSynthetic || (_cacheFp + _cacheFs) === 0) {
+      console.log('[TerrainCache] Skip single-parcel write — synthetic or empty flow (poison guard):', parcelId, 'synthetic=', (terrainFlowData as any)?.isSynthetic, 'flow=', _cacheFp + _cacheFs);
+      return;
+    }
+
     const lat = (parcelPolygon.properties as any)?.lat || activeLatRef.current;
     const lng = (parcelPolygon.properties as any)?.lng || activeLngRef.current;
     const acreage = parseFloat((parcelPolygon.properties as any)?.ll_gisacre || activeAcreageRef.current || '0');
