@@ -31,6 +31,10 @@ model User {
   huntSessions     HuntSession[]
   parcelReads      ParcelRead[]
 
+  // Brick 1 — vetted-introduction marketplace (gated: TFP_HUNTER_PROFILES_OPEN)
+  hunterProfile    HunterProfile?     // one trust profile per user (hunter side)
+  ownerShortlists  HunterShortlist[]  // hunters this user (as landowner) has shortlisted
+
   // Piece 6a: placeholder Season Pass unlock (kept as a legacy/admin override).
   // When true, the user has unlimited Terrain Brain reads + save. Pro/Pro Max/admin
   // are treated as unlocked in code regardless of this flag.
@@ -595,4 +599,103 @@ model CountyFlowRating {
   @@index([state, avgFlowIndex])
   @@index([adjustedFlowIndex])
   @@index([highFlowCount])
+}
+
+
+// ─── Brick 1: Hunter Trust Profile + Owner Browse-and-Choose ───────────────
+// The FIRST brick of the vetted-introduction marketplace. GATED behind
+// TFP_HUNTER_PROFILES_OPEN (closed by default) — not public.
+//
+// CENTRAL GUARDRAIL: this is "certified-huntable for people", so it must not
+// overclaim. Every credential carries an honest CredentialLevel and nothing
+// more. For MVP there is NO 'VERIFIED' level in the enum at all, so nothing
+// in the app *can* render "verified"/"screened"/"background-checked". A real
+// third-party check slots in later by ADDING a level + provenance columns;
+// the render function is the only thing that changes (no data migration).
+//
+// Reputation is a SHELL: there is no numeric trust score field. A new hunter
+// renders honestly as "New — unproven", carried by disclosed creds/refs.
+// completedLeaseCount is the future container the (deferred) review engine
+// will fill via accepted Inquiries; it renders unproven while 0.
+model HunterProfile {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ── Disclosure ──
+  groupSize             Int?          // typical party size
+  hasKidsFamily         Boolean?      // kids / family along
+  footprint             Footprint?    // day-hunt / tent / trailer / RV
+  needsPowerHookup      Boolean?
+  needsWaterHookup      Boolean?
+  hasATV                Boolean?      // brings an ATV/UTV
+
+  // ── Credentials (each an honest verification level; NO 'verified' for MVP) ──
+  huntingLicense        CredentialLevel @default(NONE)
+  hunterEd              CredentialLevel @default(NONE)
+  liabilityInsurance    CredentialLevel @default(NONE)
+  mdcPermits            CredentialLevel @default(NONE)
+
+  // ── Safety gate — SELF-ATTESTATION, never a background check ──
+  firearmAttestation    Boolean  @default(false)  // "I attest I have no firearm-related violations"
+  firearmAttestationAt  DateTime?
+
+  // ── References (optional). PII is NOT surfaced in Brick 1 browse — stored
+  //    for future genuine-engagement reveal. Array of { name, relationship,
+  //    contact, note }. ──
+  references            Json?
+
+  // ── Reputation shell — NO numeric score. Future review engine fills this. ──
+  completedLeaseCount   Int      @default(0)
+
+  // ── Bio ──
+  bio                   String?  @db.Text  // freeform "who we are / how we hunt"
+
+  // ── Visibility. A profile only appears in owner browse when visible == true
+  //    AND firearmAttestation == true (the affirmative-claim hard gate). ──
+  visible               Boolean  @default(true)
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  shortlistedBy         HunterShortlist[]
+
+  @@index([visible, firearmAttestation])
+}
+
+// Owner-choose flow for Brick 1 (browse + shortlist only; no messaging/review
+// engine yet). A landowner shortlists a hunter in general (listingId null) or
+// against a specific listing they own. When the deferred acceptance/review
+// flow lands, an ACCEPTED Inquiry (already carries userId) becomes the join
+// that unlocks a review of the hunter's profile — no rework needed here.
+model HunterShortlist {
+  id               String        @id @default(cuid())
+  ownerUserId      String
+  owner            User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  hunterProfileId  String
+  hunterProfile    HunterProfile @relation(fields: [hunterProfileId], references: [id], onDelete: Cascade)
+  listingId        String?       // optional: shortlisted against a specific listing
+  note             String?
+  createdAt        DateTime      @default(now())
+
+  @@unique([ownerUserId, hunterProfileId, listingId])
+  @@index([ownerUserId])
+  @@index([hunterProfileId])
+}
+
+enum Footprint {
+  DAY_HUNT
+  TENT
+  TRAILER
+  RV
+}
+
+// Honest verification ceiling for MVP. DOCUMENT_ON_FILE is defined for the
+// future (a credential-document uploader is NOT built in Brick 1, so this
+// value is currently UNREACHABLE and never surfaced). 'VERIFIED' is
+// deliberately absent until a real third-party check exists.
+enum CredentialLevel {
+  NONE
+  SELF_ATTESTED
+  DOCUMENT_ON_FILE
 }

@@ -204,7 +204,24 @@ export const BUILD_DATE = 'Jul 18';
 //      below Claim (it leaves TFP carrying none of our terrain read). Render +
 //      persistence only; no detection bar changed, terrain cache untouched
 //      (TERRAIN_ENGINE_VERSION unchanged).
-export const BUILD_REV = 'r17';
+// r18: BRICK 1 of the vetted-introduction marketplace — Hunter Trust Profile
+//      + Owner Browse-and-Choose. GATED behind TFP_HUNTER_PROFILES_OPEN
+//      (closed by default; separate switch from the already-open marketplace
+//      gate). New models HunterProfile + HunterShortlist (+ Footprint /
+//      CredentialLevel enums), all additive (safe db push, no data loss).
+//      CENTRAL GUARDRAIL — no overclaiming: CredentialLevel has NO 'VERIFIED'
+//      member, so nothing can render "verified"/"screened"/"background-checked";
+//      creds render "Self-attested" or "Not provided" only (the doc-on-file
+//      uploader is NOT built in Brick 1, so DOCUMENT_ON_FILE is unreachable &
+//      never surfaced). Firearm item is ALWAYS "Self-attested — no third-party
+//      background check". Reputation is a shell — "New — unproven", no numeric
+//      score. Affirmative-claim hard gate: a profile appears in browse ONLY
+//      when visible && firearmAttestation. Owner browse restricted to
+//      landowners (own >=1 Listing, or admin). Reference PII hidden (count
+//      only). Deferred (not built): review engine, insurance integration,
+//      payments/escrow, matching algorithm, trophy room. No terrain/detection
+//      change; terrain cache untouched (TERRAIN_ENGINE_VERSION unchanged).
+export const BUILD_REV = 'r18';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
