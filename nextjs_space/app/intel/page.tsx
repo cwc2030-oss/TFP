@@ -7651,12 +7651,12 @@ const archetypeInitializedRef = useRef(false);
     const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
     const SETTLE_MS = 450;
 
-    // Redraw the ring circle + maker's-mark label centered on the current
-    // viewport center (visual only — no state, no compute).
-    const setRingAtCenter = () => {
+    // Draw the ring circle + maker's-mark label at an EXPLICIT geographic center
+    // (visual only — no state, no compute). The ring is a geographic turf.circle,
+    // so mapbox reprojects + scales it on every transform: anchored to lat/lng, it
+    // stays glued to its ground and scales in place on zoom (never drifts).
+    const drawRingAt = (center: [number, number]) => {
       try {
-        const c = map.getCenter();
-        const center: [number, number] = [c.lng, c.lat];
         const ring = turf.circle(center, RING_RADIUS_M, { units: 'meters', steps: 64 });
         const src = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
         if (src) src.setData({ type: 'FeatureCollection', features: [ring] } as any);
@@ -7668,25 +7668,54 @@ const archetypeInitializedRef = useRef(false);
       } catch { /* non-fatal */ }
     };
 
+    // Re-center the ring on the current viewport center (used only while PANNING).
+    const setRingAtCenter = () => {
+      const c = map.getCenter();
+      drawRingAt([c.lng, c.lat]);
+    };
+
     // ~100 m grid snap — identical to the Piece-4 cache-key grid so a revisit to
     // a snapped spot is a cache hit (instant, no new terrain compute).
     const snapToGrid = (lng: number, lat: number): [number, number] =>
       [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000];
 
+    // Track the zoom level at the START of each user gesture so we can tell a PAN
+    // (center changes, zoom holds) from a ZOOM / pinch (zoom changes). Scroll-wheel
+    // and pinch must zoom the MAP and leave the ring glued to its ground — never
+    // walk it diagonally, and never fire a read (same dirt under the ring).
+    let gestureStartZoom = map.getZoom();
+
     const onMoveStart = (e: any) => {
       // Only user gestures carry an originalEvent. Programmatic camera moves
       // (flyTo / fitBounds / easeTo) do not, so they leave the flag false.
-      if (e && e.originalEvent) userMoveRef.current = true;
+      if (e && e.originalEvent) {
+        userMoveRef.current = true;
+        gestureStartZoom = map.getZoom();
+      }
     };
 
     const onMove = () => {
-      // Keep the ring pinned to the viewport center while the user roams.
-      if (userMoveRef.current) setRingAtCenter();
+      if (!userMoveRef.current) return;
+      // Only a PURE PAN re-pins the ring to the viewport center (roam-and-scan). If
+      // the gesture is changing zoom (scroll wheel / pinch) the ring stays glued to
+      // its committed geographic center and scales in place — no diagonal drift.
+      const zoomChanged = Math.abs(map.getZoom() - gestureStartZoom) > 1e-3;
+      if (!zoomChanged) setRingAtCenter();
     };
 
     const onMoveEnd = () => {
       if (!userMoveRef.current) return; // ignore programmatic settles
       userMoveRef.current = false;
+      // Pure zoom / pinch does not change the ground under the ring's center, so it
+      // fires NO new read (same dirt → no wasted compute, no phantom roll-in). Also
+      // re-glue the ring to its committed geographic center, in case a pan phase of
+      // a combined gesture had pinned it to the viewport center mid-move.
+      const zoomChanged = Math.abs(map.getZoom() - gestureStartZoom) > 1e-3;
+      if (zoomChanged) {
+        const cur = huntZoneCenterRef.current;
+        if (cur) drawRingAt(cur);
+        return;
+      }
       if (roamSettleTimerRef.current) clearTimeout(roamSettleTimerRef.current);
       // Debounce: only the final rest position trips a read. If the ring moves
       // again first, Piece-4's own abort/seq teardown supersedes the prior read.

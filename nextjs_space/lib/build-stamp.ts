@@ -319,7 +319,21 @@ export const BUILD_DATE = 'Jul 20';
 //      (roll-in, teal lock, no Re-Load button, no dashed border, inline retry,
 //      cancel-in-flight). Interaction/handler restore only — no engine bump, no
 //      cache flush.
-export const BUILD_REV = 'r24';
+//
+// r25 — DECOUPLE SCROLL-WHEEL FROM THE A-300 RING. Bug: scroll/pinch was walking
+//      the ring diagonally instead of zooming the map. Cause = the roam auto-trip
+//      effect re-pinned the ring to the viewport center on EVERY user 'move'
+//      (incl. wheel-zoom, which recenters toward the cursor) and fired a wasted
+//      read on settle. Fix: track gesture-start zoom and split PAN from ZOOM —
+//      onMove re-centers the ring ONLY on a pure pan; a zoom/pinch leaves the ring
+//      glued to its committed geographic center (turf.circle in lat/lng, so mapbox
+//      reprojects + scales it in place → no drift). onMoveEnd skips the read
+//      entirely on any zoom (same dirt under the ring → no compute, no phantom
+//      roll-in) and re-glues the ring to its committed center. The ring-drag
+//      handler already listened to mouse down/move/up only (never wheel), so wheel
+//      reaches the map's native scroll-zoom. All r23/r24 wins intact. Input-handler
+//      + ring-anchor only — no engine bump, no cache flush.
+export const BUILD_REV = 'r25';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
