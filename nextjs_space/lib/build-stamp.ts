@@ -266,7 +266,27 @@ export const BUILD_DATE = 'Jul 19';
 //      features branch it is unreachable. Marginal-with-no-flow now shows ONLY
 //      "Single spine detected — unconfirmed. Scout on foot before committing."
 //      with zero flow-line reference. UI-only — terrain engine key NOT bumped.
-export const BUILD_REV = 'r21';
+// r22 ("The Loose Window" — presentation-layer rebuild of /intel, NO engine bump):
+//      Clark's redesign — collapse the multi-panel intel view into ONE minimal
+//      floating translucent card (LooseWindow) whose centerpiece is the four
+//      MEASURED structural drivers (Bench/Saddle/Ridge/Convergence, all
+//      estimated:false). Card carries: (A) a situated message that NAMES the
+//      leading driver in teal + a plain "so what", swapping with real terrain;
+//      flat/no-backbone gets the food-and-cover line, never "unhuntable", and
+//      never a flow-line promise (still gated on flowTierCounts.total > 0);
+//      (B) four big numbers with % (teal hero / ivory / muted-low color logic,
+//      flat = low+muted, never blank); (C) tap-to-teach one-liners (one tap deep,
+//      taps swallowed so the map never drags). Gated behind LOOSE_WINDOW=true:
+//      left rail (Hunt Goal/Conditions/Intelligence/Refine) + right rail
+//      (Terrain Flow + Terrain Story) hidden via opacity/pointer-events (all
+//      state/effects still wired). Standalone Pick-Parcel entry hidden (map-
+//      click read retires; address/My Parcels/Re-Load still read terrain);
+//      Territory KEPT (Pro revenue path). Clean Map + Re-center hidden. New quiet
+//      top-right conditions strip: moon (auto, illum %) + season phase (calendar-
+//      derived, honest — no parked value) display-only; wind TAPPABLE, starts
+//      UNSET (no fabricated "NW" on a Verified screen). ONE amber Re-Load =
+//      genuine fresh read + recenter. UI-only — terrain engine key NOT bumped.
+export const BUILD_REV = 'r22';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

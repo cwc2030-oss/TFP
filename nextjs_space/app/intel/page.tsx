@@ -85,6 +85,7 @@ import { QAScorecard, QASessionSummary, QAAnalyticsPanel, exportSessionCSV, type
 import TerrainStoryPanel, { TerrainStoryExportLegend, StructuralDriversGrid } from '@/components/terrain/terrain-story-panel';
 import FlatTerrainNotice from '@/components/terrain/flat-terrain-notice';
 import TerrainLoadingBar from '@/components/terrain/terrain-loading-bar';
+import LooseWindow from '@/components/terrain/loose-window';
 import { generateTerrainStory, computeStructuralDrivers, type TerrainStorySummary } from '@/lib/terrain-story';
 import HuntingPotentialCard, { computeHuntingPotential, type HuntingPotentialScore } from '@/components/terrain/hunting-potential-card';
 import HuntOutcomeCard, { HuntInProgressBanner } from '@/components/hunt-outcome-card';
@@ -2348,6 +2349,41 @@ function getTodayMoonPhase(): string {
   return 'waning_crescent';
 }
 
+// ═══ Moon illumination — deterministic, no API call ═══
+// Returns illumination percentage (0 = new, 100 = full) and waxing/waning,
+// derived from the same synodic-month position as getTodayMoonPhase().
+function getTodayMoonDetail(): { illumPct: number; waxing: boolean } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const jd = 367 * year
+    - Math.floor(7 * (year + Math.floor((month + 9) / 12)) / 4)
+    + Math.floor(275 * month / 9)
+    + day + 1721013.5;
+  const knownNewMoon = 2451549.5;
+  const synodicMonth = 29.53058867;
+  const phase = ((jd - knownNewMoon) % synodicMonth + synodicMonth) % synodicMonth;
+  const pct = phase / synodicMonth;
+  const illum = (1 - Math.cos(2 * Math.PI * pct)) / 2;
+  return { illumPct: Math.round(illum * 100), waxing: pct < 0.5 };
+}
+
+// ═══ Season phase — honest, calendar-derived (Midwest MO/KS deer calendar) ═══
+// Display-only. Never a parked value: the label always reflects today's month.
+function getSeasonPhaseLabel(): string {
+  const m = new Date().getMonth(); // 0-11
+  if (m === 8) return 'EARLY';       // September
+  if (m === 9) return 'PRE-RUT';     // October
+  if (m === 10) return 'RUT';        // November
+  if (m === 11) return 'POST-RUT';   // December
+  if (m === 0 || m === 1) return 'LATE'; // Jan-Feb
+  return 'OFF-SEASON';               // Mar-Aug
+}
+
+// Compass cycle for the tappable wind control (hunter sets his own observed wind).
+const WIND_COMPASS: WindDirection[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
 const MOON_PHASES = [
   { value: 'new_moon',         icon: '🌑', label: 'New' },
   { value: 'waxing_crescent',  icon: '🌒', label: 'Wax Cres' },
@@ -2587,6 +2623,19 @@ function DeerIntelContent() {
   // Moon phase — auto-populated from today's date, adjustable by user
   const [moonPhase, setMoonPhase] = useState<string>('');
   useEffect(() => { setMoonPhase(getTodayMoonPhase()); }, []);
+  // Loose-window conditions strip (r22): honest, display-only moon + season.
+  // Wind starts UNSET — no parked "NW" fabricated value on a Verified screen;
+  // the hunter taps to set his own observed wind (true because he set it).
+  const [moonIllumPct, setMoonIllumPct] = useState<number | null>(null);
+  const [moonWaxing, setMoonWaxing] = useState<boolean>(true);
+  const [seasonPhaseLabel, setSeasonPhaseLabel] = useState<string>('');
+  const [windUserSet, setWindUserSet] = useState<boolean>(false);
+  useEffect(() => {
+    const { illumPct, waxing } = getTodayMoonDetail();
+    setMoonIllumPct(illumPct);
+    setMoonWaxing(waxing);
+    setSeasonPhaseLabel(getSeasonPhaseLabel());
+  }, []);
   // Refs that always mirror the latest season/wind values.
   // runAnalysis reads from these so it never captures stale closures,
   // while remaining excluded from its dep array to avoid auto-re-triggers.
@@ -2723,6 +2772,17 @@ const archetypeInitializedRef = useRef(false);
   // extra layer toggles, archetype tuning) for the simplified 300-acre flow.
   // Set false to restore the full toolbar. Nothing is deleted — only gated.
   const FLOW_ONLY_UI = true;
+
+  // LOOSE_WINDOW (r22): the presentation-layer rebuild of /intel. Collapses the
+  // multi-panel intel view into ONE minimal floating translucent card whose
+  // centerpiece is the four measured structural drivers. When true:
+  //   • the left rail (Hunt Goal / Conditions controls / Intelligence / Refine)
+  //     and the right rail (Terrain Flow + Terrain Story panels) are hidden
+  //     (opacity-0 + pointer-events-none) — all state/effects stay wired.
+  //   • Clean Map / Re-center / Pick Parcel controls are hidden; Territory stays.
+  //   • a quiet top-right conditions strip + a single amber Re-Load appear.
+  // No terrain engine / compute / cache change. Gate, don't delete (reversible).
+  const LOOSE_WINDOW = true;
   
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Phase 1: Clean map = stands + terrain features that justify them
@@ -17157,11 +17217,65 @@ const archetypeInitializedRef = useRef(false);
           </div>
 
           <div className="flex items-center gap-2 md:gap-1 lg:gap-2">
+            {/* ═══ LOOSE-WINDOW CONDITIONS STRIP (quiet, always on) ═══ */}
+            {LOOSE_WINDOW && (
+              <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-black/35 backdrop-blur-md border border-white/[0.08] text-white/70 text-xs">
+                {/* Wind — tappable; starts UNSET (no fabricated default) */}
+                <button
+                  onClick={() => {
+                    const idx = WIND_COMPASS.indexOf(windDirection);
+                    const next = WIND_COMPASS[(idx + 1) % WIND_COMPASS.length];
+                    setWindDirection(next);
+                    setWindUserSet(true);
+                    setWindLastUpdated(new Date());
+                  }}
+                  className="flex items-center gap-1.5 hover:text-white transition-colors"
+                  title={windUserSet ? `Wind ${windDirection} — tap to change` : 'Tap to set your observed wind'}
+                >
+                  <Wind className="h-3.5 w-3.5" />
+                  {windUserSet ? (
+                    <>
+                      <span style={{ transform: `rotate(${windDirectionToDeg(windDirection)}deg)`, display: 'inline-block', lineHeight: 1 }}>↑</span>
+                      <span className="font-medium tabular-nums">{windDirection}</span>
+                    </>
+                  ) : (
+                    <span className="text-amber-300/80">Set wind</span>
+                  )}
+                </button>
+                <span className="h-3 w-px bg-white/15" />
+                {/* Season phase — display-only, calendar-derived */}
+                <span className="flex items-center gap-1.5" title="Season phase — from the calendar">
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span className="font-medium tracking-wide">{seasonPhaseLabel || '—'}</span>
+                </span>
+                <span className="h-3 w-px bg-white/15" />
+                {/* Moon — display-only, auto from date */}
+                <span className="flex items-center gap-1.5" title="Moon phase — from today's date">
+                  <span className="text-sm leading-none">{MOON_PHASES.find(p => p.value === moonPhase)?.icon || '🌙'}</span>
+                  {moonIllumPct !== null && (
+                    <span className="tabular-nums">{moonWaxing ? 'Waxing' : 'Waning'} · {moonIllumPct}%</span>
+                  )}
+                </span>
+              </div>
+            )}
+            {/* ═══ LOOSE-WINDOW RE-LOAD (single amber button) ═══ */}
+            {LOOSE_WINDOW && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 hover:text-amber-200"
+                onClick={() => { setMainFlowError(false); setMainRetryNonce(n => n + 1); flyToCenter(); }}
+                title="Re-Load — run a fresh terrain read and re-center"
+              >
+                <RefreshCw className="h-4 w-4 lg:mr-1" />
+                <span className="md:hidden lg:inline">Re-Load</span>
+              </Button>
+            )}
             {/* CLEAN MAP — one-tap off switch for ALL overlay lines */}
             <Button
               size="sm"
               variant="ghost"
-              className={`${cleanMap
+              className={`${LOOSE_WINDOW ? 'hidden' : ''} ${cleanMap
                 ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
                 : 'bg-white/10 text-white/90 border border-white/20 hover:bg-white/20 hover:text-white'
               }`}
@@ -17272,8 +17386,8 @@ const archetypeInitializedRef = useRef(false);
                 <span className="md:hidden lg:inline">{geometryDebugMode ? 'Debug ON' : 'Debug'}</span>
               </Button>
             )}
-            {/* Territory Builder toggle */}
-            {!FLOW_ONLY_UI && (
+            {/* Territory Builder toggle — kept in the loose window as the Pro revenue path */}
+            {(!FLOW_ONLY_UI || LOOSE_WINDOW) && (
             <Button
               size="sm"
               variant="ghost"
@@ -17355,7 +17469,7 @@ const archetypeInitializedRef = useRef(false);
             <Button
               size="sm"
               variant="ghost"
-              className={`${parcelPickMode 
+              className={`${LOOSE_WINDOW ? 'hidden' : ''} ${parcelPickMode 
                 ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50' 
                 : (demoMode || heroParcel)
                   ? 'text-white/40 hover:text-white/70 hover:bg-white/5'
@@ -17374,7 +17488,7 @@ const archetypeInitializedRef = useRef(false);
             <Button
               size="sm"
               variant="ghost"
-              className="text-white/80 hover:text-white hover:bg-white/10"
+              className={`text-white/80 hover:text-white hover:bg-white/10 ${LOOSE_WINDOW ? 'hidden' : ''}`}
               onClick={flyToCenter}
             >
               <Crosshair className="h-4 w-4 lg:mr-1" />
@@ -17398,6 +17512,21 @@ const archetypeInitializedRef = useRef(false);
           </div>
         </div>
       </div>
+
+      {/* ========== LOOSE WINDOW (r22 intel centerpiece) ========== */}
+      {LOOSE_WINDOW && !exportMode && (
+        <div className="absolute bottom-6 left-4 z-20 pointer-events-none">
+          <LooseWindow
+            drivers={terrainStory?.drivers ?? null}
+            terrainState={terrainStory?.terrainState ?? null}
+            genuineFlat={genuineFlat}
+            flowLinesDrawn={flowTierCounts.total > 0}
+            isLoading={terrainFlowLoading}
+            hasError={mainFlowError}
+            onReload={() => { setMainFlowError(false); setMainRetryNonce(n => n + 1); flyToCenter(); }}
+          />
+        </div>
+      )}
 
       {/* ========== PARCEL PICK MODE BANNER ========== */}
       {parcelPickMode && !parcelPickLoading && (
@@ -17664,7 +17793,7 @@ const archetypeInitializedRef = useRef(false);
         absolute top-16 bottom-4 left-4 z-10
         transition-[width,opacity] duration-300 will-change-[width]
         ${panelCollapsed ? 'w-12' : 'w-80'}
-        ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}
+        ${(exportMode || LOOSE_WINDOW) ? 'opacity-0 pointer-events-none' : 'opacity-100'}
       `}>
         <div className="h-full bg-gray-950/95 backdrop-blur-xl rounded-xl border border-white/[0.08] overflow-hidden flex flex-col shadow-2xl">
           {/* Collapse Toggle */}
@@ -18529,7 +18658,7 @@ const archetypeInitializedRef = useRef(false);
         absolute top-16 bottom-4 right-4 z-10
         transition-[width,opacity] duration-300 will-change-[width]
         ${rightPanelCollapsed ? 'w-12' : 'w-72'}
-        ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}
+        ${(exportMode || LOOSE_WINDOW) ? 'opacity-0 pointer-events-none' : 'opacity-100'}
       `}>
         <div className="h-full bg-gray-950/95 backdrop-blur-xl rounded-xl border border-white/[0.08] overflow-hidden flex flex-col shadow-2xl">
           {/* Collapse Toggle */}
@@ -20879,8 +21008,8 @@ const archetypeInitializedRef = useRef(false);
         />
       )}
 
-      {/* Legend - Premium V1 styling (hidden in export mode - replaced by export legend) */}
-      <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-gray-900/95 backdrop-blur rounded-xl px-5 py-3 flex items-center gap-5 text-xs text-white/80 border border-white/15 shadow-2xl transition-opacity duration-300 ${exportMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      {/* Legend - Premium V1 styling (hidden in export mode - replaced by export legend; hidden under LOOSE_WINDOW) */}
+      <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-gray-900/95 backdrop-blur rounded-xl px-5 py-3 flex items-center gap-5 text-xs text-white/80 border border-white/15 shadow-2xl transition-opacity duration-300 ${(exportMode || LOOSE_WINDOW) ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         {/* Terrain */}
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full" style={{ background: LAYER_COLORS.bedding }} />
