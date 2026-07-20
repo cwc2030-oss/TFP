@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 19';
+export const BUILD_DATE = 'Jul 20';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -286,7 +286,26 @@ export const BUILD_DATE = 'Jul 19';
 //      derived, honest — no parked value) display-only; wind TAPPABLE, starts
 //      UNSET (no fabricated "NW" on a Verified screen). ONE amber Re-Load =
 //      genuine fresh read + recenter. UI-only — terrain engine key NOT bumped.
-export const BUILD_REV = 'r22';
+// r23 ("Roam-and-Read" — the A-300 reads what it's over, NO engine bump):
+//      The terrain read follows the ring instead of being pinned to the loaded
+//      parcel. The A-300 ring locks to the map's viewport center; when the user
+//      roams the map and it SETTLES (debounced ~450ms), the ground under the
+//      ring center is read and EVERYTHING recomputes for that center (four
+//      numbers + situated message + flow lines) via the existing Piece-4 scope
+//      pipeline — abort-in-flight/cancel prior read, cache-first (snapped grid),
+//      story regen from the SAME response, failure ≠ flat. A quarter-inch nudge
+//      trips a fresh read (roaming is the primary interaction now). Fired only
+//      on USER moves (movestart originalEvent discriminator) — programmatic
+//      flyTo/fitBounds never trip a read. URL lat/lng updates to the ring center
+//      (shareable). Numbers now ROLL IN (odometer, eased decelerate ~520ms,
+//      landing exactly on the true measured value — never randomized) with a
+//      soft one-beat teal pulse on the leading driver as the read lands.
+//      Re-Load button REMOVED (roaming replaces it; genuine failures show an
+//      inline "Re-read terrain" retry INSIDE the Loose Window, wired to the
+//      scope retry). Faint yellow dashed parcel border HIDDEN while roaming.
+//      Honesty invariants preserved. Gated behind ROAM_AND_READ=true. UI/wiring
+//      only — terrain engine key NOT bumped.
+export const BUILD_REV = 'r23';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

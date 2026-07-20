@@ -685,6 +685,23 @@ export async function POST(request: NextRequest) {
       version: API_VERSION,
       request_id: `flow_terrain_${Date.now().toString(36)}`,
       terrain_debug: terrainDebug,
+      // r23 (roam-and-read): carry the SAME per-scope ridge/saddle extraction the
+      // flow was built from, so the client can regenerate the four structural
+      // drivers (Bench/Saddle/Ridge/Convergence) for THIS scope instead of
+      // reusing the start-parcel's stale ridge spine. Without this the numbers
+      // stayed frozen at the loaded parcel while the map roamed. Shaped to match
+      // the client ridgeSpineData contract computeStructuralDrivers reads.
+      ridge_spine: ridgeData ? {
+        ridges_primary: ridgeData.ridges_primary ?? null,
+        ridges_secondary: ridgeData.ridges_secondary ?? null,
+        saddle_nodes: ridgeData.saddle_nodes ?? null,
+        metadata: {
+          total_ridge_length_m: ridgeData.metadata?.total_ridge_length_m ?? 0,
+          ridge_count_primary: ridgeData.metadata?.ridge_count_primary ?? terrainDebug.ridge_count_primary ?? 0,
+          ridge_count_secondary: ridgeData.metadata?.ridge_count_secondary ?? terrainDebug.ridge_count_secondary ?? 0,
+          saddle_count: ridgeData.metadata?.saddle_count ?? terrainDebug.ridge_saddle_count ?? 0,
+        },
+      } : null,
     }, {
       headers: {
         'X-Processing-Time-Ms': String(Date.now() - startTime),

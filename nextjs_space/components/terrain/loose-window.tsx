@@ -19,8 +19,42 @@
  *       One tap deep. Taps never trigger a map drag (gestures are stopped here).
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { StructuralDrivers, StructuralDriverScore } from '@/lib/terrain-story';
+
+// ── r23 odometer roll-in ──
+// Animate a number from its current displayed value up/down to the new measured
+// target over ~520ms with an eased decelerate. HONESTY: it always lands exactly
+// on `target` (the real measured percentage) and never randomizes the reveal —
+// it just rolls the last-shown value to the new true value when a fresh read
+// lands. On first mount it shows the target immediately (no animation).
+function useCountUp(target: number, durationMs = 520): number {
+  const [display, setDisplay] = useState(target);
+  const displayRef = useRef(target);
+  const rafRef = useRef<number | null>(null);
+  useEffect(() => {
+    const from = displayRef.current;
+    const to = target;
+    if (from === to) return;
+    const start = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic — decelerate onto the value
+      const v = Math.round(from + (to - from) * eased);
+      displayRef.current = v;
+      setDisplay(v);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        displayRef.current = to; // guarantee we land on the true measured value
+        setDisplay(to);
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, durationMs]);
+  return display;
+}
 
 // ── Palette (Clark-specified) ──
 const TEAL = '#34D3B7';   // leading driver hero
@@ -80,6 +114,29 @@ export function LooseWindow({
   onReload,
 }: LooseWindowProps) {
   const [openKey, setOpenKey] = useState<DriverKey | null>(null);
+
+  // ── r23: measured percentages (hooks must run before any early return) ──
+  const benchPct = pct(drivers?.benchSupport);
+  const saddlePct = pct(drivers?.saddleInfluence);
+  const ridgePct = pct(drivers?.ridgeSpineSupport);
+  const convPct = pct(drivers?.convergenceDensity);
+  const benchAnim = useCountUp(benchPct);
+  const saddleAnim = useCountUp(saddlePct);
+  const ridgeAnim = useCountUp(ridgePct);
+  const convAnim = useCountUp(convPct);
+  const animFor: Record<DriverKey, number> = {
+    bench: benchAnim, saddle: saddleAnim, ridge: ridgeAnim, convergence: convAnim,
+  };
+
+  // One-beat teal pulse on the leading driver when a fresh read lands. Fires
+  // ~520ms after the measured values change (i.e. as the roll-in settles).
+  const [pulseNonce, setPulseNonce] = useState(0);
+  useEffect(() => {
+    if (!drivers) return;
+    const t = setTimeout(() => setPulseNonce((n) => n + 1), 520);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [benchPct, saddlePct, ridgePct, convPct]);
 
   // Stop every gesture at the card so tapping a number never drags the map.
   const swallow = {
@@ -186,8 +243,12 @@ export function LooseWindow({
               className={`flex flex-col items-center rounded-lg py-1.5 transition-colors ${isOpen ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}`}
               aria-expanded={isOpen}
             >
-              <span className="text-[26px] leading-none font-semibold tabular-nums" style={{ color }}>
-                {percentage}
+              <span
+                key={key === leaderKey && !flat ? `n-${key}-${pulseNonce}` : `n-${key}`}
+                className={`text-[26px] leading-none font-semibold tabular-nums ${key === leaderKey && !flat ? 'tfp-teal-beat' : ''}`}
+                style={{ color }}
+              >
+                {animFor[key]}
               </span>
               <span className="mt-1 text-[8px] tracking-[0.14em]" style={{ color, opacity: 0.7 }}>
                 {SHORT[key]}

@@ -73,9 +73,12 @@ export interface ReconcileState {
 // Ordered by visual stacking (bottom → top), matching addLayer order.
 
 export const LAYER_REGISTRY: LayerEntry[] = [
-  // ── Parcel boundary (visible when parcel data exists) ──
-  { id: 'tfp-parcel-glow',    group: 'parcel', opacityProp: 'line-opacity', targetOpacity: 0.35, source: { kind: 'parcel' } },
-  { id: 'tfp-parcel-outline',  group: 'parcel', opacityProp: 'line-opacity', targetOpacity: 0.95, source: { kind: 'parcel' } },
+  // ── Parcel boundary ──
+  // r23 ROAM-AND-READ: the parcel border is hidden ALWAYS so nothing stays
+  // pinned to the start parcel while the A-300 ring roams. Marked 'hidden' so
+  // reconcileVisibility never restores it to its old gold-boundary opacity.
+  { id: 'tfp-parcel-glow',    group: 'parcel', opacityProp: 'line-opacity', targetOpacity: 0, source: { kind: 'hidden' } },
+  { id: 'tfp-parcel-outline',  group: 'parcel', opacityProp: 'line-opacity', targetOpacity: 0, source: { kind: 'hidden' } },
 
   // ── QA Parcel (hidden by default — toggled by qaParcelLookupMode) ──
   { id: 'tfp-qa-parcel-fill',          group: 'qaParcel', opacityProp: 'fill-opacity', targetOpacity: 0.08, source: { kind: 'hidden' } },

@@ -2486,6 +2486,16 @@ function DeerIntelContent() {
   // (whose closure is keyed on [mapReady] only) can read the CURRENT override
   // without capturing a stale value.
   const huntZoneCenterOverrideRef = useRef<[number, number] | null>(null);
+  // ═══ r23 ROAM-AND-READ ═══
+  // userMoveRef: true only while the CURRENT map movement was user-initiated
+  // (drag / scroll / pinch). Programmatic camera moves (flyTo / fitBounds /
+  // easeTo) fire 'movestart' WITHOUT an originalEvent, so they leave this false
+  // and never trip an auto-read. Consumed (reset) at moveend.
+  const userMoveRef = useRef<boolean>(false);
+  // Debounce timer for the settle-triggered auto-read (fires ~450ms after the
+  // user stops roaming). Cleared on every fresh move so only the final rest
+  // position trips a read.
+  const roamSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Key of the scope compute currently in flight (native MISS path). A "read"
   // retry that resolves to this exact key must NOT abort+restart it — it lets
   // the in-flight compute finish, so a re-click never resets the 2-6s clock.
@@ -2783,7 +2793,18 @@ const archetypeInitializedRef = useRef(false);
   //   • a quiet top-right conditions strip + a single amber Re-Load appear.
   // No terrain engine / compute / cache change. Gate, don't delete (reversible).
   const LOOSE_WINDOW = true;
-  
+
+  // ═══ r23 — ROAM-AND-READ ("the A-300 reads what it's over") ═══
+  // The terrain read follows the ring instead of being pinned to the loaded
+  // parcel. The A-300 ring locks to the map's viewport center; when the user
+  // roams the map and it SETTLES, the ground under the ring center is read and
+  // EVERYTHING recomputes for that center (four numbers + situated message +
+  // flow lines), reusing the existing Piece-4 scope pipeline (abort-in-flight,
+  // cache-first, story regen from the same response, failure ≠ flat). The
+  // Re-Load button and the yellow dashed parcel border are removed in this
+  // mode. Reversible: gate, don't delete.
+  const ROAM_AND_READ = true;
+
   const [visibility, setVisibility] = useState<TerrainLayerVisibility>({
     // Phase 1: Clean map = stands + terrain features that justify them
     bedding: false,                 // v3.8.2: DEMOTED — speculative context, opt-in only
@@ -7439,6 +7460,10 @@ const archetypeInitializedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    // r23 ROAM-AND-READ: the ring no longer grab-drags independently. It locks
+    // to the viewport center and the map pans normally underneath it (see the
+    // auto-trip effect below), so we skip installing the grab handlers here.
+    if (ROAM_AND_READ) return;
 
     const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
     const GRAB_LAYERS = ['tfp-huntzone-fill', 'tfp-huntzone-ring'];
@@ -7594,6 +7619,100 @@ const archetypeInitializedRef = useRef(false);
     return () => { try { delete (window as any).__TFP_SCOPE_MOVE__; } catch { /* noop */ } };
   }, [debugMode]);
 
+  // ========== r23 — ROAM-AND-READ AUTO-TRIP ==========
+  // The A-300 ring locks to the map's viewport center and the read follows it.
+  // While the user roams (drag / scroll / pinch) the ring tracks the center
+  // live; when motion SETTLES (debounced ~450ms), we snap the center to the
+  // ~100 m grid and commit it via setHuntZoneCenterOverride — which drives the
+  // existing Piece-4 scope pipeline (abort-in-flight, cache-first, story regen
+  // from the same response, failure ≠ flat). A quarter-inch nudge is enough to
+  // trip a fresh read; that IS the primary interaction now. Programmatic camera
+  // moves (flyTo / fitBounds / easeTo) fire 'movestart' WITHOUT an originalEvent,
+  // so they never trip a read.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !ROAM_AND_READ) return;
+
+    const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
+    const SETTLE_MS = 450;
+
+    // Redraw the ring circle + maker's-mark label centered on the current
+    // viewport center (visual only — no state, no compute).
+    const setRingAtCenter = () => {
+      try {
+        const c = map.getCenter();
+        const center: [number, number] = [c.lng, c.lat];
+        const ring = turf.circle(center, RING_RADIUS_M, { units: 'meters', steps: 64 });
+        const src = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
+        if (src) src.setData({ type: 'FeatureCollection', features: [ring] } as any);
+        const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+        if (labelSrc) {
+          const northPt = turf.destination(center, RING_RADIUS_M, 0, { units: 'meters' });
+          labelSrc.setData({ type: 'FeatureCollection', features: [northPt] } as any);
+        }
+      } catch { /* non-fatal */ }
+    };
+
+    // ~100 m grid snap — identical to the Piece-4 cache-key grid so a revisit to
+    // a snapped spot is a cache hit (instant, no new terrain compute).
+    const snapToGrid = (lng: number, lat: number): [number, number] =>
+      [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000];
+
+    const onMoveStart = (e: any) => {
+      // Only user gestures carry an originalEvent. Programmatic camera moves
+      // (flyTo / fitBounds / easeTo) do not, so they leave the flag false.
+      if (e && e.originalEvent) userMoveRef.current = true;
+    };
+
+    const onMove = () => {
+      // Keep the ring pinned to the viewport center while the user roams.
+      if (userMoveRef.current) setRingAtCenter();
+    };
+
+    const onMoveEnd = () => {
+      if (!userMoveRef.current) return; // ignore programmatic settles
+      userMoveRef.current = false;
+      if (roamSettleTimerRef.current) clearTimeout(roamSettleTimerRef.current);
+      // Debounce: only the final rest position trips a read. If the ring moves
+      // again first, Piece-4's own abort/seq teardown supersedes the prior read.
+      roamSettleTimerRef.current = setTimeout(() => {
+        roamSettleTimerRef.current = null;
+        try {
+          const c = map.getCenter();
+          if (!Number.isFinite(c.lng) || !Number.isFinite(c.lat)) return;
+          const snapped = snapToGrid(c.lng, c.lat);
+          const cur = huntZoneCenterRef.current;
+          // Same grid cell as the last read → no-op (avoids a redundant recompute).
+          if (cur && cur[0] === snapped[0] && cur[1] === snapped[1]) return;
+          // Commit the new center — this trips the Piece-4 read for the ground
+          // under the ring (numbers + message + flow all recompute together).
+          huntZoneCenterRef.current = snapped;
+          setHuntZoneCenterOverride(snapped);
+          // Reflect the read location in the URL so it's shareable / bookmarkable.
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('lat', snapped[1].toFixed(6));
+            url.searchParams.set('lng', snapped[0].toFixed(6));
+            window.history.replaceState({}, '', url.toString());
+          } catch { /* non-fatal */ }
+          console.log('[ROAM] settle → read at', snapped);
+        } catch { /* non-fatal */ }
+      }, SETTLE_MS);
+    };
+
+    map.on('movestart', onMoveStart);
+    map.on('move', onMove);
+    map.on('moveend', onMoveEnd);
+
+    return () => {
+      map.off('movestart', onMoveStart);
+      map.off('move', onMove);
+      map.off('moveend', onMoveEnd);
+      if (roamSettleTimerRef.current) { clearTimeout(roamSettleTimerRef.current); roamSettleTimerRef.current = null; }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady]);
+
   // ========== PIECE 4 — NATIVE PER-SCOPE FLOW COMPUTE + CACHE ==========
   // When the Hunt Zone ring SETTLES on a snapped grid center (huntZoneCenterOverride
   // commits from the Piece 3 drag release), compute flow NATIVELY for that 300-ac
@@ -7650,7 +7769,13 @@ const archetypeInitializedRef = useRef(false);
           || (parcelPolygon?.properties as any)?.acreage
           || undefined;
         const storyAddress = qaParcel?.address || address || undefined;
-        const scopeStory = generateTerrainStory(payload, storyAcreage, storyAddress, ridgeSpineDataRef.current || ridgeSpineData);
+        // r23 (roam-and-read): measure the four structural drivers from THIS
+        // scope's ridge/saddle extraction (payload.ridge_spine), so Bench/Saddle/
+        // Ridge/Convergence reflect the ground under the ring right now. Fall back
+        // to the start-parcel spine only for legacy cache entries that predate the
+        // ridge_spine field (self-heals on the next native recompute).
+        const scopeRidgeSpine = (payload as any)?.ridge_spine || ridgeSpineDataRef.current || ridgeSpineData;
+        const scopeStory = generateTerrainStory(payload, storyAcreage, storyAddress, scopeRidgeSpine);
         setTerrainStory(scopeStory);
         console.log(`[HuntZoneFlow] Story regenerated (${srcLabel}) → ${scopeStory.terrainState} — ${scopeStory.headline}`);
       } catch (storyErr) {
@@ -7677,6 +7802,21 @@ const archetypeInitializedRef = useRef(false);
       setScopeFlowError({ lng, lat });
     };
 
+    // r23 (roam-and-read) self-heal: a cached payload is only usable if the story
+    // can be regenerated honestly from it. It must carry the stamped backbone
+    // verdict (Fix #2), AND — when that verdict is CONFIRMED (structured terrain) —
+    // the per-scope ridge_spine the four drivers are measured from. Legacy entries
+    // that predate ridge_spine would otherwise fall back to the START parcel's
+    // spine, freezing the numbers on roam. Flat/marginal verdicts return empty
+    // drivers regardless, so backbone alone suffices for them.
+    const cacheUsable = (p: any): boolean => {
+      const bb = p?.metadata?.backbone;
+      if (!bb) return false;
+      const state = bb.state ?? (bb.hasRealBackbone === false ? 'flat' : 'confirmed');
+      if (state === 'confirmed') return !!p?.ridge_spine;
+      return true;
+    };
+
     const run = async () => {
       // Mark this scope as in flight for the WHOLE compute (cache checks +
       // native compute), so a same-scope "read" re-click de-dupes against it
@@ -7685,12 +7825,12 @@ const archetypeInitializedRef = useRef(false);
       setTerrainFlowLoading(true);
       try {
         // 1) Session memory cache — truly instant, no network.
-        // Self-heal: require the stamped verdict on any cached payload. Legacy
-        // scope-cache entries predate Fix #2 and lack metadata.backbone; treat
-        // those as a MISS so we recompute natively and re-cache WITH the
-        // verdict (guaranteeing flow+story derive from the same response).
+        // Self-heal: require the stamped verdict (+ ridge_spine when confirmed) on
+        // any cached payload. Legacy scope-cache entries predate Fix #2 / r23 and
+        // lack them; treat those as a MISS so we recompute natively and re-cache
+        // WITH both (guaranteeing flow+story+drivers derive from the same response).
         const mem = huntZoneFlowCacheRef.current.get(key);
-        if (mem && (mem as any)?.metadata?.backbone) {
+        if (mem && cacheUsable(mem)) {
           // Fire-and-forget server GET so the cache hit still registers in
           // /admin/usage, without blocking the instant memory return.
           fetch(`/api/terrain-cache?parcelIds=${encodeURIComponent(key)}`, { cache: 'no-store' }).catch(() => {});
@@ -7704,7 +7844,7 @@ const archetypeInitializedRef = useRef(false);
           if (!cancelled && resp.ok) {
             const json = await resp.json();
             const hit = json?.results?.[key]?.terrainFlowData;
-            if (hit && (hit as any)?.metadata?.backbone) {
+            if (hit && cacheUsable(hit)) {
               huntZoneFlowCacheRef.current.set(key, hit);
               applyFlow(hit, 'persistent-cache');
               return;
@@ -7776,6 +7916,12 @@ const archetypeInitializedRef = useRef(false);
               backbone: d.metadata.backbone,
               stats: d.metadata.stats,
             },
+            // r23 (roam-and-read): the fresh per-scope ridge/saddle extraction the
+            // four structural drivers (Bench/Saddle/Ridge/Convergence) are measured
+            // from. Carrying it on the payload (and into cache) is what lets the
+            // numbers recompute for the roamed-to ground instead of freezing at the
+            // start parcel's ridge spine.
+            ridge_spine: (d as any).ridge_spine ?? null,
           };
           huntZoneFlowCacheRef.current.set(key, payload);
           applyFlow(payload, 'native-compute');
@@ -11054,7 +11200,9 @@ const archetypeInitializedRef = useRef(false);
             paint: {
               'line-color': LAYER_COLORS.parcelGlow,
               'line-width': 10,           // Wide glow halo
-              'line-opacity': 0.35,       // Subtle, not overpowering
+              // r23 ROAM-AND-READ: the parcel border is hidden while roaming so
+              // nothing stays pinned to the start parcel as the ring travels.
+              'line-opacity': ROAM_AND_READ ? 0 : 0.35,
               'line-blur': 4,             // Soft edge glow effect
             },
           });
@@ -11067,7 +11215,8 @@ const archetypeInitializedRef = useRef(false);
               'line-color': LAYER_COLORS.parcelBoundary,
               'line-width': 4.5,          // ~4-5px for clear visibility
               'line-dasharray': [5, 3],   // Dashed pattern
-              'line-opacity': 0.95,       // Strong presence
+              // r23 ROAM-AND-READ: hidden while roaming (see glow layer note).
+              'line-opacity': ROAM_AND_READ ? 0 : 0.95,
             },
           });
         }
@@ -14837,8 +14986,10 @@ const archetypeInitializedRef = useRef(false);
             // Single parcel or first parcel — show gold boundary immediately
             try { map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible'); } catch {}
             try { map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible'); } catch {}
-            try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.95)); } catch {}
-            try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.35)); } catch {}
+            if (!ROAM_AND_READ) {
+              try { map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.95)); } catch {}
+              try { map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.35)); } catch {}
+            }
             console.log('[PICK] Imperative paint: gold boundary visible immediately');
             // Piece 2: paint the Hunt Zone 300-ac scope ring immediately too, so it
             // appears in lockstep with the gold boundary (same center/radius as the
@@ -17258,8 +17409,10 @@ const archetypeInitializedRef = useRef(false);
                 </span>
               </div>
             )}
-            {/* ═══ LOOSE-WINDOW RE-LOAD (single amber button) ═══ */}
-            {LOOSE_WINDOW && (
+            {/* r23 ROAM-AND-READ: the Re-Load button is gone. Roaming the map is
+                the read trigger now; genuine compute failures surface an inline
+                "tap to retry" inside the Loose Window itself. */}
+            {LOOSE_WINDOW && !ROAM_AND_READ && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -17522,8 +17675,18 @@ const archetypeInitializedRef = useRef(false);
             genuineFlat={genuineFlat}
             flowLinesDrawn={flowTierCounts.total > 0}
             isLoading={terrainFlowLoading}
-            hasError={mainFlowError}
-            onReload={() => { setMainFlowError(false); setMainRetryNonce(n => n + 1); flyToCenter(); }}
+            hasError={mainFlowError || !!scopeFlowError}
+            onReload={() => {
+              // r23: a roamed read fails at a scope (scopeFlowError) — retry the
+              // Piece-4 compute for that same center, not the parcel main flow.
+              if (scopeFlowError) {
+                setScopeFlowError(null);
+                setScopeRetryNonce(n => n + 1);
+              } else {
+                setMainFlowError(false);
+                setMainRetryNonce(n => n + 1);
+              }
+            }}
           />
         </div>
       )}
