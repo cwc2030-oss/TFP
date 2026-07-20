@@ -351,7 +351,23 @@ export const BUILD_DATE = 'Jul 20';
 //      (return-to-parcel chip flies the ring back + re-reads) and its outline
 //      shows as a landmark when loaded (hidden in pure free-roam). All r23/r24/r25
 //      wins intact. Interaction/gesture layer only — no engine bump, no cache flush.
-export const BUILD_REV = 'r26';
+//
+// r27 — SEPARATE NAV FROM READ (map = look, ring = read): panning the map now
+//      only NAVIGATES — it fires NO read and does NOT re-pin the ring. Before,
+//      a map-pan settle (r24/r26) treated the pan as "roam here": it dropped the
+//      loaded parcel and scored whatever new ground was under the viewport center,
+//      so nudging the map just to LOOK AROUND cost the user their parcel. Fix:
+//      the roam effect no longer binds the map's drag events at all, so a pan (and
+//      a zoom) can neither re-pin the ring nor trip a read. The loaded parcel, its
+//      gold outline, its numbers, and its message all persist through a pan; the
+//      A-300 ring is a geographic turf.circle so it stays glued to its ground and
+//      simply scrolls off-screen if you pan far (return-to-parcel chip, or dragging
+//      the ring back, brings it home). Net trigger rule: reads fire ONLY on
+//      ring-drag settle (Piece 3) + return-to-parcel. Zoom still fires no read.
+//      Tap-to-place-the-ring intentionally left out (no new gesture this pass).
+//      All r23–r26 wins intact. Interaction plumbing only — no engine bump, no
+//      cache flush.
+export const BUILD_REV = 'r27';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

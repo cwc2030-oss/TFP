@@ -7463,13 +7463,13 @@ const archetypeInitializedRef = useRef(false);
     // r24 RESTORE: the A-300 ring is grab-draggable again (r23 had disabled this
     // guard in favor of map-pan-only roaming, which clobbered the grab). Both
     // gestures now coexist: grabbing the RING translates the ring and, on release,
-    // commits its snapped center — tripping the SAME Piece-4 read the roam
-    // auto-trip uses. Grabbing EMPTY MAP still pans (the roam auto-trip effect
-    // below keeps the ring pinned to viewport center during a pan and reads on
-    // settle). No conflict: onDown disables dragPan for the ring gesture, so the
-    // map never moves during a ring drag → the roam 'move'/'moveend' handlers
-    // never fire → no double-commit. Either way the read follows the RING's
-    // footprint, not screen-center.
+    // commits its snapped center — tripping the Piece-4 read for the ground under
+    // the ring. r27: grabbing EMPTY MAP just PANS the view (navigation only) — it
+    // no longer re-pins the ring or trips a read (the roam auto-trip effect below
+    // has been de-wired), so looking around never drops the loaded parcel. onDown
+    // still disables dragPan for the ring gesture so the map never moves during a
+    // ring drag. The read follows the RING's footprint, and ONLY a ring drag (or
+    // return-to-parcel) fires it.
 
     const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
     const GRAB_LAYERS = ['tfp-huntzone-fill', 'tfp-huntzone-ring'];
@@ -7709,63 +7709,29 @@ const archetypeInitializedRef = useRef(false);
     const snapToGrid = (lng: number, lat: number): [number, number] =>
       [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000];
 
-    // r26 ZOOM KILL-SHOT: roam-and-read is now PAN-ONLY. It binds to the map's
-    // DRAG events (dragstart / drag / dragend), which fire ONLY for a real pointer
-    // pan — never for a zoom (wheel is disabled; pinch and +/- fire zoom/move but
-    // NOT drag) and never for programmatic camera moves (flyTo / easeTo / fitBounds
-    // emit no drag events). This structurally breaks the old zoom->read feedback
-    // loop: a zoom can neither re-pin the ring nor trip a read, because the roam
-    // handlers never hear about it. The ring is a geographic turf.circle, so mapbox
-    // reprojects + scales it on every transform — during a zoom it holds its ground
-    // anchor and simply scales in place (no re-pin, no jump, no read).
+    // HISTORY: r23 pinned the ring to viewport center and auto-tripped a read on
+    // any settle (pan/scroll/pinch). r26 narrowed that to PAN-ONLY by binding the
+    // map's drag events. r27 removes pan-reading entirely (see below) — a map pan
+    // is pure navigation now. Kept for context; superseded by the r27 block.
 
-    const onDragStart = () => { userMoveRef.current = true; };
-
-    // While the user pans, the ring tracks the viewport center live (roam-and-scan).
-    const onDrag = () => {
-      if (!userMoveRef.current) return;
-      setRingAtCenter();
-    };
-
-    const onDragEnd = () => {
-      if (!userMoveRef.current) return;
-      userMoveRef.current = false;
-      if (roamSettleTimerRef.current) clearTimeout(roamSettleTimerRef.current);
-      // Debounce: only the final rest position trips a read. If the ring moves
-      // again first, Piece-4's own abort/seq teardown supersedes the prior read.
-      roamSettleTimerRef.current = setTimeout(() => {
-        roamSettleTimerRef.current = null;
-        try {
-          const c = map.getCenter();
-          if (!Number.isFinite(c.lng) || !Number.isFinite(c.lat)) return;
-          const snapped = snapToGrid(c.lng, c.lat);
-          const cur = huntZoneCenterRef.current;
-          // Same grid cell as the last read → no-op (avoids a redundant recompute).
-          if (cur && cur[0] === snapped[0] && cur[1] === snapped[1]) return;
-          // Commit the new center — this trips the Piece-4 read for the ground
-          // under the ring (numbers + message + flow all recompute together).
-          huntZoneCenterRef.current = snapped;
-          setHuntZoneCenterOverride(snapped);
-          // Reflect the read location in the URL so it's shareable / bookmarkable.
-          try {
-            const url = new URL(window.location.href);
-            url.searchParams.set('lat', snapped[1].toFixed(6));
-            url.searchParams.set('lng', snapped[0].toFixed(6));
-            window.history.replaceState({}, '', url.toString());
-          } catch { /* non-fatal */ }
-          console.log('[ROAM] settle → read at', snapped);
-        } catch { /* non-fatal */ }
-      }, SETTLE_MS);
-    };
-
-    map.on('dragstart', onDragStart);
-    map.on('drag', onDrag);
-    map.on('dragend', onDragEnd);
+    // r27 SEPARATE NAV FROM READ: the map's drag events are intentionally NOT
+    // bound any more. Panning the map is pure NAVIGATION — it fires NO read and
+    // does NOT re-pin the ring. The loaded parcel, its gold outline, its numbers,
+    // and its message all persist while the user scrolls the neighborhood to look
+    // around; "looking around" never costs them their loaded spot. The A-300 ring
+    // is a geographic turf.circle, so mapbox keeps it glued to its ground as the
+    // camera moves — pan far enough and it simply scrolls off-screen (the
+    // "Return to parcel" chip, or dragging the ring back once it's on-screen,
+    // brings it home). Reads now fire ONLY on ring-drag settle (Piece 3) and on
+    // return-to-parcel. This deliberately removes the r23–r26 pan-auto-trip.
+    //
+    // drawRingAt / setRingAtCenter / snapToGrid remain defined above (cheap, and
+    // they document the ring-draw mechanics); we reference them here so intent is
+    // explicit without wiring any map listeners. No dragstart/drag/dragend, so a
+    // zoom or a pan can neither re-pin the ring nor trip a read.
+    void drawRingAt; void setRingAtCenter; void snapToGrid; void SETTLE_MS;
 
     return () => {
-      map.off('dragstart', onDragStart);
-      map.off('drag', onDrag);
-      map.off('dragend', onDragEnd);
       if (roamSettleTimerRef.current) { clearTimeout(roamSettleTimerRef.current); roamSettleTimerRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
