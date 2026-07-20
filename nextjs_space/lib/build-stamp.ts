@@ -305,7 +305,21 @@ export const BUILD_DATE = 'Jul 20';
 //      scope retry). Faint yellow dashed parcel border HIDDEN while roaming.
 //      Honesty invariants preserved. Gated behind ROAM_AND_READ=true. UI/wiring
 //      only — terrain engine key NOT bumped.
-export const BUILD_REV = 'r23';
+//
+// r24 — RESTORE A-300 RING DRAG (r23 regression fix). r23 wired drag to the map
+//      for roam-and-read and in doing so disabled the ring's own grab handler —
+//      the ring could no longer be dragged, only the map panned under a
+//      center-locked ring. r24 restores the grab so BOTH gestures coexist (as
+//      before r23): grab the RING → the ring moves and, on release, commits its
+//      snapped center (URL updated) tripping the same Piece-4 read; grab EMPTY
+//      MAP → the map pans and the roam auto-trip reads on settle. No conflict —
+//      the ring drag disables dragPan, so the map never moves during it and the
+//      roam move/moveend handlers don't fire (no double-commit). The read always
+//      follows the RING's footprint, not screen-center. All r23 wins intact
+//      (roll-in, teal lock, no Re-Load button, no dashed border, inline retry,
+//      cancel-in-flight). Interaction/handler restore only — no engine bump, no
+//      cache flush.
+export const BUILD_REV = 'r24';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

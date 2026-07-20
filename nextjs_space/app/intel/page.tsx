@@ -7460,10 +7460,16 @@ const archetypeInitializedRef = useRef(false);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    // r23 ROAM-AND-READ: the ring no longer grab-drags independently. It locks
-    // to the viewport center and the map pans normally underneath it (see the
-    // auto-trip effect below), so we skip installing the grab handlers here.
-    if (ROAM_AND_READ) return;
+    // r24 RESTORE: the A-300 ring is grab-draggable again (r23 had disabled this
+    // guard in favor of map-pan-only roaming, which clobbered the grab). Both
+    // gestures now coexist: grabbing the RING translates the ring and, on release,
+    // commits its snapped center — tripping the SAME Piece-4 read the roam
+    // auto-trip uses. Grabbing EMPTY MAP still pans (the roam auto-trip effect
+    // below keeps the ring pinned to viewport center during a pan and reads on
+    // settle). No conflict: onDown disables dragPan for the ring gesture, so the
+    // map never moves during a ring drag → the roam 'move'/'moveend' handlers
+    // never fire → no double-commit. Either way the read follows the RING's
+    // footprint, not screen-center.
 
     const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
     const GRAB_LAYERS = ['tfp-huntzone-fill', 'tfp-huntzone-ring'];
@@ -7554,6 +7560,15 @@ const archetypeInitializedRef = useRef(false);
         setRingAt(snapped);                 // settle on grid immediately (round + scaled)
         huntZoneCenterRef.current = snapped;
         setHuntZoneCenterOverride(snapped); // SINGLE clip/compute fires here, on release
+        // Reflect the ring's new footprint in the URL (parity with roam settle) so
+        // the read location stays shareable / bookmarkable whether the ground under
+        // the ring changed by dragging the ring or by panning the map.
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('lat', snapped[1].toFixed(6));
+          url.searchParams.set('lng', snapped[0].toFixed(6));
+          window.history.replaceState({}, '', url.toString());
+        } catch { /* non-fatal */ }
         console.log('[MAP] Hunt Zone ring released — snapped center', snapped, `movedPx=${movedPx.toFixed(1)}`);
       }
     };
