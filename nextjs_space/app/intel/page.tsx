@@ -7619,6 +7619,36 @@ const archetypeInitializedRef = useRef(false);
     huntZoneCenterOverrideRef.current = huntZoneCenterOverride;
   }, [huntZoneCenterOverride]);
 
+  // r26 RETURN-TO-PARCEL: keep the loaded parcel's gold outline visible as a
+  // landmark whenever a SPECIFIC single parcel is loaded. r23 had hidden it for
+  // pure free-roam (nothing should stay pinned to the start parcel as the ring
+  // travels) — but a loaded/marked parcel is exactly the anchor the hunter wants
+  // to see and return to. So: outline shown when parcelPolygon is set (single
+  // parcel), hidden when no parcel is loaded (pure free-roam). Multi-parcel
+  // territory is left to enforceTerritoryLineMode (it owns those layers).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const isMulti = territoryParcelsRef.current.length > 1;
+    if (isMulti) return; // enforcer owns multi-parcel boundary styling
+    const hasParcel = !!parcelPolygon;
+    try {
+      if (hasParcel) {
+        if (map.getLayer('tfp-parcel-outline')) {
+          map.setLayoutProperty('tfp-parcel-outline', 'visibility', 'visible');
+          map.setPaintProperty('tfp-parcel-outline', 'line-opacity', clampOpacity(0.9));
+        }
+        if (map.getLayer('tfp-parcel-glow')) {
+          map.setLayoutProperty('tfp-parcel-glow', 'visibility', 'visible');
+          map.setPaintProperty('tfp-parcel-glow', 'line-opacity', clampOpacity(0.3));
+        }
+      } else {
+        if (map.getLayer('tfp-parcel-outline')) map.setPaintProperty('tfp-parcel-outline', 'line-opacity', 0);
+        if (map.getLayer('tfp-parcel-glow')) map.setPaintProperty('tfp-parcel-glow', 'line-opacity', 0);
+      }
+    } catch { /* non-fatal */ }
+  }, [parcelPolygon, mapReady]);
+
   // QA-only (admin, ?debug=true): expose a console hook to drive precise, rapid
   // scope moves for the pile-up/abort acceptance test. Committing a snapped
   // center is exactly what the Piece-3 drag release does, so this exercises the
@@ -7679,43 +7709,27 @@ const archetypeInitializedRef = useRef(false);
     const snapToGrid = (lng: number, lat: number): [number, number] =>
       [Math.round(lng * 1000) / 1000, Math.round(lat * 1000) / 1000];
 
-    // Track the zoom level at the START of each user gesture so we can tell a PAN
-    // (center changes, zoom holds) from a ZOOM / pinch (zoom changes). Scroll-wheel
-    // and pinch must zoom the MAP and leave the ring glued to its ground — never
-    // walk it diagonally, and never fire a read (same dirt under the ring).
-    let gestureStartZoom = map.getZoom();
+    // r26 ZOOM KILL-SHOT: roam-and-read is now PAN-ONLY. It binds to the map's
+    // DRAG events (dragstart / drag / dragend), which fire ONLY for a real pointer
+    // pan — never for a zoom (wheel is disabled; pinch and +/- fire zoom/move but
+    // NOT drag) and never for programmatic camera moves (flyTo / easeTo / fitBounds
+    // emit no drag events). This structurally breaks the old zoom->read feedback
+    // loop: a zoom can neither re-pin the ring nor trip a read, because the roam
+    // handlers never hear about it. The ring is a geographic turf.circle, so mapbox
+    // reprojects + scales it on every transform — during a zoom it holds its ground
+    // anchor and simply scales in place (no re-pin, no jump, no read).
 
-    const onMoveStart = (e: any) => {
-      // Only user gestures carry an originalEvent. Programmatic camera moves
-      // (flyTo / fitBounds / easeTo) do not, so they leave the flag false.
-      if (e && e.originalEvent) {
-        userMoveRef.current = true;
-        gestureStartZoom = map.getZoom();
-      }
-    };
+    const onDragStart = () => { userMoveRef.current = true; };
 
-    const onMove = () => {
+    // While the user pans, the ring tracks the viewport center live (roam-and-scan).
+    const onDrag = () => {
       if (!userMoveRef.current) return;
-      // Only a PURE PAN re-pins the ring to the viewport center (roam-and-scan). If
-      // the gesture is changing zoom (scroll wheel / pinch) the ring stays glued to
-      // its committed geographic center and scales in place — no diagonal drift.
-      const zoomChanged = Math.abs(map.getZoom() - gestureStartZoom) > 1e-3;
-      if (!zoomChanged) setRingAtCenter();
+      setRingAtCenter();
     };
 
-    const onMoveEnd = () => {
-      if (!userMoveRef.current) return; // ignore programmatic settles
+    const onDragEnd = () => {
+      if (!userMoveRef.current) return;
       userMoveRef.current = false;
-      // Pure zoom / pinch does not change the ground under the ring's center, so it
-      // fires NO new read (same dirt → no wasted compute, no phantom roll-in). Also
-      // re-glue the ring to its committed geographic center, in case a pan phase of
-      // a combined gesture had pinned it to the viewport center mid-move.
-      const zoomChanged = Math.abs(map.getZoom() - gestureStartZoom) > 1e-3;
-      if (zoomChanged) {
-        const cur = huntZoneCenterRef.current;
-        if (cur) drawRingAt(cur);
-        return;
-      }
       if (roamSettleTimerRef.current) clearTimeout(roamSettleTimerRef.current);
       // Debounce: only the final rest position trips a read. If the ring moves
       // again first, Piece-4's own abort/seq teardown supersedes the prior read.
@@ -7744,14 +7758,14 @@ const archetypeInitializedRef = useRef(false);
       }, SETTLE_MS);
     };
 
-    map.on('movestart', onMoveStart);
-    map.on('move', onMove);
-    map.on('moveend', onMoveEnd);
+    map.on('dragstart', onDragStart);
+    map.on('drag', onDrag);
+    map.on('dragend', onDragEnd);
 
     return () => {
-      map.off('movestart', onMoveStart);
-      map.off('move', onMove);
-      map.off('moveend', onMoveEnd);
+      map.off('dragstart', onDragStart);
+      map.off('drag', onDrag);
+      map.off('dragend', onDragEnd);
       if (roamSettleTimerRef.current) { clearTimeout(roamSettleTimerRef.current); roamSettleTimerRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -11135,6 +11149,12 @@ const archetypeInitializedRef = useRef(false);
       if (typeof window !== 'undefined') {
         window.__TFP_MAP__ = map;
       }
+
+      // r26 ZOOM KILL-SHOT: retire scroll-wheel zoom entirely. The wheel must not
+      // zoom, pan, or move the ring by ANY code path — a wheel that does nothing
+      // can't break anything. Zoom is done via the +/- control (which pivots on
+      // the A-300 ring) and native pinch (trackpad + touch), never the wheel.
+      try { (map as any).scrollZoom.disable(); } catch { /* noop */ }
     } catch (err) {
       console.log("[MAP-DIAG] Map constructor FAILED:", err);
       console.log("[MAP-DIAG] SUMMARY: map_create=FAILED, webgl=true, container=" + container.offsetWidth + "x" + container.offsetHeight);
@@ -16244,6 +16264,59 @@ const archetypeInitializedRef = useRef(false);
   // V4 Step 11b: Smooth re-center with cinematic easing
   // v4-fix14: Re-center fits to parcel bounds (not a fixed zoom level) so
   // the camera returns to the same parcel-dominant framing as the initial fit.
+  // r26 ZOOM KILL-SHOT: zoom via +/- buttons, pivoting on the A-300 ring's own
+  // geographic center (around:) so the ring stays FIXED on screen and only scales
+  // — it can't drift relative to the ground because it IS the pivot. Fires NO read
+  // (roam-and-read is drag-only now), so numbers hold and nothing rolls in on zoom.
+  const zoomAroundRing = (delta: number) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const cur = huntZoneCenterRef.current;
+    const around = cur ? { lng: cur[0], lat: cur[1] } : map.getCenter();
+    try {
+      map.easeTo({ zoom: map.getZoom() + delta, around, duration: 220 });
+    } catch { /* non-fatal */ }
+  };
+
+  // r26 RETURN-TO-PARCEL: the loaded parcel stays a returnable anchor even after
+  // the hunter roams the ring off it. Fly the ring back to the parcel centroid and
+  // re-read it. flyTo is programmatic (no drag events) so the roam handler won't
+  // fight it; we commit the centroid ourselves to trip the Piece-4 read.
+  const returnToLoadedParcel = () => {
+    const map = mapRef.current;
+    if (!map || !parcelPolygon) return;
+    try {
+      const c = turf.centerOfMass(parcelPolygon as any);
+      const coords = c?.geometry?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) return;
+      const center: [number, number] = [Number(coords[0]), Number(coords[1])];
+      if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) return;
+      const RING_RADIUS_M = acresToRadiusMeters(MAX_ANALYSIS_ACRES);
+      // Draw the ring at the parcel centroid immediately (geographic — mapbox keeps
+      // it glued as the camera flies in).
+      const ring = turf.circle(center, RING_RADIUS_M, { units: 'meters', steps: 64 });
+      const src = map.getSource('tfp-huntzone') as mapboxgl.GeoJSONSource | undefined;
+      if (src) src.setData({ type: 'FeatureCollection', features: [ring] } as any);
+      const labelSrc = map.getSource('tfp-huntzone-label') as mapboxgl.GeoJSONSource | undefined;
+      if (labelSrc) {
+        const northPt = turf.destination(center, RING_RADIUS_M, 0, { units: 'meters' });
+        labelSrc.setData({ type: 'FeatureCollection', features: [northPt] } as any);
+      }
+      map.flyTo({ center, zoom: Math.max(map.getZoom(), 14.5), duration: 900, essential: true });
+      // Commit the centroid (snapped to the Piece-4 grid) — trips the read.
+      const snapped: [number, number] = [Math.round(center[0] * 1000) / 1000, Math.round(center[1] * 1000) / 1000];
+      huntZoneCenterRef.current = snapped;
+      setHuntZoneCenterOverride(snapped);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('lat', snapped[1].toFixed(6));
+        url.searchParams.set('lng', snapped[0].toFixed(6));
+        window.history.replaceState({}, '', url.toString());
+      } catch { /* non-fatal */ }
+      console.log('[RETURN] flew ring back to loaded parcel', snapped);
+    } catch (e) { console.warn('[RETURN] returnToLoadedParcel failed', e); }
+  };
+
   const flyToCenter = () => {
     const map = mapRef.current;
     if (!map) return;
@@ -16649,6 +16722,46 @@ const archetypeInitializedRef = useRef(false);
       <div className="absolute inset-0 z-0" style={{ overflow: 'hidden' }}>
         <div ref={mapContainerRef} style={{ width: '100%', height: '100%', position: 'relative' }} />
       </div>
+
+      {/* r26 ZOOM CONTROL — always-visible +/- buttons. Scroll-wheel zoom is
+          retired; these + pinch are the zoom path. Each button eases the camera
+          around the A-300 ring's own center, so the ring stays fixed on screen and
+          only scales (no drift), and fires NO read. */}
+      {mapReady && !mapError && (
+        <div className="absolute right-4 bottom-24 z-30 flex flex-col rounded-lg overflow-hidden shadow-lg border border-white/15">
+          <button
+            type="button"
+            aria-label="Zoom in"
+            onClick={() => zoomAroundRing(1)}
+            className="w-10 h-10 flex items-center justify-center bg-black/70 hover:bg-black/85 text-white text-2xl font-light leading-none backdrop-blur-sm transition-colors"
+          >
+            +
+          </button>
+          <div className="h-px bg-white/15" />
+          <button
+            type="button"
+            aria-label="Zoom out"
+            onClick={() => zoomAroundRing(-1)}
+            className="w-10 h-10 flex items-center justify-center bg-black/70 hover:bg-black/85 text-white text-2xl font-light leading-none backdrop-blur-sm transition-colors"
+          >
+            −
+          </button>
+        </div>
+      )}
+
+      {/* r26 RETURN-TO-PARCEL chip — when a specific parcel is loaded it stays a
+          returnable anchor: tap to fly the ring back to it and re-read. */}
+      {mapReady && !mapError && parcelPolygon && !territoryMode && (
+        <button
+          type="button"
+          onClick={returnToLoadedParcel}
+          className="absolute left-4 bottom-24 z-30 flex items-center gap-2 bg-black/70 hover:bg-black/85 text-white/90 px-3 py-2 rounded-full shadow-lg border border-amber-400/40 backdrop-blur-sm text-xs font-medium transition-colors"
+          title="Return to your loaded parcel and re-read it"
+        >
+          <Target className="h-3.5 w-3.5 text-amber-400" />
+          <span>Return to parcel</span>
+        </button>
+      )}
 
       {/* Build stamp — admin-only via ?debug=true */}
 

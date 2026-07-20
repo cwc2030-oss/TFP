@@ -333,7 +333,25 @@ export const BUILD_DATE = 'Jul 20';
 //      handler already listened to mouse down/move/up only (never wheel), so wheel
 //      reaches the map's native scroll-zoom. All r23/r24 wins intact. Input-handler
 //      + ring-anchor only — no engine bump, no cache flush.
-export const BUILD_REV = 'r25';
+//
+// r26 — ZOOM KILL-SHOT: retire the scroll wheel + break the zoom->read feedback
+//      loop + restore return-to-parcel. r25 anchored the ring to ground coords but
+//      the ring still oscillated on repeated wheel-zoom over an OFF-CENTER ring:
+//      zoom fires a generic 'move' the roam handler couldn't distinguish from a
+//      pan, so it re-pinned the ring + read, which nudged the camera -> another
+//      move -> re-pin -> read (the obsessive back-and-forth). Fix (3 parts):
+//      (1) roam-and-read is now PAN-ONLY — it binds to DRAG events (dragstart/
+//      drag/dragend), which fire only for a real pointer pan, never for a zoom or
+//      a programmatic camera move, so a zoom can neither re-pin nor read (loop
+//      cannot form). (2) scroll-wheel zoom disabled entirely; zoom is via an
+//      always-visible +/- control that eases with around:ringCenter (ring is the
+//      pivot, stays fixed on screen, only scales) plus native pinch. (3) the ring
+//      holds its ground anchor through any zoom (geographic turf.circle -> mapbox
+//      reprojects + scales it). Also: a loaded parcel is a returnable anchor again
+//      (return-to-parcel chip flies the ring back + re-reads) and its outline
+//      shows as a landmark when loaded (hidden in pure free-roam). All r23/r24/r25
+//      wins intact. Interaction/gesture layer only — no engine bump, no cache flush.
+export const BUILD_REV = 'r26';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
