@@ -434,7 +434,24 @@ export const BUILD_DATE = 'Jul 21';
 //      bullets, and the "most comprehensive...available" superlative; every bullet
 //      now describes what the tool actually does. Marketing/checkout wiring only —
 //      no terrain engine change, no cache flush.
-export const BUILD_REV = 'r32';
+// r33 — REMOVE SIT PINS + STAND JOURNAL (legacy Pro-only hunt-logging), app-only:
+//      the personal sit-pin markers + stand-journal features were never part of
+//      the honest loose-window product, weren't confirmed working, and their
+//      pricing bullets were already dropped in r32 — so they're cleaned out.
+//      Deleted the four API routes (app/api/sit-pins, app/api/sit-pins/[id],
+//      app/api/stand-journal, app/api/stand-journal/[id]) and surgically removed
+//      from /intel: the green sit-pin Mapbox source+layers (tfp-user-sit-pins /
+//      tfp-sit-pin image, glow/icon/label + hover/click/context-menu handlers),
+//      the Esc-closes-context-menu keydown branch, the pin/journal state, the
+//      save/delete-pin + journal load/submit/delete handlers + isProRef, and the
+//      three UI blocks (context menu, pin naming modal, Stand Journal modal);
+//      dropped the .tfp-sit-pin-popup CSS. LOAD-BEARING report engine LEFT INTACT
+//      (app/api/parcel-hunt-file, lib/report/build-html.ts, report/share,
+//      report/[reportId], HuntingReport model) — listing creation + the paid
+//      Hunt Report still work. The Supabase spatial tables (public.user_sit_pins
+//      + stand-journal) are left dormant (no data touched, no Prisma migration).
+//      App/UI only — no terrain engine change, no cache flush.
+export const BUILD_REV = 'r33';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
