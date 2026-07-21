@@ -531,7 +531,7 @@ function FlowScoreContent() {
                   <p className="text-stone-400 text-sm leading-relaxed">
                     {isSubscribed
                       ? `Your Pro subscription includes full Terrain Brain analysis for this ${parcel.acreage > 0 ? `${Math.round(parcel.acreage)}-acre` : ''} parcel — open it now.`
-                      : `The Terrain Brain can analyze this ${parcel.acreage > 0 ? `${Math.round(parcel.acreage)}-acre` : ''} parcel for deer movement corridors, funnel points, and optimal stand locations. Enter your email to continue.`}
+                      : `The Terrain Brain can analyze this ${parcel.acreage > 0 ? `${Math.round(parcel.acreage)}-acre` : ''} parcel for deer movement corridors, funnel points, and the four measured terrain drivers. Enter your email to continue.`}
                   </p>
                 </div>
                 <button
@@ -697,7 +697,7 @@ function FlowScoreContent() {
                     'Territory Mode — deer flow across property lines',
                     'Up to 25 parcels per territory',
                     'Unlimited downloadable hunt reports (PDF)',
-                    'AI-analyzed corridors, funnels & stand sites',
+                    'Flow corridors, funnels & the four terrain drivers',
                     'Interactive satellite map with all layers',
                   ].map((item) => (
                     <li key={item} className="flex items-center gap-2.5 text-stone-300">
@@ -743,7 +743,7 @@ function FlowScoreContent() {
 
                 <ul className="space-y-1.5 mb-5 text-sm">
                   {[
-                    'AI-analyzed corridors & stand sites',
+                    'Flow corridors, funnels & terrain drivers',
                     'Interactive map with all layers',
                     'Downloadable hunt report (PDF)',
                     'Never expires — access anytime',

@@ -135,12 +135,20 @@ export default function AdminPage() {
               <Shield className="w-8 h-8 text-amber-600" />
               <h1 className="text-3xl font-bold text-stone-800">Admin Panel</h1>
             </div>
-            <a
-              href="/admin/usage"
-              className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700 hover:text-emerald-800 border border-emerald-200 rounded-md px-3 py-1.5 bg-emerald-50"
-            >
-              <Database className="w-4 h-4" /> Regrid &amp; Cache Usage
-            </a>
+            <div className="flex items-center gap-2">
+              <a
+                href="/admin/listings"
+                className="inline-flex items-center gap-2 text-sm font-medium text-amber-700 hover:text-amber-800 border border-amber-200 rounded-md px-3 py-1.5 bg-amber-50"
+              >
+                <FileText className="w-4 h-4" /> Listing Review
+              </a>
+              <a
+                href="/admin/usage"
+                className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700 hover:text-emerald-800 border border-emerald-200 rounded-md px-3 py-1.5 bg-emerald-50"
+              >
+                <Database className="w-4 h-4" /> Regrid &amp; Cache Usage
+              </a>
+            </div>
           </div>
           <p className="text-stone-600">Terra Firma Partners LLC Dashboard</p>
         </motion.div>

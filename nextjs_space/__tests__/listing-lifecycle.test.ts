@@ -155,9 +155,12 @@ describe('Lifecycle ownership + status guards', () => {
     expect(Array.isArray(body.errors)).toBe(true);
     expect(body.errors.length).toBeGreaterThan(0);
     const fields = body.errors.map((e: any) => e.field);
-    // Spot-check: state, county, asking price, lease type, description, photos
+    // Spot-check: state, county, asking price, lease type, description, contact.
+    // NOTE: photos is intentionally NOT required to publish — a zero-photo listing
+    // auto-generates a parcel-shape image at publish time, so it never surfaces as
+    // a missing-field error.
     expect(fields).toEqual(expect.arrayContaining(['state', 'county', 'askingPriceMin']));
-    expect(fields).toEqual(expect.arrayContaining(['leaseType', 'description', 'photos']));
+    expect(fields).toEqual(expect.arrayContaining(['leaseType', 'description', 'contactMethod']));
   });
 
   it('User A withdrawing a DRAFT -> 200', async () => {

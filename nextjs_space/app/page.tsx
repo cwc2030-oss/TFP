@@ -144,7 +144,10 @@ function HeroSection() {
   
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!address.trim()) return;
+    if (!address.trim()) {
+      setSearchError('Please enter a property address to view it in 3D.');
+      return;
+    }
     
     setIsSearching(true);
     setSearchError('');
@@ -251,7 +254,7 @@ function HeroSection() {
                 </div>
                 <Button
                   type="submit"
-                  disabled={isSearching || !address.trim()}
+                  disabled={isSearching}
                   size="lg"
                   className="bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg px-8 text-lg whitespace-nowrap disabled:opacity-50"
                 >

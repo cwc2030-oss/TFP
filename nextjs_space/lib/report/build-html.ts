@@ -330,7 +330,7 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
   <div style="padding:12px 14px;background:#f8f6f0">
     <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#c9a84c;margin-bottom:4px">For the Hunter</div>
     <div style="font-size:13px;font-weight:bold;color:#1a3a2a;margin-bottom:4px">Hunt With Intelligence</div>
-    <div style="font-size:11px;color:#444;line-height:1.5">Your terrain analysis identifies exactly where deer move, bed, and converge on this property. Use the intercept points and wind strategy in this report to put yourself in the right position before opening day.</div>
+    <div style="font-size:11px;color:#444;line-height:1.5">Your terrain analysis traces exactly where deer move, funnel, and converge on this property. Use the measured corridors, funnels, and saddle crossings in this report to put yourself in the right position before opening day.</div>
   </div>
 </div>`;
 
@@ -622,17 +622,17 @@ ${ogMeta}
       <strong>Hard Funnels</strong> are tight terrain pinch points — saddles, creek crossings, ridge gaps — that physically 
       force deer through a narrow zone. Positions near hard funnels intercept nearly all deer movement in that area.<br><br>
       <strong>Slight Funnels</strong> are softer compressions — benches, field edges, gentle draws — where deer prefer 
-      to travel but aren't forced. These are excellent intercept locations but require more precise wind management.<br><br>
+      to travel but aren't forced. These are excellent setup locations but require more precise wind management.<br><br>
       <strong>Pro Tip:</strong> ${funnelHard > 0
-        ? `This property has ${funnelHard} hard funnel${funnelHard > 1 ? 's' : ''} — prioritize intercept placement within 50 yards of these natural pinch points for maximum encounter rates.`
+        ? `This property has ${funnelHard} hard funnel${funnelHard > 1 ? 's' : ''} — set up within 50 yards of these natural pinch points for maximum encounter rates.`
         : funnelTotal > 0
           ? `This property has ${funnelTotal} funnel zone${funnelTotal === 1 ? '' : 's'} identified by terrain analysis. Once classification completes, revisit for hard vs. slight breakdown.`
-          : 'Focus intercept points on corridor edges with favorable wind — approach from downwind for best results.'}
+          : 'Focus on corridor edges and approach from downwind for best results.'}
     </div>
   </div>
   <div class="disclaimer">
-    This report is generated from satellite terrain analysis and predictive modeling. Intercept point recommendations are based on terrain geometry,
-    historical deer movement patterns, and wind modeling. Always scout properties in person before committing to intercept positions.
+    This report is generated from satellite terrain analysis and elevation modeling. The measured terrain drivers and traced corridors are derived from terrain geometry and elevation structure.
+    Always scout properties in person before committing to positions.
     Terra Firma Partners is not responsible for hunting outcomes. Data sources: Regrid, USGS DEM, USDA. Report ID: ${reportId}
   </div>
 </div>
@@ -733,8 +733,8 @@ ${mapImageBase64 ? `
       </div>
       <div style="height:1px;background:#ddd;margin-bottom:12px"></div>
       <div style="font-size:10px;color:#999;line-height:1.6;margin-bottom:12px">
-        This certificate confirms that the above property has been analyzed using satellite terrain 
-        intelligence, elevation modeling, and deer movement prediction. 
+        This certificate confirms that the above property has been analyzed using satellite elevation modeling 
+        to trace its ridge, saddle, and convergence structure and the deer movement corridors that follow it. 
         Assessment valid at time of generation. Adjacent parcel analysis available separately.
       </div>
       ${listPropertyCtaHTML}

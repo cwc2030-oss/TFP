@@ -210,6 +210,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ─── TC-A10 test hook: force the compute-failure path ────────────────
+    // The "failure ≠ flat" guarantee (a choked compute must surface an explicit
+    // 502 → "tap to retry" banner, NEVER a false flat/zero read) is moat-critical
+    // and previously had no automated coverage because there was no way to force
+    // the geoprocessor error path on demand. This switch is OFF unless the server
+    // env TFP_ALLOW_TEST_FAILURE === '1' (never set in production), and only fires
+    // when the request explicitly asks for it via ?forceFail=1 or options.forceFail.
+    // It returns the SAME 502 failure shape as a real transient ridge failure, so
+    // the weekly suite can assert the UI shows "tap to retry" and NOT a flat read.
+    const forceFailRequested =
+      request.nextUrl.searchParams.get('forceFail') === '1' ||
+      (options as any)?.forceFail === true;
+    if (process.env.TFP_ALLOW_TEST_FAILURE === '1' && forceFailRequested) {
+      const processingTime = (Date.now() - startTime) / 1000;
+      console.warn(`[TerrainFlow][test-hook] FORCED failure (TC-A10) in ${processingTime.toFixed(2)}s for ${parcel_id} — returning 502 for retry`);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'forced_test_failure',
+          test_hook: true,
+          scopeCompute: options.scopeCompute === true,
+          version: API_VERSION,
+        },
+        { status: 502 },
+      );
+    }
+
     // Clamp buffer to allowed range
     const effectiveBuffer = Math.min(
       Math.max(bufferMeters, 200), 

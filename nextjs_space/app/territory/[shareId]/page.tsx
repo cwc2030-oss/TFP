@@ -455,7 +455,7 @@ function SharedTerritoryContent() {
       <div className="max-w-6xl mx-auto px-4 pb-16">
         <div className="bg-gradient-to-r from-green-900/40 to-emerald-900/30 border border-green-800/50 rounded-xl p-6 text-center">
           <h3 className="text-xl font-bold mb-2">Run Your Own Terrain Analysis</h3>
-          <p className="text-gray-400 text-sm mb-5">Get deer movement corridors, intercept placements, and wind strategy for any property.</p>
+          <p className="text-gray-400 text-sm mb-5">Get deer movement corridors, funnel zones, and the four measured terrain drivers for any property.</p>
           <Link
             href={(() => {
               // Build territory-mode URL if multiple parcels

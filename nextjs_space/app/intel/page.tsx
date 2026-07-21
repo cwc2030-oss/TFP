@@ -7550,6 +7550,17 @@ const archetypeInitializedRef = useRef(false);
           huntZoneCenterRef.current = cur;
           setHuntZoneCenterOverride(cur);
         }
+        // TC-A3 test hook: count committed reads so a click (read) is
+        // distinguishable from a drag (move) in the Playwright assertions.
+        try {
+          const w = window as any;
+          w.__tfpHuntZone = {
+            ...(w.__tfpHuntZone || {}),
+            center: cur,
+            readCount: ((w.__tfpHuntZone?.readCount) || 0) + 1,
+            lastGesture: 'read',
+          };
+        } catch { /* non-fatal */ }
         console.log('[MAP] Hunt Zone read (click) — recompute at current center', cur, `movedPx=${movedPx.toFixed(1)}`);
         return;
       }
@@ -7560,6 +7571,18 @@ const archetypeInitializedRef = useRef(false);
         setRingAt(snapped);                 // settle on grid immediately (round + scaled)
         huntZoneCenterRef.current = snapped;
         setHuntZoneCenterOverride(snapped); // SINGLE clip/compute fires here, on release
+        // TC-A3 test hook: expose the committed ring center + a move counter on
+        // window so a Playwright drag can assert the ring moved and re-read on
+        // settle. Harmless diagnostic state; carries no sensitive data.
+        try {
+          const w = window as any;
+          w.__tfpHuntZone = {
+            ...(w.__tfpHuntZone || {}),
+            center: snapped,
+            moveCount: ((w.__tfpHuntZone?.moveCount) || 0) + 1,
+            lastGesture: 'move',
+          };
+        } catch { /* non-fatal */ }
         // Reflect the ring's new footprint in the URL (parity with roam settle) so
         // the read location stays shareable / bookmarkable whether the ground under
         // the ring changed by dragging the ring or by panning the map.
@@ -20304,12 +20327,11 @@ const archetypeInitializedRef = useRef(false);
                 </div>
               )}
 
-              {/* Score hero */}
+              {/* Terrain backbone verdict */}
               <div style={{ textAlign: 'center', padding: '24px', background: '#f8f6f0', border: '2px solid #1a3a2a', marginBottom: '24px' }}>
-                <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px', color: '#666', marginBottom: '8px' }}>Overall Huntability Score</div>
-                <div style={{ fontSize: '64px', fontWeight: 'bold', lineHeight: 1, color: _scoreColor }}>{_confirmed ? topScore : '—'}</div>
-                <div style={{ fontSize: '16px', letterSpacing: '3px', marginTop: '8px', color: _scoreColor }}>{_scoreLabel}</div>
-                <div style={{ fontSize: '11px', color: '#999', fontStyle: 'italic', marginTop: '8px' }}>Score reflects current wind and season conditions</div>
+                <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px', color: '#666', marginBottom: '8px' }}>Terrain Backbone Verdict</div>
+                <div style={{ fontSize: '30px', fontWeight: 'bold', lineHeight: 1.2, marginTop: '8px', letterSpacing: '2px', color: _tState === 'confirmed' ? '#2d6a4f' : _tState === 'flat' ? '#8b6f47' : '#d4a017' }}>{_tState === 'confirmed' ? 'BACKBONE CONFIRMED' : _tState === 'flat' ? 'LOW RELIEF' : 'MARGINAL'}</div>
+                <div style={{ fontSize: '11px', color: '#999', fontStyle: 'italic', marginTop: '12px' }}>Determined from measured ridge, saddle, and convergence structure — not a wind or season forecast.</div>
               </div>
 
               {/* Key stats */}
@@ -20327,38 +20349,6 @@ const archetypeInitializedRef = useRef(false);
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>Saddle Crossings</div>
                 </div>
               </div>
-
-              {/* Seasonal Huntability */}
-              {(() => {
-                const recSeason = summary?.recommendedSeason ?? 'rut';
-                const base = topScore;
-                // Derive per-season grades: recommended season gets the base score, others get reduced
-                const seasonScoreMap: Record<string, number> = {
-                  early: recSeason === 'early' ? base : recSeason === 'rut' ? Math.max(0, base - 12) : Math.max(0, base - 8),
-                  rut:   recSeason === 'rut'   ? base : recSeason === 'early' ? Math.max(0, base - 8) : Math.max(0, base - 10),
-                  late:  recSeason === 'late'  ? base : recSeason === 'rut' ? Math.max(0, base - 15) : Math.max(0, base - 10),
-                };
-                const toGrade = (s: number) => s >= 93 ? 'A+' : s >= 85 ? 'A' : s >= 78 ? 'B+' : s >= 70 ? 'B' : s >= 60 ? 'C+' : s >= 50 ? 'C' : 'D';
-                const gradeColor = (s: number) => s >= 78 ? '#2d6a4f' : s >= 60 ? '#8b6f47' : '#c0392b';
-                return (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                    {[
-                      { label: 'Early Season', key: 'early' },
-                      { label: 'Rut', key: 'rut' },
-                      { label: 'Late Season', key: 'late' },
-                    ].map(({ label, key }) => {
-                      const sc = seasonScoreMap[key];
-                      const g = toGrade(sc);
-                      return (
-                        <div key={key} style={{ background: '#f8f6f0', border: '1px solid #ddd', padding: '14px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: gradeColor(sc) }}>{g}</div>
-                          <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' }}>{label}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
 
               {/* Parcel Intelligence */}
               {(() => {
@@ -20600,16 +20590,16 @@ const archetypeInitializedRef = useRef(false);
                   {isTerritory ? 'TERRITORY HUNT CERTIFICATE' : 'TERRAIN HUNT CERTIFICATE'}
                 </div>
                 <div style={{ height: '2px', background: 'linear-gradient(90deg, #c9a84c, #f0d080, #c9a84c)', marginBottom: '24px' }} />
-                <div style={{ fontSize: '80px', fontWeight: 'bold', color: _gradeColor, lineHeight: 1, marginBottom: '8px' }}>{_grade}</div>
-                <div style={{ fontSize: '13px', letterSpacing: '2px', color: '#666', marginBottom: '24px' }}>HUNTABILITY GRADE</div>
+                <div style={{ fontSize: '34px', fontWeight: 'bold', lineHeight: 1.2, letterSpacing: '2px', color: _tState === 'confirmed' ? '#2d6a4f' : _tState === 'flat' ? '#8b6f47' : '#d4a017', marginBottom: '8px' }}>{_tState === 'confirmed' ? 'BACKBONE CONFIRMED' : _tState === 'flat' ? 'LOW RELIEF' : 'MARGINAL'}</div>
+                <div style={{ fontSize: '13px', letterSpacing: '2px', color: '#666', marginBottom: '24px' }}>TERRAIN BACKBONE VERDICT</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
                   <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
-                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{_confirmed ? topScore : '—'}</div>
-                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>HUNTABILITY SCORE</div>
+                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{ridgeSpineData?.ridges_primary?.features?.length ?? 0}</div>
+                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>RIDGE SPINES</div>
                   </div>
                   <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
-                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{top3.length}</div>
-                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>INTERCEPT POINTS</div>
+                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{intelMetrics.saddleCrossings}</div>
+                    <div style={{ fontSize: '9px', letterSpacing: '1px', opacity: 0.8, marginTop: '4px' }}>SADDLE CROSSINGS</div>
                   </div>
                   <div style={{ background: '#1a3a2a', color: 'white', padding: '12px' }}>
                     <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c9a84c' }}>{tieredCorridorData?.corridors_primary?.features?.length ?? 0}</div>
@@ -20617,8 +20607,8 @@ const archetypeInitializedRef = useRef(false);
                   </div>
                 </div>
                 <div style={{ fontSize: '10px', color: '#999', lineHeight: 1.6 }}>
-                  This certificate confirms that the above property has been analyzed using satellite terrain intelligence,
-                  elevation modeling, and deer movement prediction.
+                  This certificate confirms that the above property has been analyzed using satellite elevation modeling
+                  to trace its ridge, saddle, and convergence structure and the deer movement corridors that follow it.
                 </div>
               </div>
 
@@ -20647,7 +20637,7 @@ const archetypeInitializedRef = useRef(false);
                   You&apos;re seeing 50% of your Hunt Report
                 </div>
                 <div style={{ fontSize: '13px', color: '#718096' }}>
-                  The full PDF includes your complete stand rotation calendar, approach routes, wind strategy by season, and printable Terrain Hunt Certificate.
+                  The full report includes every measured terrain driver, all traced flow corridors, ridge and saddle structure, and a printable terrain summary.
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px' }}>

@@ -367,7 +367,23 @@ export const BUILD_DATE = 'Jul 20';
 //      Tap-to-place-the-ring intentionally left out (no new gesture this pass).
 //      All r23–r26 wins intact. Interaction plumbing only — no engine bump, no
 //      cache flush.
-export const BUILD_REV = 'r27';
+//
+// r28 — HONESTY + FORM FIXES (weekly-test fix directive): presentation, data, and
+//      test-tooling only — NO terrain engine change, NO cache flush. (1) Scrubbed
+//      the killed "Intercept Placements" / ranked-stand / wind-strategy language
+//      from every marketing + report surface (/demo, /flow-score, listing teaser,
+//      shared territory, interactive-map layer, the /intel report-preview modal,
+//      and the paid report HTML) and regrounded it in the honest A-300 deliverable
+//      (flow lines traced from real ridges + the four measured drivers + situated
+//      message). (2) Removed 9 test/debug marketplace listings and added an
+//      admin moderation gate (TFP_LISTINGS_AUTO_APPROVE=false → new publishes go
+//      to PENDING_REVIEW; /admin/listings review queue). (3) Wired real validation
+//      feedback on /signup (empty/incomplete submit) and the homepage hero "View
+//      in 3D" (empty address). (4) Closed two test holes: a forced compute-failure
+//      hook (?forceFail=1, env-gated by TFP_ALLOW_TEST_FAILURE) so TC-A10 can
+//      assert failure≠flat, and window.__tfpHuntZone ring test hooks + a Playwright
+//      e2e drag spec for TC-A3. Interaction/engine behavior unchanged.
+export const BUILD_REV = 'r28';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

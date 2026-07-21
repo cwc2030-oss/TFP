@@ -152,7 +152,7 @@ export default function ReviewPublish({ listing }: { listing: Listing }) {
 
   async function handlePublish() {
     if (!allPassed) return;
-    if (!window.confirm('Publish this listing? Hunters will be able to find it on the marketplace.')) return;
+    if (!window.confirm('Submit this listing for review? Our team gives it a quick look before it goes live on the marketplace.')) return;
     setPublishing(true);
     setError(null);
     try {
@@ -194,11 +194,11 @@ export default function ReviewPublish({ listing }: { listing: Listing }) {
     <div className="space-y-6">
       {/* Summary */}
       <div className="rounded-lg border border-stone-700 bg-stone-900/50 p-5">
-        <h3 className="text-stone-100 font-semibold text-lg mb-1">Publish checklist</h3>
+        <h3 className="text-stone-100 font-semibold text-lg mb-1">Submission checklist</h3>
         <p className="text-stone-400 text-sm mb-4">
           {allPassed
-            ? 'All requirements met — your listing is ready to go live.'
-            : `${failCount} item${failCount === 1 ? '' : 's'} still needed before you can publish.`}
+            ? 'All requirements met — submit your listing for review and it goes live once approved.'
+            : `${failCount} item${failCount === 1 ? '' : 's'} still needed before you can submit.`}
         </p>
 
         <ul className="space-y-2">
@@ -261,13 +261,13 @@ export default function ReviewPublish({ listing }: { listing: Listing }) {
               : 'bg-stone-700 text-stone-500 cursor-not-allowed')
           }
         >
-          {publishing ? 'Publishing…' : allPassed ? 'Publish listing' : `${failCount} item${failCount === 1 ? '' : 's'} remaining`}
+          {publishing ? 'Submitting…' : allPassed ? 'Submit for review' : `${failCount} item${failCount === 1 ? '' : 's'} remaining`}
         </button>
       </div>
 
       {!allPassed && (
         <p className="text-stone-500 text-xs">
-          Fill in all required fields above, then return here to publish.
+          Fill in all required fields above, then return here to submit for review.
         </p>
       )}
     </div>

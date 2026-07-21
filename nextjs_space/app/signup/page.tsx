@@ -32,6 +32,27 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
 
+    // Explicit field validation so an empty/incomplete form always gives feedback.
+    if (!formData.name.trim()) {
+      setError("Please enter your full name.");
+      return;
+    }
+    if (!formData.email.trim()) {
+      setError("Please enter your email address.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (!formData.password) {
+      setError("Please create a password.");
+      return;
+    }
+    if (formData.password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
     if (!acceptTerms) {
       setError("Please agree to the Terms of Service and Privacy Notice to continue.");
       return;
@@ -203,7 +224,7 @@ export default function SignupPage() {
 
               <Button
                 type="submit"
-                disabled={isLoading || !acceptTerms}
+                disabled={isLoading}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 text-white"
               >
                 {isLoading ? (

@@ -378,7 +378,7 @@ export default function TerrainBrainTeaser(props: Props) {
             <span className="font-semibold text-sm">Full Terrain Brain</span>
           </div>
           <p className="text-stone-400 text-xs leading-relaxed flex-1">
-            Stand locations, wind strategy &amp; interactive map — unlocks when you lease this parcel.
+            Full terrain drivers, traced flow corridors &amp; interactive map — unlocks when you lease this parcel.
           </p>
           <Link
             href={inquireHref}

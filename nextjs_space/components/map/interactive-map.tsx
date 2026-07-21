@@ -133,7 +133,6 @@ export default function InteractiveMap({
     { id: 'bedding_areas', name: 'Bedding Analysis', icon: Compass, description: 'Likely bedding locations', status: 'coming_soon', includedIn: 'pro' },
     { id: 'water_sources', name: 'Water Sources', icon: Droplets, description: 'Creeks, ponds & drainage', status: 'coming_soon', includedIn: 'pro' },
     { id: 'lidar_canopy', name: 'Canopy Height', icon: TreePine, description: 'Tree height analysis', status: 'coming_soon', includedIn: 'pro' },
-    { id: 'stand_placement', name: 'Stand Planner', icon: Zap, description: 'Optimal stand locations', status: 'coming_soon', includedIn: 'pro' },
   ];
   
   const freeLayers = [

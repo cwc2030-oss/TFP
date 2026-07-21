@@ -330,9 +330,20 @@ export async function fetchTerrainFlow(
       else externalSignal.addEventListener('abort', onExternalAbort);
     }
 
+    // TC-A10 test hook (client side): if the current page URL carries
+    // ?forceFail=1, forward it to the API so the forced compute-failure path is
+    // exercised end-to-end through the real UI (which must show "tap to retry",
+    // not a false flat read). No-op unless the server env TFP_ALLOW_TEST_FAILURE
+    // is set, so this is inert in production.
+    let apiUrl = TERRAIN_FLOW_API_URL;
+    if (typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('forceFail') === '1') {
+      apiUrl += '?forceFail=1';
+    }
+
     let response: Response;
     try {
-      response = await fetch(TERRAIN_FLOW_API_URL, {
+      response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

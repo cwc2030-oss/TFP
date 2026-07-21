@@ -195,9 +195,9 @@ export default function DemoPage() {
           See What Your Land Is Hiding
         </h1>
         <p className="text-stone-400 mt-3 text-sm sm:text-base max-w-xl mx-auto">
-          Enter any address and watch LiDAR-powered terrain analysis reveal deer
-          movement corridors, funnel zones, and optimal intercept placements —
-          right on your own land.
+          Enter any address and watch LiDAR-powered terrain analysis trace deer
+          movement corridors and funnel zones from the real ridgelines — and
+          read the four measured terrain drivers on your own land.
         </p>
 
         {/* ─── Address Search ──────────────────────────────── */}
@@ -286,11 +286,11 @@ export default function DemoPage() {
               <Target className="w-6 h-6 text-white" />
             </div>
             <h3 className="text-white font-semibold text-sm sm:text-base">
-              Intercept Placements
+              The Four Terrain Drivers
             </h3>
             <p className="text-stone-400 text-xs sm:text-sm mt-1">
-              Ranked stand and blind locations for the way the land actually
-              funnels.
+              Bench, Saddle, Ridge and Convergence — measured on your ground,
+              so you read the land the way the deer do.
             </p>
           </div>
           <div className="bg-stone-900/80 backdrop-blur border border-stone-800 rounded-xl p-5 text-center">
