@@ -414,7 +414,13 @@ export const BUILD_DATE = 'Jul 21';
 //      (additive) + OwnerMatchStatus enum. $39 rides the existing Season Pass Stripe
 //      plumbing via STRIPE_SEASON_PASS_PRICE_ID (mode:'payment', per-season). App +
 //      data-model only — no terrain engine change, no cache flush.
-export const BUILD_REV = 'r30';
+//
+// r31 — SEASON PASS PRICE = $39 (config only): pointed STRIPE_SEASON_PASS_PRICE_ID
+//      at Clark's real $39 one-time "Season Pass" Stripe price (verified via API:
+//      unit_amount 3900 usd, one-time, active) so the checkout charge now matches
+//      the $39 wall copy shipped in r30. Was still pointing at the legacy $19 price.
+//      Env/config change only — no code, engine, or data change.
+export const BUILD_REV = 'r31';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
