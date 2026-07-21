@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Check, Search, ArrowRight } from "lucide-react";
+import { Check, Search, ArrowRight, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
@@ -14,6 +14,7 @@ import { trackPricingPageViewed, trackAddressSearch } from "@/lib/gtag";
 export default function PricingPage() {
   const [billing, setBilling] = useState<"annual" | "monthly">("annual");
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null);
+  const [passLoading, setPassLoading] = useState(false);
   const router = useRouter();
   const { data: session } = useSession() || {};
 
@@ -75,7 +76,40 @@ export default function PricingPage() {
     }
   };
 
-  // ── Stripe checkout ──
+  // ── Season Pass checkout ($39, one-time per season) ──
+  // Wired to /api/reads/unlock — the SAME endpoint the in-app wall uses, which
+  // charges STRIPE_SEASON_PASS_PRICE_ID ($39). One number everywhere.
+  async function handleSeasonPass() {
+    if (!session?.user) {
+      router.push(`/signup?callbackUrl=${encodeURIComponent("/pricing")}`);
+      return;
+    }
+    setPassLoading(true);
+    try {
+      const res = await fetch("/api/reads/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.alreadyUnlocked) {
+        // Already a pass holder / Pro / admin — nothing to buy. Send them scouting.
+        router.push("/intel");
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      console.error("[pricing] Season Pass checkout failed:", data?.error || "unknown");
+      setPassLoading(false);
+    } catch (err) {
+      console.error("[pricing] Season Pass checkout error:", err);
+      setPassLoading(false);
+    }
+  }
+
+  // ── Pro / Outfitter subscription checkout ──
   async function handleUpgrade(tier: "pro" | "promax") {
     if (!session?.user) {
       router.push(`/login?callbackUrl=${encodeURIComponent("/pricing")}`);
@@ -91,8 +125,6 @@ export default function PricingPage() {
       });
       const data = await res.json();
       if (data.alreadySubscribed) {
-        // BUG 2b FIX: already-subscribed users used to land on a blank /intel map.
-        // Send them to their dashboard with a friendly "you're already subscribed" note.
         router.push(`/dashboard?sub=${data.currentTier || 'pro'}`);
         return;
       }
@@ -186,16 +218,16 @@ export default function PricingPage() {
       <section className="bg-stone-900 text-stone-300 py-10">
         <p className="max-w-3xl mx-auto px-4 text-center text-base sm:text-lg leading-relaxed">
           The flow doesn&apos;t stop at your property line. Add the
-          neighbor&apos;s ground and watch it stitch together. Drop your pins,
-          log every sit, and the read sharpens every season.
+          neighbor&apos;s ground and watch it stitch together&nbsp;&mdash; the
+          more ground you read, the fuller the picture.
         </p>
       </section>
 
       {/* ═══════════════════════════════════════════
           PRICING TIERS
          ═══════════════════════════════════════════ */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        {/* Billing Toggle */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+        {/* Billing Toggle — Pro / Outfitter only */}
         <div className="flex items-center justify-center gap-3 mb-4">
           <span className={`text-sm font-medium ${billing === "monthly" ? "text-stone-900" : "text-stone-400"}`}>Monthly</span>
           <button
@@ -209,31 +241,32 @@ export default function PricingPage() {
           </span>
         </div>
         <p className="text-center text-xs text-stone-500 mb-14">
-          Billing toggle applies to Pro &amp; Pro Max subscriptions. The Parcel Unlock is always a one-time $19.
+          The billing toggle applies to the <span className="font-semibold">Pro / Outfitter</span> subscription only.
+          The <span className="font-semibold">Season Pass is a flat $39 per season</span> &mdash; not monthly or annual.
         </p>
 
-        {/* ──── 4-Tier Cards ──── */}
-        <div className="max-w-7xl mx-auto grid md:grid-cols-2 lg:grid-cols-4 gap-6 items-start mb-8">
+        {/* ──── 3-Tier Cards ──── */}
+        <div className="grid md:grid-cols-3 gap-6 items-start">
 
           {/* ── FREE ── */}
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-stone-200 flex flex-col">
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-stone-200 flex flex-col md:mt-6">
             <div className="bg-stone-100 text-stone-700 text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
               FREE
             </div>
             <div className="p-6 text-center border-b border-stone-200">
-              <p className="text-lg font-bold text-stone-800 mb-1">Read your ground.</p>
+              <p className="text-lg font-bold text-stone-800 mb-1">Read the ground.</p>
               <div className="mt-2 mb-1">
                 <span className="text-5xl font-bold text-stone-700">$0</span>
               </div>
-              <p className="text-stone-500 text-sm">Free forever</p>
+              <p className="text-stone-500 text-sm">3 reads every season</p>
             </div>
             <div className="p-6 flex-1 flex flex-col">
               <ul className="space-y-3 flex-1">
                 {[
-                  "Deer flow on your home parcel",
-                  "Terrain read: ridges, funnels, bedding, water",
-                  "Shareable ScoreCard",
-                  "See your flow run to the property line, then follow it next door with Territory",
+                  "3 reads — see the deer flow on any 3 pieces of ground",
+                  "First read is instant, no signup — a quick email unlocks reads 2 & 3",
+                  "Every read shows the real flow lines + the four measured terrain drivers (Bench · Saddle · Ridge · Convergence)",
+                  "Own the ground? Claim your parcel — it reads free, always",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
                     <Check className="h-4 w-4 text-stone-400 flex-shrink-0 mt-0.5" />
@@ -242,8 +275,8 @@ export default function PricingPage() {
                 ))}
               </ul>
               <div className="mt-8">
-                <Link href="/" className="block">
-                  <Button className="w-full bg-stone-600 hover:bg-stone-700 text-white py-4 text-sm font-semibold">
+                <Link href="/intel" className="block">
+                  <Button className="w-full bg-stone-700 hover:bg-stone-800 text-white py-4 text-sm font-semibold">
                     Start free
                   </Button>
                 </Link>
@@ -251,23 +284,23 @@ export default function PricingPage() {
             </div>
           </div>
 
-          {/* ── PARCEL UNLOCK — $19 one-time ── */}
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-amber-600/70 relative flex flex-col">
-            <div className="absolute top-0 right-0 bg-amber-700 text-amber-50 px-3 py-1 text-xs font-bold rounded-bl-lg tracking-wide">
-              ONE-TIME
+          {/* ── SEASON PASS — $39 / season · HERO ── */}
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-500 relative flex flex-col">
+            <div className="absolute top-0 right-0 bg-emerald-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg tracking-wide">
+              BEST VALUE
             </div>
-            <div className="bg-amber-700 text-amber-50 text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
-              🎯 PARCEL UNLOCK
+            <div className="bg-emerald-600 text-white text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
+              🦌 SEASON PASS
             </div>
             <div className="p-6 text-center border-b border-stone-200">
-              <p className="text-lg font-bold text-amber-800 mb-1">
-                Try the whole system on one piece of ground.
+              <p className="text-lg font-bold text-emerald-700 mb-1">
+                Scout as much ground as you want.
               </p>
               <div className="mt-2 mb-1">
-                <span className="text-5xl font-bold text-amber-800">$19</span>
-                <span className="text-stone-500 text-sm ml-1">/ one parcel</span>
+                <span className="text-5xl font-bold text-emerald-600">$39</span>
+                <span className="text-stone-500 text-sm ml-1">/ season</span>
               </div>
-              <p className="text-stone-500 text-sm">one-time · no subscription</p>
+              <p className="text-stone-500 text-sm">flat per season · no auto-renew</p>
             </div>
             <div className="p-6 flex-1 flex flex-col">
               <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
@@ -275,21 +308,32 @@ export default function PricingPage() {
               </h3>
               <ul className="space-y-3 flex-1">
                 {[
-                  "Clean Hunt Report (no watermark)",
-                  "Save your sit pins and stand journal",
+                  "Unlimited reads, all season — roam the map and read as much ground as you want",
+                  "Save your parcels (My Parcels)",
+                  "Same honest read on every parcel — real flow lines + the four measured drivers",
+                  "One-time per season — no surprise auto-renew",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <Check className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                    <Check className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
                     <span className="text-stone-700 text-sm font-medium">{f}</span>
                   </li>
                 ))}
               </ul>
-              <div className="mt-8">
-                <Link href="/" className="block">
-                  <Button className="w-full bg-amber-700 hover:bg-amber-800 text-amber-50 py-4 text-base font-semibold">
-                    Unlock my parcel
-                  </Button>
-                </Link>
+              <div className="mt-6">
+                <Button
+                  onClick={handleSeasonPass}
+                  disabled={passLoading}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 text-base font-semibold disabled:opacity-60"
+                >
+                  {passLoading ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-4 w-4 border-2 border-white/70 border-t-transparent rounded-full animate-spin" />
+                      Redirecting…
+                    </span>
+                  ) : (
+                    "Get the Season Pass — $39"
+                  )}
+                </Button>
                 <div className="mt-3">
                   <PrivacyPromise />
                 </div>
@@ -297,20 +341,17 @@ export default function PricingPage() {
             </div>
           </div>
 
-          {/* ── PRO — Most Popular ── */}
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-emerald-500 relative flex flex-col">
-            <div className="absolute top-0 right-0 bg-emerald-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
-              WHERE MOST HUNTERS LAND
-            </div>
-            <div className="bg-emerald-600 text-white text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
-              🏆 PRO
+          {/* ── PRO / OUTFITTER ── */}
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-stone-200 flex flex-col md:mt-6">
+            <div className="bg-[#8b6b1f] text-[#f5e6b8] text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
+              🏆 PRO / OUTFITTER
             </div>
             <div className="p-6 text-center border-b border-stone-200">
-              <p className="text-lg font-bold text-emerald-700 mb-1">
+              <p className="text-lg font-bold text-[#8b6b1f] mb-1">
                 Run the whole neighborhood.
               </p>
               <div className="mt-2 mb-1">
-                <span className="text-5xl font-bold text-emerald-600">
+                <span className="text-5xl font-bold text-[#8b6b1f]">
                   {billing === "annual" ? "$99" : "$12"}
                 </span>
                 <span className="text-stone-500 text-sm ml-1">
@@ -323,76 +364,13 @@ export default function PricingPage() {
             </div>
             <div className="p-6 flex-1 flex flex-col">
               <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
-                Everything in Parcel Unlock, plus:
+                Everything in the Season Pass, plus:
               </h3>
               <ul className="space-y-3 flex-1">
                 {[
-                  "Up to 25 parcels",
-                  "Territory Mode — deer flow stitched across property lines (the read gets sharper the more ground you add)",
-                  "Sit pins + stand journal on every parcel",
-                  "Unlimited clean Hunt Reports",
-                ].map((f, i) => (
-                  <li key={i} className="flex items-start gap-2.5">
-                    <Check className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span className="text-stone-700 text-sm font-medium">{f}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-4 text-xs text-stone-500 italic">
-                $99 a year is about 2% of what you already spend chasing deer.
-              </p>
-              <div className="mt-6">
-                <Button
-                  onClick={() => handleUpgrade("pro")}
-                  disabled={upgradeLoading?.startsWith("pro_") ?? false}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 text-base font-semibold disabled:opacity-60"
-                >
-                  {upgradeLoading === `pro_${billing}` ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-4 w-4 border-2 border-white/70 border-t-transparent rounded-full animate-spin" />
-                      Redirecting…
-                    </span>
-                  ) : (
-                    "Go Pro"
-                  )}
-                </Button>
-                <div className="mt-3">
-                  <PrivacyPromise />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── PRO MAX ── */}
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-[#8b6b1f] relative flex flex-col">
-            <div className="bg-[#8b6b1f] text-[#f5e6b8] text-center py-2.5 px-4 font-semibold text-sm tracking-wide">
-              ⚡ PRO MAX
-            </div>
-            <div className="p-6 text-center border-b border-stone-200">
-              <p className="text-lg font-bold text-[#8b6b1f] mb-1">
-                For the man running real ground.
-              </p>
-              <div className="mt-2 mb-1">
-                <span className="text-5xl font-bold text-[#8b6b1f]">
-                  {billing === "annual" ? "$199" : "$24"}
-                </span>
-                <span className="text-stone-500 text-sm ml-1">
-                  /{billing === "annual" ? "year" : "month"}
-                </span>
-              </div>
-              <p className="text-stone-500 text-sm">
-                {billing === "annual" ? "Just $16.58/mo — billed annually" : "$24/mo — or save with annual"}
-              </p>
-            </div>
-            <div className="p-6 flex-1 flex flex-col">
-              <h3 className="font-semibold text-stone-900 mb-3 text-xs uppercase tracking-wide">
-                Everything in Pro, plus:
-              </h3>
-              <ul className="space-y-3 flex-1">
-                {[
-                  "Unlimited parcels — save as much ground as you run",
+                  "Territory Mode — deer flow stitched across property lines; the read sharpens the more ground you add",
+                  "Multiple parcels — save and manage many pieces of ground at once",
                   "Built for thousands of acres, multiple leases, and outfits",
-                  "First access to new tools as the hunt-scoring engine comes online",
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-2.5">
                     <Check className="h-4 w-4 text-[#8b6b1f] flex-shrink-0 mt-0.5" />
@@ -400,21 +378,33 @@ export default function PricingPage() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-8">
+              <div className="mt-6">
                 <Button
-                  onClick={() => handleUpgrade("promax")}
-                  disabled={upgradeLoading?.startsWith("promax_") ?? false}
+                  onClick={() => handleUpgrade("pro")}
+                  disabled={upgradeLoading?.startsWith("pro_") ?? false}
                   className="w-full bg-[#8b6b1f] hover:bg-[#6b4f14] text-[#f5e6b8] py-4 text-base font-semibold disabled:opacity-60"
                 >
-                  {upgradeLoading === `promax_${billing}` ? (
+                  {upgradeLoading === `pro_${billing}` ? (
                     <span className="inline-flex items-center gap-2">
                       <span className="h-4 w-4 border-2 border-[#f5e6b8]/70 border-t-transparent rounded-full animate-spin" />
                       Redirecting…
                     </span>
                   ) : (
-                    "Go Pro Max"
+                    "Go Pro"
                   )}
                 </Button>
+                {/* Pro Max — optional, for the biggest operations */}
+                <button
+                  onClick={() => handleUpgrade("promax")}
+                  disabled={upgradeLoading?.startsWith("promax_") ?? false}
+                  className="w-full mt-3 text-center text-xs text-stone-500 hover:text-[#8b6b1f] transition-colors disabled:opacity-60"
+                >
+                  {upgradeLoading === `promax_${billing}` ? (
+                    "Redirecting…"
+                  ) : (
+                    <>Running real ground? <span className="font-semibold underline">Pro Max — {billing === "annual" ? "$199/yr" : "$24/mo"}</span> · unlimited parcels</>
+                  )}
+                </button>
                 <div className="mt-3">
                   <PrivacyPromise />
                 </div>
@@ -424,14 +414,35 @@ export default function PricingPage() {
         </div>
 
         {/* ═══════════════════════════════════════════
+            LANDOWNER CALLOUT — not a priced tier
+           ═══════════════════════════════════════════ */}
+        <div className="max-w-4xl mx-auto mt-10 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex-shrink-0 h-12 w-12 rounded-full bg-emerald-600 text-white flex items-center justify-center">
+            <MapPin className="h-6 w-6" />
+          </div>
+          <div className="flex-1">
+            <p className="text-lg font-bold text-emerald-900 mb-1">Own the ground? Claim it free.</p>
+            <p className="text-emerald-800 text-sm leading-relaxed">
+              Your parcels read free&nbsp;&mdash; always&nbsp;&mdash; and you&apos;ll be able to
+              list them when the marketplace opens.
+            </p>
+          </div>
+          <Link href="/intel" className="flex-shrink-0">
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-6 text-sm font-semibold">
+              Claim your parcel
+            </Button>
+          </Link>
+        </div>
+
+        {/* ═══════════════════════════════════════════
             CLOSING BAND
            ═══════════════════════════════════════════ */}
         <div className="max-w-3xl mx-auto mt-16 mb-20 rounded-2xl bg-stone-900 text-stone-200 p-8 sm:p-12 text-center">
           <p className="text-base sm:text-lg leading-relaxed">
-            Every pin you drop and every hunt you log feeds back in. Your stand
-            journal tracks what&apos;s working, so next season&apos;s read is
-            built on this season&apos;s truth. The more you hunt it, the smarter
-            it gets.
+            The deer flow is written into the land&nbsp;&mdash; the ridges,
+            benches, saddles, and pinch points that funnel movement. Read one
+            parcel or stitch a whole territory together. The more ground you
+            read, the fuller the picture.
           </p>
         </div>
 
@@ -443,23 +454,27 @@ export default function PricingPage() {
           <div className="space-y-6">
             <FaqItem
               q="What do I get for free?"
-              a="Enter any address and get a full terrain read — deer flow corridors, ridges, funnels, bedding, water — plus a shareable ScoreCard. No credit card, no sign-up wall. When you're ready to save your pins and download a clean report, unlock the parcel for $19."
+              a="Enter any address and get a full terrain read — the real deer flow lines plus the four measured terrain drivers (Bench, Saddle, Ridge, Convergence). Your first read is instant with no signup; a quick email unlocks reads 2 and 3. That's 3 reads every season, free — and a free read is the same honest read as a paid one, just limited in quantity."
             />
             <FaqItem
-              q="What's the difference between Parcel Unlock and Pro?"
-              a="Parcel Unlock ($19) is a one-time buy that unlocks sit pins, stand journal, and a clean Hunt Report for one parcel — forever. Pro ($99/yr) unlocks up to 25 parcels plus Territory Mode, where deer flow is stitched across multiple property lines for the full picture."
+              q="What's the difference between the Season Pass and Pro?"
+              a="The Season Pass ($39, flat per season) unlocks unlimited reads so you can scout as much ground as you want all season — no per-parcel limit. Pro / Outfitter ($99/yr) adds Territory Mode, where deer flow is stitched across multiple property lines so you can read a whole territory as one, plus tools built for running many parcels, leases, and outfits."
             />
             <FaqItem
               q="What is Territory Mode?"
-              a="Territory Mode lets you combine multiple adjacent parcels into one unified hunting territory. Deer flow, corridors, and intercept points are computed across all parcels together — not individually — giving you the full picture of how deer move across the landscape."
+              a="Territory Mode lets you combine multiple adjacent parcels into one unified read. Deer flow is computed across all the ground together — not one parcel at a time — so you can see how movement runs across property lines through the pinch points and crossings that funnel it."
+            />
+            <FaqItem
+              q="Does the Season Pass auto-renew?"
+              a="No. The Season Pass is a one-time $39 charge that unlocks unlimited reads for the current season. There's no subscription and no surprise renewal — when a new season opens, you simply grab a pass again if you want it."
             />
             <FaqItem
               q="Can I switch between monthly and annual?"
-              a="Yes. You can switch billing cycles anytime from your account settings. Switching from monthly to annual saves over 30%."
+              a="Yes — for the Pro / Outfitter subscription. You can switch billing cycles anytime from your account settings, and switching from monthly to annual saves over 30%. (The Season Pass isn't a subscription, so it has no monthly/annual option — it's a flat $39 per season.)"
             />
             <FaqItem
               q="What data sources power the terrain read?"
-              a="We aggregate data from Regrid (156M+ parcel records), USDA, USGS, FEMA, and high-resolution terrain models to deliver the most comprehensive hunting terrain intelligence available."
+              a="We aggregate parcel data from Regrid (156M+ records) with high-resolution USGS elevation models and public USDA/FEMA layers to read the terrain that drives deer movement — the ridges, benches, saddles, and pinch points on your ground."
             />
           </div>
         </div>

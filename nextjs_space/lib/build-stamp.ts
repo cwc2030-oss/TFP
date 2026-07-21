@@ -420,7 +420,21 @@ export const BUILD_DATE = 'Jul 21';
 //      unit_amount 3900 usd, one-time, active) so the checkout charge now matches
 //      the $39 wall copy shipped in r30. Was still pointing at the legacy $19 price.
 //      Env/config change only — no code, engine, or data change.
-export const BUILD_REV = 'r31';
+//
+// r32 — PRICING PAGE REBUILT to the locked spine (/pricing): killed the old
+//      $19 Parcel Unlock tier and every standalone "$19" reference; new 3-tier
+//      spine = FREE (3 reads/season, anon first read) / SEASON PASS $39 hero
+//      (unlimited reads, flat per-season, no auto-renew) / PRO-OUTFITTER $99
+//      (+ optional Pro Max $199). "Get the Season Pass" wired to /api/reads/unlock
+//      (the SAME $39 STRIPE_SEASON_PASS_PRICE_ID the in-app wall uses) — one
+//      number everywhere. Billing toggle now scoped to Pro/Outfitter only; copy
+//      says Season Pass is flat $39. Added landowner "Claim it free" callout band
+//      (no price/take-rate). Honesty scrub: removed "intercept points" (->pinch
+//      points/crossings), "hunt-scoring engine", branded "ScoreCard"/"Hunt Report"
+//      bullets, and the "most comprehensive...available" superlative; every bullet
+//      now describes what the tool actually does. Marketing/checkout wiring only —
+//      no terrain engine change, no cache flush.
+export const BUILD_REV = 'r32';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
