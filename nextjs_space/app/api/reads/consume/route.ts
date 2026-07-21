@@ -4,7 +4,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/db';
-import { READS_PER_SEASON, getCurrentSeason, isReadsUnlocked } from '@/lib/reads';
+import {
+  READS_PER_SEASON,
+  ANON_FREE_READS,
+  ANON_READS_COOKIE,
+  parseAnonReads,
+  encodeAnonReads,
+  getCurrentSeason,
+  isReadsUnlocked,
+} from '@/lib/reads';
 
 /**
  * POST /api/reads/consume
@@ -32,23 +40,50 @@ export async function POST(req: NextRequest) {
     const userId = (session?.user as any)?.id as string | undefined;
     const season = getCurrentSeason();
 
-    if (!userId) {
-      return NextResponse.json({
-        allow: false,
-        status: 'anonymous',
-        authenticated: false,
-        unlocked: false,
-        used: 0,
-        limit: READS_PER_SEASON,
-      });
-    }
-
     const body = await req.json().catch(() => ({}));
     const parcelKey: string = (body?.parcelKey || '').toString().trim();
     const address: string | undefined = body?.address ? String(body.address).slice(0, 300) : undefined;
     const lat = typeof body?.lat === 'number' ? body.lat : undefined;
     const lng = typeof body?.lng === 'number' ? body.lng : undefined;
     const savedPropertyId: string = (body?.savedPropertyId || '').toString().trim();
+
+    // ── Anonymous: the FIRST distinct parcel is free + instant (no signup wall
+    //    in front of the wow). The 2nd distinct location returns status
+    //    'anonymous' so the client shows the lightweight signup. Tracked
+    //    best-effort in an httpOnly cookie; revisiting an already-seen anon
+    //    parcel is always free and never prompts signup. ──
+    if (!userId) {
+      const prior = parseAnonReads(req.cookies.get(ANON_READS_COOKIE)?.value);
+
+      // Revisit of a parcel already read anonymously -> free, no signup.
+      if (parcelKey && prior.includes(parcelKey)) {
+        return NextResponse.json({
+          allow: true, status: 'anon_revisit', authenticated: false, unlocked: false,
+          used: prior.length, limit: READS_PER_SEASON,
+        });
+      }
+
+      // Still within the anonymous free allowance -> allow + record the parcel.
+      if (prior.length < ANON_FREE_READS) {
+        const next = parcelKey ? Array.from(new Set([...prior, parcelKey])) : prior;
+        const res = NextResponse.json({
+          allow: true, status: 'anon_ok', authenticated: false, unlocked: false,
+          used: next.length, limit: READS_PER_SEASON,
+        });
+        if (parcelKey) {
+          res.cookies.set(ANON_READS_COOKIE, encodeAnonReads(next), {
+            httpOnly: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 400,
+          });
+        }
+        return res;
+      }
+
+      // Anonymous free read spent -> lightweight signup gate.
+      return NextResponse.json({
+        allow: false, status: 'anonymous', authenticated: false, unlocked: false,
+        used: prior.length, limit: READS_PER_SEASON,
+      });
+    }
 
     // Piece 6c — own saved ground stays viewable after a pass lapses. If the
     // client is opening one of THIS user's saved properties, verify ownership
@@ -63,6 +98,30 @@ export async function POST(req: NextRequest) {
         const used = await prisma.parcelRead.count({ where: { userId, season } });
         return NextResponse.json({
           allow: true, status: 'saved', authenticated: true,
+          unlocked: isReadsUnlocked(
+            await prisma.user.findUnique({
+              where: { id: userId },
+              select: { readsUnlocked: true, subscriptionStatus: true, role: true, seasonPassSeason: true, seasonPassExpiry: true },
+            }),
+          ),
+          used, limit: READS_PER_SEASON,
+        });
+      }
+    }
+
+    // ── Landowner exemption: a MATCHED claim on THIS parcel is the user's own
+    //    ground — always free to read, never metered, never walled. A PENDING
+    //    claim grants nothing (honesty: we only exempt what we soft-verified).
+    //    Scouting anyone else's parcel still runs the meter below. ──
+    if (parcelKey) {
+      const claim = await prisma.parcelClaim.findUnique({
+        where: { userId_parcelKey: { userId, parcelKey } },
+        select: { ownerMatchStatus: true },
+      });
+      if (claim && claim.ownerMatchStatus === 'MATCHED') {
+        const used = await prisma.parcelRead.count({ where: { userId, season } });
+        return NextResponse.json({
+          allow: true, status: 'owned', authenticated: true,
           unlocked: isReadsUnlocked(
             await prisma.user.findUnique({
               where: { id: userId },

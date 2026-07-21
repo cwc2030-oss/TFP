@@ -197,7 +197,7 @@ async function handleSeasonPassPurchase(session: Stripe.Checkout.Session) {
           address: session.customer_details?.email || session.customer_email || userId,
           metadata: JSON.stringify({
             productType: 'season_pass',
-            price: 19,
+            price: 39,
             season,
             stripeSessionId: session.id,
           }),

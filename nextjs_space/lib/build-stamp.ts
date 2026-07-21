@@ -396,7 +396,25 @@ export const BUILD_DATE = 'Jul 21';
 //      paths live). TC-A6 rewritten (e2e/terrain-scroll-zoom.spec.ts): wheel over
 //      an off-center ring → map zooms, ring holds its ground, NO read fires.
 //      View/interaction only — no engine change, no cache flush.
-export const BUILD_REV = 'r29';
+//
+// r30 — FREE-TIER METER + "CLAIM YOUR PARCEL" LANDOWNER PATH: put the whole
+//      free-tier scouting funnel together. (1) Anonymous first read is now free &
+//      instant — no signup wall in front of the wow (lib/reads.ts ANON_FREE_READS,
+//      cookie-tracked best-effort; /api/reads/consume + /api/reads/status anon
+//      branches). Reads 2–3 still prompt lightweight email signup; the 4th distinct
+//      location shows the honest $39/season wall ($19 copy → $39 everywhere; the
+//      buy is reachable BEFORE the wall via the meter chip + floating CTA). Roam/
+//      zoom/re-read within one parcel still burns nothing. (2) NEW landowner path:
+//      "Claim this parcel as mine" (Parcel Identity card) → soft-matches the
+//      claimant against the Regrid owner-of-record (lib/claims.ts, conservative
+//      2-token match; LLC/trust/mismatch → PENDING, never silently granted).
+//      MATCHED = your ground: reads there are always free & don't burn the meter
+//      (consume-route ownership exemption) + listable flag set. Honest: soft-verified
+//      only, no "Verified Owner" badge beyond what we checked. New ParcelClaim model
+//      (additive) + OwnerMatchStatus enum. $39 rides the existing Season Pass Stripe
+//      plumbing via STRIPE_SEASON_PASS_PRICE_ID (mode:'payment', per-season). App +
+//      data-model only — no terrain engine change, no cache flush.
+export const BUILD_REV = 'r30';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

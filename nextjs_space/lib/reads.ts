@@ -17,6 +17,36 @@
 /** Free Terrain Brain reads allowed per season for a signed-in free account. */
 export const READS_PER_SEASON = 3;
 
+/**
+ * Anonymous first-look allowance. The FIRST distinct parcel an anonymous
+ * visitor pulls up is free + instant — no signup wall in front of the "wow."
+ * The 2nd distinct location prompts a lightweight (email) signup, after which
+ * the per-account season meter (READS_PER_SEASON) takes over. Tracked
+ * best-effort in an httpOnly cookie; minor leakage is accepted in the name of
+ * early engagement (per directive).
+ */
+export const ANON_FREE_READS = 1;
+
+/** Cookie that records the distinct parcelKeys an anonymous visitor has read. */
+export const ANON_READS_COOKIE = 'tfp_anon_reads';
+
+/** Parse the anon-reads cookie into a de-duped list of parcelKeys. */
+export function parseAnonReads(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(decodeURIComponent(raw));
+    if (!Array.isArray(arr)) return [];
+    return Array.from(new Set(arr.filter((x) => typeof x === 'string'))).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+/** Encode a list of anon parcelKeys back into the cookie value. */
+export function encodeAnonReads(keys: string[]): string {
+  return encodeURIComponent(JSON.stringify(Array.from(new Set(keys)).slice(-20)));
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
  * SINGLE SOURCE OF TRUTH for season boundaries (Piece 6c).
  *

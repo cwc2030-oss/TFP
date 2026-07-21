@@ -35,6 +35,9 @@ model User {
   hunterProfile    HunterProfile?     // one trust profile per user (hunter side)
   ownerShortlists  HunterShortlist[]  // hunters this user (as landowner) has shortlisted
 
+  // Landowner path — parcels this user has claimed as their own (see ParcelClaim).
+  parcelClaims     ParcelClaim[]
+
   // Piece 6a: placeholder Season Pass unlock (kept as a legacy/admin override).
   // When true, the user has unlimited Terrain Brain reads + save. Pro/Pro Max/admin
   // are treated as unlocked in code regardless of this flag.
@@ -74,6 +77,62 @@ model ParcelRead {
 
   @@unique([userId, parcelKey, season])
   @@index([userId, season])
+}
+
+// ============================================================================
+// Landowner path — "Claim your parcel".
+//
+// A claim is the landowner signal: a user asserts a parcel is THEIRS. On claim
+// we soft-verify by matching the signed-in user's name against the Regrid
+// owner-of-record for that parcel (light name match — NOT a hard legal check).
+//
+//   ownerMatchStatus:
+//     MATCHED  — the name matched the Regrid owner-of-record (soft-verified).
+//                Their OWN parcels always read free + are flagged `listable`.
+//     PENDING  — no clean match (owner-of-record is an LLC/trust, or the name
+//                differs). We do NOT silently grant free/listable; the UI shows
+//                "pending verification."
+//
+// HONESTY (mirrors CredentialLevel + the terrain verdict): a soft match is NOT
+// "Verified Owner." We never display an ownership badge beyond what we checked.
+// Hard ownership verification is REQUIRED before listing / any money (reuse this
+// record, tightened) — enforced downstream, never granted here.
+//
+// Meter scoping (what protects the $39 tier): a MATCHED claim exempts ONLY that
+// parcel from the read meter. Scouting anyone else's ground still runs the meter
+// — free == your own land only.
+// ============================================================================
+model ParcelClaim {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Same key convention as ParcelRead: Regrid parcelId when available, else
+  // "ll:lat,lng". This is what the meter checks for an ownership exemption.
+  parcelKey         String
+  ownerMatchStatus  OwnerMatchStatus @default(PENDING)
+  // Snapshot of the Regrid owner-of-record at claim time, and the name we
+  // matched against — kept for the tightened hard-verify step before listing.
+  regridOwnerName   String?
+  claimantName      String?
+  // Flagged true ONLY on a MATCHED claim: eligible to list when the marketplace
+  // opens (still gated on hard verification before any money).
+  listable          Boolean  @default(false)
+  // Parcel context for My Parcels display + the hard-verify step.
+  address           String?
+  lat               Float?
+  lng               Float?
+  acreage           Float?
+  claimedAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([userId, parcelKey])
+  @@index([userId])
+  @@index([parcelKey])
+}
+
+enum OwnerMatchStatus {
+  PENDING
+  MATCHED
 }
 
 model MapLayer {

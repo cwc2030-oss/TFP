@@ -10,14 +10,15 @@ import { getCurrentSeason, isReadsUnlocked } from '@/lib/reads';
 /**
  * POST /api/reads/unlock
  *
- * Piece 6b — real Season Pass checkout. Creates a $19 one-time Stripe Checkout
- * session for the CURRENT season and returns its URL; the client redirects the
- * shopper to Stripe. On successful payment the stripe-webhook stamps
- * User.seasonPassSeason + seasonPassExpiry (see handleSeasonPassPurchase),
+ * Piece 6b — real Season Pass checkout. Creates a $39 one-time (per-season)
+ * Stripe Checkout session for the CURRENT season and returns its URL; the client
+ * redirects the shopper to Stripe. On successful payment the stripe-webhook
+ * stamps User.seasonPassSeason + seasonPassExpiry (see handleSeasonPassPurchase),
  * which flips the account to an unlocked pass holder for the season.
  *
- * Repurposes the existing $19 plumbing: the same STRIPE_HUNT_PLAN_PRICE_ID and
- * mode:'payment' flow already used by /api/parcels/purchase.
+ * Uses the dedicated STRIPE_SEASON_PASS_PRICE_ID ($39) via mode:'payment'. Falls
+ * back to STRIPE_HUNT_PLAN_PRICE_ID only if the dedicated var is unset so checkout
+ * never hard-breaks (see priceId resolution below).
  *
  * Body (all optional) { lat, lng, address } — echoed into success_url so the
  * shopper lands back on the same parcel and the read re-runs automatically.
@@ -78,8 +79,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Dedicated Season Pass price (separate product from the single-parcel
-    // unlock). Falls back to the legacy $19 hunt-plan price so checkout can
+    // Dedicated $39 Season Pass price (separate product from the single-parcel
+    // unlock). Falls back to the legacy hunt-plan price so checkout can
     // never break if the dedicated var is ever missing.
     const priceId =
       process.env.STRIPE_SEASON_PASS_PRICE_ID || process.env.STRIPE_HUNT_PLAN_PRICE_ID;
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
           address: email,
           metadata: JSON.stringify({
             productType: 'season_pass',
-            price: 19,
+            price: 39,
             season,
             stripeSessionId: checkoutSession.id,
           }),

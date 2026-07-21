@@ -13,7 +13,7 @@ import {
   Mountain, Eye, EyeOff, Layers, Crosshair, Home, ExternalLink,
   Maximize2, Minimize2, RefreshCw, Check, Bug, Lock, ArrowUpRight,
   Unlock, Sparkles, Settings, Download, FileText, Grid3X3, User, Share2,
-  Trash2, Plus, Mail, Bell
+  Trash2, Plus, Mail, Bell, Clock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ScoreCard from '@/components/ScoreCard';
@@ -3003,6 +3003,76 @@ const archetypeInitializedRef = useRef(false);
     refreshReadStatus();
   }, [sessionStatus, session?.user?.email, (session?.user as any)?.subscriptionStatus, refreshReadStatus]);
 
+  // ── Landowner "Claim this parcel" state ──
+  // claimStatus reflects THIS parcel: 'none' (unclaimed), 'MATCHED' (own ground,
+  // reads free), 'PENDING' (claimed but soft-match inconclusive), 'loading'.
+  const [claimStatus, setClaimStatus] = useState<'none' | 'MATCHED' | 'PENDING' | 'loading'>('none');
+  const [claimSubmitting, setClaimSubmitting] = useState(false);
+  // Mirror qaParcel into a ref so the claim callback (declared before qaParcel's
+  // useState) can read the current Regrid owner-of-record without a TDZ error.
+  const qaParcelRef = useRef<any>(null);
+
+  // Refresh the claim status for the currently loaded parcel.
+  const refreshClaimStatus = useCallback(async () => {
+    if (!readStateRef.current.authenticated || !currentParcelKey) { setClaimStatus('none'); return; }
+    try {
+      const res = await fetch('/api/parcels/claim', { cache: 'no-store' });
+      const d = await res.json();
+      const mine = Array.isArray(d?.claims)
+        ? d.claims.find((c: any) => c.parcelKey === currentParcelKey)
+        : null;
+      setClaimStatus(mine ? (mine.ownerMatchStatus === 'MATCHED' ? 'MATCHED' : 'PENDING') : 'none');
+    } catch { setClaimStatus('none'); }
+  }, [currentParcelKey]);
+
+  useEffect(() => { refreshClaimStatus(); }, [refreshClaimStatus, readState.authenticated]);
+
+  // Claim the loaded parcel as the user's own ground (soft owner-name match).
+  const handleClaimParcel = useCallback(async () => {
+    if (claimSubmitting || !currentParcelKey) return;
+    if (!readStateRef.current.authenticated) {
+      // Claiming requires a lightweight account — route to signup, resume here.
+      try {
+        const url = new URL(window.location.href);
+        window.location.href = `/signup?callbackUrl=${encodeURIComponent(url.pathname + url.search)}`;
+      } catch { window.location.href = '/signup'; }
+      return;
+    }
+    setClaimSubmitting(true);
+    setClaimStatus('loading');
+    try {
+      const res = await fetch('/api/parcels/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parcelKey: currentParcelKey,
+          regridOwner: qaParcelRef.current?.owner || (parcelPolygonRef.current?.properties as any)?.owner || '',
+          address: activeAddressRef.current,
+          lat: activeLatRef.current,
+          lng: activeLngRef.current,
+          acreage: parseFloat(activeAcreageRef.current || '0') || undefined,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d?.status === 'MATCHED') {
+        setClaimStatus('MATCHED');
+        toast.success('Claimed — this is your ground. Reads here are always free.');
+        refreshReadStatus();
+      } else if (res.ok && d?.status === 'PENDING') {
+        setClaimStatus('PENDING');
+        toast('Claim recorded — pending owner verification.', { icon: '⏳' });
+      } else {
+        setClaimStatus('none');
+        toast.error(d?.error || 'Could not record the claim.');
+      }
+    } catch {
+      setClaimStatus('none');
+      toast.error('Could not record the claim. Please try again.');
+    } finally {
+      setClaimSubmitting(false);
+    }
+  }, [claimSubmitting, currentParcelKey, refreshReadStatus]);
+
   // Refs for parcel access in closures (map event handlers, etc.)
   const parcelUnlockedRef = useRef(false);
   useEffect(() => { parcelUnlockedRef.current = parcelUnlocked; }, [parcelUnlocked]);
@@ -3369,6 +3439,7 @@ const archetypeInitializedRef = useRef(false);
   const [explorationMode, setExplorationMode] = useState(false); // Enable click-to-lookup
   const [qaParcelLoading, setQaParcelLoading] = useState(false);
   const [qaParcel, setQaParcel] = useState<LookupParcel | null>(null);
+  useEffect(() => { qaParcelRef.current = qaParcel; }, [qaParcel]);
   const [qaParcelError, setQaParcelError] = useState<string | null>(null);
   const [qaParcelAnalyzing, setQaParcelAnalyzing] = useState(false);
   const [qaRecentParcelIds, setQaRecentParcelIds] = useState<string[]>([]); // Track visited parcels
@@ -18245,6 +18316,40 @@ const archetypeInitializedRef = useRef(false);
                     {qaParcel?.plss && <span>PLSS: <span className="text-white/60 truncate">{qaParcel.plss}</span></span>}
                   </div>
                 )}
+                {/* ═══ CLAIM THIS PARCEL — landowner path ═══ */}
+                {currentParcelKey && !demoMode && !heroParcel && (
+                  <div className="mt-2.5">
+                    {claimStatus === 'MATCHED' ? (
+                      <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 bg-emerald-500/[0.10] border border-emerald-500/30">
+                        <Check className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-emerald-300 leading-tight">Your ground · reads always free</p>
+                          <p className="text-[9px] text-emerald-400/60 leading-tight mt-0.5">Matched to the owner of record.</p>
+                        </div>
+                      </div>
+                    ) : claimStatus === 'PENDING' ? (
+                      <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 bg-amber-500/[0.08] border border-amber-500/25">
+                        <Clock className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-amber-300 leading-tight">Claim pending verification</p>
+                          <p className="text-[9px] text-amber-400/60 leading-tight mt-0.5">We could not auto-match the owner name. We will confirm before any listing.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleClaimParcel}
+                        disabled={claimSubmitting || claimStatus === 'loading'}
+                        className="w-full flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-white/[0.05] hover:bg-white/[0.10] border border-white/[0.10] hover:border-amber-500/40 text-stone-300 hover:text-amber-300 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Claim this parcel as your own land"
+                      >
+                        <Home className="h-3.5 w-3.5" />
+                        <span className="text-[11px] font-semibold">
+                          {claimStatus === 'loading' ? 'Checking…' : 'Claim this parcel as mine'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* ═══ HUNTER TYPE SELECTOR ═══ */}
@@ -20751,11 +20856,11 @@ const archetypeInitializedRef = useRef(false);
             <div style={{ fontSize: '40px', marginBottom: '8px' }}>🔓</div>
             <h2 style={{ color: '#c9a84c', fontSize: '22px', fontWeight: 700, margin: '0 0 8px' }}>
               {readState.used >= readState.limit
-                ? `You've read ${readState.used}.`
+                ? `You've used your ${readState.limit} free reads this season.`
                 : 'Unlock the Season'}
             </h2>
             <p style={{ color: '#e2e8f0', fontSize: '15px', lineHeight: 1.5, margin: '0 0 6px', fontWeight: 600 }}>
-              Unlock the season — unlimited ground.
+              Unlock unlimited scouting for $39/season.
             </p>
             <p style={{ color: '#94a3b8', fontSize: '12px', lineHeight: 1.6, margin: '0 0 4px' }}>
               The map, boundaries &amp; ownership stay free. The Season Pass unlocks
@@ -20817,10 +20922,10 @@ const archetypeInitializedRef = useRef(false);
                 boxShadow: '0 4px 20px rgba(120,90,20,0.35)',
               }}
             >
-              {unlockingSeason ? 'Redirecting to checkout…' : 'Unlock the Season — $19'}
+              {unlockingSeason ? 'Redirecting to checkout…' : 'Unlock the Season — $39'}
             </button>
             <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 4px' }}>
-              Season Pass · unlimited reads all season
+              Season Pass · $39 · unlimited reads all season
             </p>
             <button
               onClick={() => setShowParcelPaywall(false)}
