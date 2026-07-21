@@ -11139,11 +11139,15 @@ const archetypeInitializedRef = useRef(false);
         window.__TFP_MAP__ = map;
       }
 
-      // r26 ZOOM KILL-SHOT: retire scroll-wheel zoom entirely. The wheel must not
-      // zoom, pan, or move the ring by ANY code path — a wheel that does nothing
-      // can't break anything. Zoom is done via the +/- control (which pivots on
-      // the A-300 ring) and native pinch (trackpad + touch), never the wheel.
-      try { (map as any).scrollZoom.disable(); } catch { /* noop */ }
+      // r29 RESTORE SCROLL-WHEEL ZOOM: bring back smooth, continuous wheel zoom
+      // (and trackpad pinch), zooming toward the cursor — the way it worked before
+      // r26. Safe now because the two r26 drift root-causes are both gone: (1) zoom
+      // fires NO read (reads are pan-only + ring-drag-only since r26/r27), and
+      // (2) the ring is anchored to its ground coordinates (a geographic
+      // turf.circle mapbox reprojects/scales every camera move) — nothing re-pins
+      // it to viewport center on zoom. So a wheel zoom can't reintroduce the
+      // walk/oscillation loop. The +/- buttons stay too — both zoom paths live.
+      try { (map as any).scrollZoom.enable(); } catch { /* noop */ }
     } catch (err) {
       console.log("[MAP-DIAG] Map constructor FAILED:", err);
       console.log("[MAP-DIAG] SUMMARY: map_create=FAILED, webgl=true, container=" + container.offsetWidth + "x" + container.offsetHeight);
@@ -16712,10 +16716,11 @@ const archetypeInitializedRef = useRef(false);
         <div ref={mapContainerRef} style={{ width: '100%', height: '100%', position: 'relative' }} />
       </div>
 
-      {/* r26 ZOOM CONTROL — always-visible +/- buttons. Scroll-wheel zoom is
-          retired; these + pinch are the zoom path. Each button eases the camera
-          around the A-300 ring's own center, so the ring stays fixed on screen and
-          only scales (no drift), and fires NO read. */}
+      {/* ZOOM CONTROL — always-visible +/- buttons. As of r29 scroll-wheel zoom
+          and trackpad pinch are live again too; these buttons remain a second
+          zoom path. Each button eases the camera around the A-300 ring's own
+          center, so the ring stays fixed on screen and only scales (no drift),
+          and fires NO read. */}
       {mapReady && !mapError && (
         <div className="absolute right-4 bottom-24 z-30 flex flex-col rounded-lg overflow-hidden shadow-lg border border-white/15">
           <button

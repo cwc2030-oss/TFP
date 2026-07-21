@@ -11,6 +11,12 @@ These specs close the two test holes flagged in the weekly system test:
   forced compute-failure path (`?forceFail=1`, honored only when the server env
   `TFP_ALLOW_TEST_FAILURE=1`) and asserts the UI shows an explicit "tap to
   retry" affordance rather than a false flat/zero read.
+- **TC-A6 — scroll-wheel zoom** (`terrain-scroll-zoom.spec.ts`). REWRITTEN for
+  r29: the wheel is no longer inert — scroll-wheel zoom (and trackpad pinch) was
+  restored. Drags the ring off-center, spins the wheel in/out over it, and
+  asserts the map zooms (map.getZoom() moves), the ring's ground coordinates
+  hold (no diagonal walk/oscillation), and NO read fires (readCount holds).
+  Uses the `window.__TFP_MAP__` + `window.__tfpHuntZone` hooks.
 
 ## One-time setup
 

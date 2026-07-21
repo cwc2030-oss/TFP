@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 20';
+export const BUILD_DATE = 'Jul 21';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -383,7 +383,20 @@ export const BUILD_DATE = 'Jul 20';
 //      hook (?forceFail=1, env-gated by TFP_ALLOW_TEST_FAILURE) so TC-A10 can
 //      assert failure≠flat, and window.__tfpHuntZone ring test hooks + a Playwright
 //      e2e drag spec for TC-A3. Interaction/engine behavior unchanged.
-export const BUILD_REV = 'r28';
+//
+// r29 — RESTORE SCROLL-WHEEL ZOOM: bring back smooth, continuous wheel zoom (and
+//      trackpad pinch), zooming toward the cursor — the way it worked before r26
+//      retired it. Single-line flip in app/intel/page.tsx: scrollZoom.disable() →
+//      scrollZoom.enable() at map create. Safe now because the two r26 drift
+//      root-causes are both already gone: zoom fires NO read (reads are pan-only +
+//      ring-drag-only since r26/r27) and the ring is anchored to its ground
+//      coordinates (a geographic turf.circle mapbox reprojects/scales every camera
+//      move — nothing re-pins it to viewport center on zoom), so the wheel cannot
+//      reintroduce the walk/oscillation loop. The +/- buttons stay too (both zoom
+//      paths live). TC-A6 rewritten (e2e/terrain-scroll-zoom.spec.ts): wheel over
+//      an off-center ring → map zooms, ring holds its ground, NO read fires.
+//      View/interaction only — no engine change, no cache flush.
+export const BUILD_REV = 'r29';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;
