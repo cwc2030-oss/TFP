@@ -461,7 +461,16 @@ export const BUILD_DATE = 'Jul 22';
 //      large object) behind ?debug=true — it ran on EVERY stand recompute (i.e.
 //      every A-300 ring roam) as real main-thread work + console spam for normal
 //      users. No behavioral change; console now reflects real severity.
-export const BUILD_REV = 'r34';
+//
+// r35 — NEIGHBOR-LAYER CLICK GUARD (Claude patch intelconsolefixes.patch 3/3;
+//      patches 1/3 + 2/3 were the console/debug fix already shipped in r34).
+//      components/map/interactive-map.tsx: the map-click handler queried the
+//      'neighbor-parcels-fill' layer on every click to skip clicks on neighbor
+//      parcels, but that layer is only added once neighbor parcels load — any
+//      click before then threw "layer neighbor-parcels-fill does not exist in
+//      the map's style and cannot be queried for features". Now guarded with
+//      map.getLayer('neighbor-parcels-fill') ? query : []. No behavioral change.
+export const BUILD_REV = 'r35';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

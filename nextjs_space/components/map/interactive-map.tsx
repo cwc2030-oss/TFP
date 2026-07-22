@@ -435,8 +435,13 @@ export default function InteractiveMap({
 
     // Click-to-select parcels
     map.on('click', async (e) => {
-      // Don't handle if clicking a neighbor parcel (those have their own handler)
-      const neighborFeatures = map.queryRenderedFeatures(e.point, { layers: ['neighbor-parcels-fill'] });
+      // Don't handle if clicking a neighbor parcel (those have their own handler).
+      // Guard on layer existence: the neighbor-parcels-fill layer is only added
+      // once neighbor parcels load, so querying it on an earlier click throws
+      // "layer does not exist in the map's style".
+      const neighborFeatures = map.getLayer('neighbor-parcels-fill')
+        ? map.queryRenderedFeatures(e.point, { layers: ['neighbor-parcels-fill'] })
+        : [];
       if (neighborFeatures.length > 0) return;
 
       const zoom = map.getZoom();
