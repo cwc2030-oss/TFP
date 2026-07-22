@@ -27,7 +27,7 @@
 export const BUILD_VERSION = 'v6.3-flowing-form';
 
 // Ship date for the current build (update on each deploy).
-export const BUILD_DATE = 'Jul 21';
+export const BUILD_DATE = 'Jul 22';
 
 // Build revision WITHIN the current terrain engine version. Bump this for
 // ship-only fixes that DON'T change cached terrain output (so the terrain
@@ -451,7 +451,17 @@ export const BUILD_DATE = 'Jul 21';
 //      Hunt Report still work. The Supabase spatial tables (public.user_sit_pins
 //      + stand-journal) are left dormant (no data touched, no Prisma migration).
 //      App/UI only — no terrain engine change, no cache flush.
-export const BUILD_REV = 'r33';
+//
+// r34 — CONSOLE/DEBUG NOISE FIX (Claude patch consoleanddebugfixes.patch).
+//      (1) Downgraded 6 [STAND-STABILITY] diagnostic traces from console.error
+//      to console.log — they were informational stand-reconciliation lines that
+//      surfaced as red 'errors' (~94 on a single load), burying real errors and
+//      the [ScopeProbe] deer-flow diagnostics. (2) Gated the heavy
+//      buildStandSelectionDebug payload (JSON.stringify + console.table of a
+//      large object) behind ?debug=true — it ran on EVERY stand recompute (i.e.
+//      every A-300 ring roam) as real main-thread work + console spam for normal
+//      users. No behavioral change; console now reflects real severity.
+export const BUILD_REV = 'r34';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

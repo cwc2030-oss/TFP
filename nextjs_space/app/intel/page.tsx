@@ -4631,11 +4631,11 @@ const archetypeInitializedRef = useRef(false);
 
           if (scoreDelta > STABILITY_REPLACEMENT_THRESHOLD) {
             // Significant improvement — use new stand but log the shift
-            console.error(`[STAND-STABILITY] slot=${slot} REPLACED: prev="${prevStand.name}" (score=${prevStand.alignment.score.toFixed(1)}) → new="${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) delta=+${scoreDelta.toFixed(1)} dist=${bestPrevDist.toFixed(0)}m`);
+            console.log(`[STAND-STABILITY] slot=${slot} REPLACED: prev="${prevStand.name}" (score=${prevStand.alignment.score.toFixed(1)}) → new="${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) delta=+${scoreDelta.toFixed(1)} dist=${bestPrevDist.toFixed(0)}m`);
             stabilized.push(newStand);
           } else {
             // Score difference not significant enough — snap to previous coords for visual stability
-            console.error(`[STAND-STABILITY] slot=${slot} SNAPPED: keeping prev coords for "${prevStand.name}" (prevScore=${prevStand.alignment.score.toFixed(1)}, newScore=${newStand.alignment.score.toFixed(1)}, delta=${scoreDelta.toFixed(1)}, dist=${bestPrevDist.toFixed(0)}m)`);
+            console.log(`[STAND-STABILITY] slot=${slot} SNAPPED: keeping prev coords for "${prevStand.name}" (prevScore=${prevStand.alignment.score.toFixed(1)}, newScore=${newStand.alignment.score.toFixed(1)}, delta=${scoreDelta.toFixed(1)}, dist=${bestPrevDist.toFixed(0)}m)`);
             // Use new scoring data but snap coords to previous position
             stabilized.push({ ...newStand, coords: prevStand.coords });
           }
@@ -4646,18 +4646,18 @@ const archetypeInitializedRef = useRef(false);
 
           if (scoreDelta > STABILITY_REPLACEMENT_THRESHOLD) {
             usedPrevIndices.add(bestPrevIdx);
-            console.error(`[STAND-STABILITY] slot=${slot} NEW_STAND: "${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) replaces distant "${prevStand.name}" (score=${prevStand.alignment.score.toFixed(1)}) delta=+${scoreDelta.toFixed(1)} dist=${bestPrevDist.toFixed(0)}m`);
+            console.log(`[STAND-STABILITY] slot=${slot} NEW_STAND: "${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) replaces distant "${prevStand.name}" (score=${prevStand.alignment.score.toFixed(1)}) delta=+${scoreDelta.toFixed(1)} dist=${bestPrevDist.toFixed(0)}m`);
             stabilized.push(newStand);
           } else {
             // Previous stand was better or close enough — keep previous in this slot
             usedPrevIndices.add(bestPrevIdx);
-            console.error(`[STAND-STABILITY] slot=${slot} RETAINED: keeping prev "${prevStand.name}" (prevScore=${prevStand.alignment.score.toFixed(1)}) over new "${newStand.name}" (newScore=${newStand.alignment.score.toFixed(1)}, delta=${scoreDelta.toFixed(1)}, dist=${bestPrevDist.toFixed(0)}m)`);
+            console.log(`[STAND-STABILITY] slot=${slot} RETAINED: keeping prev "${prevStand.name}" (prevScore=${prevStand.alignment.score.toFixed(1)}) over new "${newStand.name}" (newScore=${newStand.alignment.score.toFixed(1)}, delta=${scoreDelta.toFixed(1)}, dist=${bestPrevDist.toFixed(0)}m)`);
             // Retain previous stand with updated scoring data
             stabilized.push({ ...prevStand, alignment: newStand.alignment, inputs: newStand.inputs, resilience: newStand.resilience });
           }
         } else {
           // No previous stand to compare — accept as-is (first analysis or extra slot)
-          console.error(`[STAND-STABILITY] slot=${slot} INITIAL: "${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) — no previous anchor`);
+          console.log(`[STAND-STABILITY] slot=${slot} INITIAL: "${newStand.name}" (score=${newStand.alignment.score.toFixed(1)}) — no previous anchor`);
           stabilized.push(newStand);
         }
       }
@@ -4666,7 +4666,7 @@ const archetypeInitializedRef = useRef(false);
     } else if (aligned.length > 0) {
       // First computation — log for diagnostics
       aligned.forEach((s, i) => {
-        console.error(`[STAND-STABILITY] slot=${i} INITIAL: "${s.name}" (score=${s.alignment.score.toFixed(1)}) coords=[${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}]`);
+        console.log(`[STAND-STABILITY] slot=${i} INITIAL: "${s.name}" (score=${s.alignment.score.toFixed(1)}) coords=[${s.coords[0].toFixed(6)}, ${s.coords[1].toFixed(6)}]`);
       });
     }
     // ═══ END STAND STABILITY ═══
@@ -4689,7 +4689,11 @@ const archetypeInitializedRef = useRef(false);
     // Comprehensive diagnostic: every sub-score for every candidate, plus
     // rejection reasons and model weight diagnosis. Emitted to console as
     // a single structured object for Clark's analysis.
-    try {
+    // Gated behind ?debug=true — building this payload (JSON.stringify +
+    // console.table of a large object) runs on every stand recompute, i.e.
+    // every A-300 roam, so it's real per-move main-thread work + console spam
+    // for normal users who never read it.
+    if (debugMode) try {
       const selectedRanks = new Set(aligned.map(s => s.rank));
       // Collect parcel rings for boundary distance calculation
       let parcelRings: number[][][] | null = null;
