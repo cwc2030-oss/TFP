@@ -402,7 +402,7 @@ export function buildHuntingReportHtml(payload: HuntingReportPayload): string {
     : address;
   const ogTitle = HIDE_FAB_SCORES ? `${titleSubject} · Terrain Analyzed` : `${titleSubject} · Huntability Score: ${summary?.topStandScore ?? 'N/A'}`;
   const standCount = stands?.length ?? 0;
-  const ogDescription = HIDE_FAB_SCORES ? `${safeAcreage} acres · Terrain analysis · Powered by TFP Intelligence Engine` : `${safeAcreage} acres · ${standCount} stand locations · Verified Terrain · Powered by TFP Intelligence Engine`;
+  const ogDescription = HIDE_FAB_SCORES ? `${safeAcreage} acres · Terrain analysis · Powered by Terrain Brain™` : `${safeAcreage} acres · ${standCount} stand locations · Verified Terrain · Powered by Terrain Brain™`;
   const ogUrl = `${origin}/report/${reportId}`;
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
   const mapboxBase = 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static';
@@ -434,7 +434,7 @@ ${ogMeta}
 
 <div class="page page-1 border${wm}">
   <div class="header">
-    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners · Powered by Terrain Brain™</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
       <div>Report ID: ${reportId}</div><div>Generated: ${generated}</div>
     </div>
@@ -527,7 +527,7 @@ ${ogMeta}
 
 <div class="page border${wm}">
   <div class="header">
-    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners · Powered by Terrain Brain™</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
       <div>Report ID: ${reportId}</div>
       <div>Prevailing Wind: ${prevailingWind ?? 'Not Set'}</div>
@@ -640,7 +640,7 @@ ${ogMeta}
 ${mapImageBase64 ? `
 <div class="page border${wm}">
   <div class="header">
-    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners</p></div>
+    <div><h1>TERRA FIRMA PARTNERS</h1><p>Terrain Intelligence for Landowners · Powered by Terrain Brain™</p></div>
     <div style="text-align:right;font-size:11px;opacity:0.8">
       <div>Report ID: ${reportId}</div>
       <div>Generated: ${generated}</div>

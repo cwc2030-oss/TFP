@@ -16792,6 +16792,60 @@ const archetypeInitializedRef = useRef(false);
         </div>
       )}
 
+      {/* ═══ ON-MAP ACTION BAR — Save · Claim · List ═══ */}
+      {/* Surfaces the three parcel actions directly on the map so they're one
+          tap from where the user's eyes already are, instead of buried in the
+          scrolling intel panel. Bottom-center lane is clear of the terrain
+          story card (bottom-left) and zoom controls (bottom-right). Shown for
+          Pro users viewing a single loaded parcel — mirrors the panel's
+          Pro-gating on Save/List — and hidden during Clean Map / export
+          (broker screenshot) modes and territory mode. */}
+      {session?.user && isPro && parcelPolygon && !territoryMode && !cleanMap && !exportMode && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-20 pointer-events-auto
+                        flex items-center gap-0.5 p-1 rounded-full
+                        bg-black/60 backdrop-blur-md border border-white/10 shadow-xl">
+          {/* Save Parcel → library */}
+          <button
+            onClick={handleSaveProperty}
+            title="Save this parcel to your Terrain Intelligence Library"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold
+                       text-white/90 hover:bg-white/10 transition-colors"
+          >
+            <span>{saveConfirmed ? '✅' : '⭐'}</span>
+            <span>{saveConfirmed ? 'Saved' : 'Save'}</span>
+          </button>
+          <span className="h-4 w-px bg-white/15" />
+          {/* Claim this parcel as own land */}
+          <button
+            onClick={handleClaimParcel}
+            disabled={claimSubmitting || claimStatus === 'loading'}
+            title="Claim this parcel as your own land"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold
+                       text-white/90 hover:bg-white/10 transition-colors disabled:opacity-50"
+          >
+            <span>{claimStatus === 'MATCHED' ? '✅' : '🚩'}</span>
+            <span>
+              {claimStatus === 'loading' ? 'Checking…'
+                : claimStatus === 'MATCHED' ? 'Claimed'
+                : claimStatus === 'PENDING' ? 'Pending'
+                : claimSubmitting ? 'Claiming…'
+                : 'Claim'}
+            </span>
+          </button>
+          <span className="h-4 w-px bg-white/15" />
+          {/* List this parcel on the marketplace */}
+          <button
+            onClick={() => handleListThisProperty('report_ready')}
+            title="List this parcel on the marketplace"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold
+                       text-emerald-300 hover:bg-emerald-500/15 transition-colors"
+          >
+            <span>🏷️</span>
+            <span>List</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
         <div className="flex items-center justify-between px-4 md:px-2 lg:px-4 py-3 md:py-2 lg:py-3 pointer-events-auto">

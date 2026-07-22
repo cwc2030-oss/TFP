@@ -316,7 +316,7 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-emerald-700" />
-                Your Reports
+                Your Terrain Brain™ Reports
               </CardTitle>
             </CardHeader>
             <CardContent>
