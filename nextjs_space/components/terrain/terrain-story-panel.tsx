@@ -36,10 +36,12 @@ const DRIVER_ICONS: Record<string, React.ElementType> = {
 
 function DriverBar({ 
   driver, 
-  compact = false 
+  compact = false,
+  onScoreClick,
 }: { 
   driver: StructuralDriverScore; 
   compact?: boolean;
+  onScoreClick?: () => void;
 }) {
   const Icon = DRIVER_ICONS[driver.icon] || Mountain;
   const color = getDriverColor(driver.score);
@@ -49,9 +51,34 @@ function DriverBar({
   // Mark them so we never present an estimate as measured structure.
   const isEstimate = !!driver.estimated && driver.score > 0;
 
+  // Discoverability: when a click handler is wired, the score tile becomes an
+  // affordance into the Terrain Reasons flow — cursor + hover glow signal it's
+  // tappable, keyboard-activatable for a11y.
+  const tapProps = onScoreClick
+    ? {
+        role: 'button' as const,
+        tabIndex: 0,
+        title: 'Tap for the terrain reasons behind this score',
+        onClick: onScoreClick,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onScoreClick();
+          }
+        },
+      }
+    : {};
+
   if (compact) {
     return (
-      <div className="flex items-center gap-2">
+      <div
+        {...tapProps}
+        className={`flex items-center gap-2 rounded-md ${
+          onScoreClick
+            ? 'cursor-pointer -mx-1 px-1 py-0.5 transition-all hover:bg-cyan-500/10 hover:ring-1 hover:ring-cyan-400/40'
+            : ''
+        }`}
+      >
         <Icon className="h-3.5 w-3.5" style={{ color }} />
         <div className="flex-1 min-w-0">
           <div className="h-1.5 bg-stone-800 rounded-full overflow-hidden">
@@ -69,7 +96,14 @@ function DriverBar({
   }
   
   return (
-    <div className="group">
+    <div
+      {...tapProps}
+      className={`group rounded-md ${
+        onScoreClick
+          ? 'cursor-pointer -mx-1.5 px-1.5 py-1 transition-all hover:bg-cyan-500/[0.07] hover:ring-1 hover:ring-cyan-400/40'
+          : ''
+      }`}
+    >
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4" style={{ color }} />
@@ -105,11 +139,13 @@ function DriverBar({
 export function StructuralDriversGrid({ 
   drivers,
   compact = false,
-  showLabels = true 
+  showLabels = true,
+  onScoreClick,
 }: { 
   drivers: StructuralDrivers;
   compact?: boolean;
   showLabels?: boolean;
+  onScoreClick?: () => void;
 }) {
   // PHASE 1 honesty guard: hide estimated (constant-blended) drivers entirely.
   // Bench & Ridge are not yet per-parcel measured, so we never render them.
@@ -132,7 +168,7 @@ export function StructuralDriversGrid({
                 {driver.shortLabel}
               </span>
             )}
-            <DriverBar driver={driver} compact />
+            <DriverBar driver={driver} compact onScoreClick={onScoreClick} />
           </div>
         ))}
       </div>
@@ -142,7 +178,7 @@ export function StructuralDriversGrid({
   return (
     <div className="grid grid-cols-2 gap-3">
       {driverList.map(({ key, driver }) => (
-        <DriverBar key={key} driver={driver} />
+        <DriverBar key={key} driver={driver} onScoreClick={onScoreClick} />
       ))}
     </div>
   );
@@ -226,6 +262,9 @@ interface TerrainStoryPanelProps {
   defaultExpanded?: boolean;
   showNarrative?: boolean;
   compact?: boolean;
+  /** When provided, structural score tiles become tappable and open the
+   *  Terrain Reasons flow. Also surfaces the "tap any score for the why" hint. */
+  onScoreClick?: () => void;
 }
 
 export default function TerrainStoryPanel({
@@ -234,6 +273,7 @@ export default function TerrainStoryPanel({
   defaultExpanded = true,
   showNarrative = true,
   compact = false,
+  onScoreClick,
 }: TerrainStoryPanelProps) {
   const [expanded, setExpanded] = React.useState(defaultExpanded);
   
@@ -284,7 +324,7 @@ export default function TerrainStoryPanel({
         
         {/* Compact Drivers */}
         <div className="p-3">
-          <StructuralDriversGrid drivers={story.drivers} compact showLabels />
+          <StructuralDriversGrid drivers={story.drivers} compact showLabels onScoreClick={onScoreClick} />
         </div>
       </div>
     );
@@ -328,10 +368,20 @@ export default function TerrainStoryPanel({
           
           {/* Structural Drivers */}
           <div>
-            <h4 className="text-[9px] uppercase tracking-wider text-stone-500 font-medium mb-2">
-              Structural Support
-            </h4>
-            <StructuralDriversGrid drivers={story.drivers} />
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-[9px] uppercase tracking-wider text-stone-500 font-medium">
+                Structural Support
+              </h4>
+              {onScoreClick && (
+                <button
+                  onClick={onScoreClick}
+                  className="text-[9px] text-cyan-400/80 hover:text-cyan-300 font-medium transition-colors"
+                >
+                  tap any score for the why &rarr;
+                </button>
+              )}
+            </div>
+            <StructuralDriversGrid drivers={story.drivers} onScoreClick={onScoreClick} />
           </div>
           
           {/* Key Opportunity */}

@@ -477,7 +477,11 @@ export const BUILD_DATE = 'Jul 22';
 //      click before then threw "layer neighbor-parcels-fill does not exist in
 //      the map's style and cannot be queried for features". Now guarded with
 //      map.getLayer('neighbor-parcels-fill') ? query : []. No behavioral change.
-export const BUILD_REV = 'r36';
+// r37: tappable terrain score tiles — DriverBar tiles in the Terrain Story
+//      panel now read as tappable (cursor + hover glow + "tap any score for the
+//      why →" hint) and open the existing Terrain Reasons flow. Presentation +
+//      wiring only; no terrain-output change, cache key unchanged.
+export const BUILD_REV = 'r37';
 
 // e.g. "build v6.3-flowing-form r11 · Jul 17"
 export const BUILD_STAMP = `build ${BUILD_VERSION} ${BUILD_REV} · ${BUILD_DATE}`;

@@ -18846,6 +18846,7 @@ const archetypeInitializedRef = useRef(false);
                     defaultExpanded={true}
                     showNarrative={true}
                     compact={false}
+                    onScoreClick={() => setShowTerrainReasons(true)}
                   />
                 </div>
               ) : null}
